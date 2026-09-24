@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "tool": "treaty 0.0.1",
+  "command": [
+    "/Users/roman/PycharmProjects/CLI-argonomics/treaty/.venv/bin/treaty"
+  ],
+  "timeout_seconds": 10,
+  "manifest": [
+    "manifest"
+  ],
+  "probes": [
+    {
+      "name": "audit",
+      "argv": [
+        "audit",
+        "myapp.cli:app"
+      ],
+      "kind": "read"
+    },
+    {
+      "name": "rules",
+      "argv": [
+        "rules"
+      ],
+      "kind": "read"
+    },
+    {
+      "name": "version",
+      "argv": [
+        "version"
+      ],
+      "kind": "read"
+    },
+    {
+      "name": "unknown flag",
+      "argv": [
+        "audit",
+        "myapp.cli:app",
+        "--no-such-flag"
+      ],
+      "kind": "invalid"
+    }
+  ]
+}

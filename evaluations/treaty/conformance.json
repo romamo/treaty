@@ -1,0 +1,194 @@
+{
+  "ok": true,
+  "data": {
+    "schema_version": "1.0",
+    "tool": "treaty 0.0.1",
+    "levels": {
+      "level_1": "incomplete",
+      "level_2": "incomplete",
+      "level_3": "incomplete"
+    },
+    "summary": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 2
+    },
+    "checks": [
+      {
+        "id": "no_hang_stdin_closed",
+        "title": "Completes with stdin closed",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§10",
+          "§11"
+        ],
+        "requirements": [
+          "REQ-F-009",
+          "REQ-F-010"
+        ],
+        "runs_checked": 4,
+        "failures": []
+      },
+      {
+        "id": "no_hang_stdin_open",
+        "title": "Completes with an open, silent stdin pipe",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§50",
+          "§10"
+        ],
+        "requirements": [
+          "REQ-F-009"
+        ],
+        "runs_checked": 4,
+        "failures": []
+      },
+      {
+        "id": "json_envelope",
+        "title": "Non-TTY stdout is exactly one valid ResponseEnvelope without flags",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§2",
+          "§3",
+          "§18"
+        ],
+        "requirements": [
+          "REQ-F-003",
+          "REQ-F-004",
+          "REQ-F-006",
+          "REQ-C-013"
+        ],
+        "runs_checked": 4,
+        "failures": []
+      },
+      {
+        "id": "exit_code_contract",
+        "title": "Exit codes come from the table and match meta.exit_code",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§1"
+        ],
+        "requirements": [
+          "REQ-F-001"
+        ],
+        "runs_checked": 4,
+        "failures": []
+      },
+      {
+        "id": "stdout_no_ansi",
+        "title": "No ANSI escape sequences on stdout in a non-TTY",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§8"
+        ],
+        "requirements": [
+          "REQ-F-007"
+        ],
+        "runs_checked": 4,
+        "failures": []
+      },
+      {
+        "id": "no_color_honored",
+        "title": "NO_COLOR=1 removes ANSI from stdout and stderr",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§8"
+        ],
+        "requirements": [
+          "REQ-F-008"
+        ],
+        "runs_checked": 4,
+        "failures": []
+      },
+      {
+        "id": "help_off_stdout",
+        "title": "--help keeps stdout free of prose and exits 0",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§3"
+        ],
+        "requirements": [
+          "REQ-F-048"
+        ],
+        "runs_checked": 1,
+        "failures": []
+      },
+      {
+        "id": "invalid_input_exit_2",
+        "title": "Invalid input exits 2 before side effects",
+        "status": "pass",
+        "level": 1,
+        "failure_modes": [
+          "§14",
+          "§1"
+        ],
+        "requirements": [
+          "REQ-F-002"
+        ],
+        "runs_checked": 1,
+        "failures": []
+      },
+      {
+        "id": "dry_run_preview",
+        "title": "Destructive commands preview with their dry-run flag",
+        "status": "skip",
+        "level": 1,
+        "failure_modes": [
+          "§23"
+        ],
+        "requirements": [
+          "REQ-C-004"
+        ],
+        "runs_checked": 0,
+        "failures": [],
+        "skipped_reason": "profile declares no destructive probe"
+      },
+      {
+        "id": "destructive_refuses_unconfirmed",
+        "title": "Destructive commands refuse with exit 2, before side effects, without confirmation",
+        "status": "skip",
+        "level": 2,
+        "failure_modes": [
+          "§23",
+          "§10"
+        ],
+        "requirements": [
+          "REQ-C-005",
+          "REQ-O-021"
+        ],
+        "runs_checked": 0,
+        "failures": [],
+        "skipped_reason": "profile declares no destructive probe"
+      },
+      {
+        "id": "manifest_valid",
+        "title": "tool manifest returns a valid ManifestResponse",
+        "status": "pass",
+        "level": 3,
+        "failure_modes": [
+          "§52",
+          "§21"
+        ],
+        "requirements": [
+          "REQ-O-041"
+        ],
+        "runs_checked": 1,
+        "failures": []
+      }
+    ]
+  },
+  "error": null,
+  "warnings": [],
+  "meta": {
+    "exit_code": 0,
+    "duration_ms": 1117,
+    "schema_version": "1.0"
+  }
+}

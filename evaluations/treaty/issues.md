@@ -11,3 +11,25 @@ Discovered during §10 evaluation on 2026-09-24.
 ### §onboarding observation: `--version` is not recognised (fixed 2026-09-24)
 `treaty --version` exits 2 ARG_ERROR (`unknown command '--version'`); the version is only available as the `treaty version` subcommand. Agents commonly probe `--version` first. Fixed: root-level `--version` now aliases the `version` command; below the root it stays unrecognised so command flags named `--version` are not shadowed.
 Discovered during onboarding on 2026-09-24.
+
+### §34: path traversal accepted in `--out` and `--directory` (fixed in treaty's CLI 2026-09-24)
+`treaty conformance treaty._cli:cli --out ../../etc/test.json` wrote a file two levels above the repo with exit 0; `treaty init demo --directory ../../etc/test --dry-run` planned the same. The framework has no path-argument hardening (`../`, `%XX`, null bytes), so every treaty-built CLI inherits this.
+Fixed for treaty's own CLI: `--out` and `--directory` reject `..` segments, percent-encodings and null bytes with a validation-phase ARG_ERROR whose `suggestion` gives the absolute or decoded form. Framework-level path hardening for other CLIs is still open.
+Discovered during §34 evaluation on 2026-09-24.
+
+### §42/§24: framework echoes raw flag values in errors; no sensitive-flag declaration
+`treaty audit treaty._cli:cli --limit s3cr3t-value` returns `error.context.value: "s3cr3t-value"`. There is no `Flag(sensitive=True)` or env/file secret source, so a treaty-built CLI with a `--token` flag would echo the token on any parse error.
+Discovered during §42 evaluation on 2026-09-24.
+
+### §61: `exec` deadlocks callers that write the whole plan before reading
+`exec` writes each envelope as it reads each line. With a 228KB plan, a caller that writes everything before reading blocks once the 64KB stdout pipe fills. There is no stdin size limit, STDIN_TOO_LARGE error or `--input-file` alternative.
+Discovered during §61 evaluation on 2026-09-24.
+
+### §71: no documented install; stale wheel in `dist/`
+README and HANDOFF.md have no install command. `dist/treaty-0.0.1-py3-none-any.whl` (built 2026-09-23) predates `_cli.py` and has no console-script entry point, so installing it gives no `treaty` binary. Installing from source works.
+Discovered during §71 evaluation on 2026-09-24.
+
+### §1/§14 candidate: explicit `--spec-dir` silently ignored when invalid (fixed 2026-09-24)
+`treaty conformance treaty._cli:cli --run --spec-dir /nonexistent` exits 0 and runs the kit from the `../cli-agent-ergonomics` fallback. `find_spec_dir` treats the explicit flag as one candidate among several, so a typo in an explicit path is never reported.
+Fixed: a `--spec-dir` or `TREATY_SPEC_DIR` without `conformance/run.py` now exits 4 PRECONDITION naming the source, checked before the profile is written; only unnamed discovery falls back to the sibling checkout.
+Discovered during §1 evaluation on 2026-09-24.
