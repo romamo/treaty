@@ -30,13 +30,21 @@ from ._flags import Flag
 from ._help import render_command, render_root
 from ._manifest import build_manifest, build_schema_manifest, command_schema
 from ._mode import OutputMode, resolve_mode
-from ._parse import Invocation, build_from_mapping, parse_command_args, resolve_path, split_globals
+from ._parse import (
+    Invocation,
+    Route,
+    build_from_mapping,
+    parse_command_args,
+    resolve_path,
+    split_globals,
+)
 from ._schema import to_jsonable
 from ._signals import Cancelled, CancelSignal, cancellation_handlers
 from ._timeout import Timeout, TimeoutExpired, call_with_timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, Scope
 
 EXEC_PATH = CommandPath("exec")
+VERSION_PATH = CommandPath("version")
 DEFAULT_TIMEOUT = Timeout(60.0)
 
 
@@ -182,7 +190,7 @@ class App:
         def manifest(args: NoArgs, ctx: Ctx) -> dict[str, object]:
             return build_manifest(self._commands, self.exits, self.version)
 
-        @self.command("version", description="Print the tool name and version")
+        @self.command(VERSION_PATH.value, description="Print the tool name and version")
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {"name": self.name, "version": self.version}
 
@@ -238,6 +246,9 @@ class App:
         except ParseError as exc:
             return run.emit(OutputMode.JSON, run.arg_error(exc))
         route = resolve_path(rest, self._commands)
+        if route.path is None and not route.prefix and route.tokens == ("--version",):
+            # Root-only alias so a command's own --version flag is never shadowed
+            route = Route(path=VERSION_PATH, prefix=VERSION_PATH.parts, tokens=())
         if globals_.schema:
             return run.schema(mode, route.path, route.prefix)
         if route.path is None:
@@ -524,9 +535,25 @@ class _Run:
                 any_failed = True
                 if not args.ignore_errors:
                     break
-        if lines_seen and not parsed_any:
+        if not lines_seen:
+            return self.emit(OutputMode.JSON, self._empty_stream())
+        if not parsed_any:
             return FrameworkCode.ARG_ERROR.value
         return FrameworkCode.GENERAL_ERROR.value if any_failed else 0
+
+    def _empty_stream(self) -> Envelope:
+        entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="EMPTY_STREAM",
+                message="no DispatchRequest lines on stdin",
+                retryable=False,
+                context={"lines": 0},
+                phase="validation",
+                fix_required="pipe one DispatchRequest JSON object per line into exec",
+            ),
+        )
 
     def _exec_lines(self, args: ExecArgs, stdin: IO[str]) -> Iterator[tuple[int, Envelope]]:
         line_no = 0

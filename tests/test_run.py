@@ -124,6 +124,23 @@ def test_format_flag_overrides_tty(app: App) -> None:
     assert code == 2 and json.loads(out)["error"]["context"]["value"] == "yaml"
 
 
+def test_root_version_flag_aliases_version_command(app: App) -> None:
+    code, env = run_json(app, ["--version"])
+    assert code == 0 and env["data"] == {"name": "deployctl", "version": "1.4.0"}
+    code, out, _ = run(app, ["--version"], isatty=True)
+    assert code == 0 and '"version": "1.4.0"' in out
+
+
+def test_version_flag_not_aliased_below_root(app: App) -> None:
+    code, env = run_json(app, ["deploy", "--version"])
+    assert code == 2 and env["error"]["code"] == "ARG_ERROR"
+
+
+def test_root_help_lists_version_flag(app: App) -> None:
+    _, out, _ = run(app, ["--help"], isatty=True)
+    assert "--version" in out
+
+
 def test_ci_env_forces_json(app: App) -> None:
     code, out, _ = run(app, ["version"], isatty=True, env={"CI": "1"})
     assert json.loads(out)["ok"] is True

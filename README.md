@@ -46,8 +46,11 @@ keyed by dot-path.
 ## Built-ins
 
 Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`).
+`<app> --version` at the root is an alias for `<app> version`; a command's own `--version`
+flag is never shadowed.
 `exec` reads one `DispatchRequest` per stdin line and dispatches in-process, writing one
-envelope per line with `_cmd` and `_line` in `meta`:
+envelope per line with `_cmd` and `_line` in `meta`. A stream with no lines exits `2` with a
+single `EMPTY_STREAM` envelope:
 
 ```bash
 printf '%s\n' '{"_cmd":"deploy.rollback","service":"api","_opts":{"to":"1.3.9"}}' \

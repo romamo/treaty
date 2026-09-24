@@ -112,6 +112,14 @@ def test_exec_cannot_dispatch_itself(app: App) -> None:
     assert code == 1 and out[0]["error"]["code"] == "UNKNOWN_COMMAND"
 
 
-def test_exec_empty_stdin_is_success(app: App) -> None:
+def test_exec_empty_stdin_emits_error_envelope(app: App) -> None:
     code, out = run_exec(app, [])
-    assert code == 0 and out == []
+    assert code == 2 and len(out) == 1
+    assert out[0]["error"]["code"] == "EMPTY_STREAM"
+    assert out[0]["error"]["phase"] == "validation"
+    assert out[0]["meta"]["exit_code"] == 2
+
+
+def test_exec_blank_lines_only_is_empty_stream(app: App) -> None:
+    code, out = run_exec(app, ["", "   "])
+    assert code == 2 and out[0]["error"]["code"] == "EMPTY_STREAM"
