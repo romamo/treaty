@@ -14,11 +14,11 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 88 passed |
+| `uv run pytest` | 89 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 11 of 11, levels 1 to 3 |
-| Git | not initialised; no commits yet |
+| Git | initial commit on `main`; no remote, nothing pushed |
 | PyPI | `treaty` is free; nothing published |
 
 ## Decisions already made
@@ -39,7 +39,12 @@ The two do not share code.
   returning the preview as `data` with error code `CONFIRMATION_REQUIRED` (REQ-O-021)
 - **Timeouts use a daemon thread**, not `SIGALRM`, so they work on Windows, off the main
   thread, and inside blocking C calls. A timed-out handler is abandoned, not killed
-- **Commands may set `human=`**, a renderer for human mode; JSON mode ignores it
+- **Commands may set `human=`**, a renderer for human mode; JSON mode ignores it. It also
+  renders `data` on failed runs, so a `CliExit` must carry `data` of the handler's return
+  type (the error line goes to stderr)
+- **`treaty audit --strict` fails on warnings and errors, never advice.** It raises
+  `AUDIT_FAILED` (79) with the full report as `data`; without `--strict` the audit always
+  exits 0 on a completed run
 - **Uncaught handler exceptions propagate.** Only `CliExit`, `ParseError` (a handler
   validating its own input, exit 2), timeout, and cancellation become envelopes; anything
   else is a bug and surfaces as a traceback
@@ -111,6 +116,8 @@ Framework flags the parser knows: `--format`, `--help`, `--schema`, and per comm
 - `run_kit` strips `VIRTUAL_ENV` before calling `uv run --project <spec>`, or uv warns
   about the mismatched environment on stderr
 - `treaty init` needs `--treaty-source <checkout>` until the package is on PyPI
+- The `treaty` CLI owns command-specific exit codes 79 (`AUDIT_FAILED`) and 80
+  (`CONFORMANCE_FAILED`); pick the next free code in 79..125 for new ones
 - Exit code entries reject descriptions over 120 characters or ending in a period; that is
   the spec's rule, not a style choice
 

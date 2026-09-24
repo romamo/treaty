@@ -14,12 +14,15 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   levels; `--treaty-source` pins a local checkout until the PyPI release
 - `treaty conformance module:app [--run]` derives probes from examples and danger levels,
   writes the profile, and runs the spec kit; fails with `CONFORMANCE_FAILED` on failing checks
-- `treaty audit --strict` exits `AUDIT_FAILED` on warnings, for CI
+- `treaty audit --strict` exits `AUDIT_FAILED` (79) on any warning or error finding, for
+  CI; the envelope keeps the full report as `data` and advice never fails the run
+- Human mode renders `data` on failed runs too, so `--strict` and a failing
+  `conformance --run` print their report instead of raw JSON
 - Handler-raised `ParseError` becomes a validation-phase exit 2 envelope
 
 ## 0.1.0: first release
 
-- Initialise git, first commit, push to `romamo/treaty`
+- Push to `romamo/treaty` (git initialised, first commit made)
 - Reserve `treaty` on PyPI with the 0.0.1 wheel
 - GitHub Actions: pytest, mypy, ruff, and the conformance kit against a spec checkout
 - `meta.schema_version` on every response (REQ-F-022), derived from a per-command
