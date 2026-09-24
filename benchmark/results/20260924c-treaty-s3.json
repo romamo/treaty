@@ -1,0 +1,323 @@
+{
+  "harness_version": "2",
+  "date": "2026-09-24",
+  "model": "anthropic/claude-sonnet-4.6",
+  "anthropic_sdk_version": "1.8.0",
+  "trials": 5,
+  "summary": [
+    {
+      "scenario": "s3",
+      "mode": "treaty",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 4144,
+      "tokens_per_success": 4141,
+      "median_api_calls": 2,
+      "median_time_ms": 8062
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "s3",
+      "mode": "treaty",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "subcommands and deploy arguments named",
+      "unsafe_retry": false,
+      "final_answer": "Here's a full breakdown:\n\n---\n\n## Subcommands\n\nThe tool has the following subcommands:\n\n1. **`deploy`** – Deploy an application version\n2. **`deployments list`** – List deployments (five per page by default)\n3. **`deployments delete`** – Delete deployments matching a filter\n4. **`health check`** – Run health checks against all services\n5. **`manifest`** – Print the command manifest for agents\n\n---\n\n## `deploy` Command Arguments\n\n| Flag | Type | Required | Description |\n|---|---|---|---|\n| `--version` | string | ✅ Yes | The version to deploy |\n| `--env` | enum | ✅ Yes | Target environment — accepted values: `staging`, `production` |\n| `--idempotency-key` | string | ❌ No | Duplicate calls with the same key return the original result |\n| `--timeout` | number | ❌ No | Seconds before the framework aborts with TIMEOUT; `0` disables the limit |",
+      "metrics": {
+        "total_tokens": 4122,
+        "input_tokens": 3611,
+        "output_tokens": 511,
+        "max_context": 2917,
+        "api_calls": 2,
+        "tool_calls": 4,
+        "time_ms": 8104
+      },
+      "tool_calls": [
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"28286a3d7b54\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:dd0890adfbbb1a1dd3a5b75a843bf369\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"be3b023fd6a7\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"ff1d3e6157b4\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"a3c92697e6cf\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "4b78c9b301a034bb"
+    },
+    {
+      "scenario": "s3",
+      "mode": "treaty",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "subcommands and deploy arguments named",
+      "unsafe_retry": false,
+      "final_answer": "Here's a full breakdown:\n\n---\n\n## Available Subcommands\n\nThe tool has the following subcommands:\n\n| Command | Description |\n|---|---|\n| `deploy` | Deploy an application version |\n| `deployments list` | List deployments, five per page by default |\n| `deployments delete` | Delete deployments matching a filter |\n| `health check` | Run health checks against all services |\n| `manifest` | Print the command manifest for agents |\n\n---\n\n## `deploy` Command — Accepted Arguments\n\n| Flag | Type | Required | Description |\n|---|---|---|---|\n| `--version` | string | ✅ Yes | The version to deploy |\n| `--env` | enum | ✅ Yes | Target environment — must be one of: `staging` or `production` |\n| `--idempotency-key` | string | ❌ No | Duplicate calls with the same key return the original result |\n| `--timeout` | number | ❌ No | Seconds before the framework aborts with TIMEOUT; `0` disables the limit |\n\n**Example usage:**\n```\ndemocli deploy --version 2.1.0 --env staging\n```",
+      "metrics": {
+        "total_tokens": 4150,
+        "input_tokens": 3608,
+        "output_tokens": 542,
+        "max_context": 2914,
+        "api_calls": 2,
+        "tool_calls": 4,
+        "time_ms": 8062
+      },
+      "tool_calls": [
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"79555ae613d6\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:dd0890adfbbb1a1dd3a5b75a843bf369\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"83c2e2d367da\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"b6d7c66607e1\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"c470f59dca34\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "4b78c9b301a034bb"
+    },
+    {
+      "scenario": "s3",
+      "mode": "treaty",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "subcommands and deploy arguments named",
+      "unsafe_retry": false,
+      "final_answer": "Here's a full breakdown:\n\n---\n\n## Subcommands\n\nThe tool has the following subcommands:\n\n| Command | Description |\n|---|---|\n| `deploy` | Deploy an application version |\n| `deployments list` | List deployments (five per page by default) |\n| `deployments delete` | Delete deployments matching a filter |\n| `health check` | Run health checks against all services |\n| `manifest` | Print the command manifest for agents |\n\n---\n\n## `deploy` Command — Arguments\n\n| Flag | Type | Required | Description |\n|---|---|---|---|\n| `--version` | string | ✅ Yes | The version to deploy |\n| `--env` | enum | ✅ Yes | Target environment — allowed values: `staging`, `production` |\n| `--idempotency-key` | string | ❌ No | Duplicate calls with the same key return the original result |\n| `--timeout` | number | ❌ No | Seconds before the framework aborts with TIMEOUT; `0` disables the limit |\n\n**Example:**\n```\ndemocli deploy --version 2.1.0 --env staging\n```",
+      "metrics": {
+        "total_tokens": 4143,
+        "input_tokens": 3607,
+        "output_tokens": 536,
+        "max_context": 2913,
+        "api_calls": 2,
+        "tool_calls": 4,
+        "time_ms": 7926
+      },
+      "tool_calls": [
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"8d0f88ca9c12\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:dd0890adfbbb1a1dd3a5b75a843bf369\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"50973efe90d5\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"5676bb80ada4\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"76bc42fffac5\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "4b78c9b301a034bb"
+    },
+    {
+      "scenario": "s3",
+      "mode": "treaty",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "subcommands and deploy arguments named",
+      "unsafe_retry": false,
+      "final_answer": "Here's a full breakdown:\n\n---\n\n## Subcommands\n\nThe tool has the following subcommands:\n\n| Command | Description |\n|---|---|\n| `deploy` | Deploy an application version |\n| `deployments list` | List deployments, five per page by default |\n| `deployments delete` | Delete deployments matching a filter |\n| `health check` | Run health checks against all services |\n| `manifest` | Print the command manifest for agents |\n\n---\n\n## `deploy` Command — Arguments\n\n| Flag | Type | Required | Description |\n|---|---|---|---|\n| `--version` | string | ✅ Yes | The version to deploy |\n| `--env` | enum | ✅ Yes | Target environment — allowed values: `staging`, `production` |\n| `--idempotency-key` | string | ❌ No | Duplicate calls with the same key return the original result |\n| `--timeout` | number | ❌ No | Seconds before the framework aborts with TIMEOUT; `0` disables the limit |\n\n**Example usage:**\n```\ndemocli deploy --version 2.1.0 --env staging\n```",
+      "metrics": {
+        "total_tokens": 4144,
+        "input_tokens": 3608,
+        "output_tokens": 536,
+        "max_context": 2914,
+        "api_calls": 2,
+        "tool_calls": 4,
+        "time_ms": 7827
+      },
+      "tool_calls": [
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"622b57a7f3ca\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:dd0890adfbbb1a1dd3a5b75a843bf369\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"388f6d3004a7\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"cc459fdcdc8e\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"1dd657e3d955\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "4b78c9b301a034bb"
+    },
+    {
+      "scenario": "s3",
+      "mode": "treaty",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "subcommands and deploy arguments named",
+      "unsafe_retry": false,
+      "final_answer": "Here's a full breakdown:\n\n---\n\n## Available Subcommands\n\nThe tool has **5 subcommands** across its binaries:\n\n| Command | Description |\n|---|---|\n| `deploy` | Deploy an application version |\n| `deployments list` | List deployments, five per page by default |\n| `deployments delete` | Delete deployments matching a filter |\n| `health check` | Run health checks against all services |\n| `manifest` | Print the command manifest for agents |\n\n---\n\n## `deploy` Command — Arguments\n\n| Flag | Type | Required | Description |\n|---|---|---|---|\n| `--version` | string | ✅ Yes | The version to deploy |\n| `--env` | enum | ✅ Yes | Target environment — allowed values: `staging`, `production` |\n| `--idempotency-key` | string | ❌ No | Duplicate calls with the same key return the original result |\n| `--timeout` | number | ❌ No | Seconds before the framework aborts with TIMEOUT; `0` disables the limit |\n\n**Example usage:**\n```\ndemocli deploy --version 2.1.0 --env staging\n```",
+      "metrics": {
+        "total_tokens": 4149,
+        "input_tokens": 3606,
+        "output_tokens": 543,
+        "max_context": 2912,
+        "api_calls": 2,
+        "tool_calls": 4,
+        "time_ms": 8288
+      },
+      "tool_calls": [
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"25658005ec0e\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:dd0890adfbbb1a1dd3a5b75a843bf369\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"f8066009859e\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"6530d3b03f51\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"ac3aa68c7ad6\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "4b78c9b301a034bb"
+    }
+  ]
+}

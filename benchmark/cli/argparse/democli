@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# democli (argparse build): thin launcher for the benchmark harness
+HERE="$(cd "$(dirname "$0")" && pwd)"
+exec uv run --quiet --python 3.14 --no-project "$HERE/democli.py" "$@"

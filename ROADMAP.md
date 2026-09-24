@@ -76,8 +76,10 @@ matching audit rule so adoption never requires reading the spec.
 - Shell completion generated from the manifest
 - Windows CI: signals are POSIX-only in the tests; the daemon-thread timeout already works
   there
-- Benchmark integration: run the Terminal-Bench harness against a treaty-built CLI and
-  compare with the argparse and click baselines in the spec's comparison matrix
+- Benchmark: `benchmark/README.md` compares argparse, click, and treaty builds of the same
+  CLI on the spec harness (done 2026-09-24; group help scoped to its subtree and shared
+  exit codes hoisted to a root table the same day). Next: add scenarios where text
+  baselines should fail (hallucinated flags, partial failure, timeouts)
 
 ## Non-goals
 

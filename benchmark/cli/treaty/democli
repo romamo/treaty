@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# democli (treaty build): thin launcher for the benchmark harness
+HERE="$(cd "$(dirname "$0")" && pwd)"
+exec uv run --quiet --project "$HERE/../../.." "$HERE/democli.py" "$@"

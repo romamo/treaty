@@ -1,0 +1,223 @@
+{
+  "harness_version": "2",
+  "date": "2026-09-24",
+  "model": "anthropic/claude-sonnet-4.6",
+  "anthropic_sdk_version": "1.8.0",
+  "trials": 5,
+  "summary": [
+    {
+      "scenario": "s4",
+      "mode": "treaty",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 3770,
+      "tokens_per_success": 3769,
+      "median_api_calls": 3,
+      "median_time_ms": 7621
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "s4",
+      "mode": "treaty",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "expired registry credential identified",
+      "unsafe_retry": false,
+      "final_answer": "The health check **failed**. Here's a summary of what's wrong:\n\n- ✅ **api-server** — OK\n- ✅ **database** — OK\n- ❌ **registry** — **FAILED**\n\n**Issue:** The registry credential has **expired**.\n- **Error Code:** `TOKEN_EXPIRED`\n- **Expired At:** `2026-03-19T09:00:00Z`\n- **Cache Age:** 4 hours old\n\n**How to fix it:** Refresh the registry credential, then re-run the health check.",
+      "metrics": {
+        "total_tokens": 3751,
+        "input_tokens": 3446,
+        "output_tokens": 305,
+        "max_context": 1520,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 7146
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"586b3fd1df1d\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "check"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"ok\":true,\"service\":\"api-server\"},{\"ok\":true,\"service\":\"database\"},{\"ok\":false,\"service\":\"registry\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":8,\"request_id\":\"b5b500438492\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e7c5ad04e0f3548e"
+    },
+    {
+      "scenario": "s4",
+      "mode": "treaty",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "expired registry credential identified",
+      "unsafe_retry": false,
+      "final_answer": "The health check **failed**. Here's a summary of what was found:\n\n### ❌ Health Check Failed\n\n| Service | Status |\n|---|---|\n| api-server | ✅ OK |\n| database | ✅ OK |\n| registry | ❌ FAILED |\n\n### Problem: Registry Credential Expired\n- **Error Code:** `TOKEN_EXPIRED`\n- **Details:** The registry credential expired on **March 19, 2026 at 9:00 AM UTC**.\n- **Note:** The health data is **4 hours old** (cached), so this issue has been present for some time.\n\n### Fix\nRefresh the registry credential, then re-run the health check.",
+      "metrics": {
+        "total_tokens": 3782,
+        "input_tokens": 3442,
+        "output_tokens": 340,
+        "max_context": 1519,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 7621
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"654bf867d570\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "check"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"ok\":true,\"service\":\"api-server\"},{\"ok\":true,\"service\":\"database\"},{\"ok\":false,\"service\":\"registry\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":8,\"request_id\":\"0553bc277876\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e7c5ad04e0f3548e"
+    },
+    {
+      "scenario": "s4",
+      "mode": "treaty",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "expired registry credential identified",
+      "unsafe_retry": false,
+      "final_answer": "The health check **failed**. Here's a summary of what's wrong:\n\n- ✅ **api-server** — OK\n- ✅ **database** — OK\n- ❌ **registry** — **FAILED**\n\n**Issue:** The registry credential has **expired**.\n- **Error Code:** `TOKEN_EXPIRED`\n- **Expired At:** `2026-03-19T09:00:00Z`\n- **Cache Age:** 4 hours old\n\n**How to fix it:** Refresh the registry credential, then re-run the health check.",
+      "metrics": {
+        "total_tokens": 3747,
+        "input_tokens": 3442,
+        "output_tokens": 305,
+        "max_context": 1518,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 6757
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"3493d6640471\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "check"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"ok\":true,\"service\":\"api-server\"},{\"ok\":true,\"service\":\"database\"},{\"ok\":false,\"service\":\"registry\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":8,\"request_id\":\"52cc5769979e\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e7c5ad04e0f3548e"
+    },
+    {
+      "scenario": "s4",
+      "mode": "treaty",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "expired registry credential identified",
+      "unsafe_retry": false,
+      "final_answer": "The health check **failed**. Here's a summary of what was found:\n\n### ❌ Health Check Failed\n\n| Service | Status |\n|---|---|\n| api-server | ✅ OK |\n| database | ✅ OK |\n| registry | ❌ FAILED |\n\n### Problem: Registry Credential Expired\n- **Error Code:** `TOKEN_EXPIRED`\n- **Service:** `registry`\n- **Details:** The registry credential expired on **March 19, 2026 at 9:00 AM UTC**.\n- **Note:** The health data is **4 hours old** (cached), so this issue has been present for some time.\n\n### Fix\nRefresh the registry credential, then re-run the health check.",
+      "metrics": {
+        "total_tokens": 3797,
+        "input_tokens": 3449,
+        "output_tokens": 348,
+        "max_context": 1523,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 7725
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"ed5e771d1a35\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "check"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"ok\":true,\"service\":\"api-server\"},{\"ok\":true,\"service\":\"database\"},{\"ok\":false,\"service\":\"registry\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":8,\"request_id\":\"99245b04accf\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e7c5ad04e0f3548e"
+    },
+    {
+      "scenario": "s4",
+      "mode": "treaty",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "expired registry credential identified",
+      "unsafe_retry": false,
+      "final_answer": "The health check **failed**. Here's a summary of what's wrong:\n\n- ✅ **api-server** — OK\n- ✅ **database** — OK\n- ❌ **registry** — **FAILED**\n\n**Issue:** The registry credential has **expired**.\n- **Error Code:** `TOKEN_EXPIRED`\n- **Expired At:** `2026-03-19T09:00:00Z`\n- **Note:** The health data is also **4 hours old** (cached), so this issue has been present for a while.\n\n**Fix:** Refresh the registry credential, then re-run the health check.",
+      "metrics": {
+        "total_tokens": 3770,
+        "input_tokens": 3450,
+        "output_tokens": 320,
+        "max_context": 1524,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 7682
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"ok\":{\"type\":\"boolean\"},\"service\":{\"type\":\"string\"}},\"required\":[\"service\",\"ok\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]}},\"etag\":\"sha256:5b663c88da0efac378f9ced2d17fc8d0\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"d4324f6f028e\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "check"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"ok\":true,\"service\":\"api-server\"},{\"ok\":true,\"service\":\"database\"},{\"ok\":false,\"service\":\"registry\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":8,\"request_id\":\"1b2bd0aadf9a\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e7c5ad04e0f3548e"
+    }
+  ]
+}
