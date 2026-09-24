@@ -108,6 +108,14 @@ def test_no_args_json_mode_returns_manifest(app: App) -> None:
     assert code == 0 and "commands" in env["data"]
 
 
+def test_group_help_json_scopes_to_subtree(app: App) -> None:
+    code, env = run_json(app, ["deploy", "--help"])
+    assert code == 0
+    assert set(env["data"]["commands"]) == {"deploy.rollback", "deploy.status"}
+    code, env = run_json(app, ["deploy"])
+    assert code == 0 and "manifest" not in env["data"]["commands"]
+
+
 def test_human_mode_help_and_errors(app: App) -> None:
     code, out, err = run(app, [], isatty=True)
     assert code == 0 and "Command groups" in out and "deploy" in out

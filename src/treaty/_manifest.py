@@ -19,19 +19,32 @@ def canonical_json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def command_entry(
-    command: Command, exits: ExitCodeRegistry, all_paths: Mapping[CommandPath, Command]
-) -> dict[str, object]:
-    exit_codes: dict[str, object] = {}
+def shared_exit_codes(exits: ExitCodeRegistry) -> dict[str, object]:
+    """The table every command inherits: success, the two framework failures, and signals"""
+    table: dict[str, object] = {}
     for code in _ALWAYS:
         entry = exits.framework(code)
-        exit_codes[str(entry.code.value)] = entry.to_json()
+        table[str(entry.code.value)] = entry.to_json()
     for signal_code in (130, 143):
         entry = exits.by_code(signal_code)
-        exit_codes[str(signal_code)] = entry.to_json()
+        table[str(signal_code)] = entry.to_json()
+    return table
+
+
+def command_entry(
+    command: Command,
+    exits: ExitCodeRegistry,
+    all_paths: Mapping[CommandPath, Command],
+    *,
+    shared: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """One CommandEntry; with ``shared`` given, entries equal to the shared table are hoisted"""
+    exit_codes: dict[str, object] = dict(shared_exit_codes(exits))
     for name in command.exit_codes:
         entry = exits.by_name(name)
         exit_codes[str(entry.code.value)] = entry.to_json()
+    if shared is not None:
+        exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
     flags: dict[str, object] = {f.flag: f.to_flag_entry() for f in command.fields}
     if command.has_network_io:
         flags["timeout"] = {
@@ -96,8 +109,10 @@ def build_schema_manifest(
 def build_manifest(
     commands: Mapping[CommandPath, Command], exits: ExitCodeRegistry, framework_version: str
 ) -> dict[str, object]:
+    """The manifest tree with the shared exit-code table hoisted to the root"""
+    shared = shared_exit_codes(exits)
     entries = {
-        path.value: command_entry(cmd, exits, commands)
+        path.value: command_entry(cmd, exits, commands, shared=shared)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
     digest = hashlib.sha256(canonical_json(entries).encode()).hexdigest()
@@ -106,5 +121,6 @@ def build_manifest(
         "schema_version": SCHEMA_VERSION,
         "framework_version": framework_version,
         "etag": etag.value,
+        "exit_codes": shared,
         "commands": entries,
     }

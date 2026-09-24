@@ -28,7 +28,8 @@ def test_manifest_validates_against_spec(app: App) -> None:
 
 
 def test_rollback_entry_contents(app: App) -> None:
-    entry = app.manifest()["commands"]["deploy.rollback"]
+    manifest = app.manifest()
+    entry = manifest["commands"]["deploy.rollback"]
     assert entry["danger_level"] == "destructive"
     assert entry["required_scopes"] == ["deploy:write"]
     assert entry["has_network_io"] is True
@@ -51,8 +52,9 @@ def test_rollback_entry_contents(app: App) -> None:
         "enum_values": ["fast", "safe"],
     }
     assert flags["tags"]["type"] == "array" and flags["tags"]["default"] == []
-    assert set(entry["exit_codes"]) == {"0", "1", "2", "79", "80", "130", "143"}
-    assert entry["exit_codes"]["143"] == {
+    assert set(entry["exit_codes"]) == {"79", "80"}
+    assert set(manifest["exit_codes"]) == {"0", "1", "2", "130", "143"}
+    assert manifest["exit_codes"]["143"] == {
         "name": "CANCELLED_SIGTERM",
         "description": "Cancelled by SIGTERM; external state may be partially modified",
         "retryable": False,
@@ -86,3 +88,9 @@ def test_etag_is_stable_and_changes_with_registrations(app: App) -> None:
         return {"pong": "yes"}
 
     assert app.manifest()["etag"] != first
+
+
+def test_schema_entry_keeps_full_exit_table(app: App) -> None:
+    code, envelope = run_json(app, ["deploy", "rollback", "--schema"])
+    assert code == 0
+    assert set(envelope["data"]["exit_codes"]) == {"0", "1", "2", "79", "80", "130", "143"}
