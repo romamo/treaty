@@ -204,6 +204,17 @@ class App:
             def exec_(args: ExecArgs, ctx: Ctx) -> None:
                 raise RegistrationError("exec is dispatched by the framework, not called directly")
 
+    def _invocations(self, prefix: tuple[str, ...]) -> list[str]:
+        """Commands as the agent must type them, scoped to the prefix it was already under
+
+        Registry keys are dot paths (``deployments.list``); an agent that reads them in an
+        error copies them literally, so errors show ``democli deployments list`` instead.
+        """
+        paths = [p for p in self._commands if p.parts[: len(prefix)] == prefix]
+        if not paths:
+            paths = list(self._commands)
+        return sorted(f"{self.name} {' '.join(p.parts)}" for p in paths)
+
     @property
     def commands(self) -> Mapping[CommandPath, Command]:
         return self._commands
@@ -262,7 +273,7 @@ class App:
                         context={
                             "argument": route.tokens[0],
                             "prefix": ".".join(route.prefix),
-                            "available": sorted(p.value for p in self._commands),
+                            "available": self._invocations(route.prefix),
                         },
                     )
                 ),

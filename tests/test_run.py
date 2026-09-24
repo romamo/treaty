@@ -98,9 +98,13 @@ def test_parse_errors_are_arg_error(app: App, argv: list[str], missing_or_flag: 
     assert missing_or_flag in env["error"]["context"]
 
 
-def test_unknown_command_lists_available(app: App) -> None:
+def test_unknown_command_lists_available_invocations(app: App) -> None:
     code, env = run_json(app, ["deploy", "explode"])
-    assert code == 2 and "deploy.rollback" in env["error"]["context"]["available"]
+    available = env["error"]["context"]["available"]
+    assert code == 2 and available == ["deployctl deploy rollback", "deployctl deploy status"]
+    code, env = run_json(app, ["explode"])
+    assert code == 2 and "deployctl deploy rollback" in env["error"]["context"]["available"]
+    assert "deployctl manifest" in env["error"]["context"]["available"]
 
 
 def test_no_args_json_mode_returns_manifest(app: App) -> None:

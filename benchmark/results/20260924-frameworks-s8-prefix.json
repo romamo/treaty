@@ -36,10 +36,10 @@
       "successes": 5,
       "success_rate": 1.0,
       "unsafe_retries": 0,
-      "median_total_tokens": 5050,
-      "tokens_per_success": 5585,
-      "median_api_calls": 4,
-      "median_time_ms": 7877
+      "median_total_tokens": 11049,
+      "tokens_per_success": 14577,
+      "median_api_calls": 6,
+      "median_time_ms": 11620
     }
   ],
   "runs": [
@@ -2007,13 +2007,13 @@
       "unsafe_retry": false,
       "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
       "metrics": {
-        "total_tokens": 4997,
-        "input_tokens": 4697,
-        "output_tokens": 300,
-        "max_context": 1762,
-        "api_calls": 4,
-        "tool_calls": 3,
-        "time_ms": 7604
+        "total_tokens": 24592,
+        "input_tokens": 23885,
+        "output_tokens": 707,
+        "max_context": 5931,
+        "api_calls": 9,
+        "tool_calls": 8,
+        "time_ms": 16320
       },
       "tool_calls": [
         {
@@ -2023,27 +2023,75 @@
             "deploy-013"
           ],
           "exit_code": 2,
-          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"7bbed73c5a5a\"},\"ok\":false,\"warnings\":[]}\n",
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"9dc48d7ac4a4\"},\"ok\":false,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
-            "list"
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"04c75c5def11\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"fd5c17d08758\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"87cd311851ce\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "deployments.list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"89321e9a7e8e\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"5b4cebe0d205\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments.list",
+          "args": [
+            "--limit",
+            "50"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: deployments.list"
+        },
+        {
+          "command": "manifest",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]},\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]},\"exec\":{\"danger_level\":\"safe\",\"description\":\"Dispatch JSONL DispatchRequest lines from stdin in-process\",\"examples\":[{\"command\":\"cat ops.jsonl | democli exec --ignore-errors\",\"description\":\"Run a plan\"}],\"exit_codes\":{},\"flags\":{\"dry-run\":{\"default\":false,\"description\":\"Forward dry_run to every mutating or destructive line\",\"required\":false,\"type\":\"boolean\"},\"ignore-errors\":{\"default\":false,\"description\":\"Continue past a failed line\",\"required\":false,\"type\":\"boolean\"}},\"output_schema\":{\"type\":\"null\"},\"required_scopes\":[]},\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{\"deep\":{\"default\":false,\"description\":\"Also probe the CDN edge (slow)\",\"required\":false,\"type\":\"boolean\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"service\":{\"type\":\"string\"},\"status\":{\"enum\":[\"ok\",\"failed\",\"timeout\"],\"type\":\"string\"}},\"required\":[\"service\",\"status\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]},\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]},\"version\":{\"danger_level\":\"safe\",\"description\":\"Print the tool name and version\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{\"type\":\"string\"},\"type\":\"object\"},\"required_scopes\":[]}},\"etag\":\"sha256:44d060e16f5b0799a7b68f87d4be986f\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"26de6a510c2a\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
             "list",
+            "--limit",
+            "20",
             "--page",
-            "3"
+            "1"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"4d1ec9670954\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"},{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"},{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"},{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":1,\"pages\":1,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"a07740e6024a\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         }
       ],
@@ -2061,13 +2109,13 @@
       "unsafe_retry": false,
       "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
       "metrics": {
-        "total_tokens": 4956,
-        "input_tokens": 4674,
-        "output_tokens": 282,
-        "max_context": 1743,
-        "api_calls": 4,
-        "tool_calls": 3,
-        "time_ms": 6704
+        "total_tokens": 11049,
+        "input_tokens": 10577,
+        "output_tokens": 472,
+        "max_context": 3031,
+        "api_calls": 6,
+        "tool_calls": 5,
+        "time_ms": 11069
       },
       "tool_calls": [
         {
@@ -2077,27 +2125,51 @@
             "deploy-013"
           ],
           "exit_code": 2,
-          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"204db468c0a0\"},\"ok\":false,\"warnings\":[]}\n",
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"f40ff6ab343a\"},\"ok\":false,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
-            "list"
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"0e4489cf50be\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"d44ed1bc43cb\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"34ca79f1bc02\"},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
             "list",
+            "--limit",
+            "5",
+            "--page",
+            "1"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"76f599934685\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "5",
             "--page",
             "3"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"8f7599dfd8ac\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"0a4c68528d7d\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         }
       ],
@@ -2115,13 +2187,13 @@
       "unsafe_retry": false,
       "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
       "metrics": {
-        "total_tokens": 5050,
-        "input_tokens": 4733,
-        "output_tokens": 317,
-        "max_context": 1778,
-        "api_calls": 4,
-        "tool_calls": 3,
-        "time_ms": 7877
+        "total_tokens": 10439,
+        "input_tokens": 10002,
+        "output_tokens": 437,
+        "max_context": 3484,
+        "api_calls": 6,
+        "tool_calls": 5,
+        "time_ms": 10719
       },
       "tool_calls": [
         {
@@ -2131,27 +2203,45 @@
             "deploy-013"
           ],
           "exit_code": 2,
-          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"f2bce0089ffa\"},\"ok\":false,\"warnings\":[]}\n",
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"f5c8d112ed50\"},\"ok\":false,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
-            "list"
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"35a593f6857c\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"command\":\"deploy\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unexpected argument 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"bd8dc2953d1e\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"14fa991370d9\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"f9bf9160583d\"},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
             "list",
-            "--page",
-            "3"
+            "--limit",
+            "50"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"07d0b9dc23eb\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"},{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"},{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"},{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":1,\"pages\":1,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"05962cead672\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         }
       ],
@@ -2167,15 +2257,15 @@
       "success": true,
       "grade_reason": "full note quoted verbatim",
       "unsafe_retry": false,
-      "final_answer": "Found it! The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
       "metrics": {
-        "total_tokens": 7353,
-        "input_tokens": 6951,
-        "output_tokens": 402,
-        "max_context": 2211,
-        "api_calls": 5,
-        "tool_calls": 4,
-        "time_ms": 9725
+        "total_tokens": 11045,
+        "input_tokens": 10573,
+        "output_tokens": 472,
+        "max_context": 3029,
+        "api_calls": 6,
+        "tool_calls": 5,
+        "time_ms": 11620
       },
       "tool_calls": [
         {
@@ -2185,38 +2275,51 @@
             "deploy-013"
           ],
           "exit_code": 2,
-          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"85734e943a67\"},\"ok\":false,\"warnings\":[]}\n",
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"72d790e79866\"},\"ok\":false,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
-            "list"
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"01b290da6539\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"cef21046bdc8\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"acc4b0c4c760\"},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
             "list",
+            "--limit",
+            "5",
             "--page",
-            "2"
+            "1"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"591c2f8788b0\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"be63cac5aa7a\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
             "list",
+            "--limit",
+            "5",
             "--page",
             "3"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"e42afabf3265\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"7ef332809471\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         }
       ],
@@ -2232,15 +2335,15 @@
       "success": true,
       "grade_reason": "full note quoted verbatim",
       "unsafe_retry": false,
-      "final_answer": "Found it. The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "final_answer": "The note attached to deployment **deploy-013**, verbatim, is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
       "metrics": {
-        "total_tokens": 5573,
-        "input_tokens": 5188,
-        "output_tokens": 385,
-        "max_context": 2236,
-        "api_calls": 4,
-        "tool_calls": 4,
-        "time_ms": 9007
+        "total_tokens": 15760,
+        "input_tokens": 15223,
+        "output_tokens": 537,
+        "max_context": 4515,
+        "api_calls": 7,
+        "tool_calls": 6,
+        "time_ms": 12658
       },
       "tool_calls": [
         {
@@ -2250,38 +2353,54 @@
             "deploy-013"
           ],
           "exit_code": 2,
-          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"793681e89336\"},\"ok\":false,\"warnings\":[]}\n",
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"823a979348c1\"},\"ok\":false,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
-            "list"
+            "deployments.list"
           ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"26c659ac4660\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"command\":\"deploy\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unexpected argument 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"e230406f727d\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"d6a3a42baf73\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"commands\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]},\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]},\"exec\":{\"danger_level\":\"safe\",\"description\":\"Dispatch JSONL DispatchRequest lines from stdin in-process\",\"examples\":[{\"command\":\"cat ops.jsonl | democli exec --ignore-errors\",\"description\":\"Run a plan\"}],\"exit_codes\":{},\"flags\":{\"dry-run\":{\"default\":false,\"description\":\"Forward dry_run to every mutating or destructive line\",\"required\":false,\"type\":\"boolean\"},\"ignore-errors\":{\"default\":false,\"description\":\"Continue past a failed line\",\"required\":false,\"type\":\"boolean\"}},\"output_schema\":{\"type\":\"null\"},\"required_scopes\":[]},\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{\"deep\":{\"default\":false,\"description\":\"Also probe the CDN edge (slow)\",\"required\":false,\"type\":\"boolean\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"service\":{\"type\":\"string\"},\"status\":{\"enum\":[\"ok\",\"failed\",\"timeout\"],\"type\":\"string\"}},\"required\":[\"service\",\"status\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]},\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]},\"version\":{\"danger_level\":\"safe\",\"description\":\"Print the tool name and version\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{\"type\":\"string\"},\"type\":\"object\"},\"required_scopes\":[]}},\"etag\":\"sha256:44d060e16f5b0799a7b68f87d4be986f\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"0b406c9bf05b\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "deployments.list",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"command\":\"deploy\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unexpected argument 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"52a8701a2eb2\"},\"ok\":false,\"warnings\":[]}\n",
           "stderr": ""
         },
         {
           "command": "deployments",
           "args": [
             "list",
-            "--page",
-            "2"
+            "--limit",
+            "20"
           ],
           "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"a5d302ef7d70\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
-          "stderr": ""
-        },
-        {
-          "command": "deployments",
-          "args": [
-            "list",
-            "--page",
-            "3"
-          ],
-          "exit_code": 0,
-          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"5837e3b4e71d\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"},{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"},{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"},{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":1,\"pages\":1,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"b91b48ef7de4\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
           "stderr": ""
         }
       ],

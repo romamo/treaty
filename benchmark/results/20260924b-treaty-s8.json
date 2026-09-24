@@ -1,0 +1,315 @@
+{
+  "harness_version": "2",
+  "date": "2026-09-24",
+  "model": "anthropic/claude-sonnet-4.6",
+  "anthropic_sdk_version": "1.8.0",
+  "trials": 5,
+  "summary": [
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 5050,
+      "tokens_per_success": 5585,
+      "median_api_calls": 4,
+      "median_time_ms": 7877
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 4997,
+        "input_tokens": 4697,
+        "output_tokens": 300,
+        "max_context": 1762,
+        "api_calls": 4,
+        "tool_calls": 3,
+        "time_ms": 7604
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"7bbed73c5a5a\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"fd5c17d08758\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"4d1ec9670954\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 4956,
+        "input_tokens": 4674,
+        "output_tokens": 282,
+        "max_context": 1743,
+        "api_calls": 4,
+        "tool_calls": 3,
+        "time_ms": 6704
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"204db468c0a0\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"d44ed1bc43cb\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"8f7599dfd8ac\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 5050,
+        "input_tokens": 4733,
+        "output_tokens": 317,
+        "max_context": 1778,
+        "api_calls": 4,
+        "tool_calls": 3,
+        "time_ms": 7877
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"f2bce0089ffa\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"14fa991370d9\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"07d0b9dc23eb\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "Found it! The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 7353,
+        "input_tokens": 6951,
+        "output_tokens": 402,
+        "max_context": 2211,
+        "api_calls": 5,
+        "tool_calls": 4,
+        "time_ms": 9725
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"85734e943a67\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"cef21046bdc8\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"591c2f8788b0\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"e42afabf3265\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "Found it. The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 5573,
+        "input_tokens": 5188,
+        "output_tokens": 385,
+        "max_context": 2236,
+        "api_calls": 4,
+        "tool_calls": 4,
+        "time_ms": 9007
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"democli deployments delete\",\"democli deployments list\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"793681e89336\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"d6a3a42baf73\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"a5d302ef7d70\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"5837e3b4e71d\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    }
+  ]
+}

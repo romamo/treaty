@@ -50,7 +50,7 @@ Model `anthropic/claude-sonnet-4.6` via OpenRouter, temperature 0, 5 trials per 
 | S7 deploy with a lost response | treaty | 5/5 | 0 | 14287 | 7 |
 | S8 quote a long field verbatim | argparse | 0/5 | 0 | 44688 | 16 |
 | S8 quote a long field verbatim | click | 0/5 | 0 | 55760 | 19 |
-| S8 quote a long field verbatim | treaty | 5/5 | 0 | 11049 | 5 |
+| S8 quote a long field verbatim | treaty | 5/5 | 0 | 5050 | 3 |
 
 | Mode | Successes | Of which S1 to S5 |
 |------|-----------|-------------------|
@@ -114,11 +114,13 @@ and siblings.
    difference here because the prose already said the same thing
 7. **Lossy text is unrecoverable (S8).** The agent spent 16 to 19 tool calls hunting for a
    `get` or `show` command, hit the step limit in most trials, and reported the note as
-   truncated. Treaty answered in 5 calls. The treaty trials also exposed a usability defect:
-   after `deployments get` failed, the error's `available` list and the manifest keys use
-   dot paths, and the agent typed `deployments deployments.list` and `deployments.list`
-   literally before finding `deployments list`. The `available` context should show
-   invocations, not registry keys
+   truncated. Treaty answered in 3 calls. The first treaty run of S8 exposed a usability
+   defect: after `deployments get` failed, the error's `available` list showed registry
+   keys (`deployments.list`), and the agent typed `deployments deployments.list` and
+   `deployments.list` literally before finding the right form, at a median of 11049 tokens
+   over 5 calls (`results/20260924-frameworks-s8-prefix.json`). With `available` now
+   listing invocations scoped to the group (`democli deployments list`), every trial went
+   straight from the failed call to the right one: 5050 median tokens over 3 calls
 
 ## Grader changes made for this run
 
