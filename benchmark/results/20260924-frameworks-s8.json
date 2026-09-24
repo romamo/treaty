@@ -1,0 +1,2410 @@
+{
+  "harness_version": "2",
+  "date": "2026-09-24",
+  "model": "anthropic/claude-sonnet-4.6",
+  "anthropic_sdk_version": "1.8.0",
+  "trials": 5,
+  "summary": [
+    {
+      "scenario": "s8",
+      "mode": "argparse",
+      "trials": 5,
+      "successes": 0,
+      "success_rate": 0.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 44688,
+      "tokens_per_success": null,
+      "median_api_calls": 17,
+      "median_time_ms": 32430
+    },
+    {
+      "scenario": "s8",
+      "mode": "click",
+      "trials": 5,
+      "successes": 0,
+      "success_rate": 0.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 55760,
+      "tokens_per_success": null,
+      "median_api_calls": 20,
+      "median_time_ms": 37610
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 11049,
+      "tokens_per_success": 14577,
+      "median_api_calls": 6,
+      "median_time_ms": 11620
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "s8",
+      "mode": "argparse",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not quote the full note of deploy-013",
+      "unsafe_retry": false,
+      "final_answer": "The note for deploy-013 is consistently truncated with \"…\" in the list output, and there is no `get` subcommand or verbose flag available. Unfortunately, based on all available CLI tools and options, the full note cannot be retrieved — the list output truncates it to:\n\n> `feat: switch session st…`\n\nThe CLI does not provide a way to view the full, untruncated note for deploy-013. The only visible portion of the note is **\"feat: switch session st…\"** — the rest is cut off by the display, and there is no available command to retrieve the complete text.",
+      "metrics": {
+        "total_tokens": 25598,
+        "input_tokens": 24456,
+        "output_tokens": 1142,
+        "max_context": 3039,
+        "api_calls": 13,
+        "tool_calls": 12,
+        "time_ms": 25669
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deployments [-h] {list,delete} ...\ndemocli deployments: error: argument subcommand: invalid choice: 'get' (choose from 'list', 'delete')\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --verbose\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments list [-h] [--limit LIMIT] [--page PAGE]\n\noptions:\n  -h, --help     show this help message and exit\n  --limit LIMIT  Items per page (default 5)\n  --page PAGE    Page number (default 1)\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "deploy-013"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deploy [-h] --version VERSION --env {staging,production}\n                      [--idempotency-key IDEMPOTENCY_KEY]\n\noptions:\n  -h, --help            show this help message and exit\n  --version VERSION     Version to deploy\n  --env {staging,production}\n                        Target environment\n  --idempotency-key IDEMPOTENCY_KEY\n                        Duplicate calls with the same key return the original\n                        result\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--limit",
+            "1"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\n\nPage 3 of 20 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "13",
+            "--limit",
+            "1"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "13",
+            "--limit",
+            "100"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\n\nPage 13 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli health [-h] {check} ...\n\npositional arguments:\n  {check}\n    check     Run health checks against all services\n\noptions:\n  -h, --help  show this help message and exit\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--limit",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "6064688752693db6"
+    },
+    {
+      "scenario": "s8",
+      "mode": "argparse",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "max_steps",
+      "success": false,
+      "grade_reason": "loop ended with stop_reason=max_steps",
+      "unsafe_retry": false,
+      "final_answer": "",
+      "metrics": {
+        "total_tokens": 57159,
+        "input_tokens": 55462,
+        "output_tokens": 1697,
+        "max_context": 4519,
+        "api_calls": 20,
+        "tool_calls": 20,
+        "time_ms": 38285
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deployments [-h] {list,delete} ...\ndemocli deployments: error: argument subcommand: invalid choice: 'get' (choose from 'list', 'delete')\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "deploy-013"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--id",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --id deploy-013\n"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deploy [-h] --version VERSION --env {staging,production}\n                      [--idempotency-key IDEMPOTENCY_KEY]\n\noptions:\n  -h, --help            show this help message and exit\n  --version VERSION     Version to deploy\n  --env {staging,production}\n                        Target environment\n  --idempotency-key IDEMPOTENCY_KEY\n                        Duplicate calls with the same key return the original\n                        result\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments list [-h] [--limit LIMIT] [--page PAGE]\n\noptions:\n  -h, --help     show this help message and exit\n  --limit LIMIT  Items per page (default 5)\n  --page PAGE    Page number (default 1)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli health [-h] {check} ...\n\npositional arguments:\n  {check}\n    check     Run health checks against all services\n\noptions:\n  -h, --help  show this help message and exit\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --verbose\n"
+        },
+        {
+          "command": "run_cli",
+          "args": [
+            "deployments",
+            "list",
+            "--format",
+            "json"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: run_cli"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--format",
+            "json"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --format json\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--full"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --full\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--no-truncate"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --no-truncate\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--wide"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --wide\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--output",
+            "wide"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --output wide\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "-h"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments list [-h] [--limit LIMIT] [--page PAGE]\n\noptions:\n  -h, --help     show this help message and exit\n  --limit LIMIT  Items per page (default 5)\n  --page PAGE    Page number (default 1)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "-h"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments [-h] {list,delete} ...\n\npositional arguments:\n  {list,delete}\n    list         List deployments\n    delete       Delete deployments matching a filter\n\noptions:\n  -h, --help     show this help message and exit\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "delete",
+            "-h"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments delete [-h] --filter FILTER [--dry-run] [--yes]\n\noptions:\n  -h, --help       show this help message and exit\n  --filter FILTER  Selection expression such as env=staging\n  --dry-run        Preview without deleting\n  --yes            Skip the confirmation prompt\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "6064688752693db6"
+    },
+    {
+      "scenario": "s8",
+      "mode": "argparse",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not quote the full note of deploy-013",
+      "unsafe_retry": false,
+      "final_answer": "The note is still truncated regardless of the limit. Unfortunately, the available CLI tools (`deployments list`, `deploy`, `health`) do not offer a way to retrieve the full, untruncated note for a specific deployment — there is no `get`/`inspect`/`show` subcommand, and the list view truncates long notes with `…`.\n\nI am unable to retrieve the full, exact note for deploy-013 with the tools available. The list view only shows a truncated version: **\"feat: switch session st…\"** — the rest of the note is cut off and there is no CLI command available to fetch the complete text.",
+      "metrics": {
+        "total_tokens": 32888,
+        "input_tokens": 31623,
+        "output_tokens": 1265,
+        "max_context": 4257,
+        "api_calls": 14,
+        "tool_calls": 13,
+        "time_ms": 29138
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deployments [-h] {list,delete} ...\ndemocli deployments: error: argument subcommand: invalid choice: 'get' (choose from 'list', 'delete')\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "deploy-013"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "info",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deploy [-h] --version VERSION --env {staging,production}\n                      [--idempotency-key IDEMPOTENCY_KEY]\ndemocli deploy: error: the following arguments are required: --version, --env\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --verbose\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments list [-h] [--limit LIMIT] [--page PAGE]\n\noptions:\n  -h, --help     show this help message and exit\n  --limit LIMIT  Items per page (default 5)\n  --page PAGE    Page number (default 1)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\n\nPage 3 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli health [-h] {check} ...\n\npositional arguments:\n  {check}\n    check     Run health checks against all services\n\noptions:\n  -h, --help  show this help message and exit\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "20",
+            "--page",
+            "1"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deploy [-h] --version VERSION --env {staging,production}\n                      [--idempotency-key IDEMPOTENCY_KEY]\n\noptions:\n  -h, --help            show this help message and exit\n  --version VERSION     Version to deploy\n  --env {staging,production}\n                        Target environment\n  --idempotency-key IDEMPOTENCY_KEY\n                        Duplicate calls with the same key return the original\n                        result\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "6064688752693db6"
+    },
+    {
+      "scenario": "s8",
+      "mode": "argparse",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not quote the full note of deploy-013",
+      "unsafe_retry": false,
+      "final_answer": "The note is still truncated regardless of the display approach. Unfortunately, the CLI's `deployments list` command truncates the NOTE field in its output, and there is no `get` or `inspect` subcommand available to retrieve the full note for a specific deployment. The note for deploy-013 is cut off at:\n\n> `feat: switch session st…`\n\nThe full text of the note **cannot be retrieved** with the available CLI tools — the `deployments` command only supports `list` and `delete`, neither of which exposes the complete, untruncated note for deploy-013. The tools at my disposal do not provide a way to view the full note beyond what is shown: **\"feat: switch session st…\"**",
+      "metrics": {
+        "total_tokens": 44695,
+        "input_tokens": 43181,
+        "output_tokens": 1514,
+        "max_context": 4434,
+        "api_calls": 17,
+        "tool_calls": 16,
+        "time_ms": 34411
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deployments [-h] {list,delete} ...\ndemocli deployments: error: argument subcommand: invalid choice: 'get' (choose from 'list', 'delete')\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "deploy-013"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "info",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deploy [-h] --version VERSION --env {staging,production}\n                      [--idempotency-key IDEMPOTENCY_KEY]\ndemocli deploy: error: the following arguments are required: --version, --env\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --verbose\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments list [-h] [--limit LIMIT] [--page PAGE]\n\noptions:\n  -h, --help     show this help message and exit\n  --limit LIMIT  Items per page (default 5)\n  --page PAGE    Page number (default 1)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\n\nPage 3 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli health [-h] {check} ...\ndemocli health: error: argument subcommand: invalid choice: 'deploy-013' (choose from 'check')\n"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli health check [-h] [--deep]\n\noptions:\n  -h, --help  show this help message and exit\n  --deep      Also probe the CDN edge (slow)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 1 of 2 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments [-h] {list,delete} ...\n\npositional arguments:\n  {list,delete}\n    list         List deployments\n    delete       Delete deployments matching a filter\n\noptions:\n  -h, --help     show this help message and exit\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "delete",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments delete [-h] --filter FILTER [--dry-run] [--yes]\n\noptions:\n  -h, --help       show this help message and exit\n  --filter FILTER  Selection expression such as env=staging\n  --dry-run        Preview without deleting\n  --yes            Skip the confirmation prompt\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "delete",
+            "--filter",
+            "id=deploy-013",
+            "--dry-run"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "error: unsupported filter 'id=deploy-013'; use env=staging\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "6064688752693db6"
+    },
+    {
+      "scenario": "s8",
+      "mode": "argparse",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not quote the full note of deploy-013",
+      "unsafe_retry": false,
+      "final_answer": "The note is still truncated regardless of the display approach. Unfortunately, the CLI's `deployments list` command truncates the NOTE field in its output, and there is no `get`/`inspect`/`show` subcommand available to retrieve the full note for a single deployment. The full text of the note cannot be retrieved beyond what is displayed — which is:\n\n> `feat: switch session st…`\n\nThe CLI does not provide a way to view the complete, untruncated note for deploy-013. The only visible portion of the note is **\"feat: switch session st…\"** — the rest is cut off by the tool's output formatting, and no other available command exposes the full text.",
+      "metrics": {
+        "total_tokens": 44688,
+        "input_tokens": 43181,
+        "output_tokens": 1507,
+        "max_context": 4434,
+        "api_calls": 17,
+        "tool_calls": 16,
+        "time_ms": 32430
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deployments [-h] {list,delete} ...\ndemocli deployments: error: argument subcommand: invalid choice: 'get' (choose from 'list', 'delete')\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "deploy-013"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "info",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli deploy [-h] --version VERSION --env {staging,production}\n                      [--idempotency-key IDEMPOTENCY_KEY]\ndemocli deploy: error: the following arguments are required: --version, --env\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli [-h] [--version] {deployments,deploy,health} ...\ndemocli: error: unrecognized arguments: --verbose\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments list [-h] [--limit LIMIT] [--page PAGE]\n\noptions:\n  -h, --help     show this help message and exit\n  --limit LIMIT  Items per page (default 5)\n  --page PAGE    Page number (default 1)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\n\nPage 3 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "usage: democli health [-h] {check} ...\ndemocli health: error: argument subcommand: invalid choice: 'deploy-013' (choose from 'check')\n"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli health check [-h] [--deep]\n\noptions:\n  -h, --help  show this help message and exit\n  --deep      Also probe the CDN edge (slow)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 1 of 2 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments [-h] {list,delete} ...\n\npositional arguments:\n  {list,delete}\n    list         List deployments\n    delete       Delete deployments matching a filter\n\noptions:\n  -h, --help     show this help message and exit\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "delete",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "usage: democli deployments delete [-h] --filter FILTER [--dry-run] [--yes]\n\noptions:\n  -h, --help       show this help message and exit\n  --filter FILTER  Selection expression such as env=staging\n  --dry-run        Preview without deleting\n  --yes            Skip the confirmation prompt\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "delete",
+            "--filter",
+            "id=deploy-013",
+            "--dry-run"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "error: unsupported filter 'id=deploy-013'; use env=staging\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "6064688752693db6"
+    },
+    {
+      "scenario": "s8",
+      "mode": "click",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not quote the full note of deploy-013",
+      "unsafe_retry": false,
+      "final_answer": "The note is still truncated with \"feat: switch session st…\". Unfortunately, the CLI's `deployments list` command truncates the note field and there is no `get` subcommand or other flag to retrieve the full note. Based on what is available from the CLI output, the note for deploy-013 is truncated and the full text cannot be retrieved with the available tools — the complete note cannot be quoted verbatim beyond what is shown.\n\nThat said, the note as displayed is:\n\n> **feat: switch session st…**\n\nThe note is truncated by the CLI and the full text is not retrievable with the available commands. The visible portion is `feat: switch session st…`, but I cannot provide the complete verbatim note as the tooling does not expose a way to retrieve the untruncated value.",
+      "metrics": {
+        "total_tokens": 15791,
+        "input_tokens": 14922,
+        "output_tokens": 869,
+        "max_context": 2595,
+        "api_calls": 9,
+        "tool_calls": 8,
+        "time_ms": 19946
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\nTry 'democli.py deployments --help' for help.\n\nError: No such command 'get'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\n\n  Manage deployments.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  delete  Delete deployments matching a filter.\n  list    List deployments.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments list [OPTIONS]\n\n  List deployments.\n\nOptions:\n  --limit INTEGER  Items per page  [default: 5]\n  --page INTEGER   Page number  [default: 1]\n  --help           Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deploy [OPTIONS]\n\n  Deploy an application version.\n\nOptions:\n  --version TEXT              Version to deploy  [required]\n  --env [staging|production]  Target environment  [required]\n  --idempotency-key TEXT      Duplicate calls with the same key return the\n                              original result\n  --help                      Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py health [OPTIONS] COMMAND [ARGS]...\n\n  Service health commands.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  check  Run health checks against all services.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "2f604f0069264294"
+    },
+    {
+      "scenario": "s8",
+      "mode": "click",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not quote the full note of deploy-013",
+      "unsafe_retry": false,
+      "final_answer": "The note is still truncated with \"feat: switch session st…\". Unfortunately, the CLI's `deployments list` command truncates the note field and there is no `get` subcommand or other flag to retrieve the full note. Based on what is available from the CLI output, the full note cannot be retrieved beyond what is displayed.\n\nThe note for deployment **deploy-013** is truncated in the CLI output and displayed as:\n\n> `feat: switch session st…`\n\nThe CLI does not provide a command to retrieve the full, untruncated note for a specific deployment — there is no `get` subcommand or verbose/full-output flag available. The complete text of the note beyond \"feat: switch session st…\" cannot be determined with the tools available.",
+      "metrics": {
+        "total_tokens": 15779,
+        "input_tokens": 14922,
+        "output_tokens": 857,
+        "max_context": 2595,
+        "api_calls": 9,
+        "tool_calls": 8,
+        "time_ms": 20310
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\nTry 'democli.py deployments --help' for help.\n\nError: No such command 'get'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\n\n  Manage deployments.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  delete  Delete deployments matching a filter.\n  list    List deployments.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments list [OPTIONS]\n\n  List deployments.\n\nOptions:\n  --limit INTEGER  Items per page  [default: 5]\n  --page INTEGER   Page number  [default: 1]\n  --help           Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deploy [OPTIONS]\n\n  Deploy an application version.\n\nOptions:\n  --version TEXT              Version to deploy  [required]\n  --env [staging|production]  Target environment  [required]\n  --idempotency-key TEXT      Duplicate calls with the same key return the\n                              original result\n  --help                      Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py health [OPTIONS] COMMAND [ARGS]...\n\n  Service health commands.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  check  Run health checks against all services.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "2f604f0069264294"
+    },
+    {
+      "scenario": "s8",
+      "mode": "click",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "max_steps",
+      "success": false,
+      "grade_reason": "loop ended with stop_reason=max_steps",
+      "unsafe_retry": false,
+      "final_answer": "",
+      "metrics": {
+        "total_tokens": 55760,
+        "input_tokens": 53953,
+        "output_tokens": 1807,
+        "max_context": 4310,
+        "api_calls": 20,
+        "tool_calls": 20,
+        "time_ms": 38985
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\nTry 'democli.py deployments --help' for help.\n\nError: No such command 'get'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\n\n  Manage deployments.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  delete  Delete deployments matching a filter.\n  list    List deployments.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments list [OPTIONS]\n\n  List deployments.\n\nOptions:\n  --limit INTEGER  Items per page  [default: 5]\n  --page INTEGER   Page number  [default: 1]\n  --help           Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deploy [OPTIONS]\n\n  Deploy an application version.\n\nOptions:\n  --version TEXT              Version to deploy  [required]\n  --env [staging|production]  Target environment  [required]\n  --idempotency-key TEXT      Duplicate calls with the same key return the\n                              original result\n  --help                      Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py health [OPTIONS] COMMAND [ARGS]...\n\n  Service health commands.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  check  Run health checks against all services.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--format",
+            "json"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--format'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--full"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--full'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--verbose'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--no-truncate"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--no-truncate'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--wide"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--wide'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--output",
+            "json"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--output'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--id",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--id'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--note"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--note'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--show-notes"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--show-notes'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--expand"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--expand'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--fields",
+            "note"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--fields'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--columns",
+            "note"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--columns'.\n"
+        }
+      ],
+      "scenario_hash": "2f604f0069264294"
+    },
+    {
+      "scenario": "s8",
+      "mode": "click",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not quote the full note of deploy-013",
+      "unsafe_retry": false,
+      "final_answer": "Based on exhaustive exploration of all available CLI commands and options, the `deployments list` command is the only way to view deployment notes, and it truncates long notes in the table display. The full, exact note for deploy-013 cannot be retrieved beyond what the tool exposes.\n\nThe note for deployment **deploy-013** is truncated in the CLI output as:\n\n> `feat: switch session st…`\n\nThe full, exact text of the note is not retrievable — the CLI's `deployments list` command truncates the NOTE field in its table output, and there is no `get`, `--verbose`, `--format`, `--full`, or any other option available to display the complete note. I've exhausted all available commands and flags without finding a way to expose the untruncated text.",
+      "metrics": {
+        "total_tokens": 57278,
+        "input_tokens": 55304,
+        "output_tokens": 1974,
+        "max_context": 4446,
+        "api_calls": 20,
+        "tool_calls": 19,
+        "time_ms": 43319
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\nTry 'democli.py deployments --help' for help.\n\nError: No such command 'get'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\n\n  Manage deployments.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  delete  Delete deployments matching a filter.\n  list    List deployments.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments list [OPTIONS]\n\n  List deployments.\n\nOptions:\n  --limit INTEGER  Items per page  [default: 5]\n  --page INTEGER   Page number  [default: 1]\n  --help           Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deploy [OPTIONS]\n\n  Deploy an application version.\n\nOptions:\n  --version TEXT              Version to deploy  [required]\n  --env [staging|production]  Target environment  [required]\n  --idempotency-key TEXT      Duplicate calls with the same key return the\n                              original result\n  --help                      Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py health [OPTIONS] COMMAND [ARGS]...\n\n  Service health commands.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  check  Run health checks against all services.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments list [OPTIONS]\n\n  List deployments.\n\nOptions:\n  --limit INTEGER  Items per page  [default: 5]\n  --page INTEGER   Page number  [default: 1]\n  --help           Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "delete",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments delete [OPTIONS]\n\n  Delete deployments matching a filter.\n\nOptions:\n  --filter TEXT  Selection expression such as env=staging  [required]\n  --dry-run      Preview without deleting\n  --yes          Skip the confirmation prompt\n  --help         Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--format",
+            "json"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--format'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--verbose'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--wide"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--wide'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--no-truncate"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--no-truncate'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--full"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--full'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--output",
+            "json"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--output'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--notes"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--notes'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--id",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--id'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--filter",
+            "id=deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--filter'.\n"
+        }
+      ],
+      "scenario_hash": "2f604f0069264294"
+    },
+    {
+      "scenario": "s8",
+      "mode": "click",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "max_steps",
+      "success": false,
+      "grade_reason": "loop ended with stop_reason=max_steps",
+      "unsafe_retry": false,
+      "final_answer": "",
+      "metrics": {
+        "total_tokens": 55899,
+        "input_tokens": 54076,
+        "output_tokens": 1823,
+        "max_context": 4324,
+        "api_calls": 20,
+        "tool_calls": 20,
+        "time_ms": 37610
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\nTry 'democli.py deployments --help' for help.\n\nError: No such command 'get'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments [OPTIONS] COMMAND [ARGS]...\n\n  Manage deployments.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  delete  Delete deployments matching a filter.\n  list    List deployments.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deployments list [OPTIONS]\n\n  List deployments.\n\nOptions:\n  --limit INTEGER  Items per page  [default: 5]\n  --page INTEGER   Page number  [default: 1]\n  --help           Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 1 of 1 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: manifest"
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py deploy [OPTIONS]\n\n  Deploy an application version.\n\nOptions:\n  --version TEXT              Version to deploy  [required]\n  --env [staging|production]  Target environment  [required]\n  --idempotency-key TEXT      Duplicate calls with the same key return the\n                              original result\n  --help                      Show this message and exit.\n",
+          "stderr": ""
+        },
+        {
+          "command": "health",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "Usage: democli.py health [OPTIONS] COMMAND [ARGS]...\n\n  Service health commands.\n\nOptions:\n  --help  Show this message and exit.\n\nCommands:\n  check  Run health checks against all services.\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\n\nPage 13 of 20 (20 deployments total)\nUse --page 14 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--format",
+            "json"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--format'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--full"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--full'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--verbose"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--verbose'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--wide"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--wide'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--no-truncate"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--no-truncate'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--output",
+            "json"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--output'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--note"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--note'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--show-notes"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--show-notes'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--expand"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--expand'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--detail"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--detail'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--id",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--id'.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "1",
+            "--page",
+            "13",
+            "--fields",
+            "id,note"
+          ],
+          "exit_code": 2,
+          "stdout": "",
+          "stderr": "Usage: democli.py deployments list [OPTIONS]\nTry 'democli.py deployments list --help' for help.\n\nError: No such option '--fields'.\n"
+        }
+      ],
+      "scenario_hash": "2f604f0069264294"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 24592,
+        "input_tokens": 23885,
+        "output_tokens": 707,
+        "max_context": 5931,
+        "api_calls": 9,
+        "tool_calls": 8,
+        "time_ms": 16320
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"9dc48d7ac4a4\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"04c75c5def11\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"87cd311851ce\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "deployments.list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"89321e9a7e8e\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"5b4cebe0d205\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments.list",
+          "args": [
+            "--limit",
+            "50"
+          ],
+          "exit_code": 127,
+          "stdout": "",
+          "stderr": "command not found: deployments.list"
+        },
+        {
+          "command": "manifest",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]},\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]},\"exec\":{\"danger_level\":\"safe\",\"description\":\"Dispatch JSONL DispatchRequest lines from stdin in-process\",\"examples\":[{\"command\":\"cat ops.jsonl | democli exec --ignore-errors\",\"description\":\"Run a plan\"}],\"exit_codes\":{},\"flags\":{\"dry-run\":{\"default\":false,\"description\":\"Forward dry_run to every mutating or destructive line\",\"required\":false,\"type\":\"boolean\"},\"ignore-errors\":{\"default\":false,\"description\":\"Continue past a failed line\",\"required\":false,\"type\":\"boolean\"}},\"output_schema\":{\"type\":\"null\"},\"required_scopes\":[]},\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{\"deep\":{\"default\":false,\"description\":\"Also probe the CDN edge (slow)\",\"required\":false,\"type\":\"boolean\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"service\":{\"type\":\"string\"},\"status\":{\"enum\":[\"ok\",\"failed\",\"timeout\"],\"type\":\"string\"}},\"required\":[\"service\",\"status\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]},\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]},\"version\":{\"danger_level\":\"safe\",\"description\":\"Print the tool name and version\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{\"type\":\"string\"},\"type\":\"object\"},\"required_scopes\":[]}},\"etag\":\"sha256:44d060e16f5b0799a7b68f87d4be986f\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"26de6a510c2a\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "20",
+            "--page",
+            "1"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"},{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"},{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"},{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":1,\"pages\":1,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"a07740e6024a\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 11049,
+        "input_tokens": 10577,
+        "output_tokens": 472,
+        "max_context": 3031,
+        "api_calls": 6,
+        "tool_calls": 5,
+        "time_ms": 11069
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"f40ff6ab343a\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"0e4489cf50be\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"34ca79f1bc02\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "5",
+            "--page",
+            "1"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"76f599934685\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "5",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"0a4c68528d7d\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 10439,
+        "input_tokens": 10002,
+        "output_tokens": 437,
+        "max_context": 3484,
+        "api_calls": 6,
+        "tool_calls": 5,
+        "time_ms": 10719
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"f5c8d112ed50\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"35a593f6857c\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"command\":\"deploy\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unexpected argument 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"bd8dc2953d1e\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"f9bf9160583d\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "50"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"},{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"},{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"},{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":1,\"pages\":1,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"05962cead672\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The full, exact note attached to deployment **deploy-013** is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 11045,
+        "input_tokens": 10573,
+        "output_tokens": 472,
+        "max_context": 3029,
+        "api_calls": 6,
+        "tool_calls": 5,
+        "time_ms": 11620
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"72d790e79866\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"01b290da6539\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "--help"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]}},\"etag\":\"sha256:224c3f0eea48974c25716ba184037c96\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"acc4b0c4c760\"},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "5",
+            "--page",
+            "1"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"be63cac5aa7a\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "5",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"7ef332809471\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    },
+    {
+      "scenario": "s8",
+      "mode": "treaty",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "full note quoted verbatim",
+      "unsafe_retry": false,
+      "final_answer": "The note attached to deployment **deploy-013**, verbatim, is:\n\n> \"feat: switch session store to redis cluster; requires REDIS_URL on every pod\"",
+      "metrics": {
+        "total_tokens": 15760,
+        "input_tokens": 15223,
+        "output_tokens": 537,
+        "max_context": 4515,
+        "api_calls": 7,
+        "tool_calls": 6,
+        "time_ms": 12658
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "get",
+            "deploy-013"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"get\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'get'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"823a979348c1\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"available\":[\"deploy\",\"deployments.delete\",\"deployments.list\",\"exec\",\"health.check\",\"manifest\",\"version\"],\"prefix\":\"deployments\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unknown command 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"26c659ac4660\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "deployments.list"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"command\":\"deploy\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unexpected argument 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"e230406f727d\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "manifest",
+          "args": [],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"commands\":{\"deploy\":{\"danger_level\":\"mutating\",\"description\":\"Deploy an application version\",\"examples\":[{\"command\":\"democli deploy --version 2.1.0 --env staging\",\"description\":\"Deploy to staging\"}],\"exit_codes\":{\"79\":{\"description\":\"Another deployment holds the lock; retry after error.retry_after_ms\",\"name\":\"LOCK_HELD\",\"retryable\":true,\"side_effects\":\"none\"}},\"flags\":{\"env\":{\"description\":\"Target environment\",\"enum_values\":[\"staging\",\"production\"],\"required\":true,\"type\":\"enum\"},\"idempotency-key\":{\"description\":\"Duplicate calls with the same key return the original result\",\"required\":false,\"type\":\"string\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"},\"version\":{\"description\":\"Version to deploy\",\"required\":true,\"type\":\"string\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"deploy_id\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"status\",\"version\",\"env\",\"deploy_id\"],\"title\":\"DeployResult\",\"type\":\"object\"},\"required_scopes\":[\"deploy:write\"]},\"deployments.delete\":{\"danger_level\":\"destructive\",\"description\":\"Delete deployments matching a filter\",\"examples\":[{\"command\":\"democli deployments delete --filter env=staging --dry-run\",\"description\":\"Preview a staging cleanup\"}],\"exit_codes\":{},\"flags\":{\"confirm-destructive\":{\"default\":false,\"description\":\"Required to apply; without it the command previews and exits 2\",\"required\":false,\"type\":\"boolean\"},\"dry-run\":{\"default\":false,\"description\":\"Preview without deleting\",\"required\":false,\"type\":\"boolean\"},\"filter\":{\"description\":\"Selection expression such as env=staging\",\"required\":true,\"type\":\"string\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"count\":{\"type\":\"integer\"},\"deployments\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"age_days\":{\"type\":\"integer\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"env\",\"age_days\"],\"title\":\"Target\",\"type\":\"object\"},\"type\":\"array\"},\"effect\":{\"enum\":[\"would_delete\",\"deleted\"],\"type\":\"string\"}},\"required\":[\"effect\",\"deployments\",\"count\"],\"title\":\"DeleteResult\",\"type\":\"object\"},\"required_scopes\":[\"deployments:write\"]},\"deployments.list\":{\"danger_level\":\"safe\",\"description\":\"List deployments, five per page by default\",\"examples\":[{\"command\":\"democli deployments list --page 2\",\"description\":\"Second page\"}],\"exit_codes\":{},\"flags\":{\"limit\":{\"default\":5,\"description\":\"Items per page\",\"required\":false,\"type\":\"integer\"},\"page\":{\"default\":1,\"description\":\"Page number, starting at 1\",\"required\":false,\"type\":\"integer\"}},\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"items\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"created_at\":{\"type\":\"string\"},\"env\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"},\"note\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"}},\"required\":[\"id\",\"version\",\"env\",\"status\",\"created_at\",\"note\"],\"title\":\"Deployment\",\"type\":\"object\"},\"type\":\"array\"},\"pagination\":{\"additionalProperties\":false,\"properties\":{\"has_more\":{\"type\":\"boolean\"},\"next_page\":{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"null\"}]},\"page\":{\"type\":\"integer\"},\"pages\":{\"type\":\"integer\"},\"total\":{\"type\":\"integer\"}},\"required\":[\"page\",\"pages\",\"total\",\"has_more\",\"next_page\"],\"title\":\"Pagination\",\"type\":\"object\"}},\"required\":[\"items\",\"pagination\"],\"title\":\"DeploymentPage\",\"type\":\"object\"},\"required_scopes\":[\"deployments:read\"]},\"exec\":{\"danger_level\":\"safe\",\"description\":\"Dispatch JSONL DispatchRequest lines from stdin in-process\",\"examples\":[{\"command\":\"cat ops.jsonl | democli exec --ignore-errors\",\"description\":\"Run a plan\"}],\"exit_codes\":{},\"flags\":{\"dry-run\":{\"default\":false,\"description\":\"Forward dry_run to every mutating or destructive line\",\"required\":false,\"type\":\"boolean\"},\"ignore-errors\":{\"default\":false,\"description\":\"Continue past a failed line\",\"required\":false,\"type\":\"boolean\"}},\"output_schema\":{\"type\":\"null\"},\"required_scopes\":[]},\"health.check\":{\"danger_level\":\"safe\",\"description\":\"Run health checks against all services\",\"examples\":[{\"command\":\"democli health check\",\"description\":\"Check every service\"}],\"exit_codes\":{},\"flags\":{\"deep\":{\"default\":false,\"description\":\"Also probe the CDN edge (slow)\",\"required\":false,\"type\":\"boolean\"},\"timeout\":{\"description\":\"Seconds before the framework aborts with TIMEOUT; 0 disables the limit\",\"required\":false,\"type\":\"number\"}},\"has_network_io\":true,\"output_schema\":{\"additionalProperties\":false,\"properties\":{\"cache_age_hours\":{\"type\":\"integer\"},\"services\":{\"items\":{\"additionalProperties\":false,\"properties\":{\"service\":{\"type\":\"string\"},\"status\":{\"enum\":[\"ok\",\"failed\",\"timeout\"],\"type\":\"string\"}},\"required\":[\"service\",\"status\"],\"title\":\"ServiceStatus\",\"type\":\"object\"},\"type\":\"array\"}},\"required\":[\"services\",\"cache_age_hours\"],\"title\":\"HealthReport\",\"type\":\"object\"},\"required_scopes\":[\"health:read\"]},\"manifest\":{\"danger_level\":\"safe\",\"description\":\"Print the command manifest for agents\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{},\"type\":\"object\"},\"required_scopes\":[]},\"version\":{\"danger_level\":\"safe\",\"description\":\"Print the tool name and version\",\"exit_codes\":{},\"flags\":{},\"output_schema\":{\"additionalProperties\":{\"type\":\"string\"},\"type\":\"object\"},\"required_scopes\":[]}},\"etag\":\"sha256:44d060e16f5b0799a7b68f87d4be986f\",\"exit_codes\":{\"0\":{\"description\":\"Operation completed as intended\",\"name\":\"SUCCESS\",\"retryable\":false,\"side_effects\":\"none\"},\"1\":{\"description\":\"Unclassified execution failure; inspect state before retrying\",\"name\":\"GENERAL_ERROR\",\"retryable\":false,\"side_effects\":\"partial\"},\"130\":{\"description\":\"Cancelled by SIGINT; external state may be partially modified\",\"name\":\"CANCELLED_SIGINT\",\"retryable\":false,\"side_effects\":\"partial\"},\"143\":{\"description\":\"Cancelled by SIGTERM; external state may be partially modified\",\"name\":\"CANCELLED_SIGTERM\",\"retryable\":false,\"side_effects\":\"partial\"},\"2\":{\"description\":\"Input validation failed before any side effect occurred\",\"name\":\"ARG_ERROR\",\"retryable\":false,\"side_effects\":\"none\"}},\"framework_version\":\"2.1.0\",\"schema_version\":\"1.0\"},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"0b406c9bf05b\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "deployments.list",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 2,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"ARG_ERROR\",\"context\":{\"argument\":\"deployments.list\",\"command\":\"deploy\"},\"fix_required\":\"correct the arguments and reissue\",\"message\":\"unexpected argument 'deployments.list'\",\"phase\":\"validation\",\"retryable\":false},\"meta\":{\"duration_ms\":0,\"exit_code\":2,\"request_id\":\"52a8701a2eb2\"},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--limit",
+            "20"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"},{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"},{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"},{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":1,\"pages\":1,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"b91b48ef7de4\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "e1aa9236325096a5"
+    }
+  ]
+}

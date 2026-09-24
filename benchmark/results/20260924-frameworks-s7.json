@@ -1,0 +1,1539 @@
+{
+  "harness_version": "2",
+  "date": "2026-09-24",
+  "model": "anthropic/claude-sonnet-4.6",
+  "anthropic_sdk_version": "1.8.0",
+  "trials": 5,
+  "summary": [
+    {
+      "scenario": "s7",
+      "mode": "argparse",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 14331,
+      "tokens_per_success": 14362,
+      "median_api_calls": 8,
+      "median_time_ms": 16884
+    },
+    {
+      "scenario": "s7",
+      "mode": "click",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 14325,
+      "tokens_per_success": 14344,
+      "median_api_calls": 8,
+      "median_time_ms": 15819
+    },
+    {
+      "scenario": "s7",
+      "mode": "treaty",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 14287,
+      "tokens_per_success": 14346,
+      "median_api_calls": 6,
+      "median_time_ms": 14600
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "s7",
+      "mode": "argparse",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was successfully created despite the connection error. There is exactly one production deployment of version 2.2.0, and no retry is needed.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14410,
+        "input_tokens": 13671,
+        "output_tokens": 739,
+        "max_context": 2611,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 17871
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "667e179c29219622"
+    },
+    {
+      "scenario": "s7",
+      "mode": "argparse",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created during the failed command. There is exactly one production deployment of version 2.2.0, and no duplicates exist.\n\nThe deployment ID is **deploy-new-001**.",
+      "metrics": {
+        "total_tokens": 14331,
+        "input_tokens": 13613,
+        "output_tokens": 718,
+        "max_context": 2592,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 16090
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "667e179c29219622"
+    },
+    {
+      "scenario": "s7",
+      "mode": "argparse",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was successfully created despite the connection error. There is exactly one production deployment of version 2.2.0, and no retry is needed.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14407,
+        "input_tokens": 13669,
+        "output_tokens": 738,
+        "max_context": 2610,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 17241
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "667e179c29219622"
+    },
+    {
+      "scenario": "s7",
+      "mode": "argparse",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created during the failed command. There is exactly one production deployment of version 2.2.0, and no duplicates exist.\n\nThe deployment ID is **deploy-new-001**.",
+      "metrics": {
+        "total_tokens": 14331,
+        "input_tokens": 13613,
+        "output_tokens": 718,
+        "max_context": 2592,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 15579
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "667e179c29219622"
+    },
+    {
+      "scenario": "s7",
+      "mode": "argparse",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created during the failed command. There is exactly one production deployment of version 2.2.0, and no duplicates exist.\n\nThe deployment ID is **deploy-new-001**.",
+      "metrics": {
+        "total_tokens": 14331,
+        "input_tokens": 13613,
+        "output_tokens": 718,
+        "max_context": 2592,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 16884
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "667e179c29219622"
+    },
+    {
+      "scenario": "s7",
+      "mode": "click",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created successfully despite the connection error. There is exactly one production deployment of version 2.2.0, with ID **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14325,
+        "input_tokens": 13613,
+        "output_tokens": 712,
+        "max_context": 2592,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 16042
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "19d281c76de0e114"
+    },
+    {
+      "scenario": "s7",
+      "mode": "click",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created successfully despite the connection error. There is exactly one production deployment of version 2.2.0, with ID **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14322,
+        "input_tokens": 13611,
+        "output_tokens": 711,
+        "max_context": 2591,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 15445
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "19d281c76de0e114"
+    },
+    {
+      "scenario": "s7",
+      "mode": "click",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created successfully despite the connection error. There is exactly one production deployment of version 2.2.0, with ID **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14325,
+        "input_tokens": 13613,
+        "output_tokens": 712,
+        "max_context": 2592,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 15698
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "19d281c76de0e114"
+    },
+    {
+      "scenario": "s7",
+      "mode": "click",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created during the connection reset. There is exactly one production deployment of version 2.2.0, and no duplicates exist. No further action is needed.\n\nThe deployment ID is **deploy-new-001**.",
+      "metrics": {
+        "total_tokens": 14331,
+        "input_tokens": 13609,
+        "output_tokens": 722,
+        "max_context": 2590,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 15819
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "19d281c76de0e114"
+    },
+    {
+      "scenario": "s7",
+      "mode": "click",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was indeed created successfully despite the connection error. There is exactly one production deployment of version 2.2.0, and no duplicates exist. No further action is needed.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14417,
+        "input_tokens": 13671,
+        "output_tokens": 746,
+        "max_context": 2611,
+        "api_calls": 8,
+        "tool_calls": 7,
+        "time_ms": 16038
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-001     1.0.0    staging     retired  2026-01-15T10:00:00Z  -\ndeploy-002     1.0.1    staging     retired  2026-01-22T14:30:00Z  -\ndeploy-003     1.1.0    production  retired  2026-02-01T09:00:00Z  -\ndeploy-004     1.1.1    staging     retired  2026-02-05T16:00:00Z  -\ndeploy-005     1.2.0    production  active   2026-02-10T09:30:00Z  -\n\nPage 1 of 4 (20 deployments total)\nUse --page 2 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-006     1.2.1    staging     active   2026-02-12T11:00:00Z  -\ndeploy-007     1.3.0    staging     active   2026-02-18T08:00:00Z  hotfix: retry budget fo…\ndeploy-008     1.3.1    production  active   2026-02-20T13:00:00Z  -\ndeploy-009     1.4.0    staging     active   2026-02-25T10:00:00Z  -\ndeploy-010     1.4.1    production  active   2026-03-01T09:00:00Z  -\n\nPage 2 of 4 (20 deployments total)\nUse --page 3 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-011     1.5.0    staging     active   2026-03-02T10:00:00Z  -\ndeploy-012     1.5.1    staging     active   2026-03-04T14:00:00Z  -\ndeploy-013     1.6.0    staging     active   2026-03-06T11:00:00Z  feat: switch session st…\ndeploy-014     1.6.1    production  active   2026-03-08T09:30:00Z  -\ndeploy-015     2.0.0    staging     active   2026-03-10T10:00:00Z  -\n\nPage 3 of 4 (20 deployments total)\nUse --page 4 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 4 (20 deployments total)\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "",
+          "stderr": "Error: connection reset while reading the response; the deployment may or may not have been created. Check `deployments list` before retrying.\n"
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-016     2.0.1    staging     active   2026-03-11T12:00:00Z  -\ndeploy-017     2.0.2    production  active   2026-03-12T08:00:00Z  -\ndeploy-018     2.1.0    staging     active   2026-03-14T15:00:00Z  chore: bump base image\ndeploy-019     2.1.0    staging     active   2026-03-15T10:00:00Z  -\ndeploy-020     2.1.0    staging     active   2026-03-16T09:00:00Z  -\n\nPage 4 of 5 (21 deployments total)\nUse --page 5 to see the next page\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "ID             VERSION  ENV         STATUS   CREATED               NOTE\ndeploy-new-001 2.2.0    production  active   2026-09-24T12:00:00Z  -\n\nPage 5 of 5 (21 deployments total)\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "19d281c76de0e114"
+    },
+    {
+      "scenario": "s7",
+      "mode": "treaty",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was successfully created despite the connection reset. There is exactly one production deployment of version 2.2.0.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14314,
+        "input_tokens": 13603,
+        "output_tokens": 711,
+        "max_context": 3434,
+        "api_calls": 6,
+        "tool_calls": 7,
+        "time_ms": 14236
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"09c0addbd737\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"37c4ccd2f5e5\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"5c652802875e\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":4,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"3823472b5338\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"RESPONSE_LOST\",\"context\":{\"env\":\"production\",\"version\":\"2.2.0\"},\"message\":\"Connection reset while reading the response\",\"phase\":\"execution\",\"retryable\":false,\"suggestion\":\"Run `democli deployments list` to see whether the deployment was created, or re-run with the same --idempotency-key to get the original result\"},\"meta\":{\"duration_ms\":0,\"exit_code\":1,\"request_id\":\"e29bf2d4fbd6\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":5,\"page\":4,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"ba2f5a5f8d85\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-09-24T12:00:00Z\",\"env\":\"production\",\"id\":\"deploy-new-001\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.2.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":5,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"9f74a23582ab\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "eec94a5f931dad2f"
+    },
+    {
+      "scenario": "s7",
+      "mode": "treaty",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment did go through successfully despite the connection reset. There is exactly one production deployment of version 2.2.0.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14603,
+        "input_tokens": 13817,
+        "output_tokens": 786,
+        "max_context": 3500,
+        "api_calls": 6,
+        "tool_calls": 7,
+        "time_ms": 15355
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"732df9e83db4\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"c430d8077d37\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"a7d55139da74\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":4,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"9bf5f54fa671\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"RESPONSE_LOST\",\"context\":{\"env\":\"production\",\"version\":\"2.2.0\"},\"message\":\"Connection reset while reading the response\",\"phase\":\"execution\",\"retryable\":false,\"suggestion\":\"Run `democli deployments list` to see whether the deployment was created, or re-run with the same --idempotency-key to get the original result\"},\"meta\":{\"duration_ms\":0,\"exit_code\":1,\"request_id\":\"69acb4ee8846\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"8e65d478e44b\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-09-24T12:00:00Z\",\"env\":\"production\",\"id\":\"deploy-new-001\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.2.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":5,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"a6e1d99f1084\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "eec94a5f931dad2f"
+    },
+    {
+      "scenario": "s7",
+      "mode": "treaty",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment was successfully created despite the connection reset. There is exactly one production deployment of version 2.2.0, and no duplicates exist.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14251,
+        "input_tokens": 13546,
+        "output_tokens": 705,
+        "max_context": 3407,
+        "api_calls": 6,
+        "tool_calls": 7,
+        "time_ms": 14600
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"f15be7528789\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"b85067aeb040\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"84f58e69ea0b\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":4,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"efdf9e12319c\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"RESPONSE_LOST\",\"context\":{\"env\":\"production\",\"version\":\"2.2.0\"},\"message\":\"Connection reset while reading the response\",\"phase\":\"execution\",\"retryable\":false,\"suggestion\":\"Run `democli deployments list` to see whether the deployment was created, or re-run with the same --idempotency-key to get the original result\"},\"meta\":{\"duration_ms\":0,\"exit_code\":1,\"request_id\":\"fda674174fbf\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"0a720c218594\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-09-24T12:00:00Z\",\"env\":\"production\",\"id\":\"deploy-new-001\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.2.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":5,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"95212b38773c\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "eec94a5f931dad2f"
+    },
+    {
+      "scenario": "s7",
+      "mode": "treaty",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment did go through successfully despite the connection reset. There is exactly one production deployment of version 2.2.0.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14278,
+        "input_tokens": 13576,
+        "output_tokens": 702,
+        "max_context": 3417,
+        "api_calls": 6,
+        "tool_calls": 7,
+        "time_ms": 14432
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"ef78fc4c44fd\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"ccf5d9a33194\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"13b0aba520eb\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":4,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"0b6fb9ec38e6\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"RESPONSE_LOST\",\"context\":{\"env\":\"production\",\"version\":\"2.2.0\"},\"message\":\"Connection reset while reading the response\",\"phase\":\"execution\",\"retryable\":false,\"suggestion\":\"Run `democli deployments list` to see whether the deployment was created, or re-run with the same --idempotency-key to get the original result\"},\"meta\":{\"duration_ms\":0,\"exit_code\":1,\"request_id\":\"b7588455337b\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"8a2c7368e8fc\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-09-24T12:00:00Z\",\"env\":\"production\",\"id\":\"deploy-new-001\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.2.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":5,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"1f102dccf409\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "eec94a5f931dad2f"
+    },
+    {
+      "scenario": "s7",
+      "mode": "treaty",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "exactly one deployment created and reported",
+      "unsafe_retry": false,
+      "final_answer": "The deployment did go through. There is exactly one production deployment of version 2.2.0, and it's active.\n\nThe deployment ID is **`deploy-new-001`**.",
+      "metrics": {
+        "total_tokens": 14287,
+        "input_tokens": 13582,
+        "output_tokens": 705,
+        "max_context": 3418,
+        "api_calls": 6,
+        "tool_calls": 7,
+        "time_ms": 14646
+      },
+      "tool_calls": [
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"07bdc1c8ee6c\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "2"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-02-12T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-006\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.1\"},{\"created_at\":\"2026-02-18T08:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-007\",\"note\":\"hotfix: retry budget for the billing webhook raised from 3 to 5 (INC-2291)\",\"status\":\"active\",\"version\":\"1.3.0\"},{\"created_at\":\"2026-02-20T13:00:00Z\",\"env\":\"production\",\"id\":\"deploy-008\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.3.1\"},{\"created_at\":\"2026-02-25T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-009\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.0\"},{\"created_at\":\"2026-03-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-010\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.4.1\"}],\"pagination\":{\"has_more\":true,\"next_page\":3,\"page\":2,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"b5468b7a8f4e\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "3"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-02T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-011\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.0\"},{\"created_at\":\"2026-03-04T14:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-012\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.5.1\"},{\"created_at\":\"2026-03-06T11:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-013\",\"note\":\"feat: switch session store to redis cluster; requires REDIS_URL on every pod\",\"status\":\"active\",\"version\":\"1.6.0\"},{\"created_at\":\"2026-03-08T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-014\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.6.1\"},{\"created_at\":\"2026-03-10T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-015\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":4,\"page\":3,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"9833b05cc5cc\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "4"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-03-11T12:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-016\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.1\"},{\"created_at\":\"2026-03-12T08:00:00Z\",\"env\":\"production\",\"id\":\"deploy-017\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.0.2\"},{\"created_at\":\"2026-03-14T15:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-018\",\"note\":\"chore: bump base image\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-019\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"},{\"created_at\":\"2026-03-16T09:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-020\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.1.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":4,\"pages\":4,\"total\":20}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"497312db9839\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deploy",
+          "args": [
+            "--version",
+            "2.2.0",
+            "--env",
+            "production"
+          ],
+          "exit_code": 1,
+          "stdout": "{\"data\":null,\"error\":{\"code\":\"RESPONSE_LOST\",\"context\":{\"env\":\"production\",\"version\":\"2.2.0\"},\"message\":\"Connection reset while reading the response\",\"phase\":\"execution\",\"retryable\":false,\"suggestion\":\"Run `democli deployments list` to see whether the deployment was created, or re-run with the same --idempotency-key to get the original result\"},\"meta\":{\"duration_ms\":0,\"exit_code\":1,\"request_id\":\"e13a778e372c\",\"timeout_ms\":60000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-01-15T10:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-001\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.0\"},{\"created_at\":\"2026-01-22T14:30:00Z\",\"env\":\"staging\",\"id\":\"deploy-002\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.0.1\"},{\"created_at\":\"2026-02-01T09:00:00Z\",\"env\":\"production\",\"id\":\"deploy-003\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.0\"},{\"created_at\":\"2026-02-05T16:00:00Z\",\"env\":\"staging\",\"id\":\"deploy-004\",\"note\":\"\",\"status\":\"retired\",\"version\":\"1.1.1\"},{\"created_at\":\"2026-02-10T09:30:00Z\",\"env\":\"production\",\"id\":\"deploy-005\",\"note\":\"\",\"status\":\"active\",\"version\":\"1.2.0\"}],\"pagination\":{\"has_more\":true,\"next_page\":2,\"page\":1,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"ff7c875090d1\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        },
+        {
+          "command": "deployments",
+          "args": [
+            "list",
+            "--page",
+            "5"
+          ],
+          "exit_code": 0,
+          "stdout": "{\"data\":{\"items\":[{\"created_at\":\"2026-09-24T12:00:00Z\",\"env\":\"production\",\"id\":\"deploy-new-001\",\"note\":\"\",\"status\":\"active\",\"version\":\"2.2.0\"}],\"pagination\":{\"has_more\":false,\"next_page\":null,\"page\":5,\"pages\":5,\"total\":21}},\"error\":null,\"meta\":{\"duration_ms\":0,\"exit_code\":0,\"request_id\":\"069031b31a88\",\"timeout_ms\":60000},\"ok\":true,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "eec94a5f931dad2f"
+    }
+  ]
+}

@@ -14,7 +14,7 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _fixture as fx  # noqa: E402
 
-from treaty import App, Ctx, Exit, Flag, NoArgs  # noqa: E402
+from treaty import App, Ctx, Exit, Flag  # noqa: E402
 
 app = App("democli", version="2.1.0", description="Demo deployment tool")
 app.exit_code(
@@ -33,6 +33,7 @@ class Deployment:
     env: str
     status: str
     created_at: str
+    note: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +76,7 @@ def list_(args: ListArgs, ctx: Ctx) -> DeploymentPage:
         pagination=Pagination(
             page=args.page,
             pages=pages,
-            total=len(fx.DEPLOYMENTS),
+            total=len(fx.all_deployments()),
             has_more=args.page < pages,
             next_page=args.page + 1 if args.page < pages else None,
         ),
@@ -145,6 +146,20 @@ class DeployResult:
     examples=[("Deploy to staging", "democli deploy --version 2.1.0 --env staging")],
 )
 def deploy(args: DeployArgs, ctx: Ctx) -> DeployResult:
+    if args.env == "production":
+        try:
+            record = fx.deploy_production(args.version, args.idempotency_key)
+        except fx.ResponseLost as exc:
+            raise Exit.GENERAL_ERROR(
+                "Connection reset while reading the response",
+                code="RESPONSE_LOST",
+                context={"version": args.version, "env": args.env},
+                suggestion="Run `democli deployments list` to see whether the deployment was "
+                "created, or re-run with the same --idempotency-key to get the original result",
+            ) from exc
+        return DeployResult(
+            status="deployed", version=args.version, env=args.env, deploy_id=record["id"]
+        )
     if not fx.acquire_deploy_lock():
         raise Exit.LOCK_HELD(
             "Another deployment is in progress",
@@ -157,7 +172,12 @@ def deploy(args: DeployArgs, ctx: Ctx) -> DeployResult:
 @dataclass(frozen=True, slots=True)
 class ServiceStatus:
     service: str
-    ok: bool
+    status: Literal["ok", "failed", "timeout"]
+
+
+@dataclass(frozen=True, slots=True)
+class CheckArgs:
+    deep: bool = Flag(default=False, description="Also probe the CDN edge (slow)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,13 +193,21 @@ health = app.group("health", description="Service health commands")
     "check",
     description="Run health checks against all services",
     required_scopes=["health:read"],
-        examples=[("Check every service", "democli health check")],
+    has_network_io=True,
+    timeout=5,
+    examples=[("Check every service", "democli health check")],
 )
-def check(args: NoArgs, ctx: Ctx) -> HealthReport:
-    report = HealthReport(
-        services=[ServiceStatus("api-server", True), ServiceStatus("database", True), ServiceStatus("registry", False)],
-        cache_age_hours=fx.CACHE_AGE_HOURS,
-    )
+def check(args: CheckArgs, ctx: Ctx) -> HealthReport:
+    services = [
+        ServiceStatus("api-server", "ok"),
+        ServiceStatus("database", "ok"),
+        ServiceStatus("registry", "failed"),
+    ]
+    if args.deep:
+        budget = ctx.timeout.seconds
+        deadline = None if budget is None else max(budget - 1.0, 0.5)
+        services.append(ServiceStatus("cdn", fx.probe_cdn(deadline)))
+    report = HealthReport(services=services, cache_age_hours=fx.CACHE_AGE_HOURS)
     raise Exit.AUTH_REQUIRED(
         "Registry credential expired",
         code="TOKEN_EXPIRED",

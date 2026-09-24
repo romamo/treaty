@@ -42,14 +42,38 @@ Model `anthropic/claude-sonnet-4.6` via OpenRouter, temperature 0, 5 trials per 
 | S5 destructive delete with dry-run | click | 5/5 | 0 | 5859 | 4 |
 | S5 destructive delete with dry-run | treaty | 5/5 | 0 | 7708 | 4 |
 | S5 destructive delete with dry-run | good | 5/5 | 0 | 9667 | 5 |
+| S6 deep check with a hanging probe | argparse | 0/5 | 0 | 2839 | 2 |
+| S6 deep check with a hanging probe | click | 0/5 | 0 | 2815 | 2 |
+| S6 deep check with a hanging probe | treaty | 5/5 | 0 | 1963 | 1 |
+| S7 deploy with a lost response | argparse | 5/5 | 0 | 14331 | 7 |
+| S7 deploy with a lost response | click | 5/5 | 0 | 14325 | 7 |
+| S7 deploy with a lost response | treaty | 5/5 | 0 | 14287 | 7 |
+| S8 quote a long field verbatim | argparse | 0/5 | 0 | 44688 | 16 |
+| S8 quote a long field verbatim | click | 0/5 | 0 | 55760 | 19 |
+| S8 quote a long field verbatim | treaty | 5/5 | 0 | 11049 | 5 |
 
-| Mode | Successes |
-|------|-----------|
-| bad | 1/25 |
-| argparse | 20/25 |
-| click | 20/25 |
-| treaty | 25/25 |
-| good | 25/25 |
+| Mode | Successes | Of which S1 to S5 |
+|------|-----------|-------------------|
+| bad | 1/25 | 1/25 |
+| argparse | 25/40 | 20/25 |
+| click | 25/40 | 20/25 |
+| treaty | 40/40 | 25/25 |
+| good | 25/25 | 25/25 |
+
+S6 to S8 were added after the first run to target failure modes the comparison matrix marks
+as unsupported by argparse and click. The spec's mocks have no `--deep`, production deploy,
+or notes, so they were not run on them. Raw trials: `results/20260924-frameworks-s6.json`
+and siblings.
+
+- **S6** `health check --deep` probes a CDN edge that takes 30 s. The treaty command declares
+  `timeout=5` and the handler bounds the probe with `ctx.timeout`; the text builds have no
+  deadline, so the harness kills them at 10 s
+- **S7** The first production deploy commits server-side but the response is lost. A blind
+  retry creates a duplicate; `deployments list` shows what exists, and a repeated
+  `--idempotency-key` returns the original. Graded by the number of records created
+- **S8** Three deployments carry long notes. The text builds render a fixed-width table and
+  shorten notes past 24 characters with an ellipsis, as `kubectl` and `gh` do; JSON carries
+  the full string
 
 ## Findings
 
@@ -78,6 +102,23 @@ Model `anthropic/claude-sonnet-4.6` via OpenRouter, temperature 0, 5 trials per 
    the agent reads it before running `health check`
 4. **The `good` mock is not cheaper than text either.** Its S1 and S5 envelopes cost more
    tokens than the click build. Structured output buys safety and determinism, not brevity
+5. **Hanging commands are a clean loss for text (S6).** Every argparse and click trial ran the
+   deep check twice, got exit 124 with an empty stdout both times, and reported that the
+   tool hangs. Buffered stdout means even the services that had already answered were lost.
+   Treaty returned in 4 s with three services reported and the CDN marked `timeout`, at
+   two thirds of the tokens
+6. **A well-worded error message closes the side-effect gap (S7).** All fifteen trials passed.
+   The text message "may or may not have been created, check `deployments list`" led the
+   agent to list and find the record, exactly as the treaty envelope's `suggestion` did.
+   Nobody used `--idempotency-key`. The envelope's `retryable: false` made no visible
+   difference here because the prose already said the same thing
+7. **Lossy text is unrecoverable (S8).** The agent spent 16 to 19 tool calls hunting for a
+   `get` or `show` command, hit the step limit in most trials, and reported the note as
+   truncated. Treaty answered in 5 calls. The treaty trials also exposed a usability defect:
+   after `deployments get` failed, the error's `available` list and the manifest keys use
+   dot paths, and the agent typed `deployments deployments.list` and `deployments.list`
+   literally before finding `deployments list`. The `available` context should show
+   invocations, not registry keys
 
 ## Grader changes made for this run
 

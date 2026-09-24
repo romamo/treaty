@@ -78,8 +78,10 @@ matching audit rule so adoption never requires reading the spec.
   there
 - Benchmark: `benchmark/README.md` compares argparse, click, and treaty builds of the same
   CLI on the spec harness (done 2026-09-24; group help scoped to its subtree and shared
-  exit codes hoisted to a root table the same day). Next: add scenarios where text
-  baselines should fail (hallucinated flags, partial failure, timeouts)
+  exit codes hoisted to a root table the same day; S6 to S8 added for hangs, lost
+  responses, and lossy text). Next: make `ARG_ERROR.context.available` list invocations
+  (`deployments list`) rather than registry keys (`deployments.list`), which S8 showed
+  agents typing literally
 
 ## Non-goals
 

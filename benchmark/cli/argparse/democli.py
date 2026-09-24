@@ -14,16 +14,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _fixture as fx  # noqa: E402
 
 
+def note_cell(note: str, width: int = 24) -> str:
+    """Text tables need a fixed width: long notes are shortened, empty ones shown as a dash."""
+    if not note:
+        return "-"
+    return note if len(note) <= width else note[: width - 1] + "\u2026"
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     try:
         items, pages = fx.page(args.limit, args.page)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    print(f"{'ID':<12} {'VERSION':<8} {'ENV':<11} {'STATUS':<8} CREATED")
+    print(f"{'ID':<14} {'VERSION':<8} {'ENV':<11} {'STATUS':<8} {'CREATED':<21} NOTE")
     for item in items:
-        print(f"{item['id']:<12} {item['version']:<8} {item['env']:<11} {item['status']:<8} {item['created_at']}")
-    print(f"\nPage {args.page} of {pages} ({len(fx.DEPLOYMENTS)} deployments total)")
+        print(
+            f"{item['id']:<14} {item['version']:<8} {item['env']:<11} {item['status']:<8} "
+            f"{item['created_at']:<21} {note_cell(item['note'])}"
+        )
+    print(f"\nPage {args.page} of {pages} ({len(fx.all_deployments())} deployments total)")
     if args.page < pages:
         print(f"Use --page {args.page + 1} to see the next page")
     return 0
@@ -55,6 +65,18 @@ def cmd_delete(args: argparse.Namespace) -> int:
 
 
 def cmd_deploy(args: argparse.Namespace) -> int:
+    if args.env == "production":
+        try:
+            record = fx.deploy_production(args.version, args.idempotency_key)
+        except fx.ResponseLost:
+            print(
+                "error: connection reset while reading the response; the deployment may or may "
+                "not have been created. Check `deployments list` before retrying.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"Deployed {args.version} to production ({record['id']})")
+        return 0
     if not fx.acquire_deploy_lock():
         print(
             f"error: another deployment is in progress (lock held by {fx.LOCK_HOLDER}). "
@@ -71,7 +93,11 @@ def cmd_health(args: argparse.Namespace) -> int:
     print("api-server ... ok")
     print("database ... ok")
     print(f"registry ... FAILED (credential expired at {fx.REGISTRY_EXPIRED_AT})", file=sys.stderr)
-    print("3 services checked, 1 failed")
+    checked = 3
+    if args.deep:
+        print(f"cdn ... {fx.probe_cdn(None)}")
+        checked = 4
+    print(f"{checked} services checked, 1 failed")
     return 1
 
 
@@ -101,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     health = sub.add_parser("health", help="Service health commands")
     hsub = health.add_subparsers(dest="subcommand", required=True)
     check = hsub.add_parser("check", help="Run health checks against all services")
+    check.add_argument("--deep", action="store_true", help="Also probe the CDN edge (slow)")
     check.set_defaults(func=cmd_health)
     return parser
 

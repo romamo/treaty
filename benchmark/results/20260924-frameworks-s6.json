@@ -1,0 +1,657 @@
+{
+  "harness_version": "2",
+  "date": "2026-09-24",
+  "model": "anthropic/claude-sonnet-4.6",
+  "anthropic_sdk_version": "1.8.0",
+  "trials": 5,
+  "summary": [
+    {
+      "scenario": "s6",
+      "mode": "argparse",
+      "trials": 5,
+      "successes": 0,
+      "success_rate": 0.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 2839,
+      "tokens_per_success": null,
+      "median_api_calls": 3,
+      "median_time_ms": 31241
+    },
+    {
+      "scenario": "s6",
+      "mode": "click",
+      "trials": 5,
+      "successes": 0,
+      "success_rate": 0.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 2815,
+      "tokens_per_success": null,
+      "median_api_calls": 3,
+      "median_time_ms": 29966
+    },
+    {
+      "scenario": "s6",
+      "mode": "treaty",
+      "trials": 5,
+      "successes": 5,
+      "success_rate": 1.0,
+      "unsafe_retries": 0,
+      "median_total_tokens": 1963,
+      "tokens_per_success": 1963,
+      "median_api_calls": 2,
+      "median_time_ms": 10393
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "s6",
+      "mode": "argparse",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\n- **No service statuses could be retrieved.** The deep health check did not complete within the allowed time window, so there is no status data for any service.\n- This could indicate:\n  - One or more services are **unresponsive or hanging**, causing the check to stall.\n  - There is a **network/connectivity issue** preventing the health checker from reaching the services.\n  - The health check tool itself may be **misconfigured or experiencing an issue**.\n\n### Recommended next steps:\n1. Try running a **standard (non-deep) health check** to see if basic service statuses are available.\n2. Check the **infrastructure/network connectivity** to the services being probed.\n3. Review **logs** for the health check service or individual services for errors.\n4. Contact your **platform/ops team** if the issue persists.",
+      "metrics": {
+        "total_tokens": 2839,
+        "input_tokens": 2396,
+        "output_tokens": 443,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 31390
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "ae188cf9bdd16168"
+    },
+    {
+      "scenario": "s6",
+      "mode": "argparse",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\nThe deep health check did **not complete successfully**, and **no service status information was returned**. This could indicate:\n\n1. **The health check service itself is unresponsive or slow** — the deep check may be trying to reach services that are down or unreachable.\n2. **Network/connectivity issues** — the tool may be unable to reach the endpoints it needs to probe.\n3. **The deep check takes too long** — it may require a longer timeout threshold than what's configured.\n\n### Recommendation:\n- Try running a **standard (non-deep) health check** (`health check`) to see if surface-level statuses are available.\n- Check the health service's own logs or configuration for timeout settings.\n- Investigate whether any downstream services are known to be degraded.\n\nWould you like me to run the standard health check or any other diagnostic commands?",
+      "metrics": {
+        "total_tokens": 2839,
+        "input_tokens": 2396,
+        "output_tokens": 443,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 32342
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "ae188cf9bdd16168"
+    },
+    {
+      "scenario": "s6",
+      "mode": "argparse",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\nThe deep health check did **not complete successfully**, and **no service status information was returned**. This could indicate:\n\n1. **The health check service itself is unresponsive or slow** — the deep check may be trying to reach services that are down or unreachable.\n2. **Network/connectivity issues** — the tool may be unable to reach the endpoints it needs to probe.\n3. **The deep check takes too long** — it may require a longer timeout threshold than what's configured.\n\n### Recommendation:\n- Try running a **standard (non-deep) health check** (`health check`) to see if surface-level statuses are available.\n- Check the health service's own logs or configuration for timeout settings.\n- Investigate whether any downstream services are known to be degraded.\n\nWould you like me to run the standard health check or any other diagnostic commands?",
+      "metrics": {
+        "total_tokens": 2839,
+        "input_tokens": 2396,
+        "output_tokens": 443,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 30520
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "ae188cf9bdd16168"
+    },
+    {
+      "scenario": "s6",
+      "mode": "argparse",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\n- **No service statuses could be retrieved.** The deep health check did not complete within the allowed time window, so there is no data on any individual service.\n- This could indicate:\n  - One or more services are **unresponsive or hanging**, causing the check to stall.\n  - There is a **network/connectivity issue** preventing the health checker from reaching the services.\n  - The health check tool itself may be **misconfigured or experiencing an issue**.\n\n### Recommended next steps:\n1. Try running a **standard (non-deep) health check** to see if basic connectivity works.\n2. Check the health of individual services manually if possible.\n3. Investigate infrastructure/network connectivity issues.\n4. Review logs for the health check tool or the services it monitors.",
+      "metrics": {
+        "total_tokens": 2823,
+        "input_tokens": 2396,
+        "output_tokens": 427,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 31241
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "ae188cf9bdd16168"
+    },
+    {
+      "scenario": "s6",
+      "mode": "argparse",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\nThe deep health check did **not complete successfully**, and **no service status information was returned**. This could indicate:\n\n1. **The health check service itself is unresponsive or overloaded.**\n2. **One or more downstream services are hanging**, causing the deep check to stall.\n3. **A network or infrastructure issue** is preventing the check from completing within the allowed time window.\n\n### Recommendation:\n- Try running a **standard (non-deep) health check** to see if basic services are reachable.\n- Investigate logs for the health check service or any known degraded services.\n- Retry the deep health check after some time or with a longer timeout if the tool supports it.\n\nWould you like me to run a standard health check or investigate further?",
+      "metrics": {
+        "total_tokens": 2819,
+        "input_tokens": 2396,
+        "output_tokens": 423,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 29933
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "ae188cf9bdd16168"
+    },
+    {
+      "scenario": "s6",
+      "mode": "click",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\nThe deep health check **did not complete successfully**, and **no service status information was returned**. This could indicate:\n\n1. **The health check service itself is unresponsive or down.**\n2. **One or more downstream services are hanging**, causing the check to exceed its timeout threshold.\n3. **A network or infrastructure issue** is preventing the tool from reaching the services it needs to probe.\n\n### Recommendation:\n- Investigate the health check service's own availability.\n- Try running a **standard (non-deep) health check** (`health check`) to see if basic connectivity is working.\n- Check logs or monitoring dashboards for any services that may be unresponsive.\n\nWould you like me to try a standard health check or any other diagnostic commands?",
+      "metrics": {
+        "total_tokens": 2815,
+        "input_tokens": 2396,
+        "output_tokens": 419,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 29966
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "b32c5271918af2c2"
+    },
+    {
+      "scenario": "s6",
+      "mode": "click",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\nThe deep health check did **not complete successfully**, and **no service status information was returned**. This could indicate:\n\n1. **The health check service itself is unresponsive or slow** — the deep check may be trying to reach services that are down or unreachable.\n2. **Network/infrastructure issues** — underlying services may not be responding within the expected time window.\n3. **A misconfiguration** — the `--deep` flag may be attempting checks that require additional setup or credentials.\n\n### Recommendation:\n- Try running a **standard (non-deep) health check** (`health check`) to see if surface-level statuses are available.\n- Check logs or monitoring dashboards for any known outages.\n- Investigate whether the timeout threshold needs to be increased for the deep check.\n\nWould you like me to run the standard health check or any other diagnostic commands?",
+      "metrics": {
+        "total_tokens": 2841,
+        "input_tokens": 2396,
+        "output_tokens": 445,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 30946
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "b32c5271918af2c2"
+    },
+    {
+      "scenario": "s6",
+      "mode": "click",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### Result\n**No service statuses could be retrieved.** The deep health check is failing to complete within the allowed time limit. This could indicate:\n\n1. **One or more services are unresponsive**, causing the health check to hang while waiting for a response.\n2. **Network/connectivity issues** between the health check tool and the services it monitors.\n3. **The health check tool itself** may be misconfigured or experiencing an issue.\n\nI'd recommend investigating connectivity to your services or checking system logs for more details. Would you like me to try any other commands to diagnose the issue?",
+      "metrics": {
+        "total_tokens": 2773,
+        "input_tokens": 2396,
+        "output_tokens": 377,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 29420
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "b32c5271918af2c2"
+    },
+    {
+      "scenario": "s6",
+      "mode": "click",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\nThe deep health check did **not complete successfully**, and **no service status information was returned**. This could indicate:\n\n1. **The health check service itself is unresponsive or slow** — the deep check may be trying to reach services that are down or unreachable.\n2. **Network/connectivity issues** — the tool may be unable to reach the endpoints it needs to probe.\n3. **A configuration or infrastructure problem** — the deep check may be hanging on one or more services.\n\n### Recommendation:\n- Try running a **standard (non-deep) health check** (`health check`) to see if surface-level statuses are available.\n- Investigate the health check service's logs or configuration for timeout thresholds.\n- Check if any underlying services are known to be down or degraded.\n\nWould you like me to run a standard health check or any other diagnostic commands?",
+      "metrics": {
+        "total_tokens": 2842,
+        "input_tokens": 2396,
+        "output_tokens": 446,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 30324
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "b32c5271918af2c2"
+    },
+    {
+      "scenario": "s6",
+      "mode": "click",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": false,
+      "grade_reason": "answer does not cover: api-server, database, registry, cdn",
+      "unsafe_retry": false,
+      "final_answer": "The deep health check command is **timing out** on both attempts and returning no output. Here's a summary of what happened:\n\n- **Command run:** `health check --deep`\n- **Exit code:** `124` (which is the standard exit code for a timeout)\n- **stdout:** *(empty — no service statuses returned)*\n- **stderr:** `timeout`\n\n### What this means:\nThe deep health check did **not complete successfully**, and **no service status information was returned**. This could indicate:\n\n1. **The health check service itself is unresponsive or overloaded.**\n2. **One or more downstream services are hanging**, causing the deep check to stall.\n3. **A network or infrastructure issue** is preventing the check from completing within the allowed time window.\n\n### Recommendation:\n- Try running a **standard (non-deep) health check** (`health check`) to see if surface-level statuses are available.\n- Investigate the health check service logs for more detail.\n- Check if any known incidents or outages are affecting the environment.\n\nWould you like me to run a standard health check or any other diagnostic commands?",
+      "metrics": {
+        "total_tokens": 2815,
+        "input_tokens": 2396,
+        "output_tokens": 419,
+        "max_context": 906,
+        "api_calls": 3,
+        "tool_calls": 2,
+        "time_ms": 29851
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        },
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 124,
+          "stdout": "",
+          "stderr": "timeout"
+        }
+      ],
+      "scenario_hash": "b32c5271918af2c2"
+    },
+    {
+      "scenario": "s6",
+      "mode": "treaty",
+      "trial": 1,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "every service reported, cdn flagged as unresponsive",
+      "unsafe_retry": false,
+      "final_answer": "Here is the status of every service covered by the deep health check:\n\n| Service | Status |\n|---|---|\n| **api-server** | ✅ OK |\n| **database** | ✅ OK |\n| **registry** | ❌ Failed |\n| **cdn** | ⏱️ Timeout |\n\n### Additional Details:\n- **Registry** failed due to an **expired credential** (expired at `2026-03-19T09:00:00Z`). The fix required is to **refresh the registry credential** and re-run the health check. This issue is **not retryable** automatically.\n- **CDN** timed out during the check (the overall check ran for ~4,005ms against a 5,000ms timeout), so its true health is indeterminate.\n- The results are based on **cached data that is 4 hours old**, which may affect accuracy.",
+      "metrics": {
+        "total_tokens": 1955,
+        "input_tokens": 1668,
+        "output_tokens": 287,
+        "max_context": 973,
+        "api_calls": 2,
+        "tool_calls": 1,
+        "time_ms": 10393
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"service\":\"api-server\",\"status\":\"ok\"},{\"service\":\"database\",\"status\":\"ok\"},{\"service\":\"registry\",\"status\":\"failed\"},{\"service\":\"cdn\",\"status\":\"timeout\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":4005,\"exit_code\":8,\"request_id\":\"7b59b33cffe7\",\"timeout_ms\":5000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "977717f49df7fb7c"
+    },
+    {
+      "scenario": "s6",
+      "mode": "treaty",
+      "trial": 2,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "every service reported, cdn flagged as unresponsive",
+      "unsafe_retry": false,
+      "final_answer": "Here is the status of every service covered by the deep health check:\n\n| Service | Status |\n|---|---|\n| **api-server** | ✅ OK |\n| **database** | ✅ OK |\n| **registry** | ❌ Failed |\n| **cdn** | ⏱️ Timeout |\n\n### Additional Details:\n- **Registry** failed due to an **expired credential** (expired at `2026-03-19T09:00:00Z`). The fix required is to **refresh the registry credential** and re-run the health check. This issue is **not retryable** until the credential is refreshed.\n- **CDN** timed out during the check (the overall check ran for ~4 seconds against a 5,000ms timeout).\n- The cached health data is **4 hours old**, so some results may not reflect the current live state.\n\nOverall health status: **Not OK** (exit code 8).",
+      "metrics": {
+        "total_tokens": 1963,
+        "input_tokens": 1665,
+        "output_tokens": 298,
+        "max_context": 970,
+        "api_calls": 2,
+        "tool_calls": 1,
+        "time_ms": 10380
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"service\":\"api-server\",\"status\":\"ok\"},{\"service\":\"database\",\"status\":\"ok\"},{\"service\":\"registry\",\"status\":\"failed\"},{\"service\":\"cdn\",\"status\":\"timeout\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":4006,\"exit_code\":8,\"request_id\":\"90887b978858\",\"timeout_ms\":5000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "977717f49df7fb7c"
+    },
+    {
+      "scenario": "s6",
+      "mode": "treaty",
+      "trial": 3,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "every service reported, cdn flagged as unresponsive",
+      "unsafe_retry": false,
+      "final_answer": "Here is the status of every service covered by the deep health check:\n\n| Service | Status |\n|---|---|\n| **api-server** | ✅ OK |\n| **database** | ✅ OK |\n| **registry** | ❌ Failed |\n| **cdn** | ⏱️ Timeout |\n\n### Additional Details:\n- **Registry** failed due to an **expired credential** (expired at `2026-03-19T09:00:00Z`). The fix required is to **refresh the registry credential** and re-run the health check. This issue is **not retryable** until the credential is refreshed.\n- **CDN** timed out — the check did not receive a response within the 5,000ms timeout window.\n- The health check data is based on a **cache that is 4 hours old**, which may affect accuracy.\n\nOverall health status: **Not OK** (exit code 8).",
+      "metrics": {
+        "total_tokens": 1963,
+        "input_tokens": 1668,
+        "output_tokens": 295,
+        "max_context": 973,
+        "api_calls": 2,
+        "tool_calls": 1,
+        "time_ms": 10610
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"service\":\"api-server\",\"status\":\"ok\"},{\"service\":\"database\",\"status\":\"ok\"},{\"service\":\"registry\",\"status\":\"failed\"},{\"service\":\"cdn\",\"status\":\"timeout\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":4005,\"exit_code\":8,\"request_id\":\"8b1bb6273f77\",\"timeout_ms\":5000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "977717f49df7fb7c"
+    },
+    {
+      "scenario": "s6",
+      "mode": "treaty",
+      "trial": 4,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "every service reported, cdn flagged as unresponsive",
+      "unsafe_retry": false,
+      "final_answer": "Here is the status of every service covered by the deep health check:\n\n| Service | Status |\n|---|---|\n| **api-server** | ✅ OK |\n| **database** | ✅ OK |\n| **registry** | ❌ Failed |\n| **cdn** | ⏱️ Timeout |\n\n### Additional Details:\n- **Registry** failed due to an **expired credential** (expired at `2026-03-19T09:00:00Z`). The fix required is to **refresh the registry credential** and re-run the health check. This issue is **not retryable** until the credential is refreshed.\n- **CDN** timed out — the check did not receive a response within the 5,000ms timeout window.\n- The health check data is **4 hours old** (cached), so the current live state may differ.\n\nOverall health: **Not OK** (exit code 8).",
+      "metrics": {
+        "total_tokens": 1960,
+        "input_tokens": 1667,
+        "output_tokens": 293,
+        "max_context": 972,
+        "api_calls": 2,
+        "tool_calls": 1,
+        "time_ms": 10028
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"service\":\"api-server\",\"status\":\"ok\"},{\"service\":\"database\",\"status\":\"ok\"},{\"service\":\"registry\",\"status\":\"failed\"},{\"service\":\"cdn\",\"status\":\"timeout\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":4006,\"exit_code\":8,\"request_id\":\"1ee2176295d5\",\"timeout_ms\":5000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "977717f49df7fb7c"
+    },
+    {
+      "scenario": "s6",
+      "mode": "treaty",
+      "trial": 5,
+      "model": "anthropic/claude-sonnet-4.6",
+      "temperature": 0,
+      "stop_reason": "end_turn",
+      "success": true,
+      "grade_reason": "every service reported, cdn flagged as unresponsive",
+      "unsafe_retry": false,
+      "final_answer": "Here is the status of every service covered by the deep health check:\n\n| Service | Status |\n|---|---|\n| **api-server** | ✅ OK |\n| **database** | ✅ OK |\n| **registry** | ❌ Failed |\n| **cdn** | ⏱️ Timeout |\n\n### Additional Details:\n- **Registry** failed due to an **expired credential** (expired at `2026-03-19T09:00:00Z`). The fix required is to **refresh the registry credential** and re-run the health check. This issue is **not retryable** until the credential is refreshed.\n- **CDN** timed out — the check did not receive a response within the 5,000ms timeout window.\n- The health check data is **4 hours old** (cached), so the current state of services may differ slightly.\n\nOverall, the health check returned a **non-OK status** (exit code 8) due to the registry and CDN issues.",
+      "metrics": {
+        "total_tokens": 1976,
+        "input_tokens": 1666,
+        "output_tokens": 310,
+        "max_context": 971,
+        "api_calls": 2,
+        "tool_calls": 1,
+        "time_ms": 10446
+      },
+      "tool_calls": [
+        {
+          "command": "health",
+          "args": [
+            "check",
+            "--deep"
+          ],
+          "exit_code": 8,
+          "stdout": "{\"data\":{\"cache_age_hours\":4,\"services\":[{\"service\":\"api-server\",\"status\":\"ok\"},{\"service\":\"database\",\"status\":\"ok\"},{\"service\":\"registry\",\"status\":\"failed\"},{\"service\":\"cdn\",\"status\":\"timeout\"}]},\"error\":{\"code\":\"TOKEN_EXPIRED\",\"context\":{\"cache_age_hours\":4,\"expired_at\":\"2026-03-19T09:00:00Z\",\"service\":\"registry\"},\"fix_required\":\"Refresh the registry credential, then re-run the health check\",\"message\":\"Registry credential expired\",\"phase\":\"execution\",\"retryable\":false},\"meta\":{\"duration_ms\":4001,\"exit_code\":8,\"request_id\":\"6acf59096979\",\"timeout_ms\":5000},\"ok\":false,\"warnings\":[]}\n",
+          "stderr": ""
+        }
+      ],
+      "scenario_hash": "977717f49df7fb7c"
+    }
+  ]
+}

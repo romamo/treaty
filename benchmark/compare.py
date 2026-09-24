@@ -23,6 +23,9 @@ SCENARIO_NAMES = {
     "s3": "S3 discover command surface",
     "s4": "S4 diagnose a failure",
     "s5": "S5 destructive delete with dry-run",
+    "s6": "S6 deep check with a hanging probe",
+    "s7": "S7 deploy with a lost response",
+    "s8": "S8 quote a long field verbatim",
 }
 
 

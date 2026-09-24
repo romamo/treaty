@@ -19,6 +19,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _fixture as fx  # noqa: E402
 
 
+def note_cell(note: str, width: int = 24) -> str:
+    """Text tables need a fixed width: long notes are shortened, empty ones shown as a dash."""
+    if not note:
+        return "-"
+    return note if len(note) <= width else note[: width - 1] + "\u2026"
+
+
 @click.group()
 @click.version_option("2.1.0", prog_name="democli")
 def cli() -> None:
@@ -39,10 +46,13 @@ def list_(limit: int, page: int) -> None:
         items, pages = fx.page(limit, page)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"{'ID':<12} {'VERSION':<8} {'ENV':<11} {'STATUS':<8} CREATED")
+    click.echo(f"{'ID':<14} {'VERSION':<8} {'ENV':<11} {'STATUS':<8} {'CREATED':<21} NOTE")
     for item in items:
-        click.echo(f"{item['id']:<12} {item['version']:<8} {item['env']:<11} {item['status']:<8} {item['created_at']}")
-    click.echo(f"\nPage {page} of {pages} ({len(fx.DEPLOYMENTS)} deployments total)")
+        click.echo(
+            f"{item['id']:<14} {item['version']:<8} {item['env']:<11} {item['status']:<8} "
+            f"{item['created_at']:<21} {note_cell(item['note'])}"
+        )
+    click.echo(f"\nPage {page} of {pages} ({len(fx.all_deployments())} deployments total)")
     if page < pages:
         click.echo(f"Use --page {page + 1} to see the next page")
 
@@ -75,6 +85,16 @@ def delete(filter_expr: str, dry_run: bool, yes: bool) -> None:
 @click.option("--idempotency-key", help="Duplicate calls with the same key return the original result")
 def deploy(version: str, env: str, idempotency_key: str | None) -> None:
     """Deploy an application version."""
+    if env == "production":
+        try:
+            record = fx.deploy_production(version, idempotency_key)
+        except fx.ResponseLost as exc:
+            raise click.ClickException(
+                "connection reset while reading the response; the deployment may or may not "
+                "have been created. Check `deployments list` before retrying."
+            ) from exc
+        click.echo(f"Deployed {version} to production ({record['id']})")
+        return
     if not fx.acquire_deploy_lock():
         raise click.ClickException(
             f"another deployment is in progress (lock held by {fx.LOCK_HOLDER}). "
@@ -89,13 +109,18 @@ def health() -> None:
 
 
 @health.command()
-def check() -> None:
+@click.option("--deep", is_flag=True, help="Also probe the CDN edge (slow)")
+def check(deep: bool) -> None:
     """Run health checks against all services."""
     click.echo(f"warning: health cache is stale ({fx.CACHE_AGE_HOURS}h old)", err=True)
     click.echo("api-server ... ok")
     click.echo("database ... ok")
     click.echo(f"registry ... FAILED (credential expired at {fx.REGISTRY_EXPIRED_AT})", err=True)
-    click.echo("3 services checked, 1 failed")
+    checked = 3
+    if deep:
+        click.echo(f"cdn ... {fx.probe_cdn(None)}")
+        checked = 4
+    click.echo(f"{checked} services checked, 1 failed")
     sys.exit(1)
 
 
