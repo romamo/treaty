@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launcher the conformance kit executes; resolves the project venv without uv's own output on stderr
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/../.venv/bin/python" "$here/../examples/deployctl.py" "$@"

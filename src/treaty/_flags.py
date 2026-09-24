@@ -1,0 +1,193 @@
+"""``Arg`` and ``Flag`` field markers and the ``FieldInfo`` derived from them."""
+
+from __future__ import annotations
+
+import dataclasses
+import re
+import typing
+from dataclasses import MISSING, dataclass, field
+from enum import Enum
+from typing import Any
+
+from ._errors import ParseError, RegistrationError
+from ._types import Classified, FlagType, classify
+
+_META = "treaty"
+
+
+@dataclass(frozen=True, slots=True)
+class FlagSpec:
+    description: str
+    positional: bool = False
+    short: str | None = None
+    pattern: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.description:
+            raise RegistrationError("every flag needs a description")
+        if self.short is not None and len(self.short) != 1:
+            raise RegistrationError(f"short flag must be one character, got {self.short!r}")
+        if self.pattern is not None:
+            re.compile(self.pattern)
+
+
+def Flag(
+    *,
+    description: str,
+    default: Any = MISSING,
+    short: str | None = None,
+    pattern: str | None = None,
+) -> Any:
+    """Declare a named ``--flag`` on an arguments dataclass"""
+    spec = FlagSpec(description, short=short, pattern=pattern)
+    if isinstance(default, (list, dict, set)):
+        raise RegistrationError("mutable defaults are not allowed; use a tuple")
+    if default is MISSING:
+        return field(metadata={_META: spec})
+    return field(default=default, metadata={_META: spec})
+
+
+def Arg(*, description: str, pattern: str | None = None) -> Any:
+    """Declare a positional argument on an arguments dataclass"""
+    return field(metadata={_META: FlagSpec(description, positional=True, pattern=pattern)})
+
+
+@dataclass(frozen=True, slots=True)
+class FieldInfo:
+    name: str
+    flag: str
+    classified: Classified
+    required: bool
+    default: object
+    spec: FlagSpec
+
+    @property
+    def flag_type(self) -> FlagType:
+        return self.classified.flag_type
+
+    @property
+    def positional(self) -> bool:
+        return self.spec.positional
+
+    def parse(self, raw: str) -> object:
+        """Coerce one raw token into the field's scalar or array item type"""
+        target = self.classified.item if self.flag_type is FlagType.ARRAY else self.classified
+        if target is None:
+            raise RegistrationError(f"{self.name}: array without item type")
+        if self.spec.pattern is not None and not re.fullmatch(self.spec.pattern, raw):
+            raise ParseError(
+                f"value for {self.flag!r} does not match pattern",
+                context={"flag": self.flag, "value": raw, "pattern": self.spec.pattern},
+            )
+        return _coerce(target, raw, self.flag)
+
+    def to_flag_entry(self) -> dict[str, object]:
+        entry: dict[str, object] = {
+            "type": self.flag_type.value,
+            "required": self.required,
+            "description": self.spec.description,
+        }
+        if self.default is not MISSING and self.default is not None:
+            entry["default"] = _jsonable_default(self.default)
+        if self.flag_type is FlagType.ENUM:
+            entry["enum_values"] = list(self.classified.enum_values)
+        if self.spec.short is not None:
+            entry["short"] = self.spec.short
+        if self.spec.pattern is not None:
+            entry["pattern"] = self.spec.pattern
+        return entry
+
+
+def _jsonable_default(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, tuple):
+        return [_jsonable_default(v) for v in value]
+    return value
+
+
+def _coerce(target: Classified, raw: str, flag: str) -> object:
+    match target.flag_type:
+        case FlagType.STRING:
+            return raw
+        case FlagType.INTEGER:
+            try:
+                return int(raw)
+            except ValueError:
+                raise ParseError(
+                    f"{flag!r} expects an integer", context={"flag": flag, "value": raw}
+                ) from None
+        case FlagType.NUMBER:
+            try:
+                return float(raw)
+            except ValueError:
+                raise ParseError(
+                    f"{flag!r} expects a number", context={"flag": flag, "value": raw}
+                ) from None
+        case FlagType.ENUM:
+            if raw not in target.enum_values:
+                raise ParseError(
+                    f"{flag!r} must be one of {', '.join(target.enum_values)}",
+                    context={"flag": flag, "value": raw, "allowed": list(target.enum_values)},
+                )
+            return target.enum_cls(raw) if target.enum_cls is not None else raw
+        case FlagType.BOOLEAN:
+            lowered = raw.lower()
+            if lowered in ("true", "1", "yes"):
+                return True
+            if lowered in ("false", "0", "no"):
+                return False
+            raise ParseError(
+                f"{flag!r} expects true or false", context={"flag": flag, "value": raw}
+            )
+        case FlagType.ARRAY:
+            raise RegistrationError("nested arrays are not supported")
+
+
+def inspect_fields(cls: type) -> tuple[FieldInfo, ...]:
+    """Read an arguments dataclass into ordered ``FieldInfo`` records"""
+    if not dataclasses.is_dataclass(cls):
+        raise RegistrationError(f"{cls.__qualname__} must be a dataclass")
+    hints = typing.get_type_hints(cls)
+    infos: list[FieldInfo] = []
+    seen_optional_positional = False
+    for f in dataclasses.fields(cls):
+        spec = f.metadata.get(_META)
+        if not isinstance(spec, FlagSpec):
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: declare fields with Flag(...) or Arg(...)"
+            )
+        classified = classify(hints[f.name])
+        default: object = f.default
+        if f.default_factory is not MISSING:
+            raise RegistrationError(f"{cls.__qualname__}.{f.name}: default_factory is not allowed")
+        if classified.flag_type is FlagType.BOOLEAN:
+            if spec.positional:
+                raise RegistrationError(
+                    f"{cls.__qualname__}.{f.name}: booleans cannot be positional"
+                )
+            if default is MISSING:
+                raise RegistrationError(
+                    f"{cls.__qualname__}.{f.name}: boolean flags need a default"
+                )
+        if spec.positional and (classified.optional or default is not MISSING):
+            seen_optional_positional = True
+        elif spec.positional and seen_optional_positional:
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: required positional after optional positional"
+            )
+        required = default is MISSING and not classified.optional
+        infos.append(
+            FieldInfo(
+                name=f.name,
+                flag=f.name.replace("_", "-"),
+                classified=classified,
+                required=required,
+                default=default,
+                spec=spec,
+            )
+        )
+    shorts = [i.spec.short for i in infos if i.spec.short is not None]
+    if len(shorts) != len(set(shorts)):
+        raise RegistrationError(f"{cls.__qualname__}: duplicate short flags {shorts}")
+    return tuple(infos)

@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "tool": "deployctl (treaty example)",
+  "command": ["./deployctl"],
+  "timeout_seconds": 5,
+  "manifest": ["manifest"],
+  "probes": [
+    { "name": "version", "argv": ["version"], "kind": "read" },
+    { "name": "manifest", "argv": ["manifest"], "kind": "read" },
+    { "name": "rollback preview", "argv": ["deploy", "rollback", "api", "--dry-run"], "kind": "read" },
+    { "name": "unknown flag", "argv": ["deploy", "rollback", "api", "--no-such-flag"], "kind": "invalid" },
+    { "name": "unknown command", "argv": ["deploy", "explode"], "kind": "invalid" },
+    { "name": "bad enum value", "argv": ["deploy", "rollback", "api", "--strategy", "yolo"], "kind": "invalid" },
+    { "name": "rollback api", "argv": ["deploy", "rollback", "api", "--to", "1.3.9"], "kind": "destructive", "dry_run_flag": "--dry-run" }
+  ]
+}
