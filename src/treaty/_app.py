@@ -328,6 +328,7 @@ class _Run:
                 message=exc.message,
                 retryable=False,
                 context=exc.context,
+                suggestion=exc.suggestion,
                 phase="validation",
                 fix_required="correct the arguments and reissue",
             ),

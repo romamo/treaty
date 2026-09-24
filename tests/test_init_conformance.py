@@ -9,8 +9,9 @@ import fixture_audit_app
 import pytest
 from conftest import SPEC_DIR
 
-from treaty._cli import cli
-from treaty._profile import probes_for
+from treaty._cli import cli, resolve_spec_dir
+from treaty._errors import CliExit
+from treaty._profile import SPEC_FALLBACK, has_kit, probes_for
 
 
 def run_cli(argv: list[str], *, isatty: bool = False) -> tuple[int, dict | str]:
@@ -122,4 +123,46 @@ def test_conformance_without_spec_dir_is_precondition(tmp_path: Path, monkeypatc
     monkeypatch.delenv("TREATY_SPEC_DIR", raising=False)
     code, env = run_cli(["conformance", "examples.deployctl:app", "--run", "--spec-dir", "/nope"])
     assert code == 4 and env["error"]["code"] == "PRECONDITION"
-    assert env["data"]["ran"] is False  # profile was still written
+    assert env["error"]["context"] == {"source": "--spec-dir", "spec_dir": "/nope"}
+    assert not (tmp_path / "conformance").exists()  # validated before the profile is written
+
+
+def test_named_spec_dir_never_falls_back_to_sibling() -> None:
+    if not has_kit(SPEC_FALLBACK):
+        pytest.skip("sibling spec checkout not found")
+    with pytest.raises(CliExit) as flag:
+        resolve_spec_dir("/nope", {})
+    assert flag.value.name.value == "PRECONDITION"
+    assert flag.value.context == {"source": "--spec-dir", "spec_dir": "/nope"}
+    with pytest.raises(CliExit) as env_var:
+        resolve_spec_dir(None, {"TREATY_SPEC_DIR": "/nope"})
+    assert env_var.value.context == {"source": "TREATY_SPEC_DIR", "spec_dir": "/nope"}
+    assert resolve_spec_dir(None, {}) == SPEC_FALLBACK.resolve()
+
+
+@pytest.mark.parametrize(
+    ("argv", "flag"),
+    [
+        (["init", "demo", "--directory", "../escape"], "--directory"),
+        (["conformance", "examples.deployctl:app", "--out", "../../etc/p.json"], "--out"),
+    ],
+)
+def test_write_paths_reject_parent_segments(argv: list[str], flag: str, tmp_path: Path) -> None:
+    code, env = run_cli([*argv[:-1], str(tmp_path / "sub" / argv[-1])])
+    assert code == 2 and env["error"]["code"] == "ARG_ERROR"
+    assert env["error"]["phase"] == "validation" and env["error"]["context"]["flag"] == flag
+    assert env["error"]["suggestion"].startswith(f"pass the absolute path if intended: {flag} /")
+    assert not any(tmp_path.rglob("*"))
+
+
+def test_write_paths_reject_percent_encoding_and_null_bytes(tmp_path: Path) -> None:
+    code, env = run_cli(["init", "demo", "--directory", f"{tmp_path}/acme%2Fwidgets"])
+    assert code == 2 and env["error"]["suggestion"].endswith(f"{tmp_path}/acme/widgets")
+    code, env = run_cli(["init", "demo", "--directory", f"{tmp_path}/a\x00b"])
+    assert code == 2 and "null byte" in env["error"]["message"]
+    assert not any(tmp_path.rglob("*"))
+
+
+def test_write_paths_accept_absolute_paths(tmp_path: Path) -> None:
+    code, env = run_cli(["init", "demo", "--directory", str(tmp_path / "demo"), "--dry-run"])
+    assert code == 0 and env["data"]["directory"] == str(tmp_path / "demo")

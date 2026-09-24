@@ -27,10 +27,17 @@ class SchemaError(TreatyError):
 class ParseError(Exception):
     """Argument parsing failed before the handler ran; maps to ``ARG_ERROR``"""
 
-    def __init__(self, message: str, *, context: Mapping[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        context: Mapping[str, object] | None = None,
+        suggestion: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.context: dict[str, object] = dict(context or {})
+        self.suggestion = suggestion
 
 
 class CliExit(Exception):

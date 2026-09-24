@@ -85,12 +85,11 @@ def write_profile(profile: dict[str, object], path: Path) -> None:
     path.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
 
 
-def find_spec_dir(explicit: str | None, env: os._Environ[str] | dict[str, str]) -> Path | None:
-    candidates = [explicit, env.get("TREATY_SPEC_DIR"), "../cli-agent-ergonomics"]
-    for candidate in candidates:
-        if candidate and (Path(candidate) / "conformance" / "run.py").is_file():
-            return Path(candidate).resolve()
-    return None
+SPEC_FALLBACK = Path("../cli-agent-ergonomics")
+
+
+def has_kit(spec_dir: Path) -> bool:
+    return (spec_dir / "conformance" / "run.py").is_file()
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import stat
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from ._app import App, NoArgs
 from ._audit import RULES, AuditReport, Severity, audit
 from ._context import Ctx
-from ._errors import Exit
+from ._errors import Exit, ParseError
 from ._flags import Arg, Flag
-from ._profile import build_profile, find_spec_dir, probes_for, run_kit, write_profile
+from ._profile import (
+    SPEC_FALLBACK,
+    build_profile,
+    has_kit,
+    probes_for,
+    run_kit,
+    write_profile,
+)
 from ._scaffold import ProjectName, render
 
 
@@ -44,6 +54,34 @@ cli.exit_code(
 )
 
 BLOCKING = frozenset({Severity.ERROR, Severity.WARNING})
+
+_PERCENT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
+
+
+@dataclass(frozen=True, slots=True)
+class WritePath:
+    """A path this CLI writes to: no ``..`` segments, percent-encodings, or null bytes"""
+
+    value: Path
+
+    @classmethod
+    def parse(cls, raw: str, flag: str) -> WritePath:
+        context = {"flag": flag, "value": raw}
+        if "\x00" in raw:
+            raise ParseError(f"{flag} contains a null byte", context=context)
+        if _PERCENT_RE.search(raw):
+            raise ParseError(
+                f"{flag} contains a percent-encoded sequence",
+                context=context,
+                suggestion=f"pass the decoded path: {flag} {unquote(raw)}",
+            )
+        if ".." in Path(raw).parts:
+            raise ParseError(
+                f"{flag} escapes its base directory with '..'",
+                context=context,
+                suggestion=f"pass the absolute path if intended: {flag} {Path(raw).resolve()}",
+            )
+        return cls(Path(raw))
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +258,9 @@ def render_init(data: Any) -> str:
 )
 def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     name = ProjectName(args.name)
-    target = Path(args.directory) if args.directory else Path(args.name)
+    target = (
+        WritePath.parse(args.directory, "--directory").value if args.directory else Path(name.value)
+    )
     if target.exists() and any(target.iterdir()):
         raise Exit.CONFLICT(
             f"{target} exists and is not empty",
@@ -298,6 +338,29 @@ def render_conformance(data: Any) -> str:
     return "\n".join(lines) + "\n"
 
 
+def resolve_spec_dir(explicit: str | None, env: Mapping[str, str]) -> Path:
+    """A named location must hold the kit; only unnamed discovery falls back to the sibling"""
+    if explicit:
+        named, source = Path(explicit), "--spec-dir"
+    elif env.get("TREATY_SPEC_DIR"):
+        named, source = Path(env["TREATY_SPEC_DIR"]), "TREATY_SPEC_DIR"
+    else:
+        if has_kit(SPEC_FALLBACK):
+            return SPEC_FALLBACK.resolve()
+        raise Exit.PRECONDITION(
+            "cannot find the spec's conformance/run.py",
+            context={"tried": [str(SPEC_FALLBACK)]},
+            fix_required="pass --spec-dir or set TREATY_SPEC_DIR to the spec checkout",
+        )
+    if not has_kit(named):
+        raise Exit.PRECONDITION(
+            f"{source} has no conformance/run.py",
+            context={"source": source, "spec_dir": str(named)},
+            fix_required=f"point {source} at a spec checkout containing conformance/run.py",
+        )
+    return named.resolve()
+
+
 @cli.command(
     "conformance",
     description="Write a conformance profile from the registry and optionally run the spec kit",
@@ -310,21 +373,15 @@ def render_conformance(data: Any) -> str:
 )
 def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     app = load_app(args.target)
+    out = WritePath.parse(args.out, "--out").value if args.out else None
+    spec_dir = resolve_spec_dir(args.spec_dir, os.environ) if args.run else None
     probes = probes_for(app)
     command = list(args.command) or [app.name]
-    profile_path = Path(args.out) if args.out else Path("conformance") / f"{app.name}.json"
+    profile_path = out or Path("conformance") / f"{app.name}.json"
     write_profile(build_profile(app, command, probes), profile_path)
     result = ConformanceOut(str(profile_path), len(probes), False, None, ())
-    if not args.run:
-        return result
-    spec_dir = find_spec_dir(args.spec_dir, os.environ)
     if spec_dir is None:
-        raise Exit.PRECONDITION(
-            "cannot find the spec's conformance/run.py",
-            context={"tried": [args.spec_dir, "TREATY_SPEC_DIR", "../cli-agent-ergonomics"]},
-            fix_required="pass --spec-dir or set TREATY_SPEC_DIR to the spec checkout",
-            data=result,
-        )
+        return result
     kit = run_kit(spec_dir, profile_path, ctx.timeout.seconds)
     if kit.envelope is None or kit.exit_code == 2:
         kit_error = kit.envelope.get("error") if kit.envelope else None

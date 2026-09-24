@@ -115,7 +115,11 @@ uv run treaty conformance shop_tool.cli:app --run
 `init` scaffolds a package with one command per danger level, typed outputs, declared exit
 codes, a test using `app.run()`, and a conformance profile. `conformance` derives probes
 from each command's first example and danger level, writes the profile, and with `--run`
-executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail.
+executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. The kit is found
+via `--spec-dir`, then `TREATY_SPEC_DIR`, then a sibling `cli-agent-ergonomics` checkout; a
+named location without `conformance/run.py` exits `4` instead of falling through. `--out` and
+`--directory` reject `..` segments, percent-encodings, and null bytes; pass an absolute path
+to write outside the working directory.
 
 ## Audit your CLI
 
