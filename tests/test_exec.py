@@ -1,5 +1,8 @@
 import io
 import json
+import subprocess
+import sys
+import threading
 
 from conftest import spec_validator
 
@@ -144,3 +147,30 @@ def test_exec_refuses_tty_stdin(app: App) -> None:
     spec_validator("response-envelope").validate(envelope)
     assert code == 2 and envelope["error"]["code"] == "STDIN_IS_TTY"
     assert envelope["error"]["phase"] == "validation"
+
+
+def test_exec_drains_stdin_before_writing() -> None:
+    """A caller that writes the whole plan before reading must not deadlock on the stdout pipe"""
+    plan = b'{"_cmd": "version"}\n' * 12000  # 240KB in, ~2MB out: both past the 64KB pipe buffer
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "from treaty._cli import main; main()", "exec"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    assert proc.stdin is not None and proc.stdout is not None
+
+    def write_all() -> None:
+        assert proc.stdin is not None
+        proc.stdin.write(plan)
+        proc.stdin.close()
+
+    writer = threading.Thread(target=write_all, daemon=True)
+    writer.start()
+    writer.join(timeout=10)
+    try:
+        assert not writer.is_alive(), "exec stopped reading stdin while its stdout was full"
+    finally:
+        out = proc.stdout.read()
+        proc.wait(timeout=10)
+    assert proc.returncode == 0 and out.count(b"\n") == 12000

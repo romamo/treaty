@@ -546,10 +546,13 @@ class _Run:
                 OutputMode.JSON,
                 self._stream_error("STDIN_IS_TTY", "exec reads JSONL from stdin, not a terminal"),
             )
+        # Drain the whole plan before dispatching: a caller that writes everything before
+        # reading would otherwise deadlock once our output fills the stdout pipe
+        plan = stdin.read().splitlines()
         any_failed = False
         parsed_any = False
         lines_seen = 0
-        for line_no, envelope in self._exec_lines(args, stdin):
+        for line_no, envelope in self._exec_lines(args, plan):
             lines_seen = line_no
             write_envelope(envelope, self.out)
             if envelope.error is not None and envelope.error.code != "DISPATCH_PARSE_ERROR":
@@ -583,9 +586,9 @@ class _Run:
             ),
         )
 
-    def _exec_lines(self, args: ExecArgs, stdin: IO[str]) -> Iterator[tuple[int, Envelope]]:
+    def _exec_lines(self, args: ExecArgs, plan: list[str]) -> Iterator[tuple[int, Envelope]]:
         line_no = 0
-        for raw in stdin:
+        for raw in plan:
             line = raw.strip()
             if not line:
                 continue

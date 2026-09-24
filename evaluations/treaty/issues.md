@@ -21,8 +21,9 @@ Discovered during §34 evaluation on 2026-09-24.
 `treaty audit treaty._cli:cli --limit s3cr3t-value` returns `error.context.value: "s3cr3t-value"`. There is no `Flag(sensitive=True)` or env/file secret source, so a treaty-built CLI with a `--token` flag would echo the token on any parse error.
 Discovered during §42 evaluation on 2026-09-24.
 
-### §61: `exec` deadlocks callers that write the whole plan before reading
+### §61: `exec` deadlocks callers that write the whole plan before reading (fixed 2026-09-24)
 `exec` writes each envelope as it reads each line. With a 228KB plan, a caller that writes everything before reading blocks once the 64KB stdout pipe fills. There is no stdin size limit, STDIN_TOO_LARGE error or `--input-file` alternative.
+Fixed: `exec` now reads stdin to EOF before dispatching, so a write-everything-then-read caller always finishes writing; results still stream per line. Still no stdin size limit or `--input-file`.
 Discovered during §61 evaluation on 2026-09-24.
 
 ### §71: no documented install; stale wheel in `dist/`
