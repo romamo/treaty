@@ -50,7 +50,8 @@ Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_
 flag is never shadowed.
 `exec` reads one `DispatchRequest` per stdin line and dispatches in-process, writing one
 envelope per line with `_cmd` and `_line` in `meta`. A stream with no lines exits `2` with a
-single `EMPTY_STREAM` envelope:
+single `EMPTY_STREAM` envelope, and a terminal on stdin exits `2` with `STDIN_IS_TTY` instead of
+waiting for input:
 
 ```bash
 printf '%s\n' '{"_cmd":"deploy.rollback","service":"api","_opts":{"to":"1.3.9"}}' \

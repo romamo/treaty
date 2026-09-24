@@ -500,7 +500,14 @@ class _Run:
 
     def help_root(self, mode: OutputMode, prefix: tuple[str, ...]) -> int:
         if mode is OutputMode.JSON:
-            return self.emit(mode, self._envelope(0, data=self.app.manifest()))
+            if not prefix:
+                return self.emit(mode, self._envelope(0, data=self.app.manifest()))
+            # Group help is the group's subtree, not the whole tree (same scoping as --schema)
+            subtree = {
+                p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
+            }
+            data = build_manifest(subtree, self.app.exits, self.app.version)
+            return self.emit(mode, self._envelope(0, data=data))
         self.out.write(
             render_root(
                 self.app.name, self.app.description, self.app.commands, self.app._groups, prefix
@@ -521,6 +528,12 @@ class _Run:
 
     def exec(self, args: ExecArgs, stdin: IO[str]) -> int:
         """Dispatch each stdin line in-process; JSONL envelopes out; 0, 1, or 2"""
+        if stdin.isatty():
+            # Reading a terminal would block until the user types EOF
+            return self.emit(
+                OutputMode.JSON,
+                self._stream_error("STDIN_IS_TTY", "exec reads JSONL from stdin, not a terminal"),
+            )
         any_failed = False
         parsed_any = False
         lines_seen = 0
@@ -536,18 +549,21 @@ class _Run:
                 if not args.ignore_errors:
                     break
         if not lines_seen:
-            return self.emit(OutputMode.JSON, self._empty_stream())
+            return self.emit(
+                OutputMode.JSON,
+                self._stream_error("EMPTY_STREAM", "no DispatchRequest lines on stdin"),
+            )
         if not parsed_any:
             return FrameworkCode.ARG_ERROR.value
         return FrameworkCode.GENERAL_ERROR.value if any_failed else 0
 
-    def _empty_stream(self) -> Envelope:
+    def _stream_error(self, code: str, message: str) -> Envelope:
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
-                code="EMPTY_STREAM",
-                message="no DispatchRequest lines on stdin",
+                code=code,
+                message=message,
                 retryable=False,
                 context={"lines": 0},
                 phase="validation",

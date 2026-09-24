@@ -123,3 +123,24 @@ def test_exec_empty_stdin_emits_error_envelope(app: App) -> None:
 def test_exec_blank_lines_only_is_empty_stream(app: App) -> None:
     code, out = run_exec(app, ["", "   "])
     assert code == 2 and out[0]["error"]["code"] == "EMPTY_STREAM"
+
+
+class _Terminal(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def test_exec_refuses_tty_stdin(app: App) -> None:
+    out = io.StringIO()
+    code = app.run(
+        ["exec"],
+        stdin=_Terminal('{"_cmd": "version"}\n'),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    envelope = json.loads(out.getvalue())
+    spec_validator("response-envelope").validate(envelope)
+    assert code == 2 and envelope["error"]["code"] == "STDIN_IS_TTY"
+    assert envelope["error"]["phase"] == "validation"
