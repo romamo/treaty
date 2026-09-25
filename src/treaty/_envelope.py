@@ -98,7 +98,11 @@ class Envelope:
         }
 
 
+def serialize(envelope: Envelope) -> str:
+    return json.dumps(envelope.to_json(), separators=(",", ":"), sort_keys=True)
+
+
 def write_envelope(envelope: Envelope, stream: IO[str]) -> None:
-    stream.write(json.dumps(envelope.to_json(), separators=(",", ":"), sort_keys=True))
+    stream.write(serialize(envelope))
     stream.write("\n")
     stream.flush()

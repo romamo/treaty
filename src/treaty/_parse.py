@@ -36,10 +36,12 @@ class GlobalOptions:
     format: str | None
     help: bool
     schema: bool
+    max_output: str | None = None
 
 
 def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
     fmt: str | None = None
+    max_output: str | None = None
     help_ = False
     schema = False
     rest: list[str] = []
@@ -60,10 +62,17 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             i += 1
         elif tok.startswith("--format="):
             fmt = tok.partition("=")[2]
+        elif tok == "--max-output":
+            if i + 1 >= len(argv):
+                raise ParseError("--max-output needs a value", context={"flag": "max-output"})
+            max_output = argv[i + 1]
+            i += 1
+        elif tok.startswith("--max-output="):
+            max_output = tok.partition("=")[2]
         else:
             rest.append(tok)
         i += 1
-    return GlobalOptions(format=fmt, help=help_, schema=schema), rest
+    return GlobalOptions(format=fmt, help=help_, schema=schema, max_output=max_output), rest
 
 
 @dataclass(frozen=True, slots=True)

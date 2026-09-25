@@ -46,6 +46,7 @@ def render_root(
     lines.append("Global flags")
     lines.append(f"  {'--format':<{width}}  Output mode: human or json (default: json when piped)")
     lines.append(f"  {'--help':<{width}}  Show help for a command")
+    lines.append(f"  {'--max-output':<{width}}  Byte cap on JSON output (default: 1 MiB)")
     lines.append(f"  {'--schema':<{width}}  Print parameters and output schema as JSON")
     if not prefix:
         lines.append(f"  {'--version':<{width}}  Print the tool name and version")

@@ -66,6 +66,18 @@ Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every response. Handlers
 read `ctx.timeout` to pass the same deadline to their network calls.
 
+## Output size
+
+JSON output is capped at 1 MiB per envelope: `App(max_output_bytes=...)` app-wide,
+`TREATY_MAX_OUTPUT_BYTES` in the environment, or the global `--max-output` flag, in
+increasing precedence. Past the cap the framework follows whichever child holds most of the
+bytes and cuts the list, object, or string where no child dominates to the longest prefix
+that fits. `meta` gets `truncated`, `total_bytes`, and a `truncation_hint` giving the cap
+that returns everything (plus `total_count` and `returned_count` when `data` is a list), and
+each cut adds a `FIELD_TRUNCATED` warning naming the field. Human mode is not capped.
+`--format`, `--help`, `--schema`, and `--max-output` are global, so a command cannot
+declare a flag with those names.
+
 ## Destructive commands
 
 A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without

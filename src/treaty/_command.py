@@ -69,6 +69,10 @@ class Command:
         return None
 
 
+# Consumed by split_globals before any command sees its tokens
+GLOBAL_FLAGS = frozenset({"format", "help", "max-output", "schema"})
+
+
 def build_command(
     fn: Handler,
     *,
@@ -88,6 +92,11 @@ def build_command(
         raise RegistrationError(f"{path}: description is required")
     args_type, output_type = _inspect_handler(fn, path)
     fields = inspect_fields(args_type)
+    shadowed = sorted(f.flag for f in fields if not f.positional and f.flag in GLOBAL_FLAGS)
+    if shadowed:
+        raise RegistrationError(
+            f"{path}: flags {shadowed} are global options and would never reach the handler"
+        )
     if danger_level is DangerLevel.DESTRUCTIVE:
         dry_run = next((f for f in fields if f.name == "dry_run"), None)
         if dry_run is None or dry_run.flag_type is not FlagType.BOOLEAN:

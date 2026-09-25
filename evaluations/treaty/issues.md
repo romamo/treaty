@@ -34,3 +34,8 @@ Discovered during §71 evaluation on 2026-09-24.
 `treaty conformance treaty._cli:cli --run --spec-dir /nonexistent` exits 0 and runs the kit from the `../cli-agent-ergonomics` fallback. `find_spec_dir` treats the explicit flag as one candidate among several, so a typo in an explicit path is never reported.
 Fixed: a `--spec-dir` or `TREATY_SPEC_DIR` without `conformance/run.py` now exits 4 PRECONDITION naming the source, checked before the profile is written; only unnamed discovery falls back to the sibling checkout.
 Discovered during §1 evaluation on 2026-09-24.
+
+### §43: no output size cap (fixed 2026-09-24)
+`treaty manifest` returned 7.8KB and `exec` 2.4MB with no `meta.truncated`, `meta.total_bytes` or `--max-output`.
+Fixed: JSON envelopes are capped at 1 MiB (`--max-output`, `TREATY_MAX_OUTPUT_BYTES`, `App(max_output_bytes=)`); the dominant list, object, or string is cut to the longest fitting prefix with `meta.truncated`, `total_bytes`, `truncation_hint`, and a `FIELD_TRUNCATED` warning per cut. Still no per-command `max_output_bytes` in the schema.
+Discovered during §43 evaluation on 2026-09-24.

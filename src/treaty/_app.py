@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import IO, Any, NoReturn
 
+from ._cap import DEFAULT_CAP, OutputCap, cap_envelope
 from ._command import (
     Cleanup,
     Command,
@@ -91,6 +92,7 @@ class App:
         description: str = "",
         state: Mapping[str, object] | None = None,
         default_timeout: float | None = DEFAULT_TIMEOUT.seconds,
+        max_output_bytes: int = DEFAULT_CAP.bytes,
         enable_exec: bool = True,
     ) -> None:
         if not name or not version:
@@ -99,6 +101,7 @@ class App:
         self.version = version
         self.description = description
         self.default_timeout = Timeout(default_timeout)
+        self.max_output = OutputCap(max_output_bytes)
         self.exits = ExitCodeRegistry()
         self._state: Mapping[str, object] = dict(state or {})
         self._commands: dict[CommandPath, Command] = {}
@@ -254,6 +257,7 @@ class App:
             mode = resolve_mode(
                 globals_.format, environ, out.isatty() if isatty is None else isatty
             )
+            run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output)
         except ParseError as exc:
             return run.emit(OutputMode.JSON, run.arg_error(exc))
         route = resolve_path(rest, self._commands)
@@ -308,6 +312,7 @@ class _Run:
         self.env = env
         self.started = time.perf_counter()
         self.request_id = uuid.uuid4().hex[:12]
+        self.cap = app.max_output
 
     # Envelope construction
 
@@ -485,7 +490,7 @@ class _Run:
         self, mode: OutputMode, envelope: Envelope, *, render: HumanRenderer | None = None
     ) -> int:
         if mode is OutputMode.JSON:
-            write_envelope(envelope, self.out)
+            write_envelope(cap_envelope(envelope, self.cap), self.out)
             return envelope.exit_code
         if envelope.data is not None and render is not None:
             self.out.write(render(envelope.data))
@@ -554,7 +559,7 @@ class _Run:
         lines_seen = 0
         for line_no, envelope in self._exec_lines(args, plan):
             lines_seen = line_no
-            write_envelope(envelope, self.out)
+            write_envelope(cap_envelope(envelope, self.cap), self.out)
             if envelope.error is not None and envelope.error.code != "DISPATCH_PARSE_ERROR":
                 parsed_any = True
             elif envelope.error is None:
