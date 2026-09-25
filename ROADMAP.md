@@ -19,6 +19,8 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - Human mode renders `data` on failed runs too, so `--strict` and a failing
   `conformance --run` print their report instead of raw JSON
 - Handler-raised `ParseError` becomes a validation-phase exit 2 envelope
+- Secret flags (REQ-F-034, REQ-F-051): `secret=` on `Flag` and `Arg`, inferred from the
+  name by default; their values and any unknown `--name=value` are never echoed in errors
 - Response size cap (REQ-F-052): 1 MiB default, `--max-output` and
   `TREATY_MAX_OUTPUT_BYTES`, `meta.truncated` with a hint, and a `FIELD_TRUNCATED` warning
   per cut field (REQ-F-064)
@@ -48,6 +50,9 @@ matching audit rule so adoption never requires reading the spec.
 - Pagination metadata on list commands: `--limit`, `--cursor`, `meta.pagination`
   (REQ-F-018)
 - Stdin payload cap with `--input-file` fallback (REQ-F-054, REQ-O-039)
+- Secrets only via env var or file (REQ-C-016, REQ-O-022): `--<name>-from-env` and
+  `--<name>-from-file` for secret fields, a registration error for direct secret flags, and
+  `secret_env_vars` in the manifest
 - Pager suppression and locale-invariant serialization audit (REQ-F-010, REQ-F-005);
   both likely already hold and need tests, not code
 - `REDIRECTED` exit `13` with `error.redirect` for renamed commands and `aliases` in the

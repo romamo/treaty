@@ -17,8 +17,9 @@ Discovered during onboarding on 2026-09-24.
 Fixed for treaty's own CLI: `--out` and `--directory` reject `..` segments, percent-encodings and null bytes with a validation-phase ARG_ERROR whose `suggestion` gives the absolute or decoded form. Framework-level path hardening for other CLIs is still open.
 Discovered during §34 evaluation on 2026-09-24.
 
-### §42/§24: framework echoes raw flag values in errors; no sensitive-flag declaration
+### §42/§24: framework echoes raw flag values in errors; no sensitive-flag declaration (echo fixed 2026-09-25)
 `treaty audit treaty._cli:cli --limit s3cr3t-value` returns `error.context.value: "s3cr3t-value"`. There is no `Flag(sensitive=True)` or env/file secret source, so a treaty-built CLI with a `--token` flag would echo the token on any parse error.
+Fixed: `Flag(secret=True)`/`Arg(secret=True)`, inferred from names containing token/secret/password/key/credential/auth, redacts the value as `[REDACTED]` in every validation error (argv, `--raw-payload`, `exec`); unknown `--name=value` tokens are reported without the value. Still open for §24: secrets can still be passed as direct flags (no `--x-from-env`/`--x-from-file`, no registration error), and `secret` is not in the manifest because the spec's FlagEntry schema has no such field.
 Discovered during §42 evaluation on 2026-09-24.
 
 ### §61: `exec` deadlocks callers that write the whole plan before reading (fixed 2026-09-24)

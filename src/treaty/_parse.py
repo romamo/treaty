@@ -39,6 +39,11 @@ class GlobalOptions:
     max_output: str | None = None
 
 
+def without_value(token: str) -> str:
+    """``--name=value`` as ``--name``: an unrecognized token may carry a secret after ``=``"""
+    return token.partition("=")[0] if token.startswith("--") else token
+
+
 def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
     fmt: str | None = None
     max_output: str | None = None
@@ -193,7 +198,7 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
             found = command.field_by_short(name) if len(name) == 1 else None
         if found is None:
             raise ParseError(
-                f"unknown flag {tok!r}",
+                f"unknown flag {without_value(tok)!r}",
                 context={
                     "flag": name,
                     "command": command.path.value,
@@ -309,6 +314,13 @@ def build_from_mapping(command: Command, mapping: Mapping[str, object]) -> Invoc
 
 
 def _check_json_value(field: FieldInfo, value: object) -> object:
+    try:
+        return _check_field_value(field, value)
+    except ParseError as exc:
+        raise field.scrub(exc) from None
+
+
+def _check_field_value(field: FieldInfo, value: object) -> object:
     ctx = {"field": field.flag, "value": value}
     if field.flag_type is FlagType.ARRAY:
         item = field.classified.item

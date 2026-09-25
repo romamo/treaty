@@ -78,6 +78,14 @@ each cut adds a `FIELD_TRUNCATED` warning naming the field. Human mode is not ca
 `--format`, `--help`, `--schema`, and `--max-output` are global, so a command cannot
 declare a flag with those names.
 
+## Secrets
+
+A field declared `Flag(secret=True)` or `Arg(secret=True)`, or whose name contains `token`,
+`secret`, `password`, `key`, `credential`, or `auth`, never has its value echoed: validation
+errors show `"value": "[REDACTED]"` in JSON and human mode alike. Pass `secret=False` to opt a
+name like `author` back out. An unrecognized `--name=value` token is reported as `--name`,
+since the framework cannot know whether the value was a secret.
+
 ## Destructive commands
 
 A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without

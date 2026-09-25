@@ -38,6 +38,7 @@ from ._parse import (
     parse_command_args,
     resolve_path,
     split_globals,
+    without_value,
 )
 from ._schema import to_jsonable
 from ._signals import Cancelled, CancelSignal, cancellation_handlers
@@ -273,9 +274,9 @@ class App:
                 mode,
                 run.arg_error(
                     ParseError(
-                        f"unknown command {route.tokens[0]!r}",
+                        f"unknown command {without_value(route.tokens[0])!r}",
                         context={
-                            "argument": route.tokens[0],
+                            "argument": without_value(route.tokens[0]),
                             "prefix": ".".join(route.prefix),
                             "available": self._invocations(route.prefix),
                         },

@@ -13,6 +13,9 @@ from ._errors import ParseError, RegistrationError
 from ._types import Classified, FlagType, classify
 
 _META = "treaty"
+REDACTED = "[REDACTED]"
+# REQ-F-034: names containing these are treated as secrets unless declared otherwise
+_SECRET_NAME_PARTS = ("token", "secret", "password", "key", "credential", "auth")
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +24,7 @@ class FlagSpec:
     positional: bool = False
     short: str | None = None
     pattern: str | None = None
+    secret: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.description:
@@ -37,9 +41,13 @@ def Flag(
     default: Any = MISSING,
     short: str | None = None,
     pattern: str | None = None,
+    secret: bool | None = None,
 ) -> Any:
-    """Declare a named ``--flag`` on an arguments dataclass"""
-    spec = FlagSpec(description, short=short, pattern=pattern)
+    """Declare a named ``--flag`` on an arguments dataclass
+
+    ``secret`` keeps the value out of every error; ``None`` infers it from the name.
+    """
+    spec = FlagSpec(description, short=short, pattern=pattern, secret=secret)
     if isinstance(default, (list, dict, set)):
         raise RegistrationError("mutable defaults are not allowed; use a tuple")
     if default is MISSING:
@@ -47,9 +55,10 @@ def Flag(
     return field(default=default, metadata={_META: spec})
 
 
-def Arg(*, description: str, pattern: str | None = None) -> Any:
+def Arg(*, description: str, pattern: str | None = None, secret: bool | None = None) -> Any:
     """Declare a positional argument on an arguments dataclass"""
-    return field(metadata={_META: FlagSpec(description, positional=True, pattern=pattern)})
+    spec = FlagSpec(description, positional=True, pattern=pattern, secret=secret)
+    return field(metadata={_META: spec})
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,17 +78,33 @@ class FieldInfo:
     def positional(self) -> bool:
         return self.spec.positional
 
+    @property
+    def secret(self) -> bool:
+        if self.spec.secret is not None:
+            return self.spec.secret
+        lowered = self.name.lower()
+        return any(part in lowered for part in _SECRET_NAME_PARTS)
+
+    def scrub(self, exc: ParseError) -> ParseError:
+        """Replace an echoed value with ``[REDACTED]`` when this field holds a secret"""
+        if self.secret and "value" in exc.context:
+            exc.context["value"] = REDACTED
+        return exc
+
     def parse(self, raw: str) -> object:
         """Coerce one raw token into the field's scalar or array item type"""
         target = self.classified.item if self.flag_type is FlagType.ARRAY else self.classified
         if target is None:
             raise RegistrationError(f"{self.name}: array without item type")
-        if self.spec.pattern is not None and not re.fullmatch(self.spec.pattern, raw):
-            raise ParseError(
-                f"value for {self.flag!r} does not match pattern",
-                context={"flag": self.flag, "value": raw, "pattern": self.spec.pattern},
-            )
-        return _coerce(target, raw, self.flag)
+        try:
+            if self.spec.pattern is not None and not re.fullmatch(self.spec.pattern, raw):
+                raise ParseError(
+                    f"value for {self.flag!r} does not match pattern",
+                    context={"flag": self.flag, "value": raw, "pattern": self.spec.pattern},
+                )
+            return _coerce(target, raw, self.flag)
+        except ParseError as exc:
+            raise self.scrub(exc) from None
 
     def to_flag_entry(self) -> dict[str, object]:
         entry: dict[str, object] = {
