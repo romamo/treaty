@@ -72,6 +72,14 @@ The two do not share code.
   `Resolver` acquires each class once per run inside `_invoke`, which runs under the
   timeout so a `CliExit` or `ParseError` from `acquire` takes the normal envelope path. A
   wrong return type from `acquire` is a `TypeError` and propagates as a bug
+- **Streams are envelope lines, not bare items.** REQ-O-004 shows bare items plus a
+  summary line; treaty writes one full envelope per yield with `meta.seq`, then a
+  terminal envelope (`end`, `total`), because `exec` already speaks envelope lines and a
+  mid-stream failure needs an `error`. `_Run.stream` is a generator; `drain()` throws a
+  signal that lands between events back into it so the CANCELLED envelope is produced in
+  one place; a timeout is a whole-stream deadline enforced per `next()` on a worker
+  thread. The handler generator is closed when no worker holds it. Streaming commands
+  must be `safe`; `--no-stream` folds the stream into one envelope via `buffer_stream`
 - **Uncaught handler exceptions propagate.** Only `CliExit`, `ParseError` (a handler
   validating its own input, exit 2), timeout, and cancellation become envelopes; anything
   else is a bug and surfaces as a traceback

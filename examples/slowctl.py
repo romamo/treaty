@@ -6,6 +6,7 @@ uv run examples/slowctl.py fetch --seconds 5 --timeout 0 &  kill -TERM $!
 
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from treaty import App, Ctx, Flag
@@ -37,6 +38,24 @@ def fetch(args: Fetch, ctx: Ctx) -> dict[str, object]:
     _cleanup_seconds[0] = args.cleanup_seconds
     time.sleep(args.seconds)
     return {"slept": args.seconds, "timeout_s": ctx.timeout.seconds}
+
+
+@dataclass(frozen=True, slots=True)
+class Serve:
+    interval: float = Flag(default=0.2, description="Seconds between heartbeats")
+
+
+@app.command("serve", description="Announce a URL, then heartbeat until stopped", streaming=True)
+def serve(args: Serve, ctx: Ctx) -> Iterator[dict[str, object]]:
+    yield {"event": "listening", "url": "http://127.0.0.1:0/"}
+    try:
+        n = 0
+        while True:
+            time.sleep(args.interval)
+            n += 1
+            yield {"event": "heartbeat", "n": n}
+    finally:
+        sys.stderr.write("serve: server closed\n")
 
 
 if __name__ == "__main__":

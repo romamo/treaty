@@ -207,6 +207,37 @@ typically a `kw_only=True` base class shared by every command. Resources must no
 process state such as the working directory, because `exec` runs many requests in one
 process.
 
+## Streaming
+
+A command declared `streaming=True` has a generator handler annotated `Iterator[T]`, and
+every yield is one JSONL envelope line with `meta.seq` counting from 1. The stream ends
+with a terminal envelope that has `data: null`, `meta.end: true`, and `meta.total`, so an
+agent can tell a clean end from a killed process:
+
+```python
+@app.command("dashboard.serve", description="Serve the dashboard", streaming=True,
+             cleanup=stop_server)
+def serve(args: ServeArgs, ctx: Ctx) -> Iterator[ServeEvent]:
+    server = start(args.port)
+    yield Listening(url=server.url)
+    try:
+        while True:
+            yield server.next_event()
+    finally:
+        server.close()
+```
+
+A `CliExit`, `ParseError`, timeout, or signal after some events writes the matching failure
+envelope as the last line, with `meta.seq` at the last delivered event and `meta.partial`.
+Streaming commands default to no timeout; an explicit `timeout=` or `--timeout` is a
+deadline for the whole stream. Cancellation runs `cleanup=` and the handler's `finally`
+blocks, then ends the stream with the normal `CANCELLED` envelope and exit `130` or `143`.
+The manifest declares `streaming_default: true` and a `--no-stream` flag (REQ-O-004),
+which returns one envelope with every event in `data` and `meta.total`; a failure under
+`--no-stream` keeps the events seen so far in `data`. In `exec`, each event line carries
+`_line` and `_cmd`. Streaming commands must be `safe`: the effect and idempotency
+contracts describe one response. In human mode `human=` renders each event.
+
 ## Destructive commands
 
 A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without

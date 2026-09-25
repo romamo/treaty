@@ -85,6 +85,8 @@ def render_command(name: str, command: Command) -> str:
             lines.append(f"  {label:<{width}}  {text}")
         lines.append("")
     lines.append(f"Danger level: {command.danger_level.value}")
+    if command.streaming:
+        lines.append("Streams one JSONL envelope per event; --no-stream returns a single envelope")
     if command.examples:
         lines.append("")
         lines.append("Examples")

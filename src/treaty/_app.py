@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn
@@ -200,9 +200,14 @@ class App:
         supports_raw_payload: bool = False,
         cleanup: Cleanup | None = None,
         human: HumanRenderer | None = None,
+        streaming: bool = False,
     ) -> Callable[[Handler], Handler]:
         cmd_path = CommandPath(path)
-        command_timeout = None if isinstance(timeout, _Inherit) else Timeout(timeout)
+        if isinstance(timeout, _Inherit):
+            # A stream serves until told to stop; the app default is for one-shot handlers
+            command_timeout = Timeout(None) if streaming else None
+        else:
+            command_timeout = Timeout(timeout)
 
         def register(fn: Handler) -> Handler:
             self._register(
@@ -221,6 +226,7 @@ class App:
                     cleanup=cleanup,
                     human=human,
                     scalars=self.scalars,
+                    streaming=streaming,
                 )
             )
             return fn
@@ -366,6 +372,11 @@ class App:
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
                 return run.exec(invocation.args, inp)
+            if command.streaming:
+                envelopes = run.stream(command, invocation, mode)
+                if invocation.no_stream:
+                    return run.emit(mode, buffer_stream(envelopes), render=command.human)
+                return run.emit_stream(mode, envelopes, render=command.human)
             return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
 
 
@@ -386,6 +397,33 @@ def _dry_run_requested(args: object) -> bool:
     """True when a destructive command's args carry dry_run=True (field guaranteed by REQ-C-004)"""
     value = getattr(args, "dry_run", False)
     return isinstance(value, bool) and value
+
+
+_END = object()
+
+
+def drain(envelopes: Generator[Envelope]) -> Iterator[Envelope]:
+    """Iterate a stream; a signal that lands between events is thrown back into it
+
+    The stream generator turns the signal into its CANCELLED envelope, so the caller
+    sees the same terminal line whether the signal arrived inside the handler or not.
+    """
+    try:
+        yield from envelopes
+    except (Cancelled, KeyboardInterrupt) as exc:
+        yield envelopes.throw(exc)
+
+
+def buffer_stream(envelopes: Generator[Envelope]) -> Envelope:
+    """``--no-stream``: every event in ``data`` under one envelope; a failure keeps its events"""
+    events: list[object] = []
+    last: Envelope | None = None
+    for last in drain(envelopes):
+        if last.ok and not last.extra_meta.get("end"):
+            events.append(last.data)
+    assert last is not None, "a stream always ends with a terminal envelope"
+    meta = {k: v for k, v in last.extra_meta.items() if k not in ("seq", "end")}
+    return dataclasses.replace(last, data=events, extra_meta={**meta, "total": len(events)})
 
 
 class _Run:
@@ -587,6 +625,97 @@ class _Run:
             )
         return self._envelope(0, data=data, started=started, meta=full_meta)
 
+    def stream(
+        self,
+        command: Command,
+        invocation: Invocation,
+        mode: OutputMode,
+        *,
+        meta: Mapping[str, object] | None = None,
+    ) -> Generator[Envelope]:
+        """Run a generator handler: one envelope per event, then a terminal one (REQ-O-004)
+
+        A timeout is a deadline for the whole stream. A failure after some events keeps
+        their count in ``meta.seq`` and marks the response ``partial``.
+        """
+        started = time.perf_counter()
+        timeout = self.app.effective_timeout(command, invocation.timeout)
+        full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
+        ctx = Ctx(
+            app_name=self.app.name,
+            version=self.app.version,
+            mode=mode,
+            request_id=self.request_id,
+            env=self.env,
+            state=self.app._state,
+            timeout=timeout,
+        )
+        args = invocation.args
+        seq = 0
+        events: Iterator[object] | None = None
+
+        def remaining() -> Timeout:
+            if timeout.seconds is None:
+                return timeout
+            left = timeout.seconds - (time.perf_counter() - started)
+            if left <= 0:
+                raise TimeoutExpired(timeout)
+            return Timeout(left)
+
+        def partial() -> dict[str, object]:
+            return {**full_meta, "seq": seq, "partial": True}
+
+        try:
+            produced = call_with_timeout(lambda: _invoke(command, args, ctx), remaining())
+            if not isinstance(produced, Iterator):
+                raise TypeError(
+                    f"{command.path} is streaming but returned {type(produced).__name__}, "
+                    "not a generator"
+                )
+            events = produced
+            while True:
+                event = call_with_timeout(lambda: next(produced, _END), remaining())
+                if event is _END:
+                    break
+                seq += 1
+                data = to_jsonable(event, self.app.scalars)
+                yield self._envelope(0, data=data, started=started, meta={**full_meta, "seq": seq})
+        except CliExit as exc:
+            yield self._exit_envelope(command, exc, started, partial())
+            return
+        except ParseError as exc:
+            yield self.arg_error(exc, started=started, meta=partial())
+            return
+        except TimeoutExpired:
+            entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
+            yield self._envelope(
+                entry.code.value,
+                error=ErrorDetail(
+                    code="TIMEOUT",
+                    message=f"{command.path} exceeded {timeout.seconds}s",
+                    retryable=entry.retryable,
+                    context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
+                    phase="execution",
+                ),
+                started=started,
+                meta=partial(),
+            )
+            return
+        except Cancelled as exc:
+            yield self._cancelled(command, exc.signal, started, {**full_meta, "seq": seq})
+            return
+        except KeyboardInterrupt:
+            sig = CancelSignal("SIGINT", 130)
+            yield self._cancelled(command, sig, started, {**full_meta, "seq": seq})
+            return
+        finally:
+            # Run the handler's finally blocks now, unless a timed-out worker still holds it
+            if events is not None and timeout.seconds is None and isinstance(events, Generator):
+                events.close()
+        yield self._envelope(
+            0, started=started, meta={**full_meta, "seq": seq, "end": True, "total": seq}
+        )
+
     def _cancelled(
         self, command: Command, sig: CancelSignal, started: float, meta: Mapping[str, object]
     ) -> Envelope:
@@ -657,6 +786,26 @@ class _Run:
         if mode is OutputMode.JSON:
             write_envelope(cap_envelope(envelope, self.cap), self.out)
             return envelope.exit_code
+        return self._emit_human(envelope, render)
+
+    def emit_stream(
+        self,
+        mode: OutputMode,
+        envelopes: Generator[Envelope],
+        *,
+        render: HumanRenderer | None,
+    ) -> int:
+        """Write each envelope as it arrives; the exit code is the terminal envelope's"""
+        code = 0
+        for envelope in drain(envelopes):
+            if mode is OutputMode.JSON:
+                write_envelope(cap_envelope(envelope, self.cap), self.out)
+                code = envelope.exit_code
+            else:
+                code = self._emit_human(envelope, render)
+        return code
+
+    def _emit_human(self, envelope: Envelope, render: HumanRenderer | None) -> int:
         if envelope.data is not None and render is not None:
             self.out.write(render(envelope.data))
         elif envelope.data is not None:
@@ -838,6 +987,14 @@ class _Run:
                 invocation = self._exec_invocation(command, request, args.dry_run, line_no)
             except ParseError as exc:
                 yield line_no, self.arg_error(exc, started=started, meta=meta)
+                continue
+            if command.streaming:
+                envelopes = self.stream(command, invocation, OutputMode.JSON, meta=meta)
+                if invocation.no_stream:
+                    yield line_no, buffer_stream(envelopes)
+                else:
+                    for envelope in envelopes:
+                        yield line_no, envelope
                 continue
             yield line_no, self.execute(command, invocation, OutputMode.JSON, meta=meta)
 

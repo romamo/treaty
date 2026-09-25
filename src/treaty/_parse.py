@@ -30,6 +30,7 @@ TIMEOUT_FLAG = "timeout"
 CONFIRM_FLAG = "confirm-destructive"
 RAW_PAYLOAD_FLAG = "raw-payload"
 IDEMPOTENCY_FLAG = "idempotency-key"
+NO_STREAM_FLAG = "no-stream"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,8 @@ class Invocation:
     timeout: Timeout | None
     confirmed: bool = False
     idempotency_key: IdempotencyKey | None = None
+    no_stream: bool = False
+    """A streaming command asked for one buffered envelope instead of JSONL"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +173,7 @@ def parse_command_args(
     confirmed = False
     raw_payload: str | None = None
     key: IdempotencyKey | None = None
+    no_stream = False
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -264,6 +268,14 @@ def parse_command_args(
                 confirmed = True
                 i += 1
                 continue
+            if name == NO_STREAM_FLAG and command.streaming:
+                if has_eq:
+                    raise ParseError(
+                        f"'{NO_STREAM_FLAG}' takes no value", context={"flag": NO_STREAM_FLAG}
+                    )
+                no_stream = True
+                i += 1
+                continue
             found = command.field_by_flag(name)
             if found is not None and found.secret:
                 errors.add(direct_secret_error(found.flag))
@@ -337,6 +349,7 @@ def parse_command_args(
             timeout=timeout,
             confirmed=confirmed,
             idempotency_key=key or built.idempotency_key,
+            no_stream=no_stream or built.no_stream,
         )
     _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
@@ -344,6 +357,7 @@ def parse_command_args(
         timeout=timeout,
         confirmed=confirmed,
         idempotency_key=key,
+        no_stream=no_stream,
     )
 
 
@@ -404,6 +418,8 @@ def known_flags(command: Command) -> list[str]:
         flags.append(CONFIRM_FLAG)
     if command.danger_level is not DangerLevel.SAFE:
         flags.append(IDEMPOTENCY_FLAG)
+    if command.streaming:
+        flags.append(NO_STREAM_FLAG)
     return flags
 
 
@@ -438,6 +454,7 @@ def build_from_mapping(
     timeout: Timeout | None = None
     confirmed = False
     idempotency_key: IdempotencyKey | None = None
+    no_stream = False
     errors = _Collector()
     for key, value in mapping.items():
         try:
@@ -456,6 +473,13 @@ def build_from_mapping(
                         f"{key!r} expects a boolean", context={"field": key, "value": value}
                     )
                 confirmed = value
+                continue
+            if flag == NO_STREAM_FLAG and command.streaming:
+                if not isinstance(value, bool):
+                    raise ParseError(
+                        f"{key!r} expects a boolean", context={"field": key, "value": value}
+                    )
+                no_stream = value
                 continue
             found = command.field_by_flag(flag)
             if found is not None and found.secret:
@@ -491,6 +515,7 @@ def build_from_mapping(
         timeout=timeout,
         confirmed=confirmed,
         idempotency_key=idempotency_key,
+        no_stream=no_stream,
     )
 
 

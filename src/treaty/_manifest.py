@@ -68,6 +68,14 @@ def command_entry(
         }
         conflict = exits.framework(FrameworkCode.CONFLICT)
         exit_codes.setdefault(str(conflict.code.value), conflict.to_json())
+    if command.streaming:
+        flags["no-stream"] = {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Return one envelope with every event in data instead of "
+            "one envelope line per event",
+        }
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         flags["confirm-destructive"] = {
             "type": "boolean",
@@ -90,6 +98,8 @@ def command_entry(
         out["examples"] = [e.to_json() for e in command.examples]
     if command.has_network_io:
         out["has_network_io"] = True
+    if command.streaming:
+        out["streaming_default"] = True
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret

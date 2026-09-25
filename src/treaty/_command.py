@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc
 import inspect
 import typing
 from collections.abc import Callable, Mapping, Sequence
@@ -63,6 +64,8 @@ class Command:
     human: HumanRenderer | None
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
+    streaming: bool
+    """The handler is a generator; every yield is one envelope line (REQ-O-004)"""
     resources: tuple[type, ...]
     """Resource classes the handler takes after ``ctx``, in parameter order"""
     resource_graph: Mapping[type, ResourceSpec]
@@ -101,11 +104,17 @@ def build_command(
     cleanup: Cleanup | None,
     human: HumanRenderer | None,
     scalars: ScalarRegistry,
+    streaming: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
-    args_type, output_type, resources = _inspect_handler(fn, path)
+    args_type, output_type, resources = _inspect_handler(fn, path, streaming)
     fields = inspect_fields(args_type, scalars)
+    if streaming and danger_level is not DangerLevel.SAFE:
+        raise RegistrationError(
+            f"{path}: streaming commands must be safe; the effect and idempotency contracts "
+            "describe one response, not a stream"
+        )
     shadowed = sorted(f.flag for f in fields if not f.positional and f.flag in GLOBAL_FLAGS)
     if shadowed:
         raise RegistrationError(
@@ -149,12 +158,15 @@ def build_command(
         cleanup=cleanup,
         human=human,
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
+        streaming=streaming,
         resources=resources,
         resource_graph=resource_graph(resources, str(path)),
     )
 
 
-def _inspect_handler(fn: Handler, path: CommandPath) -> tuple[type, object, tuple[type, ...]]:
+def _inspect_handler(
+    fn: Handler, path: CommandPath, streaming: bool
+) -> tuple[type, object, tuple[type, ...]]:
     resources = dependency_params(fn, f"{path}: handler")
     params = list(inspect.signature(fn).parameters.values())
     hints = typing.get_type_hints(fn)
@@ -164,9 +176,28 @@ def _inspect_handler(fn: Handler, path: CommandPath) -> tuple[type, object, tupl
     if "return" not in hints:
         raise RegistrationError(f"{path}: handler needs a return annotation for output_schema")
     output_type = hints["return"]
+    if streaming:
+        output_type = _event_type(output_type, path)
     if not is_payload_type(output_type):
-        raise RegistrationError(
-            f"{path}: return type must serialize to a JSON object, array, or null"
-        )
+        what = "each yielded event" if streaming else "return type"
+        raise RegistrationError(f"{path}: {what} must serialize to a JSON object, array, or null")
     assert isinstance(args_type, type)
     return args_type, output_type, resources
+
+
+_STREAM_ORIGINS = (
+    collections.abc.Iterator,
+    collections.abc.Iterable,
+    collections.abc.Generator,
+)
+
+
+def _event_type(annotation: object, path: CommandPath) -> object:
+    """The ``T`` of a streaming handler's ``Iterator[T]`` (or ``Iterable`` / ``Generator``)"""
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin not in _STREAM_ORIGINS or not args:
+        raise RegistrationError(
+            f"{path}: a streaming handler must be annotated Iterator[T] for its event type"
+        )
+    return args[0]

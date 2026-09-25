@@ -45,6 +45,10 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   classmethod `acquire(cls, args, ctx, *deps)`; acquired once per run in dependency order
   under the command timeout; `CliExit` and `ParseError` from `acquire` take the normal
   envelope path; cycles and missing `acquire` fail at registration
+- Streaming handlers (cloudfall gap 3, REQ-O-004): `streaming=True` with an `Iterator[T]`
+  handler; one envelope per yield with `meta.seq`, a terminal envelope with `end` and
+  `total`, failures mark `partial`; no timeout by default, else a whole-stream deadline;
+  `streaming_default` in the manifest and `--help`; `--no-stream` buffers; works in `exec`
 
 ## 0.1.0: first release
 
@@ -71,11 +75,9 @@ operation three times, and none of them could be ported until these land. In ord
 - **Typed resources**: done, see above. Still open from it: a `release` counterpart to
   `acquire` for resources that hold a lock or a connection, run after the handler and on
   cancellation alongside `cleanup=`
-- **Streaming handlers** (`streaming=True`): the handler is a generator and every yield
-  is one JSONL envelope with a sequence number in `meta`; `timeout` defaults to `None`
-  for these commands; cancellation runs `cleanup=` and ends the stream with the normal
-  `CANCELLED` envelope. Needed for a serve command that must announce its URL and then
-  block; the same machinery later carries REQ-O-004 list streaming
+- **Streaming handlers**: done, see above. Still open from it: pagination metadata on
+  the terminal envelope for list commands (with REQ-F-018 in 0.2.0), and streaming for
+  mutating commands once the effect contract can name the event that carries `effect`
 - **MCP adapter** (`treaty[mcp]`, moved up from Later): `treaty mcp module:app` runs
   in-process, one tool per command, input schema from `parameters` and result schema
   from `output_schema` as `--schema` already emits them. Destructive commands get a
@@ -112,7 +114,6 @@ matching audit rule so adoption never requires reading the spec.
   cancellation (REQ-C-008)
 - Framework-managed locks with `retry_after_ms` (REQ-F-033)
 - `--validate-only` (REQ-O-009) and safe-default dry run with `--live` (REQ-O-048)
-- JSONL streaming for list commands with `--no-stream` (REQ-O-004)
 - Dependency declarations and a `doctor` built-in (REQ-O-031)
 - Token budget flags `--max-tokens` and `--fields` (REQ-O-049)
 
