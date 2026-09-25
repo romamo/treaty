@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import importlib
-import os
 import stat
+import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -27,15 +27,7 @@ from ._profile import (
 )
 from ._scaffold import ProjectName, render
 
-
-def _version() -> str:
-    try:
-        return version("treaty")
-    except PackageNotFoundError:
-        return "0.0.0"
-
-
-cli = App("treaty", version=_version(), description="Build and audit agent-ready CLIs")
+cli = App("treaty", version=version("treaty"), description="Build and audit agent-ready CLIs")
 cli.exit_code(
     "CONFORMANCE_FAILED",
     80,
@@ -230,9 +222,9 @@ def render_init(data: Any) -> str:
 def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     name = ProjectName(args.name)
     target = args.directory if args.directory is not None else Path(name.value)
-    if target.exists() and any(target.iterdir()):
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise Exit.CONFLICT(
-            f"{target} exists and is not empty",
+            f"{target} exists and is not an empty directory",
             context={"directory": str(target)},
             fix_required="choose an empty directory with --directory",
         )
@@ -320,7 +312,7 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
             return SPEC_FALLBACK.resolve()
         raise Exit.PRECONDITION(
             "cannot find the spec's conformance/run.py",
-            context={"tried": [str(SPEC_FALLBACK)]},
+            context={"tried": [str(SPEC_FALLBACK.resolve())]},
             fix_required="pass --spec-dir or set TREATY_SPEC_DIR to the spec checkout",
         )
     if not has_kit(named):
@@ -345,7 +337,7 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
 def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     app = load_app(args.target)
     out = args.out
-    spec_dir = resolve_spec_dir(args.spec_dir, os.environ) if args.run else None
+    spec_dir = resolve_spec_dir(args.spec_dir, ctx.env) if args.run else None
     probes = probes_for(app)
     command = list(args.command) or [app.name]
     profile_path = out or Path("conformance") / f"{app.name}.json"
@@ -354,8 +346,19 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     result = ConformanceOut(effect, str(profile_path), len(probes), False, None, ())
     if spec_dir is None:
         return result
-    kit = run_kit(spec_dir, profile_path, ctx.timeout.seconds)
-    if kit.envelope is None or kit.exit_code == 2:
+    # The kit's deadline ends first, so it is killed rather than orphaned by the TIMEOUT path
+    seconds = ctx.timeout.seconds
+    try:
+        kit = run_kit(spec_dir, profile_path, None if seconds is None else max(seconds - 5, 1))
+    except subprocess.TimeoutExpired as exc:
+        raise Exit.PRECONDITION(
+            f"the kit did not finish within {exc.timeout:g}s",
+            context={"timeout_seconds": exc.timeout},
+            fix_required="rerun with a larger --timeout, or 0 to disable it",
+            data=result,
+        ) from None
+    report = kit.envelope.get("data") if kit.envelope else None
+    if kit.exit_code == 2 or not isinstance(report, dict) or "checks" not in report:
         kit_error = kit.envelope.get("error") if kit.envelope else None
         raise Exit.PRECONDITION(
             "the kit rejected the profile or produced no envelope",
@@ -366,8 +369,6 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
             },
             data=result,
         )
-    report = kit.envelope["data"]
-    assert isinstance(report, dict)
     checks = tuple(
         CheckOut(
             c["id"],

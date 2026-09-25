@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -192,3 +193,52 @@ def test_invalid_key_is_arg_error(tmp_path: Path) -> None:
     app, calls = counting_app(tmp_path)
     code, env = run(app, ["create", "widget", "--idempotency-key", "a\tb"])
     assert code == 2 and env["error"]["code"] == "ARG_ERROR" and calls == []
+
+
+def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> None:
+    started: list[float] = []
+    app = App("slowctl", version="1", state_dir=tmp_path, default_timeout=0.2)
+
+    @app.command("create", description="Slow create", danger_level="mutating")
+    def create(args: CreateArgs, ctx: Ctx) -> Created:
+        started.append(time.monotonic())
+        time.sleep(0.5)
+        return Created("created", args.name, len(started), ctx.idempotency_key)
+
+    first = app.call("create", {"name": "w", "idempotency_key": "k1"})
+    assert first.error is not None and first.error.code == "TIMEOUT"
+    second = app.call("create", {"name": "w", "idempotency_key": "k1"})
+    assert len(started) == 1, "the retry ran the mutation beside the abandoned handler"
+    assert second.ok and isinstance(second.data, dict) and second.data["effect"] == "noop"
+
+
+def test_prune_keeps_a_lock_that_is_held(tmp_path: Path) -> None:
+    held, other = IdempotencyKey("held"), IdempotencyKey("other")
+    acquired = threading.Event()
+    with claim(tmp_path, held):
+        lock = next(tmp_path.glob("*.lock"))
+        stale = time.time() - TTL_SECONDS - 3600
+        os.utime(lock, (stale, stale))
+        with claim(tmp_path, other) as slot:
+            slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
+        assert lock.exists()
+
+        def contend() -> None:
+            with claim(tmp_path, held):
+                acquired.set()
+
+        rival = threading.Thread(target=contend, daemon=True)
+        rival.start()
+        assert not acquired.wait(0.2), "a second claim got the key while it was held"
+    assert acquired.wait(2)
+
+
+def test_prune_removes_an_idle_expired_lock(tmp_path: Path) -> None:
+    with claim(tmp_path, IdempotencyKey("idle")):
+        pass
+    lock = next(tmp_path.glob("*.lock"))
+    stale = time.time() - TTL_SECONDS - 3600
+    os.utime(lock, (stale, stale))
+    with claim(tmp_path, IdempotencyKey("other")) as slot:
+        slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
+    assert not lock.exists()

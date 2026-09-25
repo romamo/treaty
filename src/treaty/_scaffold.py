@@ -26,11 +26,21 @@ class ProjectName:
         return self.value.replace("-", "_")
 
 
+def _toml_string(value: str) -> str:
+    """A TOML basic string: a Windows path's backslashes and any quote survive"""
+    escaped = "".join(
+        f"\\u{ord(c):04x}" if ord(c) < 0x20 or ord(c) == 0x7F else c
+        for c in value.replace("\\", "\\\\").replace('"', '\\"')
+    )
+    return f'"{escaped}"'
+
+
 def render(name: ProjectName, treaty_source: str | None = None) -> dict[str, str]:
     """Relative path to file contents for a new project"""
     n, pkg = name.value, name.package
     sources = (
-        f'\n[tool.uv.sources]\ntreaty = {{ path = "{treaty_source}", editable = true }}\n'
+        "\n[tool.uv.sources]\n"
+        f"treaty = {{ path = {_toml_string(treaty_source)}, editable = true }}\n"
         if treaty_source
         else ""
     )

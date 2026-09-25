@@ -25,7 +25,8 @@ from ._app import EXEC_PATH, App, _Run
 from ._command import Command, DangerLevel
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
-from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG, TIMEOUT_FLAG
+from ._manifest import payload_schema
+from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._schema import JsonSchema
 from ._values import CommandPath
 
@@ -67,54 +68,8 @@ def tool_description(command: Command) -> str:
 
 
 def input_schema(command: Command) -> JsonSchema:
-    """The args schema with secrets replaced by their sources and framework keys added"""
-    properties: dict[str, JsonSchema] = {}
-    required: list[str] = []
-    base = command.args_schema
-    base_required = set(base.get("required", ()))
-    for f in command.fields:
-        if f.secret:
-            what = f.spec.description
-            properties[f"{f.name}_from_env"] = {
-                "type": "string",
-                "description": f"Name of the environment variable holding: {what}",
-            }
-            properties[f"{f.name}_from_file"] = {
-                "type": "string",
-                "description": f"Path of the file holding: {what}",
-            }
-            continue
-        prop = dict(base["properties"][f.name])
-        prop["description"] = f.spec.description
-        properties[f.name] = prop
-        if f.name in base_required:
-            required.append(f.name)
-    if command.has_network_io:
-        properties[TIMEOUT_FLAG] = {
-            "type": "number",
-            "description": "Seconds before the framework aborts with TIMEOUT; 0 disables it",
-        }
-    if command.danger_level is not DangerLevel.SAFE:
-        properties[IDEMPOTENCY_KEY] = {
-            "type": "string",
-            "description": "Repeat calls with the same key return the original result "
-            "with effect noop instead of running again",
-        }
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        properties[CONFIRM_KEY] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Required to apply; without it the command previews and fails "
-            "with CONFIRMATION_REQUIRED",
-        }
-    schema: JsonSchema = {
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": False,
-    }
-    if required:
-        schema["required"] = required
-    return schema
+    """The ``--raw-payload`` schema; MCP always buffers a stream, so no ``no_stream`` key"""
+    return payload_schema(command, stream_key=False)
 
 
 def output_schema(command: Command) -> JsonSchema:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections.abc
 import inspect
+import shlex
 import typing
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -37,6 +38,14 @@ class DangerLevel(StrEnum):
 class Example:
     description: str
     command: str
+
+    def __post_init__(self) -> None:
+        try:
+            shlex.split(self.command)
+        except ValueError as exc:
+            raise RegistrationError(
+                f"example {self.command!r} is not a valid shell command: {exc}"
+            ) from None
 
     def to_json(self) -> dict[str, str]:
         return {"description": self.description, "command": self.command}
@@ -86,6 +95,7 @@ class Command:
 
 # Consumed by split_globals before any command sees its tokens
 GLOBAL_FLAGS = frozenset({"format", "help", "max-output", "schema"})
+GLOBAL_SHORTS = {"h": "help"}
 
 
 def build_command(
@@ -115,10 +125,33 @@ def build_command(
             f"{path}: streaming commands must be safe; the effect and idempotency contracts "
             "describe one response, not a stream"
         )
-    shadowed = sorted(f.flag for f in fields if not f.positional and f.flag in GLOBAL_FLAGS)
+    shadowed: list[str] = []
+    for f in fields:
+        if f.positional:
+            continue
+        if f.flag in GLOBAL_FLAGS:
+            shadowed.append(f"--{f.flag} collides with --{f.flag}")
+        elif f.spec.short is not None and f.spec.short in GLOBAL_SHORTS:
+            owner = GLOBAL_SHORTS[f.spec.short]
+            shadowed.append(
+                f"-{f.spec.short} of --{f.flag} collides with -{f.spec.short} of --{owner}"
+            )
     if shadowed:
         raise RegistrationError(
-            f"{path}: flags {shadowed} are global options and would never reach the handler"
+            f"{path}: {'; '.join(shadowed)}: global options, which would never reach "
+            "the handler (REQ-F-079)"
+        )
+    framework_flags = {
+        "timeout": has_network_io,
+        "raw-payload": supports_raw_payload,
+        "confirm-destructive": danger_level is DangerLevel.DESTRUCTIVE,
+        "no-stream": streaming,
+    }
+    taken = sorted(f.flag for f in fields if framework_flags.get(f.flag, False))
+    if taken:
+        raise RegistrationError(
+            f"{path}: flags {taken} are supplied by the framework for this command and "
+            "would never reach the handler; rename the fields"
         )
     if danger_level is not DangerLevel.SAFE:
         if not can_carry_effect(output_type):

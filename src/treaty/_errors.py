@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
-from ._values import ExitCodeName
+from ._values import ExitCodeName, InvalidValue
 
 
 class TreatyError(Exception):
@@ -120,7 +120,11 @@ class _ExitFactory:
     """``Exit.CONFLICT("message", context=...)`` builds a ``CliExit`` by name"""
 
     def __getattr__(self, name: str) -> Callable[..., CliExit]:
-        exit_name = ExitCodeName(name)
+        # hasattr(), copy, pickle, and inspect probe dunders; they must see AttributeError
+        try:
+            exit_name = ExitCodeName(name)
+        except InvalidValue as exc:
+            raise AttributeError(f"Exit has no exit code {name!r}: {exc}") from None
 
         def make(message: str, **kwargs: object) -> CliExit:
             return CliExit(exit_name, message, **kwargs)  # type: ignore[arg-type]

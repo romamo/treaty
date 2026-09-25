@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+import traceback
 import uuid
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -28,11 +29,11 @@ from ._context import Ctx
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import effect_problem
 from ._envelope import Envelope, ErrorDetail, write_envelope
-from ._errors import CliExit, ParseError, RegistrationError
+from ._errors import CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
-from ._flags import Flag
+from ._flags import REDACTED, Flag
 from ._help import render_command, render_root
-from ._idempotency import Record, claim, fingerprint, state_dir
+from ._idempotency import Record, Slot, claim, fingerprint, state_dir
 from ._manifest import build_manifest, build_schema_manifest, command_schema
 from ._mode import OutputMode, resolve_mode
 from ._parse import (
@@ -49,8 +50,8 @@ from ._parse import (
 from ._resources import Resolver
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
-from ._signals import Cancelled, CancelSignal, cancellation_handlers
-from ._timeout import Timeout, TimeoutExpired, call_with_timeout
+from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
+from ._timeout import Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
 
 EXEC_PATH = CommandPath("exec")
@@ -322,11 +323,21 @@ class App:
 
         Field names use underscores; the framework keys ``confirm_destructive``,
         ``idempotency_key``, ``timeout``, and ``dry_run`` are accepted where the command
-        declares them. A streaming command returns its buffered envelope. Nothing is
-        written: the caller owns the envelope. Used by the MCP adapter.
+        declares them. A streaming command returns its buffered envelope, capped like
+        stdout (REQ-F-052). Nothing is written: the caller owns the envelope. Used by
+        the MCP adapter.
         """
         environ = env if env is not None else os.environ
         run = _Run(self, io.StringIO(), io.StringIO(), environ)
+        try:
+            cap = OutputCap.resolve(None, environ, self.max_output)
+        except ParseError as exc:
+            return run.arg_error(exc, meta={"_cmd": path})
+        return cap_envelope(self._call(run, path, arguments, environ), cap)
+
+    def _call(
+        self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
+    ) -> Envelope:
         meta: dict[str, object] = {"_cmd": path}
         try:
             command_path = CommandPath(path)
@@ -381,11 +392,9 @@ class App:
         if route.path is None and not route.prefix and route.tokens == ("--version",):
             # Root-only alias so a command's own --version flag is never shadowed
             route = Route(path=VERSION_PATH, prefix=VERSION_PATH.parts, tokens=())
-        if globals_.schema:
-            return run.schema(mode, route.path, route.prefix)
-        if route.path is None:
-            if globals_.help or not route.tokens:
-                return run.help_root(mode, route.prefix)
+        if route.path is None and route.tokens:
+            # An unroutable path is an error even with --help or --schema, which would
+            # otherwise answer with exit 0 about the enclosing group
             if route.tokens[0].startswith("-") and format_hint(route.tokens[0]) is None:
                 return run.emit(mode, run.arg_error(self._misplaced_flag(route)))
             return run.emit(
@@ -402,6 +411,10 @@ class App:
                     )
                 ),
             )
+        if globals_.schema:
+            return run.schema(mode, route.path, route.prefix)
+        if route.path is None:
+            return run.help_root(mode, route.prefix)
         command = self._commands[route.path]
         if globals_.help:
             return run.help_command(mode, command)
@@ -409,7 +422,8 @@ class App:
             invocation = parse_command_args(command, route.tokens, environ)
         except ParseError as exc:
             return run.emit(mode, run.arg_error(exc))
-        with cancellation_handlers(out):
+        with cancellation_handlers(out) as cancellation:
+            run.cancellation = cancellation
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
                 return run.exec(invocation.args, inp)
@@ -478,6 +492,9 @@ class _Run:
         self.started = time.perf_counter()
         self.request_id = uuid.uuid4().hex[:12]
         self.cap = app.max_output
+        self.cancellation = Cancellation()
+        self.abandoned: Pending | None = None
+        """Set by ``_execute`` when the handler outlived its timeout and still runs"""
 
     # Envelope construction
 
@@ -551,7 +568,11 @@ class _Run:
         with claim(directory, key) as slot:
             if slot.record is None:
                 envelope = self._execute(command, invocation, mode, meta=meta)
-                if envelope.exit_code == 0:
+                pending = self.abandoned
+                if pending is not None:
+                    # A retry must wait for the abandoned handler, not run beside it
+                    slot.hand_off(lambda held: self._record_late(command, pending, held, call))
+                elif envelope.exit_code == 0:
                     slot.save(Record(call, command.path.value, envelope.data, time.time()))
                 return envelope
             if slot.record.fingerprint != call:
@@ -586,6 +607,7 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         """Run one handler under its timeout and turn the outcome into an envelope"""
+        self.abandoned = None
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
@@ -607,13 +629,15 @@ class _Run:
             assert dataclasses.is_dataclass(args) and not isinstance(args, type)
             args = dataclasses.replace(args, dry_run=True)
         try:
-            result = call_with_timeout(lambda: _invoke(command, args, ctx), timeout)
+            with self.cancellation.armed():
+                result = call_with_timeout(lambda: _invoke(command, args, ctx), timeout)
         except CliExit as exc:
             return self._exit_envelope(command, exc, started, full_meta)
         except ParseError as exc:
             # A handler validating its own input before any side effect
             return self.arg_error(exc, started=started, meta=full_meta)
-        except TimeoutExpired:
+        except TimeoutExpired as exc:
+            self.abandoned = exc.pending
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
             return self._envelope(
                 entry.code.value,
@@ -631,7 +655,14 @@ class _Run:
             return self._cancelled(command, exc.signal, started, full_meta)
         except KeyboardInterrupt:
             return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
-        data = to_jsonable(result, self.app.scalars)
+        except Exception as exc:  # noqa: BLE001 - the one handler boundary; see _crashed
+            return self._crashed(command, args, exc, started, full_meta)
+        try:
+            data = self._payload(result)
+        except SchemaError as exc:
+            return self._broken(
+                command, "INVALID_OUTPUT", f"{command.path} returned {exc}", started, full_meta
+            )
         if command.danger_level is not DangerLevel.SAFE:
             problem = effect_problem(data, preview=_dry_run_requested(args))
             if problem is not None:
@@ -707,7 +738,8 @@ class _Run:
             return {**full_meta, "seq": seq, "partial": True}
 
         try:
-            produced = call_with_timeout(lambda: _invoke(command, args, ctx), remaining())
+            with self.cancellation.armed():
+                produced = call_with_timeout(lambda: _invoke(command, args, ctx), remaining())
             if not isinstance(produced, Iterator):
                 raise TypeError(
                     f"{command.path} is streaming but returned {type(produced).__name__}, "
@@ -715,11 +747,12 @@ class _Run:
                 )
             events = produced
             while True:
-                event = call_with_timeout(lambda: next(produced, _END), remaining())
+                with self.cancellation.armed():
+                    event = call_with_timeout(lambda: next(produced, _END), remaining())
                 if event is _END:
                     break
                 seq += 1
-                data = to_jsonable(event, self.app.scalars)
+                data = self._payload(event)
                 yield self._envelope(0, data=data, started=started, meta={**full_meta, "seq": seq})
         except CliExit as exc:
             yield self._exit_envelope(command, exc, started, partial())
@@ -748,6 +781,13 @@ class _Run:
         except KeyboardInterrupt:
             sig = CancelSignal("SIGINT", 130)
             yield self._cancelled(command, sig, started, {**full_meta, "seq": seq})
+            return
+        except SchemaError as exc:
+            message = f"{command.path} yielded {exc}"
+            yield self._broken(command, "INVALID_OUTPUT", message, started, partial())
+            return
+        except Exception as exc:  # noqa: BLE001 - the one handler boundary; see _crashed
+            yield self._crashed(command, args, exc, started, partial())
             return
         finally:
             # Run the handler's finally blocks now, unless a timed-out worker still holds it
@@ -800,20 +840,104 @@ class _Run:
                 meta=meta,
             )
         entry = self.app.exits.by_name(exc.name)
+        if entry.code.value == 0:
+            message = f"{command.path} raised {exc.name}; return the result instead of raising"
+            return self._broken(command, "INVALID_EXIT", message, started, meta)
+        try:
+            data = self._payload(exc.data)
+            context = to_jsonable(exc.context, self.app.scalars)
+        except SchemaError as err:
+            message = f"{command.path} raised {exc.name} with {err}"
+            return self._broken(command, "INVALID_EXIT", message, started, meta)
+        assert isinstance(context, dict)
         return self._envelope(
             entry.code.value,
-            data=to_jsonable(exc.data, self.app.scalars),
+            data=data,
             error=ErrorDetail(
                 code=exc.code,
                 message=exc.message,
                 retryable=entry.retryable,
                 detail=exc.detail,
-                context=exc.context,
+                context=context,
                 suggestion=exc.suggestion,
                 fix_command=exc.fix_command,
                 fix_required=exc.fix_required,
                 retry_after_ms=exc.retry_after_ms if entry.retryable else None,
                 phase="execution",
+            ),
+            started=started,
+            meta=meta,
+        )
+
+    def _record_late(self, command: Command, pending: Pending, slot: Slot, call: str) -> None:
+        """Record an abandoned handler's result once it finishes, so a retry replays it
+        instead of applying the mutation again; a failure is reported on stderr only,
+        since TIMEOUT was already the response"""
+        outcome = pending.wait()
+        if outcome.exc is not None:
+            self.err.write("".join(traceback.format_exception(outcome.exc)))
+            return
+        data = self._payload(outcome.result)
+        if effect_problem(data, preview=False) is None:
+            slot.save(Record(call, command.path.value, data, time.time()))
+
+    def _payload(self, value: object) -> object:
+        """A result or exit ``data`` as envelope data: an object, an array, or null"""
+        data = to_jsonable(value, self.app.scalars)
+        if data is not None and not isinstance(data, (dict, list)):
+            raise SchemaError(f"{type(value).__name__}, not an object, array, or null")
+        return data
+
+    def _broken(
+        self, command: Command, code: str, message: str, started: float, meta: Mapping[str, object]
+    ) -> Envelope:
+        """GENERAL_ERROR for a handler that broke the framework contract"""
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code=code,
+                message=message,
+                retryable=False,
+                context={"command": command.path.value},
+                phase="execution",
+            ),
+            started=started,
+            meta=meta,
+        )
+
+    def _crashed(
+        self,
+        command: Command,
+        args: object,
+        exc: Exception,
+        started: float,
+        meta: Mapping[str, object],
+    ) -> Envelope:
+        """A handler bug: the traceback goes to stderr and the envelope names the exception,
+        so every exit still carries an envelope. Secret argument values are redacted."""
+        secrets = [
+            value
+            for f in command.fields
+            if f.secret and isinstance(value := getattr(args, f.name, None), str) and value
+        ]
+
+        def redact(text: str) -> str:
+            for value in secrets:
+                text = text.replace(value, REDACTED)
+            return text
+
+        self.err.write(redact("".join(traceback.format_exception(exc))))
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="HANDLER_CRASHED",
+                message=redact(f"{command.path} raised {type(exc).__name__}: {exc}"),
+                retryable=False,
+                context={"command": command.path.value, "exception": type(exc).__qualname__},
+                phase="execution",
+                fix_required="a bug in the command; stderr has the traceback",
             ),
             started=started,
             meta=meta,
@@ -959,8 +1083,18 @@ class _Run:
         except ParseError as exc:
             return self.arg_error(exc)
         # One more character than the cap is always more bytes than the cap
-        text = stdin.read(cap.bytes + 1)
-        if len(text.encode()) > cap.bytes:
+        try:
+            text = stdin.read(cap.bytes + 1)
+            size = len(text.encode("utf-8"))
+        except (UnicodeDecodeError, UnicodeEncodeError) as exc:
+            # A strict stdin fails to decode; a surrogateescape one fails to re-encode
+            return self._stream_error(
+                "STDIN_NOT_UTF8",
+                f"stdin plan is not valid UTF-8: {exc.reason}",
+                context={"lines": 0},
+                fix_required="pipe UTF-8 JSONL into exec, or pass --input-file",
+            )
+        if size > cap.bytes:
             return self._stream_error(
                 "STDIN_TOO_LARGE",
                 f"stdin plan exceeds the {cap.bytes}-byte limit",

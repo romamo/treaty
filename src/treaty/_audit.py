@@ -174,7 +174,7 @@ def _network_io(app: App) -> Iterator[Finding]:
         try:
             source = inspect.getsource(c.handler)
         except OSError, TypeError:
-            continue
+            continue  # no source to scan (REPL, exec, C extension); the heuristic cannot apply
         if _NETWORK_HINTS.search(source):
             yield Finding(
                 "network-io",

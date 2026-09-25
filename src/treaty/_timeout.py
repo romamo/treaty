@@ -5,6 +5,10 @@ expiry the framework emits the TIMEOUT envelope and returns; the thread is
 abandoned and dies with the interpreter when ``main()`` exits. This works on
 every platform and even when the handler is blocked inside a C call, which a
 signal-based approach cannot guarantee.
+
+In a long-lived process (``App.call``, the MCP adapter) an abandoned handler runs
+to completion after TIMEOUT was reported. ``TimeoutExpired.pending`` lets the
+caller wait for it; the idempotency layer holds the key's lock until then.
 """
 
 from __future__ import annotations
@@ -16,6 +20,9 @@ from dataclasses import dataclass
 from ._errors import ParseError
 from ._values import InvalidValue
 
+# One year: finite (NaN and inf fail the range check) and far below threading.TIMEOUT_MAX
+MAX_SECONDS = 365 * 24 * 3600.0
+
 
 @dataclass(frozen=True, slots=True)
 class Timeout:
@@ -24,8 +31,8 @@ class Timeout:
     seconds: float | None
 
     def __post_init__(self) -> None:
-        if self.seconds is not None and not self.seconds > 0:
-            raise InvalidValue("timeout seconds must be positive or None")
+        if self.seconds is not None and not 0 < self.seconds <= MAX_SECONDS:
+            raise InvalidValue(f"timeout seconds must be in (0, {MAX_SECONDS:g}] or None")
 
     @classmethod
     def parse(cls, raw: object) -> Timeout:
@@ -39,10 +46,11 @@ class Timeout:
                 "'timeout' expects a number of seconds",
                 context={"flag": "timeout", "value": raw},
             ) from None
-        if value < 0 or value != value:
+        if not 0 <= value <= MAX_SECONDS:
             raise ParseError(
-                "'timeout' must be zero or positive",
-                context={"flag": "timeout", "value": raw},
+                f"'timeout' must be between 0 and {MAX_SECONDS:g} seconds",
+                context={"flag": "timeout", "value": raw, "maximum": MAX_SECONDS},
+                suggestion="pass 0 to disable the limit",
             )
         return cls(None) if value == 0 else cls(value)
 
@@ -54,22 +62,35 @@ class Timeout:
 class TimeoutExpired(Exception):
     """The handler did not finish within its timeout"""
 
-    def __init__(self, timeout: Timeout) -> None:
+    def __init__(self, timeout: Timeout, pending: Pending | None = None) -> None:
         super().__init__(f"handler exceeded {timeout.seconds}s")
         self.timeout = timeout
+        self.pending = pending
 
 
 @dataclass(slots=True)
-class _Slot:
+class Outcome:
     result: object = None
     exc: BaseException | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Pending:
+    """A handler still running on its abandoned worker thread"""
+
+    worker: threading.Thread
+    outcome: Outcome
+
+    def wait(self) -> Outcome:
+        self.worker.join()
+        return self.outcome
 
 
 def call_with_timeout[T](fn: Callable[[], T], timeout: Timeout) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``"""
     if timeout.seconds is None:
         return fn()
-    slot = _Slot()
+    slot = Outcome()
 
     def target() -> None:
         try:
@@ -81,7 +102,7 @@ def call_with_timeout[T](fn: Callable[[], T], timeout: Timeout) -> T:
     worker.start()
     worker.join(timeout.seconds)
     if worker.is_alive():
-        raise TimeoutExpired(timeout)
+        raise TimeoutExpired(timeout, Pending(worker, slot))
     if slot.exc is not None:
         raise slot.exc
     return slot.result  # type: ignore[return-value]

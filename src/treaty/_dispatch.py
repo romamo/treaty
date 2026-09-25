@@ -1,4 +1,4 @@
-"""``DispatchRequest`` lines: route by ``_cmd`` and turn ``_opts`` into argv."""
+"""``DispatchRequest`` lines: route by ``_cmd``; ``_opts`` and the payload become field values."""
 
 from __future__ import annotations
 
@@ -17,17 +17,6 @@ class DispatchRequest:
     path: CommandPath
     opts: Mapping[str, Scalar] = field(default_factory=dict)
     payload: Mapping[str, object] = field(default_factory=dict)
-
-    def to_argv(self) -> list[str]:
-        argv = list(self.path.parts)
-        for key, value in self.opts.items():
-            if value is True:
-                argv.append(f"--{key}")
-            elif value is False:
-                argv.append(f"--no-{key}")
-            else:
-                argv.append(f"--{key}={value}")
-        return argv
 
 
 def parse_dispatch_line(line: str, line_no: int) -> DispatchRequest:

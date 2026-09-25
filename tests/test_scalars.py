@@ -230,7 +230,10 @@ def test_manifest_carries_pattern_and_base_types_and_validates() -> None:
 def test_schema_output_carries_constraints_on_args_and_output() -> None:
     code, env = run(["deploy", "--schema"])
     assert code == 0
-    args_schema = env["data"]["raw_payload_schema"]["properties"]
+    args_schema = {
+        name: {k: v for k, v in prop.items() if k != "description"}
+        for name, prop in env["data"]["raw_payload_schema"]["properties"].items()
+    }
     assert args_schema["service"] == {
         "type": "string",
         "title": "ResourceId",

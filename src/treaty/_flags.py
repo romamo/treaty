@@ -127,14 +127,18 @@ class FieldInfo:
         if target is None:
             raise RegistrationError(f"{self.name}: array without item type")
         try:
-            if self.spec.pattern is not None and not re.fullmatch(self.spec.pattern, raw):
-                raise ParseError(
-                    f"value for {self.flag!r} does not match pattern",
-                    context={"flag": self.flag, "value": raw, "pattern": self.spec.pattern},
-                )
+            self.check_pattern(raw)
             return _coerce(target, raw, self.flag)
         except ParseError as exc:
             raise self.scrub(exc) from None
+
+    def check_pattern(self, raw: str) -> None:
+        """``Flag(pattern=)`` for argv tokens and JSON strings alike (REQ-C-020)"""
+        if self.spec.pattern is not None and not re.fullmatch(self.spec.pattern, raw):
+            raise ParseError(
+                f"value for {self.flag!r} does not match pattern",
+                context={"flag": self.flag, "value": raw, "pattern": self.spec.pattern},
+            )
 
     def to_flag_entries(self) -> dict[str, dict[str, object]]:
         """Manifest entries keyed by exposed flag; a secret shows only its two sources"""
@@ -176,6 +180,23 @@ class FieldInfo:
                 entry["pattern"] = scalar.pattern
             if scalar.pattern_type is not None:
                 entry["pattern_type"] = scalar.pattern_type
+        return entry
+
+    def to_positional_entry(self) -> dict[str, object]:
+        """``PositionalEntry`` (ManifestResponse 3.0): an array positional takes the rest"""
+        variadic = self.flag_type is FlagType.ARRAY
+        target = self.classified.item if variadic else self.classified
+        assert target is not None, "array fields always carry an item type"
+        entry: dict[str, object] = {
+            "name": self.name,
+            "type": target.flag_type.value,
+            "required": self.required,
+            "description": self.spec.description,
+        }
+        if target.flag_type is FlagType.ENUM:
+            entry["enum_values"] = list(target.enum_values)
+        if variadic:
+            entry["variadic"] = True
         return entry
 
 

@@ -103,12 +103,16 @@ def test_call_with_timeout_reraises_handler_exception() -> None:
         call_with_timeout(lambda: time.sleep(1), Timeout(0.01))
 
 
-def test_handler_exceptions_propagate_unwrapped() -> None:
+def test_handler_exception_becomes_crash_envelope_with_traceback() -> None:
     app = App("x", version="1")
 
     @app.command("crash", description="Raises")
     def crash(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise ValueError("handler bug")
 
-    with pytest.raises(ValueError, match="handler bug"):
-        app.run(["crash"], stdout=io.StringIO(), stderr=io.StringIO(), env={}, isatty=False)
+    out, err = io.StringIO(), io.StringIO()
+    code = app.run(["crash"], stdout=out, stderr=err, env={}, isatty=False)
+    env = json.loads(out.getvalue())
+    assert code == 1 and env["error"]["code"] == "HANDLER_CRASHED"
+    assert env["error"]["message"] == "crash raised ValueError: handler bug"
+    assert "Traceback" in err.getvalue() and "handler bug" in err.getvalue()

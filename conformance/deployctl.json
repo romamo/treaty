@@ -4,6 +4,7 @@
   "command": ["./deployctl"],
   "timeout_seconds": 5,
   "manifest": ["manifest"],
+  "argument_order": { "command_path": ["deploy", "rollback", "api"], "local_args": ["--strategy", "fast", "--dry-run"], "global_flag": "--format", "value": "json", "alternate_value": "human" },
   "probes": [
     { "name": "version", "argv": ["version"], "kind": "read" },
     { "name": "manifest", "argv": ["manifest"], "kind": "read" },

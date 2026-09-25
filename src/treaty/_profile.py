@@ -64,20 +64,51 @@ def probes_for(app: App) -> list[Probe]:
     return probes
 
 
+def argument_order_for(app: App) -> dict[str, object] | None:
+    """The first example whose tokens after its positionals start with an option, so the kit
+    can move ``--format`` around it (REQ-F-079); destructive ones are run with ``--dry-run``"""
+    for command in user_commands(app):
+        if command.danger_level is DangerLevel.MUTATING:
+            continue
+        argv = _argv_from_example(app, command)
+        if argv is None:
+            continue
+        head = len(command.path.parts)
+        while head < len(argv) and not argv[head].startswith("-"):
+            head += 1
+        local = list(argv[head:])
+        if command.danger_level is DangerLevel.DESTRUCTIVE:
+            local.append("--dry-run")
+        if len(local) < 2 or "--" in local:
+            continue
+        return {
+            "command_path": list(argv[:head]),
+            "local_args": local,
+            "global_flag": "--format",
+            "value": "json",
+            "alternate_value": "human",
+        }
+    return None
+
+
 def build_profile(app: App, command: Sequence[str], probes: Sequence[Probe]) -> dict[str, object]:
     """The kit resolves a slash-containing executable against the profile's directory,
     so anything relative is made absolute against the current directory here"""
     argv = list(command)
     if argv and "/" in argv[0] and not Path(argv[0]).is_absolute():
         argv[0] = str(Path(argv[0]).resolve())
-    return {
+    profile: dict[str, object] = {
         "schema_version": "1.0",
         "tool": f"{app.name} {app.version}",
         "command": argv,
         "timeout_seconds": 10,
         "manifest": ["manifest"],
-        "probes": [p.to_json() for p in probes],
     }
+    order = argument_order_for(app)
+    if order is not None:
+        profile["argument_order"] = order
+    profile["probes"] = [p.to_json() for p in probes]
+    return profile
 
 
 def write_profile(profile: dict[str, object], path: Path) -> None:

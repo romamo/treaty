@@ -7,6 +7,7 @@ context instead of a formatted message and a hard exit.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Collection, Mapping
 from dataclasses import MISSING, dataclass
 
@@ -58,6 +59,21 @@ def without_value(token: str) -> str:
     return token.partition("=")[0] if token.startswith("--") else token
 
 
+_NEGATIVE_NUMBER = re.compile(r"-(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?")
+
+
+def _is_negative(tok: str, command: Command) -> bool:
+    """``-5`` is a value, not a flag, unless the command has a digit short flag"""
+    return bool(_NEGATIVE_NUMBER.fullmatch(tok)) and command.field_by_short(tok[1]) is None
+
+
+def _repeated(flag: str) -> ParseError:
+    return ParseError(
+        f"{flag!r} given more than once with different values", context={"flag": flag}
+    )
+
+
+VALUED_GLOBALS = frozenset({"format", "max-output"})
 FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
 
 
@@ -69,8 +85,9 @@ def format_hint(token: str) -> str | None:
 
 
 def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
-    fmt: str | None = None
-    max_output: str | None = None
+    """Global options in any position; a valued one repeated with a different value is
+    an error rather than last-wins (REQ-F-067, REQ-F-079)"""
+    valued: dict[str, str] = {}
     help_ = False
     schema = False
     rest: list[str] = []
@@ -80,28 +97,33 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
         if tok == "--":
             rest.extend(argv[i:])
             break
+        name, eq, inline = tok[2:].partition("=") if tok.startswith("--") else ("", "", "")
         if tok in ("--help", "-h"):
             help_ = True
         elif tok == "--schema":
             schema = True
-        elif tok == "--format":
-            if i + 1 >= len(argv):
-                raise ParseError("--format needs a value", context={"flag": "format"})
-            fmt = argv[i + 1]
-            i += 1
-        elif tok.startswith("--format="):
-            fmt = tok.partition("=")[2]
-        elif tok == "--max-output":
-            if i + 1 >= len(argv):
-                raise ParseError("--max-output needs a value", context={"flag": "max-output"})
-            max_output = argv[i + 1]
-            i += 1
-        elif tok.startswith("--max-output="):
-            max_output = tok.partition("=")[2]
+        elif name in VALUED_GLOBALS:
+            if eq:
+                value = inline
+            elif i + 1 < len(argv):
+                i += 1
+                value = argv[i]
+            else:
+                raise ParseError(f"--{name} needs a value", context={"flag": name})
+            if valued.setdefault(name, value) != value:
+                raise _repeated(name)
         else:
             rest.append(tok)
         i += 1
-    return GlobalOptions(format=fmt, help=help_, schema=schema, max_output=max_output), rest
+    return (
+        GlobalOptions(
+            format=valued.get("format"),
+            help=help_,
+            schema=schema,
+            max_output=valued.get("max-output"),
+        ),
+        rest,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,20 +202,22 @@ def parse_command_args(
     only_positional = False
     errors = _Collector()
 
-    def assign(field: FieldInfo, raw: str) -> None:
+    def store(field: FieldInfo, parsed: object) -> None:
+        """A scalar repeated with the same value is accepted; a different value is not"""
+        if field.flag_type is FlagType.ARRAY:
+            arrays.setdefault(field.name, []).append(parsed)
+        elif field.name in values and values[field.name] != parsed:
+            errors.add(_repeated(field.flag))
+        else:
+            values[field.name] = parsed
+
+    def assign(field: FieldInfo, raw: str, *, negated: bool = False) -> None:
         try:
             parsed = field.parse(raw)
         except ParseError as exc:
             errors.add(exc)
             return
-        if field.flag_type is FlagType.ARRAY:
-            arrays.setdefault(field.name, []).append(parsed)
-        elif field.name in values:
-            errors.add(
-                ParseError(f"{field.flag!r} given more than once", context={"flag": field.flag})
-            )
-        else:
-            values[field.name] = parsed
+        store(field, (not parsed) if negated else parsed)
 
     def value_after(tok: str, flag: str, has_eq: bool, inline: str) -> str:
         """The token's value, consuming the next token when it is not inline"""
@@ -207,7 +231,7 @@ def parse_command_args(
 
     while i < len(tokens):
         tok = tokens[i]
-        if only_positional or not tok.startswith("-") or tok == "-":
+        if only_positional or not tok.startswith("-") or tok == "-" or _is_negative(tok, command):
             if pos_index >= len(positionals):
                 errors.add(
                     ParseError(
@@ -233,31 +257,24 @@ def parse_command_args(
             name, eq, inline = tok[2:].partition("=")
             has_eq = bool(eq)
             if name == TIMEOUT_FLAG and command.has_network_io:
-                raw = value_after(tok, TIMEOUT_FLAG, has_eq, inline)
-                if timeout is not None:
-                    raise ParseError(
-                        "'timeout' given more than once", context={"flag": TIMEOUT_FLAG}
-                    )
-                timeout = Timeout.parse(raw)
+                parsed_timeout = Timeout.parse(value_after(tok, TIMEOUT_FLAG, has_eq, inline))
+                if timeout is not None and timeout != parsed_timeout:
+                    raise _repeated(TIMEOUT_FLAG)
+                timeout = parsed_timeout
                 i += 1
                 continue
             if name == RAW_PAYLOAD_FLAG and command.supports_raw_payload:
                 raw = value_after(tok, RAW_PAYLOAD_FLAG, has_eq, inline)
-                if raw_payload is not None:
-                    raise ParseError(
-                        "'raw-payload' given more than once", context={"flag": RAW_PAYLOAD_FLAG}
-                    )
+                if raw_payload is not None and raw_payload != raw:
+                    raise _repeated(RAW_PAYLOAD_FLAG)
                 raw_payload = raw
                 i += 1
                 continue
             if name == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-                raw = value_after(tok, IDEMPOTENCY_FLAG, has_eq, inline)
-                if key is not None:
-                    raise ParseError(
-                        f"'{IDEMPOTENCY_FLAG}' given more than once",
-                        context={"flag": IDEMPOTENCY_FLAG},
-                    )
-                key = IdempotencyKey(raw)
+                parsed_key = IdempotencyKey(value_after(tok, IDEMPOTENCY_FLAG, has_eq, inline))
+                if key is not None and key != parsed_key:
+                    raise _repeated(IDEMPOTENCY_FLAG)
+                key = parsed_key
                 i += 1
                 continue
             if name == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
@@ -320,13 +337,9 @@ def parse_command_args(
             continue
         if found.flag_type is FlagType.BOOLEAN:
             if has_eq:
-                assign(found, inline)
-            elif found.name in values:
-                errors.add(
-                    ParseError(f"{found.flag!r} given more than once", context={"flag": found.flag})
-                )
+                assign(found, inline, negated=negated)
             else:
-                values[found.name] = not negated
+                store(found, not negated)
             i += 1
             continue
         raw = value_after(tok, found.flag, has_eq, inline)
@@ -344,10 +357,15 @@ def parse_command_args(
         errors.finish()
         mapping = _decode_raw_payload(raw_payload)
         built = build_from_mapping(command, mapping, env)
+        # Framework keys may come from argv or the payload; both only if they agree
+        if timeout is not None and built.timeout is not None and timeout != built.timeout:
+            raise _repeated(TIMEOUT_FLAG)
+        if key is not None and built.idempotency_key not in (None, key):
+            raise _repeated(IDEMPOTENCY_FLAG)
         return Invocation(
             args=built.args,
-            timeout=timeout,
-            confirmed=confirmed,
+            timeout=timeout or built.timeout,
+            confirmed=confirmed or built.confirmed,
             idempotency_key=key or built.idempotency_key,
             no_stream=no_stream or built.no_stream,
         )
@@ -429,7 +447,8 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
     missing = [
         f.env_flag if f.secret else f.flag
         for f in command.fields
-        if f.required and f.name not in values and f.flag not in failed
+        # A secret's source errors name --x-from-env or --x-from-file, not --x
+        if f.required and f.name not in values and failed.isdisjoint({f.flag, *f.exposed_flags()})
     ]
     if missing:
         errors.add(
@@ -532,8 +551,14 @@ def _check_field_value(field: FieldInfo, value: object) -> object:
         item = field.classified.item
         if not isinstance(value, list) or item is None:
             raise ParseError(f"{field.flag!r} expects an array", context=ctx)
-        return tuple(_check_scalar(item, v, field.flag) for v in value)
-    return _check_scalar(field.classified, value, field.flag)
+        return tuple(_check_patterned(field, item, v) for v in value)
+    return _check_patterned(field, field.classified, value)
+
+
+def _check_patterned(field: FieldInfo, target: Classified, value: object) -> object:
+    if isinstance(value, str):
+        field.check_pattern(value)
+    return _check_scalar(target, value, field.flag)
 
 
 def _check_scalar(target: Classified, value: object, flag: str) -> object:

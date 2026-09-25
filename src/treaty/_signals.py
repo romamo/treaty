@@ -1,8 +1,12 @@
 """SIGINT and SIGTERM handling (REQ-F-069, REQ-F-013).
 
 Handlers are installed only on the main thread for the duration of one run. The
-first signal raises ``Cancelled`` where the main thread is waiting; the second
-flushes stdout and exits immediately so the envelope is never written twice.
+first signal raises ``Cancelled`` where the main thread is waiting on a handler; the
+second flushes stdout and exits immediately so the envelope is never written twice.
+
+A signal that lands while the framework serializes or records a finished result is
+held until the next handler starts, so a completed run still writes its envelope and
+an ``exec`` plan stops before its next line.
 """
 
 from __future__ import annotations
@@ -27,33 +31,64 @@ class CancelSignal:
     exit_code: int
 
 
-class Cancelled(Exception):
-    """Raised on the main thread when a cancellation signal arrives"""
+class Cancelled(BaseException):
+    """Raised on the main thread when a cancellation signal arrives
+
+    A ``BaseException``, like ``KeyboardInterrupt``, so a handler's ``except Exception``
+    cannot swallow it.
+    """
 
     def __init__(self, sig: CancelSignal) -> None:
         super().__init__(f"cancelled by {sig.name}")
         self.signal = sig
 
 
-@contextmanager
-def cancellation_handlers(stdout: IO[str]) -> Iterator[None]:
-    """Install handlers for the run; restore the previous ones afterwards"""
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    state = {"cancelling": False}
+class Cancellation:
+    """Where a received signal may interrupt the run: only inside ``armed()``"""
 
-    def handle(signum: int, _frame: object) -> None:
-        sig = CancelSignal(signal.Signals(signum).name, SIGNAL_EXIT_CODES[signal.Signals(signum)])
-        if state["cancelling"]:
+    def __init__(self) -> None:
+        self._armed = False
+        self._pending: CancelSignal | None = None
+        self._cancelling = False
+
+    @contextmanager
+    def armed(self) -> Iterator[None]:
+        """Let a signal raise ``Cancelled`` here; one held since the last window raises now"""
+        if self._pending is not None:
+            sig, self._pending = self._pending, None
+            raise Cancelled(sig)
+        self._armed = True
+        try:
+            yield
+        finally:
+            self._armed = False
+
+    def handle(self, sig: CancelSignal, stdout: IO[str]) -> None:
+        if self._cancelling:
             stdout.flush()
             os._exit(sig.exit_code)
-        state["cancelling"] = True
+        self._cancelling = True
+        if not self._armed:
+            self._pending = sig
+            return
         raise Cancelled(sig)
+
+
+@contextmanager
+def cancellation_handlers(stdout: IO[str]) -> Iterator[Cancellation]:
+    """Install handlers for the run; restore the previous ones afterwards"""
+    cancellation = Cancellation()
+    if threading.current_thread() is not threading.main_thread():
+        yield cancellation
+        return
+
+    def handle(signum: int, _frame: object) -> None:
+        received = signal.Signals(signum)
+        cancellation.handle(CancelSignal(received.name, SIGNAL_EXIT_CODES[received]), stdout)
 
     previous = {sig: signal.signal(sig, handle) for sig in SIGNAL_EXIT_CODES}
     try:
-        yield
+        yield cancellation
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)

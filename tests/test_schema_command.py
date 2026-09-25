@@ -49,7 +49,10 @@ def test_raw_payload_schema_only_when_supported(app: App) -> None:
     raw = create_schema["raw_payload_schema"]
     Draft7Validator.check_schema(raw)
     assert raw["required"] == ["name"]
-    assert raw["properties"] == {"name": {"type": "string"}, "count": {"type": "integer"}}
+    assert raw["properties"]["name"] == {"type": "string", "description": "Name"}
+    assert raw["properties"]["count"] == {"type": "integer", "description": "How many"}
+    # The framework keys a payload may carry are part of the schema it is checked against
+    assert set(raw["properties"]) == {"name", "count", "idempotency_key"}
     assert raw["additionalProperties"] is False
 
 

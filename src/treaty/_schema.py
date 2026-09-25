@@ -1,7 +1,8 @@
 """JSON Schema draft-07 generation and JSON serialization, both dependency-free.
 
-Supports the subset the framework needs: scalars, ``Literal`` and ``Enum``
-strings, ``X | None``, ``list[T]``, ``tuple[T, ...]``, ``dict[str, T]``,
+Supports the subset the framework needs: scalars, ``Literal`` strings, string or
+integer ``Enum``, ``X | None``, ``list[T]``, ``tuple[T, ...]``, fixed ``tuple[A, B]``,
+``dict[str, T]``,
 ``object`` for unconstrained values, and nested dataclasses.
 """
 
@@ -41,6 +42,15 @@ def _schema_for_base(base: object, scalars: ScalarRegistry) -> JsonSchema:
         if not all(isinstance(v, str) for v in values):
             raise SchemaError(f"Literal values must all be strings: {base!r}")
         return {"type": "string", "enum": list(values)}
+    if origin is tuple and (args := typing.get_args(base)) and args[-1] is not Ellipsis:
+        # A fixed-length tuple: one schema per position (draft-07 tuple validation)
+        return {
+            "type": "array",
+            "items": [schema_for(a, scalars) for a in args],
+            "additionalItems": False,
+            "minItems": len(args),
+            "maxItems": len(args),
+        }
     if origin in (list, tuple):
         args = typing.get_args(base)
         item = args[0] if args else object
@@ -62,10 +72,20 @@ def _schema_for_base(base: object, scalars: ScalarRegistry) -> JsonSchema:
         if (spec := scalars.get(base)) is not None:
             return spec.json_schema()
         if issubclass(base, Enum):
-            return {"type": "string", "enum": [m.value for m in base]}
+            return _enum_schema(base)
         if dataclasses.is_dataclass(base):
             return _dataclass_schema(base, scalars)
     raise SchemaError(f"unsupported annotation {base!r}; register a class with app.scalar(...)")
+
+
+def _enum_schema(cls: type[Enum]) -> JsonSchema:
+    """The JSON type of the members' values, which is what ``to_jsonable`` emits"""
+    values = [m.value for m in cls]
+    if all(isinstance(v, str) for v in values):
+        return {"type": "string", "enum": values}
+    if all(isinstance(v, int) and not isinstance(v, bool) for v in values):
+        return {"type": "integer", "enum": values}
+    raise SchemaError(f"{cls.__qualname__}: enum values must be all strings or all integers")
 
 
 def _dataclass_schema(cls: type, scalars: ScalarRegistry) -> JsonSchema:

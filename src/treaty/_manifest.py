@@ -8,10 +8,46 @@ from collections.abc import Mapping
 
 from ._command import Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
+from ._mode import OutputMode
+from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG, NO_STREAM_FLAG, TIMEOUT_FLAG
+from ._schema import JsonSchema
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "3.0"
+CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
+IDEMPOTENCY_KEY = IDEMPOTENCY_FLAG.replace("-", "_")
+NO_STREAM_KEY = NO_STREAM_FLAG.replace("-", "_")
+TIMEOUT_KEY = TIMEOUT_FLAG
 _ALWAYS = (FrameworkCode.SUCCESS, FrameworkCode.GENERAL_ERROR, FrameworkCode.ARG_ERROR)
+
+
+# REQ-F-079: split_globals accepts these anywhere on every command path
+GLOBAL_FLAG_ENTRIES: dict[str, object] = {
+    "format": {
+        "type": "enum",
+        "required": False,
+        "enum_values": [m.value for m in OutputMode],
+        "description": "Output representation; defaults to json when stdout is not a terminal",
+    },
+    "max-output": {
+        "type": "integer",
+        "required": False,
+        "description": "Largest stdout envelope in bytes (at least 4096) before truncation",
+    },
+    "schema": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Print the command's input and output schema instead of running it",
+    },
+    "help": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "short": "h",
+        "description": "Print the command's help instead of running it",
+    },
+}
 
 
 def canonical_json(value: object) -> str:
@@ -91,6 +127,9 @@ def command_entry(
         "exit_codes": exit_codes,
         "output_schema": command.output_schema,
     }
+    positionals = [f.to_positional_entry() for f in command.fields if f.positional]
+    if positionals:
+        out["positionals"] = positionals
     children = sorted(p.value for p in all_paths if p.is_direct_child_of(command.path))
     if children:
         out["subcommands"] = children
@@ -114,8 +153,66 @@ def command_schema(
     entry = command_entry(command, exits, all_paths)
     entry["parameters"] = entry["flags"]
     if command.supports_raw_payload:
-        entry["raw_payload_schema"] = command.args_schema
+        entry["raw_payload_schema"] = payload_schema(command)
     return entry
+
+
+def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
+    """Every key a JSON payload may carry: the args schema with secrets replaced by their
+    sources, plus the framework keys the command declares"""
+    properties: dict[str, JsonSchema] = {}
+    required: list[str] = []
+    base = command.args_schema
+    base_required = set(base.get("required", ()))
+    for f in command.fields:
+        if f.secret:
+            what = f.spec.description
+            properties[f"{f.name}_from_env"] = {
+                "type": "string",
+                "description": f"Name of the environment variable holding: {what}",
+            }
+            properties[f"{f.name}_from_file"] = {
+                "type": "string",
+                "description": f"Path of the file holding: {what}",
+            }
+            continue
+        prop = dict(base["properties"][f.name])
+        prop["description"] = f.spec.description
+        properties[f.name] = prop
+        if f.name in base_required:
+            required.append(f.name)
+    if command.has_network_io:
+        properties[TIMEOUT_KEY] = {
+            "type": "number",
+            "description": "Seconds before the framework aborts with TIMEOUT; 0 disables it",
+        }
+    if command.danger_level is not DangerLevel.SAFE:
+        properties[IDEMPOTENCY_KEY] = {
+            "type": "string",
+            "description": "Repeat calls with the same key return the original result "
+            "with effect noop instead of running again",
+        }
+    if command.danger_level is DangerLevel.DESTRUCTIVE:
+        properties[CONFIRM_KEY] = {
+            "type": "boolean",
+            "default": False,
+            "description": "Required to apply; without it the command previews and fails "
+            "with CONFIRMATION_REQUIRED",
+        }
+    if command.streaming and stream_key:
+        properties[NO_STREAM_KEY] = {
+            "type": "boolean",
+            "default": False,
+            "description": "Return one envelope with every event in data",
+        }
+    schema: JsonSchema = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": False,
+    }
+    if required:
+        schema["required"] = required
+    return schema
 
 
 def build_schema_manifest(
@@ -145,6 +242,7 @@ def build_manifest(
         "schema_version": SCHEMA_VERSION,
         "framework_version": framework_version,
         "etag": etag.value,
+        "flags": GLOBAL_FLAG_ENTRIES,
         "exit_codes": shared,
         "commands": entries,
     }

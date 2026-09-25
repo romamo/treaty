@@ -152,3 +152,9 @@ def test_command_flag_named_like_a_global_is_rejected() -> None:
         @app.command("go", description="Go")
         def go(args: Args, ctx: Ctx) -> dict[str, str]:
             return {}
+
+
+def test_in_process_call_is_capped_like_stdout() -> None:
+    envelope = big_app().call("items", {}, env={})
+    assert envelope.extra_meta.get("truncated") is True
+    assert {w.code for w in envelope.warnings} == {"FIELD_TRUNCATED"}

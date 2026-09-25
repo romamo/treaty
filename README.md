@@ -76,15 +76,20 @@ printf '%s\n' '{"_cmd":"deploy.rollback","service":"api","_opts":{"to":"1.3.9"}}
 ## Flag order
 
 `--format`, `--help`, `--schema`, and `--max-output` are global: they are accepted anywhere
-before `--`, so a command cannot declare a flag with those names. Every other flag, including
-`--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`, belongs to a
-command and goes after the full command path:
+before `--`, so a command cannot declare a flag with those names or the short `-h`. The
+manifest lists them once, in its root `flags` map (ManifestResponse 3.0). Every other flag,
+including `--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`,
+belongs to a command and goes after the full command path:
 
 ```bash
 deployctl --format json deploy rollback api --dry-run   # ok
 deployctl deploy rollback api --dry-run --format json   # ok
 deployctl --dry-run deploy rollback api                 # ARG_ERROR
 ```
+
+Any option repeated with a different value exits `2` naming the option; repeating the same
+value is accepted, and array flags accumulate. A negative number such as `-5` is a value,
+not a flag.
 
 A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
 words resolve to in `context.command`, and puts the corrected order in `suggestion`. Human
@@ -94,9 +99,15 @@ mode prints every error's suggestion as a final `hint:` line on stderr.
 
 Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 `@app.command(..., timeout=5)` per command, and `--timeout` on any command declaring
-`has_network_io=True` (`--timeout 0` disables it). On expiry the framework writes a
-`TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every response. Handlers
-read `ctx.timeout` to pass the same deadline to their network calls.
+`has_network_io=True` (`--timeout 0` disables it; at most one year). On expiry the
+framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
+response. Handlers read `ctx.timeout` to pass the same deadline to their network calls. An
+idempotency key stays locked until a timed-out handler really finishes, so a retry waits
+and replays its result instead of running beside it.
+
+A handler that raises anything else exits `1` with `HANDLER_CRASHED`, naming the exception;
+the traceback goes to stderr with secret values redacted. A result or `Exit` payload the
+framework cannot serialize exits `1` with `INVALID_OUTPUT` or `INVALID_EXIT`.
 
 ## Output size
 
@@ -265,7 +276,9 @@ it on to an upstream API.
 
 SIGINT and SIGTERM produce a `CANCELLED` envelope with exit `130` or `143`, run the
 command's optional `cleanup=` hook first, and a second signal during cleanup exits at once
-without a second write. Both codes appear in every command's `exit_codes` map.
+without a second write. A handler's own `except Exception` cannot swallow the signal. One
+that arrives after the handler returned is held: the finished result is written, and an
+`exec` plan stops before its next line. Both codes appear in every command's `exit_codes` map.
 
 ## Raw payloads
 
@@ -328,8 +341,9 @@ uv run treaty conformance shop_tool.cli:app --run
 codes, a test using `app.run()`, and a conformance profile. `conformance` derives probes
 from each command's first example and danger level, writes the profile, and with `--run`
 executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. The kit is found
-via `--spec-dir`, then `TREATY_SPEC_DIR`, then a sibling `cli-agent-ergonomics` checkout; a
-named location without `conformance/run.py` exits `4` instead of falling through. `--out` and
+via `--spec-dir`, then `TREATY_SPEC_DIR`, then `../cli-agent-ergonomics` relative to the
+current directory; a named location without `conformance/run.py` exits `4` instead of
+falling through. `--out` and
 `--directory` reject `..` segments, percent-encodings, and null bytes; pass an absolute path
 to write outside the working directory.
 
