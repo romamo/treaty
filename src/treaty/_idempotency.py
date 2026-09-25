@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import IO
 
 from ._errors import ParseError
+from ._scalars import ScalarRegistry
 from ._schema import to_jsonable
 from ._values import CommandPath
 
@@ -72,9 +73,9 @@ class Record:
     created_at: float
 
 
-def fingerprint(command: CommandPath, args: object) -> str:
+def fingerprint(command: CommandPath, args: object, scalars: ScalarRegistry) -> str:
     """Hash of the command and its arguments; the same key must always mean the same call"""
-    payload = {"command": command.value, "args": to_jsonable(args)}
+    payload = {"command": command.value, "args": to_jsonable(args, scalars)}
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 

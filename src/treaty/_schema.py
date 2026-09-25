@@ -15,25 +15,26 @@ from pathlib import Path
 from typing import Any
 
 from ._errors import SchemaError
+from ._scalars import ScalarRegistry
 from ._types import is_dataclass_type, strip_optional
 
 JsonSchema = dict[str, Any]
 
 
-def schema_for(tp: object) -> JsonSchema:
+def schema_for(tp: object, scalars: ScalarRegistry) -> JsonSchema:
     """Return a draft-07 schema fragment for a supported annotation"""
     if tp is object or tp is Any:
         return {}
     if tp is types.NoneType:
         return {"type": "null"}
     base, optional = strip_optional(tp)
-    schema = _schema_for_base(base)
+    schema = _schema_for_base(base, scalars)
     if optional:
         return {"anyOf": [schema, {"type": "null"}]}
     return schema
 
 
-def _schema_for_base(base: object) -> JsonSchema:
+def _schema_for_base(base: object, scalars: ScalarRegistry) -> JsonSchema:
     origin = typing.get_origin(base)
     if origin is typing.Literal:
         values = typing.get_args(base)
@@ -43,12 +44,12 @@ def _schema_for_base(base: object) -> JsonSchema:
     if origin in (list, tuple):
         args = typing.get_args(base)
         item = args[0] if args else object
-        return {"type": "array", "items": schema_for(item)}
+        return {"type": "array", "items": schema_for(item, scalars)}
     if origin is dict:
         key, value = typing.get_args(base)
         if key is not str:
             raise SchemaError(f"dict keys must be str: {base!r}")
-        return {"type": "object", "additionalProperties": schema_for(value)}
+        return {"type": "object", "additionalProperties": schema_for(value, scalars)}
     if isinstance(base, type):
         if base is bool:
             return {"type": "boolean"}
@@ -58,19 +59,21 @@ def _schema_for_base(base: object) -> JsonSchema:
             return {"type": "number"}
         if base is str or base is Path:
             return {"type": "string"}
+        if (spec := scalars.get(base)) is not None:
+            return spec.json_schema()
         if issubclass(base, Enum):
             return {"type": "string", "enum": [m.value for m in base]}
         if dataclasses.is_dataclass(base):
-            return _dataclass_schema(base)
-    raise SchemaError(f"unsupported annotation {base!r}")
+            return _dataclass_schema(base, scalars)
+    raise SchemaError(f"unsupported annotation {base!r}; register a class with app.scalar(...)")
 
 
-def _dataclass_schema(cls: type) -> JsonSchema:
+def _dataclass_schema(cls: type, scalars: ScalarRegistry) -> JsonSchema:
     hints = typing.get_type_hints(cls)
     properties: dict[str, JsonSchema] = {}
     required: list[str] = []
     for f in dataclasses.fields(cls):
-        properties[f.name] = schema_for(hints[f.name])
+        properties[f.name] = schema_for(hints[f.name], scalars)
         if f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING:
             required.append(f.name)
     schema: JsonSchema = {
@@ -93,7 +96,7 @@ def is_payload_type(tp: object) -> bool:
     return origin in (list, tuple, dict) or is_dataclass_type(base)
 
 
-def to_jsonable(value: object) -> object:
+def to_jsonable(value: object, scalars: ScalarRegistry) -> object:
     """Convert handler output into plain JSON types; fails on anything else"""
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -101,15 +104,21 @@ def to_jsonable(value: object) -> object:
         return value.value
     if isinstance(value, Path):
         return str(value)
+    if (spec := scalars.for_value(value)) is not None:
+        return to_jsonable(spec.serialize(value), scalars)
     if isinstance(value, (list, tuple)):
-        return [to_jsonable(v) for v in value]
+        return [to_jsonable(v, scalars) for v in value]
     if isinstance(value, dict):
         out: dict[str, object] = {}
         for k, v in value.items():
             if not isinstance(k, str):
                 raise SchemaError(f"dict keys must be str, got {type(k).__name__}")
-            out[k] = to_jsonable(v)
+            out[k] = to_jsonable(v, scalars)
         return out
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {f.name: to_jsonable(getattr(value, f.name)) for f in dataclasses.fields(value)}
-    raise SchemaError(f"cannot serialize {type(value).__name__} to JSON")
+        return {
+            f.name: to_jsonable(getattr(value, f.name), scalars) for f in dataclasses.fields(value)
+        }
+    raise SchemaError(
+        f"cannot serialize {type(value).__name__} to JSON; register it with app.scalar(...)"
+    )

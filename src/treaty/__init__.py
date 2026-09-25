@@ -7,6 +7,7 @@ from ._errors import CliExit, Exit, ParseError, RegistrationError, SchemaError, 
 from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
 from ._flags import Arg, Flag
 from ._mode import OutputMode
+from ._scalars import ScalarSpec
 from ._timeout import Timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, Scope
 
@@ -30,6 +31,7 @@ __all__ = [
     "OutputMode",
     "ParseError",
     "RegistrationError",
+    "ScalarSpec",
     "SchemaError",
     "Scope",
     "SideEffects",

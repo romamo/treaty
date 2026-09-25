@@ -12,7 +12,7 @@ from dataclasses import MISSING, dataclass
 
 from ._command import Command, DangerLevel
 from ._errors import ParseError
-from ._flags import FieldInfo
+from ._flags import FieldInfo, apply_scalar
 from ._idempotency import IdempotencyKey
 from ._paths import check_path
 from ._secrets import (
@@ -512,6 +512,11 @@ def _check_field_value(field: FieldInfo, value: object) -> object:
 
 
 def _check_scalar(target: Classified, value: object, flag: str) -> object:
+    base = _check_base(target, value, flag)
+    return base if target.scalar is None else apply_scalar(target.scalar, base, flag)
+
+
+def _check_base(target: Classified, value: object, flag: str) -> object:
     ctx = {"field": flag, "value": value}
     match target.flag_type:
         case FlagType.BOOLEAN:

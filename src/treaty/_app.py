@@ -45,6 +45,7 @@ from ._parse import (
     split_globals,
     without_value,
 )
+from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._signals import Cancelled, CancelSignal, cancellation_handlers
 from ._timeout import Timeout, TimeoutExpired, call_with_timeout
@@ -116,6 +117,7 @@ class App:
         self.max_stdin = StdinCap(max_stdin_bytes)
         self.state_dir = None if state_dir is None else Path(state_dir)
         self.exits = ExitCodeRegistry()
+        self.scalars = ScalarRegistry()
         self._state: Mapping[str, object] = dict(state or {})
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
@@ -139,6 +141,38 @@ class App:
                 description=description,
                 retryable=retryable,
                 side_effects=SideEffects(side_effects),
+            )
+        )
+
+    def scalar(
+        self,
+        cls: type,
+        *,
+        parse: Callable[[Any], object],
+        base: type = str,
+        pattern: str | None = None,
+        pattern_type: str | None = None,
+        minimum: int | float | None = None,
+        maximum: int | float | None = None,
+        serialize: Callable[[Any], object] | None = None,
+    ) -> ScalarSpec:
+        """Let a domain class annotate fields and outputs; declare it before the commands using it
+
+        Values travel as ``base`` (``str``, ``int``, or ``float``), are checked against
+        ``pattern`` or the bounds, then handed to ``parse``; a ``ValueError`` from it is one
+        entry in ``error.errors``. ``serialize`` turns an instance back into the base value
+        and defaults to its ``value`` field.
+        """
+        return self.scalars.register(
+            ScalarSpec(
+                cls=cls,
+                parse=parse,
+                serialize=serialize if serialize is not None else default_serializer(cls, base),
+                base=base,
+                pattern=pattern,
+                pattern_type=pattern_type,
+                minimum=minimum,
+                maximum=maximum,
             )
         )
 
@@ -185,6 +219,7 @@ class App:
                     supports_raw_payload=supports_raw_payload,
                     cleanup=cleanup,
                     human=human,
+                    scalars=self.scalars,
                 )
             )
             return fn
@@ -426,7 +461,7 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
-        call = fingerprint(command.path, invocation.args)
+        call = fingerprint(command.path, invocation.args, self.app.scalars)
         with claim(directory, key) as slot:
             if slot.record is None:
                 envelope = self._execute(command, invocation, mode, meta=meta)
@@ -510,7 +545,7 @@ class _Run:
             return self._cancelled(command, exc.signal, started, full_meta)
         except KeyboardInterrupt:
             return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
-        data = to_jsonable(result)
+        data = to_jsonable(result, self.app.scalars)
         if command.danger_level is not DangerLevel.SAFE:
             problem = effect_problem(data, preview=_dry_run_requested(args))
             if problem is not None:
@@ -590,7 +625,7 @@ class _Run:
         entry = self.app.exits.by_name(exc.name)
         return self._envelope(
             entry.code.value,
-            data=to_jsonable(exc.data),
+            data=to_jsonable(exc.data, self.app.scalars),
             error=ErrorDetail(
                 code=exc.code,
                 message=exc.message,

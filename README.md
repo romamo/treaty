@@ -147,6 +147,28 @@ patterns of REQ-F-045 with exit `2`: any `..` segment, a percent-encoded sequenc
 `/abs/out.json` passes unchanged. `pattern=` is not allowed on `Path` fields. The audit rule
 `path-typed` warns about `str` fields whose name looks like a path.
 
+## Custom scalars
+
+A domain class can annotate a field or an output attribute once the app knows how to parse
+it. Register it before the commands that use it; the class itself never imports treaty:
+
+```python
+app.scalar(ResourceId, parse=ResourceId.from_boundary, pattern=r"[a-z][a-z0-9-]{0,62}")
+app.scalar(TcpPort, parse=TcpPort, base=int, minimum=1, maximum=65535)
+app.scalar(RunId, parse=RunId, pattern_type="uuid")
+```
+
+The value travels as its `base` (`str`, `int`, or `float`) on argv, in `exec` lines, and in
+`--raw-payload`. The framework coerces the base type, checks `pattern`, `pattern_type`, or
+the bounds, then calls `parse`; a `ValueError` or `TypeError` from it is one entry in
+`error.errors` with the class name and the cause in `context`. The manifest lists the field
+under its base type with `pattern` or `pattern_type`, and `--schema` carries the pattern,
+`format`, and bounds on both `raw_payload_schema` and `output_schema`. Outputs serialize
+back through `serialize`, which defaults to the class's `value` field (or `str` for a `str`
+base). `pattern=` on a field of a registered type is a registration error, as is annotating
+an unregistered class. `pattern_type` takes the REQ-C-020 presets `alphanumeric_id`,
+`uuid`, `semver`, and `url`; `filepath` stays with `pathlib.Path`.
+
 ## Destructive commands
 
 A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without

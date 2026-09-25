@@ -13,6 +13,7 @@ from ._context import Ctx
 from ._effect import can_carry_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
+from ._scalars import ScalarRegistry
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
 from ._timeout import Timeout
@@ -46,6 +47,8 @@ class Command:
     args_type: type
     output_type: object
     output_schema: JsonSchema
+    args_schema: JsonSchema
+    """JSON Schema of the args dataclass; served as ``raw_payload_schema``"""
     fields: tuple[FieldInfo, ...]
     description: str
     danger_level: DangerLevel
@@ -92,11 +95,12 @@ def build_command(
     supports_raw_payload: bool,
     cleanup: Cleanup | None,
     human: HumanRenderer | None,
+    scalars: ScalarRegistry,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
     args_type, output_type = _inspect_handler(fn, path)
-    fields = inspect_fields(args_type)
+    fields = inspect_fields(args_type, scalars)
     shadowed = sorted(f.flag for f in fields if not f.positional and f.flag in GLOBAL_FLAGS)
     if shadowed:
         raise RegistrationError(
@@ -126,7 +130,8 @@ def build_command(
         handler=fn,
         args_type=args_type,
         output_type=output_type,
-        output_schema=schema_for(output_type),
+        output_schema=schema_for(output_type, scalars),
+        args_schema=schema_for(args_type, scalars),
         fields=fields,
         description=description,
         danger_level=danger_level,

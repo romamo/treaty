@@ -57,6 +57,14 @@ The two do not share code.
 - **`error.errors` is always present on a validation error.** A single failure lists
   itself, so agents read one shape. An unknown flag followed by a bare token consumes that
   token as its value rather than reporting it as an unexpected positional
+- **Custom scalars are an app-level registry, not a protocol on the domain class.**
+  `app.scalar(cls, parse=..., base=..., pattern=..., minimum=..., serialize=...)` records a
+  `ScalarSpec`; `classify`, `schema_for`, and `to_jsonable` all take the registry, so the
+  domain module never imports treaty. A registered class is a `string`, `integer`, or
+  `number` flag; `apply_scalar` in `_flags.py` runs the declared constraint and then the
+  parser on both input routes. Registration happens before the commands that use the class:
+  an unregistered annotation is a `SchemaError` at command registration, and an
+  unregistered dataclass in an output is still an ordinary nested object
 - **Uncaught handler exceptions propagate.** Only `CliExit`, `ParseError` (a handler
   validating its own input, exit 2), timeout, and cancellation become envelopes; anything
   else is a bug and surfaces as a traceback
@@ -71,6 +79,7 @@ src/treaty/
   _cli.py        the `treaty` console script (audit, rules, init, conformance)
   _profile.py    probes from examples and danger levels, profile writer, kit runner
   _scaffold.py   file templates for `treaty init`; generated projects pass the audit
+  _scalars.py    ScalarSpec and ScalarRegistry: custom scalar classes and their constraints
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _command.py    Command record, build_command(), handler signature inspection
   _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, idempotency_key)

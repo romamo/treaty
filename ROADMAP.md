@@ -37,6 +37,10 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - Response size cap (REQ-F-052): 1 MiB default, `--max-output` and
   `TREATY_MAX_OUTPUT_BYTES`, `meta.truncated` with a hint, and a `FIELD_TRUNCATED` warning
   per cut field (REQ-F-064)
+- Custom scalars (cloudfall gap 1): `app.scalar(cls, parse=, base=, pattern=,
+  pattern_type=, minimum=, maximum=, serialize=)`; the registry reaches `classify`,
+  `schema_for`, and `to_jsonable`; both input routes check the constraint and then call the
+  parser; the manifest and `--schema` carry the pattern, preset, and bounds
 
 ## 0.1.0: first release
 
@@ -57,13 +61,9 @@ Gaps found on 2026-09-25 by reading the first real consumer, `romamo/cloudfall`
 (commit `b9677a6`): its argparse CLI, agent toolset, and MCP server declare every
 operation three times, and none of them could be ported until these land. In order:
 
-- **Custom scalars** via a registry, not a protocol on the domain class:
-  `app.scalar(ResourceId, parse=ResourceId.from_boundary, pattern=r"...")` and
-  `app.scalar(TcpPort, parse=..., base=int, minimum=1, maximum=65535)`. `classify` in
-  `_types.py` takes the registry; the manifest and `--schema` carry the pattern or bounds;
-  `exec` and `--raw-payload` serialise back through the base type; a `ValueError` from
-  the parser is one entry in `error.errors`. The REQ-C-020 presets (`uuid`, `semver`)
-  become built-in registrations
+- **Custom scalars**: done, see above. Still open from it: built-in `ScalarSpec`
+  presets that pair `pattern_type` with a matching regex, so `uuid` and `semver` are
+  checked in phase 1 rather than only declared
 - **Typed resources** on the handler signature instead of a global pre-dispatch hook:
   any parameter after `ctx` names a class with an `acquire(cls, args, ctx)` classmethod,
   resolved after validation, cached per run, composable, and a `CliExit` raised inside

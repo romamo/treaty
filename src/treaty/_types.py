@@ -14,6 +14,7 @@ from enum import Enum, StrEnum
 from pathlib import Path
 
 from ._errors import SchemaError
+from ._scalars import ScalarRegistry, ScalarSpec
 
 
 class FlagType(StrEnum):
@@ -45,6 +46,8 @@ class Classified:
     item: Classified | None = None
     path: bool = False
     """A ``pathlib.Path`` string: hardened against traversal and encoded bytes"""
+    scalar: ScalarSpec | None = None
+    """A registered custom scalar: parsed through its spec after the base type"""
 
 
 def strip_optional(tp: object) -> tuple[object, bool]:
@@ -57,7 +60,7 @@ def strip_optional(tp: object) -> tuple[object, bool]:
     return members[0], True
 
 
-def classify(tp: object) -> Classified:
+def classify(tp: object, scalars: ScalarRegistry) -> Classified:
     base, optional = strip_optional(tp)
     origin = typing.get_origin(base)
     if origin is typing.Literal:
@@ -72,7 +75,7 @@ def classify(tp: object) -> Classified:
                 raise SchemaError(f"only homogeneous 'tuple[T, ...]' is supported: {base!r}")
         elif len(args) != 1:
             raise SchemaError(f"list needs exactly one item type: {base!r}")
-        item = classify(args[0])
+        item = classify(args[0], scalars)
         if item.flag_type in (FlagType.ARRAY, FlagType.BOOLEAN) or item.optional:
             raise SchemaError(f"array items must be scalars: {base!r}")
         return Classified(FlagType.ARRAY, optional, base, item=item)
@@ -81,6 +84,8 @@ def classify(tp: object) -> Classified:
             return Classified(_SCALARS[base], optional, base)
         if base is Path:
             return Classified(FlagType.STRING, optional, base, path=True)
+        if (spec := scalars.get(base)) is not None:
+            return Classified(_SCALARS[spec.base], optional, base, scalar=spec)
         if issubclass(base, Enum):
             members = list(base)
             if not all(isinstance(m.value, str) for m in members):
@@ -92,7 +97,7 @@ def classify(tp: object) -> Classified:
                 enum_values=tuple(m.value for m in members),
                 enum_cls=base,
             )
-    raise SchemaError(f"unsupported annotation {tp!r}")
+    raise SchemaError(f"unsupported annotation {tp!r}; register a class with app.scalar(...)")
 
 
 def is_dataclass_type(tp: object) -> bool:

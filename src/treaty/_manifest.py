@@ -8,7 +8,6 @@ from collections.abc import Mapping
 
 from ._command import Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
-from ._schema import schema_for
 from ._values import CommandPath, Etag
 
 SCHEMA_VERSION = "1.0"
@@ -105,7 +104,7 @@ def command_schema(
     entry = command_entry(command, exits, all_paths)
     entry["parameters"] = entry["flags"]
     if command.supports_raw_payload:
-        entry["raw_payload_schema"] = schema_for(command.args_type)
+        entry["raw_payload_schema"] = command.args_schema
     return entry
 
 
