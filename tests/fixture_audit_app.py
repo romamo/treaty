@@ -20,6 +20,7 @@ class Wide:
     price: float = Flag(default=0.0, description="Price")
     qty: int = Flag(default=0, description="Quantity")
     note: str = Flag(default="", description="Note")
+    report_file: str = Flag(default="", description="Where to write the report")
 
 
 @app.command("delete-item", description="Delete an item")

@@ -11,6 +11,7 @@ import dataclasses
 import types
 import typing
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from ._errors import SchemaError
@@ -55,7 +56,7 @@ def _schema_for_base(base: object) -> JsonSchema:
             return {"type": "integer"}
         if base is float:
             return {"type": "number"}
-        if base is str:
+        if base is str or base is Path:
             return {"type": "string"}
         if issubclass(base, Enum):
             return {"type": "string", "enum": [m.value for m in base]}
@@ -98,6 +99,8 @@ def to_jsonable(value: object) -> object:
         return value
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, Path):
+        return str(value)
     if isinstance(value, (list, tuple)):
         return [to_jsonable(v) for v in value]
     if isinstance(value, dict):

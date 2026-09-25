@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import os
-import re
 import stat
 import sys
 from collections.abc import Mapping
@@ -12,12 +11,11 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
 
 from ._app import App, NoArgs
 from ._audit import RULES, AuditReport, Severity, audit
 from ._context import Ctx
-from ._errors import Exit, ParseError
+from ._errors import Exit
 from ._flags import Arg, Flag
 from ._profile import (
     SPEC_FALLBACK,
@@ -54,34 +52,6 @@ cli.exit_code(
 )
 
 BLOCKING = frozenset({Severity.ERROR, Severity.WARNING})
-
-_PERCENT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
-
-
-@dataclass(frozen=True, slots=True)
-class WritePath:
-    """A path this CLI writes to: no ``..`` segments, percent-encodings, or null bytes"""
-
-    value: Path
-
-    @classmethod
-    def parse(cls, raw: str, flag: str) -> WritePath:
-        context = {"flag": flag, "value": raw}
-        if "\x00" in raw:
-            raise ParseError(f"{flag} contains a null byte", context=context)
-        if _PERCENT_RE.search(raw):
-            raise ParseError(
-                f"{flag} contains a percent-encoded sequence",
-                context=context,
-                suggestion=f"pass the decoded path: {flag} {unquote(raw)}",
-            )
-        if ".." in Path(raw).parts:
-            raise ParseError(
-                f"{flag} escapes its base directory with '..'",
-                context=context,
-                suggestion=f"pass the absolute path if intended: {flag} {Path(raw).resolve()}",
-            )
-        return cls(Path(raw))
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,7 +193,7 @@ def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
 @dataclass(frozen=True, slots=True)
 class InitArgs:
     name: str = Arg(description="Project and command name, lowercase with hyphens")
-    directory: str | None = Flag(default=None, description="Target directory, default ./<name>")
+    directory: Path | None = Flag(default=None, description="Target directory, default ./<name>")
     dry_run: bool = Flag(default=False, description="List the files without writing them")
     treaty_source: str | None = Flag(
         default=None, description="Local treaty checkout to depend on instead of PyPI"
@@ -259,9 +229,7 @@ def render_init(data: Any) -> str:
 )
 def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     name = ProjectName(args.name)
-    target = (
-        WritePath.parse(args.directory, "--directory").value if args.directory else Path(name.value)
-    )
+    target = args.directory if args.directory is not None else Path(name.value)
     if target.exists() and any(target.iterdir()):
         raise Exit.CONFLICT(
             f"{target} exists and is not empty",
@@ -298,14 +266,14 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
 @dataclass(frozen=True, slots=True)
 class ConformanceArgs:
     target: str = Arg(description="Import path of the App object, as module:attribute")
-    out: str | None = Flag(
+    out: Path | None = Flag(
         default=None, description="Profile path, default conformance/<name>.json"
     )
     command: tuple[str, ...] = Flag(
         default=(), description="Executable argv for probes, default the app name on PATH"
     )
     run: bool = Flag(default=False, description="Run the spec kit after writing the profile")
-    spec_dir: str | None = Flag(
+    spec_dir: Path | None = Flag(
         default=None, description="Spec checkout with conformance/run.py; also TREATY_SPEC_DIR"
     )
 
@@ -341,10 +309,10 @@ def render_conformance(data: Any) -> str:
     return "\n".join(lines) + "\n"
 
 
-def resolve_spec_dir(explicit: str | None, env: Mapping[str, str]) -> Path:
+def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
     """A named location must hold the kit; only unnamed discovery falls back to the sibling"""
-    if explicit:
-        named, source = Path(explicit), "--spec-dir"
+    if explicit is not None:
+        named, source = explicit, "--spec-dir"
     elif env.get("TREATY_SPEC_DIR"):
         named, source = Path(env["TREATY_SPEC_DIR"]), "TREATY_SPEC_DIR"
     else:
@@ -376,7 +344,7 @@ def resolve_spec_dir(explicit: str | None, env: Mapping[str, str]) -> Path:
 )
 def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     app = load_app(args.target)
-    out = WritePath.parse(args.out, "--out").value if args.out else None
+    out = args.out
     spec_dir = resolve_spec_dir(args.spec_dir, os.environ) if args.run else None
     probes = probes_for(app)
     command = list(args.command) or [app.name]

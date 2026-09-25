@@ -1,6 +1,6 @@
 # Handoff
 
-Status as of 2026-09-24. Read this before touching the code.
+Status as of 2026-09-25. Read this before touching the code.
 
 ## What this is
 
@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 89 passed |
+| `uv run pytest` | 163 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 11 of 11, levels 1 to 3 |
@@ -31,6 +31,10 @@ The two do not share code.
   are plain functions `def h(args: ArgsDC, ctx: Ctx) -> OutputType`, not methods
 - **One flat registry keyed by dot-path.** `app.group("deploy")` is a prefix helper, not a
   sub-app; group metadata is never inherited
+- **`pathlib.Path` is the only way to declare a path.** It is a `string` flag with
+  `pattern_type: filepath`; `check_path` runs on argv, `exec`, and `--raw-payload` values
+  and refuses `..`, `%XX`, and null bytes. `../x` from a subdirectory is therefore refused
+  too; the suggestion carries the resolved absolute path, which is the intended recovery
 - **Positional arguments are also flags.** Every field appears in the manifest `flags` map
   and can be passed as `--name=value`, because `FlagEntry` has no positional marker
 - **In-house parser.** `argparse` is not used anywhere; every parse failure is a
@@ -99,7 +103,8 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-011, F-012,
-F-013, F-048, F-069, C-001, C-002, C-004, C-012, C-015, O-021, O-032, O-041, O-050.
+F-013, F-045 (paths), F-048, F-069, C-001, C-002, C-004, C-012, C-015, C-020 (`filepath`
+only), O-021, O-032, O-041, O-050.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, and per command
 `--timeout` (network), `--confirm-destructive` (destructive), `--raw-payload` (opt-in).

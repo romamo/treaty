@@ -12,9 +12,9 @@ Discovered during §10 evaluation on 2026-09-24.
 `treaty --version` exits 2 ARG_ERROR (`unknown command '--version'`); the version is only available as the `treaty version` subcommand. Agents commonly probe `--version` first. Fixed: root-level `--version` now aliases the `version` command; below the root it stays unrecognised so command flags named `--version` are not shadowed.
 Discovered during onboarding on 2026-09-24.
 
-### §34: path traversal accepted in `--out` and `--directory` (fixed in treaty's CLI 2026-09-24)
+### §34: path traversal accepted in `--out` and `--directory` (fixed 2026-09-24, framework 2026-09-25)
 `treaty conformance treaty._cli:cli --out ../../etc/test.json` wrote a file two levels above the repo with exit 0; `treaty init demo --directory ../../etc/test --dry-run` planned the same. The framework has no path-argument hardening (`../`, `%XX`, null bytes), so every treaty-built CLI inherits this.
-Fixed for treaty's own CLI: `--out` and `--directory` reject `..` segments, percent-encodings and null bytes with a validation-phase ARG_ERROR whose `suggestion` gives the absolute or decoded form. Framework-level path hardening for other CLIs is still open.
+Fixed for treaty's own CLI first: `--out` and `--directory` reject `..` segments, percent-encodings and null bytes with a validation-phase ARG_ERROR whose `suggestion` gives the absolute or decoded form. Framework fix 2026-09-25: any field annotated `pathlib.Path` gets the same checks on argv, `exec` and `--raw-payload`, reports `rejected_pattern` (`path_traversal`, `percent_encoded`, `null_byte`) in `error.context`, and is listed with `pattern_type: "filepath"` in the manifest; treaty's `--out`, `--directory`, `--spec-dir` and `exec --input-file` are `Path` fields now, and the `path-typed` audit rule warns about `str` fields whose names look like paths.
 Discovered during §34 evaluation on 2026-09-24.
 
 ### §42/§24: framework echoes raw flag values in errors; no sensitive-flag declaration (echo fixed 2026-09-25)

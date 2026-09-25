@@ -25,11 +25,12 @@ def test_audit_finds_each_planted_problem(monkeypatch, tmp_path) -> None:
     assert [f.command for f in by_rule["retryable"].findings] == ["create-item"]
     assert {f.command for f in by_rule["typed-output"].findings} == {"delete-item", "create-item"}
     assert [f.command for f in by_rule["network-io"].findings] == ["create-item"]
+    assert [f.message[:11] for f in by_rule["path-typed"].findings] == ["report_file"]
     assert [f.command for f in by_rule["raw-payload"].findings] == ["create-item"]
     assert [f.command for f in by_rule["cleanup"].findings] == []
     assert not by_rule["profile"].passed
     assert len(report.next_steps) == 3 and report.next_steps[0].rule == "describe"
-    assert report.failed == 7
+    assert report.failed == 8
 
 
 def test_audit_passes_a_clean_app(monkeypatch, tmp_path) -> None:
@@ -59,12 +60,12 @@ def test_cli_audit_json_and_human(monkeypatch, tmp_path) -> None:
     code, out = run_cli(["audit", "fixture_audit_app:app", "--limit", "2"], isatty=False)
     assert code == 0
     data = json.loads(out)["data"]
-    assert data["rules_total"] == len(RULES) and data["failed"] == 7
+    assert data["rules_total"] == len(RULES) and data["failed"] == 8
     assert len(data["next_steps"]) == 2
     code, out = run_cli(["audit", "fixture_audit_app:app", "--all"], isatty=True)
     assert code == 0
     assert "Next steps" in out and "1. (advice) describe [create-item]" in out
-    assert out.count("fix:") == 9
+    assert out.count("fix:") == 10
 
 
 def test_cli_audit_bad_targets() -> None:
@@ -90,7 +91,12 @@ def test_cli_audit_strict() -> None:
     code, out = run_cli(["audit", "fixture_audit_app:app", "--strict"], isatty=False)
     envelope = json.loads(out)
     assert code == 79 and envelope["error"]["code"] == "AUDIT_FAILED"
-    assert envelope["error"]["context"]["rules"] == ["danger-level", "network-io", "retryable"]
+    assert envelope["error"]["context"]["rules"] == [
+        "danger-level",
+        "network-io",
+        "path-typed",
+        "retryable",
+    ]
     assert envelope["data"]["rules_total"] == len(RULES)
     code, out = run_cli(["audit", "treaty._cli:cli", "--strict"], isatty=False)
     assert code == 0 and json.loads(out)["ok"]

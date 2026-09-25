@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any
 
 from ._errors import ParseError, RegistrationError
+from ._paths import PATTERN_TYPE, check_path
 from ._types import Classified, FlagType, classify
 
 _META = "treaty"
@@ -79,6 +80,12 @@ class FieldInfo:
         return self.spec.positional
 
     @property
+    def path(self) -> bool:
+        """True for ``Path`` fields and arrays of them"""
+        item = self.classified.item
+        return self.classified.path or (item is not None and item.path)
+
+    @property
     def secret(self) -> bool:
         if self.spec.secret is not None:
             return self.spec.secret
@@ -120,6 +127,8 @@ class FieldInfo:
             entry["short"] = self.spec.short
         if self.spec.pattern is not None:
             entry["pattern"] = self.spec.pattern
+        if self.path:
+            entry["pattern_type"] = PATTERN_TYPE
         return entry
 
 
@@ -134,7 +143,7 @@ def _jsonable_default(value: object) -> object:
 def _coerce(target: Classified, raw: str, flag: str) -> object:
     match target.flag_type:
         case FlagType.STRING:
-            return raw
+            return check_path(raw, flag) if target.path else raw
         case FlagType.INTEGER:
             try:
                 return int(raw)
@@ -183,6 +192,12 @@ def inspect_fields(cls: type) -> tuple[FieldInfo, ...]:
                 f"{cls.__qualname__}.{f.name}: declare fields with Flag(...) or Arg(...)"
             )
         classified = classify(hints[f.name])
+        item = classified.item
+        if spec.pattern is not None and (classified.path or (item is not None and item.path)):
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: Path fields get the filepath preset; "
+                "pattern= is not allowed on them (REQ-C-020)"
+            )
         default: object = f.default
         if f.default_factory is not MISSING:
             raise RegistrationError(f"{cls.__qualname__}.{f.name}: default_factory is not allowed")

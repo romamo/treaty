@@ -11,6 +11,7 @@ import types
 import typing
 from dataclasses import dataclass
 from enum import Enum, StrEnum
+from pathlib import Path
 
 from ._errors import SchemaError
 
@@ -42,6 +43,8 @@ class Classified:
     enum_values: tuple[str, ...] = ()
     enum_cls: type[Enum] | None = None
     item: Classified | None = None
+    path: bool = False
+    """A ``pathlib.Path`` string: hardened against traversal and encoded bytes"""
 
 
 def strip_optional(tp: object) -> tuple[object, bool]:
@@ -76,6 +79,8 @@ def classify(tp: object) -> Classified:
     if isinstance(base, type):
         if base in _SCALARS:
             return Classified(_SCALARS[base], optional, base)
+        if base is Path:
+            return Classified(FlagType.STRING, optional, base, path=True)
         if issubclass(base, Enum):
             members = list(base)
             if not all(isinstance(m.value, str) for m in members):

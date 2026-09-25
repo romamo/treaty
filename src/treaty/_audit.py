@@ -186,6 +186,23 @@ def _network_io(app: App) -> Iterator[Finding]:
             )
 
 
+_PATH_NAME_HINTS = re.compile(r"(^|_)(path|dir|directory|file|folder)($|_)|(path|dir|file)$")
+
+
+def _path_typed(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        for f in c.fields:
+            if f.flag_type is FlagType.STRING and not f.path and _PATH_NAME_HINTS.search(f.name):
+                yield Finding(
+                    "path-typed",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"{f.name} looks like a path but is a str; traversal and encoded bytes "
+                    "are not rejected (heuristic)",
+                    f"{f.name}: Path = ... so the framework rejects '..', %XX and null bytes",
+                )
+
+
 def _raw_payload(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.danger_level is DangerLevel.SAFE or c.supports_raw_payload:
@@ -248,6 +265,7 @@ RULES: tuple[Rule, ...] = (
         _typed_output,
     ),
     Rule("network-io", "Network commands declare has_network_io", Severity.WARNING, _network_io),
+    Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule(
         "raw-payload", "Wide mutating commands accept --raw-payload", Severity.ADVICE, _raw_payload
     ),

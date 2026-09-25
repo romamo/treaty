@@ -70,7 +70,7 @@ class NoArgs:
 @dataclass(frozen=True, slots=True)
 class ExecArgs:
     ignore_errors: bool = Flag(default=False, description="Continue past a failed line")
-    input_file: str | None = Flag(
+    input_file: Path | None = Flag(
         default=None, description="Read the plan from this file instead of stdin; - is stdin"
     )
     dry_run: bool = Flag(
@@ -699,14 +699,14 @@ class _Run:
 
     def _read_plan(self, args: ExecArgs, stdin: IO[str]) -> str | Envelope:
         """The whole plan, read before dispatch so a write-then-read caller cannot deadlock"""
-        if args.input_file is not None and args.input_file != "-":
+        if args.input_file is not None and args.input_file != Path("-"):
             try:
-                return Path(args.input_file).read_text(encoding="utf-8")
+                return args.input_file.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
                 return self._stream_error(
                     "INPUT_FILE_UNREADABLE",
                     f"cannot read --input-file: {exc}",
-                    context={"input_file": args.input_file},
+                    context={"input_file": str(args.input_file)},
                     fix_required="pass a readable UTF-8 file, or - to read stdin",
                 )
         if stdin.isatty():

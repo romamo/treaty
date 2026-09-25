@@ -116,6 +116,17 @@ errors show `"value": "[REDACTED]"` in JSON and human mode alike. Pass `secret=F
 name like `author` back out. An unrecognized `--name=value` token is reported as `--name`,
 since the framework cannot know whether the value was a secret.
 
+## Paths
+
+A field annotated `pathlib.Path` (or `Path | None`, `tuple[Path, ...]`) reaches the handler as a
+`Path` and is listed in the manifest with `pattern_type: "filepath"`. Before any handler runs,
+on argv, `exec`, and `--raw-payload` alike, the framework rejects the agent hallucination
+patterns of REQ-F-045 with exit `2`: any `..` segment, a percent-encoded sequence such as
+`%2e%2e` or `%2f`, and null bytes. The error carries `rejected_pattern` in `context` and a
+`suggestion` with the decoded or absolute form, so `../out.json` is refused but
+`/abs/out.json` passes unchanged. `pattern=` is not allowed on `Path` fields. The audit rule
+`path-typed` warns about `str` fields whose name looks like a path.
+
 ## Destructive commands
 
 A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without

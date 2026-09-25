@@ -14,6 +14,7 @@ from ._command import Command, DangerLevel
 from ._errors import ParseError
 from ._flags import FieldInfo
 from ._idempotency import IdempotencyKey
+from ._paths import check_path
 from ._timeout import Timeout
 from ._types import Classified, FlagType
 from ._values import CommandPath
@@ -412,7 +413,7 @@ def _check_scalar(target: Classified, value: object, flag: str) -> object:
             raise ParseError(f"{flag!r} expects a number", context=ctx)
         case FlagType.STRING:
             if isinstance(value, str):
-                return value
+                return check_path(value, flag) if target.path else value
             raise ParseError(f"{flag!r} expects a string", context=ctx)
         case FlagType.ENUM:
             if isinstance(value, str) and value in target.enum_values:
