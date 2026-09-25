@@ -232,6 +232,7 @@ class InitArgs:
 
 @dataclass(frozen=True, slots=True)
 class InitOut:
+    effect: str
     directory: str
     files: tuple[str, ...]
     written: bool
@@ -277,6 +278,7 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
             if rel == f"conformance/{name.value}":
                 path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return InitOut(
+        effect="would_create" if args.dry_run else "created",
         directory=str(target),
         files=tuple(files),
         written=not args.dry_run,
@@ -318,6 +320,7 @@ class CheckOut:
 
 @dataclass(frozen=True, slots=True)
 class ConformanceOut:
+    effect: str
     profile: str
     probes: int
     ran: bool
@@ -378,8 +381,9 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     probes = probes_for(app)
     command = list(args.command) or [app.name]
     profile_path = out or Path("conformance") / f"{app.name}.json"
+    effect = "updated" if profile_path.exists() else "created"
     write_profile(build_profile(app, command, probes), profile_path)
-    result = ConformanceOut(str(profile_path), len(probes), False, None, ())
+    result = ConformanceOut(effect, str(profile_path), len(probes), False, None, ())
     if spec_dir is None:
         return result
     kit = run_kit(spec_dir, profile_path, ctx.timeout.seconds)
@@ -405,7 +409,9 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
         )
         for c in report["checks"]
     )
-    result = ConformanceOut(str(profile_path), len(probes), True, dict(report["levels"]), checks)
+    result = ConformanceOut(
+        effect, str(profile_path), len(probes), True, dict(report["levels"]), checks
+    )
     if kit.exit_code != 0:
         raise Exit.CONFORMANCE_FAILED(
             f"{report['summary']['failed']} conformance checks failed",

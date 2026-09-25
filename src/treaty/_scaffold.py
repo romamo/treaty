@@ -101,13 +101,20 @@ class DeleteArgs:
 class Item:
     name: str
     note: str | None
-    created: bool
+    exists: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Creation:
+    effect: str
+    name: str
+    note: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class Deletion:
+    effect: str
     name: str
-    deleted: bool
 
 
 @app.command(
@@ -116,7 +123,7 @@ class Deletion:
     examples=[("Check an item", "{n} status widget")],
 )
 def status(args: ItemArgs, ctx: Ctx) -> Item:
-    return Item(name=args.name, note=None, created=False)
+    return Item(name=args.name, note=None, exists=False)
 
 
 @app.command(
@@ -127,10 +134,11 @@ def status(args: ItemArgs, ctx: Ctx) -> Item:
     supports_raw_payload=True,
     examples=[("Create an item", "{n} create widget --note first")],
 )
-def create(args: CreateArgs, ctx: Ctx) -> Item:
+def create(args: CreateArgs, ctx: Ctx) -> Creation:
     if args.name == "taken":
         raise Exit.ALREADY_EXISTS("item exists", context={{"name": args.name}})
-    return Item(name=args.name, note=args.note, created=not args.dry_run)
+    effect = "would_create" if args.dry_run else "created"
+    return Creation(effect=effect, name=args.name, note=args.note)
 
 
 @app.command(
@@ -143,7 +151,7 @@ def create(args: CreateArgs, ctx: Ctx) -> Item:
 def delete(args: DeleteArgs, ctx: Ctx) -> Deletion:
     if args.name == "missing":
         raise Exit.ITEM_NOT_FOUND("no such item", context={{"name": args.name}})
-    return Deletion(name=args.name, deleted=not args.dry_run)
+    return Deletion(effect="would_delete" if args.dry_run else "deleted", name=args.name)
 
 
 def main() -> None:
@@ -176,7 +184,7 @@ def test_delete_needs_confirmation() -> None:
     code, envelope = run(["delete", "widget"])
     assert code == 2 and envelope["error"]["code"] == "CONFIRMATION_REQUIRED"
     code, envelope = run(["delete", "widget", "--confirm-destructive"])
-    assert code == 0 and envelope["data"]["deleted"] is True
+    assert code == 0 and envelope["data"]["effect"] == "deleted"
 """,
         f"conformance/{n}.json": f'''{{
   "schema_version": "1.0",

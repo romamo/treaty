@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import IO, Any, NoReturn
 
 from ._cap import DEFAULT_CAP, OutputCap, cap_envelope
@@ -24,11 +25,13 @@ from ._command import (
 )
 from ._context import Ctx
 from ._dispatch import DispatchRequest, parse_dispatch_line
+from ._effect import effect_problem
 from ._envelope import Envelope, ErrorDetail, write_envelope
 from ._errors import CliExit, ParseError, RegistrationError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import Flag
 from ._help import render_command, render_root
+from ._idempotency import Record, claim, fingerprint, state_dir
 from ._manifest import build_manifest, build_schema_manifest, command_schema
 from ._mode import OutputMode, resolve_mode
 from ._parse import (
@@ -95,6 +98,7 @@ class App:
         state: Mapping[str, object] | None = None,
         default_timeout: float | None = DEFAULT_TIMEOUT.seconds,
         max_output_bytes: int = DEFAULT_CAP.bytes,
+        state_dir: str | Path | None = None,
         enable_exec: bool = True,
     ) -> None:
         if not name or not version:
@@ -104,6 +108,7 @@ class App:
         self.description = description
         self.default_timeout = Timeout(default_timeout)
         self.max_output = OutputCap(max_output_bytes)
+        self.state_dir = None if state_dir is None else Path(state_dir)
         self.exits = ExitCodeRegistry()
         self._state: Mapping[str, object] = dict(state or {})
         self._commands: dict[CommandPath, Command] = {}
@@ -299,6 +304,13 @@ class App:
             return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
 
 
+def _previewing(command: Command, invocation: Invocation) -> bool:
+    """A destructive command run without --confirm-destructive or --dry-run"""
+    return command.danger_level is DangerLevel.DESTRUCTIVE and not (
+        invocation.confirmed or _dry_run_requested(invocation.args)
+    )
+
+
 def _dry_run_requested(args: object) -> bool:
     """True when a destructive command's args carry dry_run=True (field guaranteed by REQ-C-004)"""
     value = getattr(args, "dry_run", False)
@@ -362,6 +374,66 @@ class _Run:
         *,
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
+        """Run one handler, replaying the stored result when its idempotency key was seen"""
+        key = invocation.idempotency_key
+        if key is None or _previewing(command, invocation) or _dry_run_requested(invocation.args):
+            return self._execute(command, invocation, mode, meta=meta)
+        started = time.perf_counter()
+        timeout = self.app.effective_timeout(command, invocation.timeout)
+        full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
+        directory = state_dir(self.app.name, self.app.state_dir, self.env)
+        if directory is None:
+            entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
+            return self._envelope(
+                entry.code.value,
+                error=ErrorDetail(
+                    code="STATE_DIR_UNKNOWN",
+                    message="no directory to keep idempotency records in",
+                    retryable=False,
+                    phase="validation",
+                    fix_required="set TREATY_STATE_DIR, XDG_STATE_HOME, or HOME",
+                ),
+                started=started,
+                meta=full_meta,
+            )
+        call = fingerprint(command.path, invocation.args)
+        with claim(directory, key) as slot:
+            if slot.record is None:
+                envelope = self._execute(command, invocation, mode, meta=meta)
+                if envelope.exit_code == 0:
+                    slot.save(Record(call, command.path.value, envelope.data, time.time()))
+                return envelope
+            if slot.record.fingerprint != call:
+                entry = self.app.exits.framework(FrameworkCode.CONFLICT)
+                return self._envelope(
+                    entry.code.value,
+                    error=ErrorDetail(
+                        code="IDEMPOTENCY_KEY_REUSED",
+                        message="this idempotency key was already used with different arguments",
+                        retryable=False,
+                        context={"command": slot.record.command},
+                        phase="validation",
+                        fix_required="use a new --idempotency-key, or repeat the original call",
+                    ),
+                    started=started,
+                    meta=full_meta,
+                )
+            assert isinstance(slot.record.data, dict)
+            return self._envelope(
+                0,
+                data={**slot.record.data, "effect": "noop"},
+                started=started,
+                meta={**full_meta, "idempotency_hit": True},
+            )
+
+    def _execute(
+        self,
+        command: Command,
+        invocation: Invocation,
+        mode: OutputMode,
+        *,
+        meta: Mapping[str, object] | None = None,
+    ) -> Envelope:
         """Run one handler under its timeout and turn the outcome into an envelope"""
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
@@ -374,11 +446,12 @@ class _Run:
             env=self.env,
             state=self.app._state,
             timeout=timeout,
+            idempotency_key=None
+            if invocation.idempotency_key is None
+            else invocation.idempotency_key.value,
         )
         args = invocation.args
-        preview_only = command.danger_level is DangerLevel.DESTRUCTIVE and not (
-            invocation.confirmed or _dry_run_requested(args)
-        )
+        preview_only = _previewing(command, invocation)
         if preview_only:
             assert dataclasses.is_dataclass(args) and not isinstance(args, type)
             args = dataclasses.replace(args, dry_run=True)
@@ -407,11 +480,28 @@ class _Run:
             return self._cancelled(command, exc.signal, started, full_meta)
         except KeyboardInterrupt:
             return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
+        data = to_jsonable(result)
+        if command.danger_level is not DangerLevel.SAFE:
+            problem = effect_problem(data, preview=_dry_run_requested(args))
+            if problem is not None:
+                entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+                return self._envelope(
+                    entry.code.value,
+                    error=ErrorDetail(
+                        code="INVALID_EFFECT",
+                        message=f"{command.path} broke the effect contract: {problem}",
+                        retryable=False,
+                        context={"command": command.path.value},
+                        phase="execution",
+                    ),
+                    started=started,
+                    meta=full_meta,
+                )
         if preview_only:
             entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
             return self._envelope(
                 entry.code.value,
-                data=to_jsonable(result),
+                data=data,
                 error=ErrorDetail(
                     code="CONFIRMATION_REQUIRED",
                     message=f"{command.path} is destructive; nothing was applied",
@@ -423,7 +513,7 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
-        return self._envelope(0, data=to_jsonable(result), started=started, meta=full_meta)
+        return self._envelope(0, data=data, started=started, meta=full_meta)
 
     def _cancelled(
         self, command: Command, sig: CancelSignal, started: float, meta: Mapping[str, object]

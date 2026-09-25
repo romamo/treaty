@@ -59,14 +59,17 @@ src/treaty/
   _cli.py        the `treaty` console script (audit, rules, init, conformance)
   _profile.py    probes from examples and danger levels, profile writer, kit runner
   _scaffold.py   file templates for `treaty init`; generated projects pass the audit
+  _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation
   _command.py    Command record, build_command(), handler signature inspection
-  _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout)
+  _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, idempotency_key)
   _dispatch.py   DispatchRequest line parser for exec
+  _effect.py     effect contract: registration check and per-run validation
   _envelope.py   Envelope, ErrorDetail, WarningDetail, write_envelope()
   _errors.py     TreatyError family (registration), ParseError, CliExit, Exit factory
   _exit.py       ExitCodeEntry, FrameworkCode, ExitCodeRegistry, signal entries
   _flags.py      Arg/Flag markers, FieldInfo, inspect_fields(), token coercion
   _help.py       human-mode help renderer (root, group, command)
+  _idempotency.py  IdempotencyKey VO, per-key locked record store, state dir lookup
   _manifest.py   build_manifest(), command_entry(), command_schema(), etag
   _mode.py       OutputMode resolution (--format, TREATY_FORMAT, CI, tty)
   _parse.py      globals, path routing, per-command parsing, mapping builder, raw payload

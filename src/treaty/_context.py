@@ -18,3 +18,4 @@ class Ctx:
     env: Mapping[str, str]
     state: Mapping[str, object]
     timeout: Timeout
+    idempotency_key: str | None = None

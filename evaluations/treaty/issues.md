@@ -40,3 +40,8 @@ Discovered during §1 evaluation on 2026-09-24.
 `treaty manifest` returned 7.8KB and `exec` 2.4MB with no `meta.truncated`, `meta.total_bytes` or `--max-output`.
 Fixed: JSON envelopes are capped at 1 MiB (`--max-output`, `TREATY_MAX_OUTPUT_BYTES`, `App(max_output_bytes=)`); the dominant list, object, or string is cut to the longest fitting prefix with `meta.truncated`, `total_bytes`, `truncation_hint`, and a `FIELD_TRUNCATED` warning per cut. Still no per-command `max_output_bytes` in the schema.
 Discovered during §43 evaluation on 2026-09-24.
+
+### §12: no idempotency key or effect field (fixed 2026-09-25)
+`treaty init --idempotency-key k1` was rejected as an unknown flag and no response carried `effect`.
+Fixed: mutating and destructive commands must return `effect` (`created`/`updated`/`deleted`/`noop`, or `would_*` on dry runs), checked at registration and on every run, and get a framework `--idempotency-key`. A repeat with the same key replays the stored result as `effect: "noop"` with `meta.idempotency_hit`; a different call on the same key exits 6 `IDEMPOTENCY_KEY_REUSED`. Records are per-key locked files in the app's state directory, expiring after 24 hours.
+Discovered during §12 evaluation on 2026-09-24.

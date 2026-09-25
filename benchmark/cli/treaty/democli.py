@@ -6,6 +6,7 @@ The framework supplies the envelope, exit codes, manifest, dry-run gating, and
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +17,13 @@ import _fixture as fx  # noqa: E402
 
 from treaty import App, Ctx, Exit, Flag  # noqa: E402
 
-app = App("democli", version="2.1.0", description="Demo deployment tool")
+# Idempotency records live beside the fixture state, which the harness isolates per trial
+app = App(
+    "democli",
+    version="2.1.0",
+    description="Demo deployment tool",
+    state_dir=Path(os.environ.get("TMPDIR", "/tmp")) / "treaty-state",
+)
 app.exit_code(
     "LOCK_HELD",
     79,
@@ -123,13 +130,11 @@ def delete(args: DeleteArgs, ctx: Ctx) -> DeleteResult:
 class DeployArgs:
     version: str = Flag(description="Version to deploy")
     env: Literal["staging", "production"] = Flag(description="Target environment")
-    idempotency_key: str | None = Flag(
-        default=None, description="Duplicate calls with the same key return the original result"
-    )
 
 
 @dataclass(frozen=True, slots=True)
 class DeployResult:
+    effect: Literal["created"]
     status: str
     version: str
     env: str
@@ -148,7 +153,7 @@ class DeployResult:
 def deploy(args: DeployArgs, ctx: Ctx) -> DeployResult:
     if args.env == "production":
         try:
-            record = fx.deploy_production(args.version, args.idempotency_key)
+            record = fx.deploy_production(args.version, ctx.idempotency_key)
         except fx.ResponseLost as exc:
             raise Exit.GENERAL_ERROR(
                 "Connection reset while reading the response",
@@ -158,7 +163,11 @@ def deploy(args: DeployArgs, ctx: Ctx) -> DeployResult:
                 "created, or re-run with the same --idempotency-key to get the original result",
             ) from exc
         return DeployResult(
-            status="deployed", version=args.version, env=args.env, deploy_id=record["id"]
+            effect="created",
+            status="deployed",
+            version=args.version,
+            env=args.env,
+            deploy_id=record["id"],
         )
     if not fx.acquire_deploy_lock():
         raise Exit.LOCK_HELD(
@@ -166,7 +175,13 @@ def deploy(args: DeployArgs, ctx: Ctx) -> DeployResult:
             context={"lock_holder": fx.LOCK_HOLDER},
             retry_after_ms=fx.LOCK_RETRY_MS,
         )
-    return DeployResult(status="deployed", version=args.version, env=args.env, deploy_id="deploy-new-001")
+    return DeployResult(
+        effect="created",
+        status="deployed",
+        version=args.version,
+        env=args.env,
+        deploy_id="deploy-new-001",
+    )
 
 
 @dataclass(frozen=True, slots=True)

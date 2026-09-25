@@ -58,6 +58,15 @@ def command_entry(
             "required": False,
             "description": "JSON object of field values; cannot be combined with individual flags",
         }
+    if command.danger_level is not DangerLevel.SAFE:
+        flags["idempotency-key"] = {
+            "type": "string",
+            "required": False,
+            "description": "Repeat calls with the same key return the original result "
+            "with effect noop instead of running again",
+        }
+        conflict = exits.framework(FrameworkCode.CONFLICT)
+        exit_codes.setdefault(str(conflict.code.value), conflict.to_json())
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         flags["confirm-destructive"] = {
             "type": "boolean",

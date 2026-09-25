@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 from ._context import Ctx
+from ._effect import can_carry_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._schema import JsonSchema, is_payload_type, schema_for
@@ -97,6 +98,17 @@ def build_command(
         raise RegistrationError(
             f"{path}: flags {shadowed} are global options and would never reach the handler"
         )
+    if danger_level is not DangerLevel.SAFE:
+        if not can_carry_effect(output_type):
+            raise RegistrationError(
+                f"{path}: {danger_level.value} commands must return an object with an "
+                "'effect' field (REQ-C-003)"
+            )
+        if any(f.name == "idempotency_key" for f in fields):
+            raise RegistrationError(
+                f"{path}: --idempotency-key is supplied by the framework for "
+                f"{danger_level.value} commands; read ctx.idempotency_key instead"
+            )
     if danger_level is DangerLevel.DESTRUCTIVE:
         dry_run = next((f for f in fields if f.name == "dry_run"), None)
         if dry_run is None or dry_run.flag_type is not FlagType.BOOLEAN:

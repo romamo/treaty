@@ -39,6 +39,7 @@ class Rollback:
 
 @dataclass(frozen=True, slots=True)
 class Plan:
+    effect: str
     service: str
     release: str
     strategy: str
@@ -88,6 +89,7 @@ def app() -> App:
         if args.service == "buggy":
             raise Exit.NOT_DECLARED("handler bug")
         return Plan(
+            "would_update" if args.dry_run else "updated",
             args.service,
             args.to or "previous",
             args.strategy,

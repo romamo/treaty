@@ -13,6 +13,7 @@ from dataclasses import MISSING, dataclass
 from ._command import Command, DangerLevel
 from ._errors import ParseError
 from ._flags import FieldInfo
+from ._idempotency import IdempotencyKey
 from ._timeout import Timeout
 from ._types import Classified, FlagType
 from ._values import CommandPath
@@ -20,6 +21,7 @@ from ._values import CommandPath
 TIMEOUT_FLAG = "timeout"
 CONFIRM_FLAG = "confirm-destructive"
 RAW_PAYLOAD_FLAG = "raw-payload"
+IDEMPOTENCY_FLAG = "idempotency-key"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +31,7 @@ class Invocation:
     args: object
     timeout: Timeout | None
     confirmed: bool = False
+    idempotency_key: IdempotencyKey | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +126,7 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
     timeout: Timeout | None = None
     confirmed = False
     raw_payload: str | None = None
+    key: IdempotencyKey | None = None
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -189,6 +193,22 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
                 raw_payload = raw
                 i += 1
                 continue
+            if name == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
+                if has_eq:
+                    raw = inline
+                elif i + 1 < len(tokens):
+                    raw = tokens[i + 1]
+                    i += 1
+                else:
+                    raise ParseError(f"{tok!r} needs a value", context={"flag": IDEMPOTENCY_FLAG})
+                if key is not None:
+                    raise ParseError(
+                        f"'{IDEMPOTENCY_FLAG}' given more than once",
+                        context={"flag": IDEMPOTENCY_FLAG},
+                    )
+                key = IdempotencyKey(raw)
+                i += 1
+                continue
             if name == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
                 if has_eq:
                     raise ParseError(
@@ -247,8 +267,15 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
             )
         mapping = _decode_raw_payload(raw_payload)
         built = build_from_mapping(command, mapping)
-        return Invocation(args=built.args, timeout=timeout, confirmed=confirmed)
-    return Invocation(args=_finish(command, values), timeout=timeout, confirmed=confirmed)
+        return Invocation(
+            args=built.args,
+            timeout=timeout,
+            confirmed=confirmed,
+            idempotency_key=key or built.idempotency_key,
+        )
+    return Invocation(
+        args=_finish(command, values), timeout=timeout, confirmed=confirmed, idempotency_key=key
+    )
 
 
 def _decode_raw_payload(raw: str) -> Mapping[str, object]:
@@ -272,6 +299,8 @@ def known_flags(command: Command) -> list[str]:
         flags.append(TIMEOUT_FLAG)
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         flags.append(CONFIRM_FLAG)
+    if command.danger_level is not DangerLevel.SAFE:
+        flags.append(IDEMPOTENCY_FLAG)
     return flags
 
 
@@ -293,10 +322,16 @@ def build_from_mapping(command: Command, mapping: Mapping[str, object]) -> Invoc
     values: dict[str, object] = {}
     timeout: Timeout | None = None
     confirmed = False
+    idempotency_key: IdempotencyKey | None = None
     for key, value in mapping.items():
         flag = key.replace("_", "-")
         if flag == TIMEOUT_FLAG and command.has_network_io:
             timeout = Timeout.parse(value)
+            continue
+        if flag == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
+            if not isinstance(value, str):
+                raise ParseError(f"{key!r} expects a string", context={"field": key})
+            idempotency_key = IdempotencyKey(value)
             continue
         if flag == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
             if not isinstance(value, bool):
@@ -321,7 +356,12 @@ def build_from_mapping(command: Command, mapping: Mapping[str, object]) -> Invoc
             values[found.name] = None
             continue
         values[found.name] = _check_json_value(found, value)
-    return Invocation(args=_finish(command, values), timeout=timeout, confirmed=confirmed)
+    return Invocation(
+        args=_finish(command, values),
+        timeout=timeout,
+        confirmed=confirmed,
+        idempotency_key=idempotency_key,
+    )
 
 
 def _check_json_value(field: FieldInfo, value: object) -> object:

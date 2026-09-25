@@ -25,10 +25,10 @@ class Rollback:
 
 @dataclass(frozen=True, slots=True)
 class Plan:
+    effect: Literal["would_update", "updated"]
     service: str
     release: str
     strategy: str
-    applied: bool
 
 
 deploy = app.group("deploy", description="Manage deployments")
@@ -46,7 +46,8 @@ deploy = app.group("deploy", description="Manage deployments")
 def rollback(args: Rollback, ctx: Ctx) -> Plan:
     if args.service == "locked":
         raise Exit.DEPLOY_CONFLICT("deployment in progress", context={"service": args.service})
-    return Plan(args.service, args.to or "previous", args.strategy, applied=not args.dry_run)
+    effect: Literal["would_update", "updated"] = "would_update" if args.dry_run else "updated"
+    return Plan(effect, args.service, args.to or "previous", args.strategy)
 
 
 if __name__ == "__main__":

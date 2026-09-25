@@ -23,6 +23,7 @@ class Rollback:
 
 @dataclass(frozen=True, slots=True)
 class Plan:
+    effect: str
     service: str
     release: str
 
@@ -33,7 +34,8 @@ deploy = app.group("deploy", description="Manage deployments")
 def rollback(args: Rollback, ctx: Ctx) -> Plan:
     if args.to is None:
         raise Exit.CONFLICT("No previous release recorded", context={"service": args.service})
-    return Plan(service=args.service, release=args.to)
+    effect = "would_update" if args.dry_run else "updated"
+    return Plan(effect=effect, service=args.service, release=args.to)
 
 if __name__ == "__main__":
     app.main()
@@ -91,6 +93,23 @@ since the framework cannot know whether the value was a secret.
 A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without
 `--confirm-destructive` the framework runs it in dry-run mode and exits `2` with error code
 `CONFIRMATION_REQUIRED`, so the `data` payload shows what would be affected without applying it.
+
+## Effects and idempotency keys
+
+Mutating and destructive commands return an object with an `effect` field: `created`,
+`updated`, `deleted`, or `noop` on a live run, and a `would_*` value such as `would_delete`
+on a dry run. Registration fails when the output type cannot carry the field, and a run
+that reports the wrong kind of value exits `1` with `INVALID_EFFECT`.
+
+The framework gives those commands `--idempotency-key` (also `idempotency_key` in `exec`
+lines and `--raw-payload`). A successful live run is stored under the key; repeating the
+call returns the stored `data` with `effect: "noop"` and `meta.idempotency_hit: true`
+without running the handler, and reusing the key with different arguments exits `6` with
+`IDEMPOTENCY_KEY_REUSED`. Failures and dry runs are never stored, a concurrent retry waits
+for the first call, and records expire after 24 hours. Records live in
+`App(state_dir=...)`, else `$TREATY_STATE_DIR/<app>`, else `$XDG_STATE_HOME/treaty/<app>`,
+else `~/.local/state/treaty/<app>`. Handlers read the key as `ctx.idempotency_key` to pass
+it on to an upstream API.
 
 ## Cancellation
 

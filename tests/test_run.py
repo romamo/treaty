@@ -29,6 +29,7 @@ def test_success_envelope(app: App) -> None:
     )
     assert code == 0 and env["ok"] is True and env["error"] is None
     assert env["data"] == {
+        "effect": "would_update",
         "service": "api",
         "release": "1.3.9",
         "strategy": "safe",

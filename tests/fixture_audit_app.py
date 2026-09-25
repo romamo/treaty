@@ -31,7 +31,7 @@ def delete_item(args: Name, ctx: Ctx) -> dict[str, object]:
 def create_item(args: Wide, ctx: Ctx) -> dict[str, object]:
     import urllib.request
 
-    return {"created": args.name, "via": urllib.request.__name__}
+    return {"effect": "created", "created": args.name, "via": urllib.request.__name__}
 
 
 @app.command(

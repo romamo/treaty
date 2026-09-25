@@ -19,7 +19,12 @@ def make_app() -> App:
 
     @app.command("create", description="Create", danger_level="mutating", supports_raw_payload=True)
     def create(args: CreateArgs, ctx: Ctx) -> dict[str, object]:
-        return {"name": args.name, "count": args.count, "tags": list(args.tags)}
+        return {
+            "effect": "created",
+            "name": args.name,
+            "count": args.count,
+            "tags": list(args.tags),
+        }
 
     @app.command("plain", description="No raw payload")
     def plain(args: CreateArgs, ctx: Ctx) -> dict[str, object]:
