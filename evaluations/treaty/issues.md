@@ -27,8 +27,9 @@ Discovered during §42 evaluation on 2026-09-24.
 Fixed: `exec` now reads stdin to EOF before dispatching, so a write-everything-then-read caller always finishes writing; results still stream per line. Stdin cap and `--input-file` added 2026-09-25: a piped plan over 64 KiB (`TREATY_MAX_STDIN_BYTES`) exits 2 `STDIN_TOO_LARGE` before dispatch, and `--input-file PATH` reads any size from a file.
 Discovered during §61 evaluation on 2026-09-24.
 
-### §71: no documented install; stale wheel in `dist/`
+### §71: no documented install; stale wheel in `dist/` (fixed 2026-09-25)
 README and HANDOFF.md have no install command. `dist/treaty-0.0.1-py3-none-any.whl` (built 2026-09-23) predates `_cli.py` and has no console-script entry point, so installing it gives no `treaty` binary. Installing from source works.
+Fixed: README and a new AGENTS.md document `uv tool install --reinstall <checkout>` (CLI) and `uv add --editable <checkout>` (library), both verified non-interactive and exit 0 on a second run, with `treaty --version` as the verify command. `dist/` rebuilt with `uv build`; the new wheel has the `treaty` console script.
 Discovered during §71 evaluation on 2026-09-24.
 
 ### §1/§14 candidate: explicit `--spec-dir` silently ignored when invalid (fixed 2026-09-24)

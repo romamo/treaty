@@ -45,6 +45,17 @@ Design decisions: zero runtime dependencies in core, handlers are plain function
 over a frozen dataclass of arguments, and every command lives in one flat registry
 keyed by dot-path.
 
+## Install
+
+treaty is not on PyPI yet; install from a checkout. Both commands are non-interactive and
+safe to repeat:
+
+```bash
+uv tool install --reinstall /path/to/treaty   # the treaty CLI on PATH
+uv add --editable /path/to/treaty             # the library, inside a uv project
+treaty --version                               # verify: prints a JSON envelope, exits 0
+```
+
 ## Built-ins
 
 Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`).
