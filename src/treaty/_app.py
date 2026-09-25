@@ -39,6 +39,7 @@ from ._parse import (
     Route,
     build_from_mapping,
     format_hint,
+    misplaced_flag_target,
     parse_command_args,
     resolve_path,
     split_globals,
@@ -230,6 +231,26 @@ class App:
             paths = list(self._commands)
         return sorted(f"{self.name} {' '.join(p.parts)}" for p in paths)
 
+    def _misplaced_flag(self, route: Route) -> ParseError:
+        """A flag given before the command path: command flags are parsed only after it"""
+        flag = without_value(route.tokens[0])
+        target = misplaced_flag_target(route, self._commands)
+        command = (
+            f"{self.name} {' '.join(target.parts)}"
+            if target is not None
+            else f"{self.name} {' '.join((*route.prefix, '<command>'))}"
+        )
+        context: dict[str, object] = {"flag": flag, "prefix": ".".join(route.prefix)}
+        if target is not None:
+            context["command"] = command
+        else:
+            context["available"] = self._invocations(route.prefix)
+        return ParseError(
+            f"flag {flag!r} must come after the command path",
+            context=context,
+            suggestion=f"flags go after the command: {command} [arguments] {flag}",
+        )
+
     @property
     def commands(self) -> Mapping[CommandPath, Command]:
         return self._commands
@@ -281,6 +302,8 @@ class App:
         if route.path is None:
             if globals_.help or not route.tokens:
                 return run.help_root(mode, route.prefix)
+            if route.tokens[0].startswith("-") and format_hint(route.tokens[0]) is None:
+                return run.emit(mode, run.arg_error(self._misplaced_flag(route)))
             return run.emit(
                 mode,
                 run.arg_error(
@@ -598,6 +621,8 @@ class _Run:
             self.err.write(f"{self.app.name}: {envelope.error.code}: {envelope.error.message}\n")
             for key, value in envelope.error.context.items():
                 self.err.write(f"  {key}: {value}\n")
+            if envelope.error.suggestion is not None:
+                self.err.write(f"hint: {envelope.error.suggestion}\n")
         self.out.flush()
         self.err.flush()
         return envelope.exit_code

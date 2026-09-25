@@ -120,6 +120,20 @@ def resolve_path(argv: list[str], known: Collection[CommandPath]) -> Route:
     return Route(path=path, prefix=consumed, tokens=tuple(argv[i:]))
 
 
+def misplaced_flag_target(route: Route, known: Collection[CommandPath]) -> CommandPath | None:
+    """The command a flag placed before the path was meant for, if the words after it name one
+
+    Words are tried from each starting point so a flag value (``--to 1.3.9 deploy rollback``)
+    does not hide the path that follows it.
+    """
+    words = [t for t in route.tokens if not t.startswith("-")]
+    for start in range(len(words)):
+        path = resolve_path([*route.prefix, *words[start:]], known).path
+        if path is not None:
+            return path
+    return None
+
+
 def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
     values: dict[str, object] = {}
     arrays: dict[str, list[object]] = {}

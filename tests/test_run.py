@@ -108,6 +108,33 @@ def test_unknown_command_lists_available_invocations(app: App) -> None:
     assert "deployctl manifest" in env["error"]["context"]["available"]
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--dry-run", "deploy", "rollback", "api"],
+        ["deploy", "--dry-run", "rollback", "api"],
+        ["--tags", "a", "deploy", "rollback", "api"],
+    ],
+)
+def test_flag_before_command_path_names_the_command(app: App, argv: list[str]) -> None:
+    code, env = run_json(app, argv)
+    flag = argv[0] if argv[0].startswith("-") else argv[1]
+    assert code == 2 and env["error"]["code"] == "ARG_ERROR"
+    assert env["error"]["message"] == f"flag {flag!r} must come after the command path"
+    assert env["error"]["context"]["command"] == "deployctl deploy rollback"
+    assert env["error"]["suggestion"] == (
+        f"flags go after the command: deployctl deploy rollback [arguments] {flag}"
+    )
+
+
+def test_flag_before_unknown_command_lists_available(app: App) -> None:
+    code, env = run_json(app, ["--token=hunter2", "explode"])
+    assert code == 2 and env["error"]["context"]["flag"] == "--token"
+    assert "command" not in env["error"]["context"]
+    assert "deployctl deploy rollback" in env["error"]["context"]["available"]
+    assert "hunter2" not in json.dumps(env)
+
+
 def test_no_args_json_mode_returns_manifest(app: App) -> None:
     code, env = run_json(app, [])
     assert code == 0 and "commands" in env["data"]
@@ -128,6 +155,16 @@ def test_human_mode_help_and_errors(app: App) -> None:
     assert code == 0 and "--dry-run" in out and "Danger level: destructive" in out
     code, out, err = run(app, ["deploy", "rollback", "locked"], isatty=True)
     assert code == 79 and out == "" and "DEPLOY_CONFLICT" in err
+
+
+def test_human_mode_error_ends_with_suggestion(app: App) -> None:
+    code, out, err = run(app, ["--dry-run", "deploy", "rollback", "api"], isatty=True)
+    assert code == 2 and out == ""
+    assert err.splitlines()[-1] == (
+        "hint: flags go after the command: deployctl deploy rollback [arguments] --dry-run"
+    )
+    code, out, err = run(app, ["deploy", "rollback", "locked"], isatty=True)
+    assert "hint:" not in err
 
 
 def test_format_flag_overrides_tty(app: App) -> None:
