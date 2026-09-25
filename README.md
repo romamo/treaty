@@ -281,6 +281,29 @@ as an alternative to individual flags. The payload is checked against the same f
 dataclass. `tool --schema` prints the whole manifest in that form; `tool <group> --schema`
 prints one group's subtree. The output is JSON in every mode.
 
+## MCP
+
+With the `mcp` extra installed, any treaty app serves its commands as MCP tools over
+stdio, in-process, with nothing to write:
+
+```bash
+uv add --editable "/path/to/treaty[mcp]"
+treaty-mcp deployctl:app
+```
+
+One tool per command except `exec`, named with dots as underscores (`deploy_rollback`).
+The input schema is the args dataclass schema with field names as declared, secrets
+replaced by `<name>_from_env` and `<name>_from_file`, and the framework keys the command
+declares: `timeout`, `idempotency_key`, and `confirm_destructive`. The output schema is
+the response envelope around the command's `output_schema`, and every result carries the
+envelope as `structuredContent` and as JSON text; `isError` mirrors `ok`. Calls go through
+`App.call`, the same path as an `exec` line, so an unconfirmed destructive tool call
+returns `CONFIRMATION_REQUIRED` with its dry-run preview, idempotency keys, timeouts,
+effect validation, and output caps all apply, and a streaming command returns its buffered
+envelope. Tool annotations map `safe` to read-only and idempotent, `destructive` to
+destructive, and `has_network_io` to open-world. `App.call(path, arguments)` is public
+for other in-process adapters.
+
 ## Conformance
 
 `conformance/deployctl.json` is a profile for the spec's deterministic kit. With the spec checked

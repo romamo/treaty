@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import io
 import json
 import os
 import sys
@@ -50,7 +51,7 @@ from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._signals import Cancelled, CancelSignal, cancellation_handlers
 from ._timeout import Timeout, TimeoutExpired, call_with_timeout
-from ._values import CommandPath, ExitCode, ExitCodeName, Scope
+from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
 
 EXEC_PATH = CommandPath("exec")
 VERSION_PATH = CommandPath("version")
@@ -309,6 +310,46 @@ class App:
         return self.default_timeout
 
     # Execution
+
+    def call(
+        self,
+        path: str,
+        arguments: Mapping[str, object],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> Envelope:
+        """Run one command in-process from JSON values, as an ``exec`` line would
+
+        Field names use underscores; the framework keys ``confirm_destructive``,
+        ``idempotency_key``, ``timeout``, and ``dry_run`` are accepted where the command
+        declares them. A streaming command returns its buffered envelope. Nothing is
+        written: the caller owns the envelope. Used by the MCP adapter.
+        """
+        environ = env if env is not None else os.environ
+        run = _Run(self, io.StringIO(), io.StringIO(), environ)
+        meta: dict[str, object] = {"_cmd": path}
+        try:
+            command_path = CommandPath(path)
+        except InvalidValue as exc:
+            return run.arg_error(ParseError(str(exc), context={"_cmd": path}), meta=meta)
+        command = self._commands.get(command_path)
+        if command is None or command_path == EXEC_PATH:
+            available = sorted(p.value for p in self._commands if p != EXEC_PATH)
+            return run.arg_error(
+                ParseError(
+                    f"unknown command {path}",
+                    context={"_cmd": path, "available": available},
+                ),
+                code="UNKNOWN_COMMAND",
+                meta=meta,
+            )
+        try:
+            invocation = build_from_mapping(command, arguments, environ)
+        except ParseError as exc:
+            return run.arg_error(exc, meta=meta)
+        if command.streaming:
+            return buffer_stream(run.stream(command, invocation, OutputMode.JSON, meta=meta))
+        return run.execute(command, invocation, OutputMode.JSON, meta=meta)
 
     def main(self) -> NoReturn:
         sys.exit(self.run(sys.argv[1:]))

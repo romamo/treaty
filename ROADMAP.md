@@ -49,6 +49,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   handler; one envelope per yield with `meta.seq`, a terminal envelope with `end` and
   `total`, failures mark `partial`; no timeout by default, else a whole-stream deadline;
   `streaming_default` in the manifest and `--help`; `--no-stream` buffers; works in `exec`
+- MCP adapter (cloudfall gap 4, `treaty[mcp]`): `treaty-mcp module:app` serves one tool
+  per command in-process over stdio; input schema from the args schema plus framework
+  keys, secrets as `_from_env` and `_from_file`; output schema is the envelope; calls go
+  through the new `App.call`, so confirmation, idempotency, timeouts, effects, and caps
+  apply; streams come back buffered
 
 ## 0.1.0: first release
 
@@ -67,7 +72,8 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 
 Gaps found on 2026-09-25 by reading the first real consumer, `romamo/cloudfall`
 (commit `b9677a6`): its argparse CLI, agent toolset, and MCP server declare every
-operation three times, and none of them could be ported until these land. In order:
+operation three times, and none of them could be ported until these land. All four
+landed the same day; what remains under each is follow-up work:
 
 - **Custom scalars**: done, see above. Still open from it: built-in `ScalarSpec`
   presets that pair `pattern_type` with a matching regex, so `uuid` and `semver` are
@@ -78,14 +84,9 @@ operation three times, and none of them could be ported until these land. In ord
 - **Streaming handlers**: done, see above. Still open from it: pagination metadata on
   the terminal envelope for list commands (with REQ-F-018 in 0.2.0), and streaming for
   mutating commands once the effect contract can name the event that carries `effect`
-- **MCP adapter** (`treaty[mcp]`, moved up from Later): `treaty mcp module:app` runs
-  in-process, one tool per command, input schema from `parameters` and result schema
-  from `output_schema` as `--schema` already emits them. Destructive commands get a
-  `confirm_destructive` boolean and an unconfirmed call returns the
-  `CONFIRMATION_REQUIRED` envelope with the dry-run preview, so the gate is identical on
-  the CLI and over MCP. Calls go through the `exec` invocation path so idempotency,
-  timeouts, effect validation, and output caps apply. In-process rather than one
-  subprocess per call because consumers like cloudfall import ansible at startup
+- **MCP adapter**: done, see above, as the `treaty-mcp` script rather than a `treaty`
+  subcommand because a stdio server owns stdout. Still open from it: the manifest as an
+  MCP resource, and progress notifications for streaming commands instead of buffering
 
 ## 0.2.0: level 2 coverage
 

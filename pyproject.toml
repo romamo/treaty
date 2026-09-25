@@ -22,10 +22,14 @@ Issues = "https://github.com/romamo/treaty/issues"
 
 [project.scripts]
 treaty = "treaty._cli:main"
+treaty-mcp = "treaty._mcp:main"
 
 [project.optional-dependencies]
 rich = ["rich>=13"]
 pydantic = ["pydantic>=2"]
+mcp = [
+    "mcp>=2,<3",
+]
 
 [dependency-groups]
 dev = [
@@ -33,6 +37,7 @@ dev = [
     "jsonschema>=4.23",
     "mypy>=1.14",
     "ruff>=0.9",
+    "mcp>=2,<3",
 ]
 
 [build-system]

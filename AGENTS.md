@@ -11,6 +11,8 @@ uv add --editable /path/to/treaty             # the library, inside a uv project
 ```
 
 Verify with `treaty --version`: it prints a JSON envelope with `data.version` and exits 0.
+Add the `mcp` extra (`/path/to/treaty[mcp]`) to get `treaty-mcp module:app`, which serves
+any treaty app's commands as MCP tools over stdio.
 
 ## Running the CLI
 

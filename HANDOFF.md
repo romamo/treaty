@@ -80,6 +80,14 @@ The two do not share code.
   one place; a timeout is a whole-stream deadline enforced per `next()` on a worker
   thread. The handler generator is closed when no worker holds it. Streaming commands
   must be `safe`; `--no-stream` folds the stream into one envelope via `buffer_stream`
+- **MCP is a separate console script, not a `treaty` subcommand.** A stdio MCP server
+  owns stdout, and every `treaty` command ends by writing an envelope there, so
+  `treaty-mcp module:app` in `_mcp.py` bypasses the App runner. Only `build_server`,
+  `serve`, and `main` import the `mcp` package (the `treaty[mcp]` extra, SDK 2.x with
+  snake_case constructors); tool construction and `call_tool` are plain data over
+  `App.call`. `App.call` is the in-process dispatch API: `build_from_mapping` then
+  `execute` or a buffered `stream`, writing nothing. An unknown tool name is
+  `UNKNOWN_TOOL` with the tool names, distinct from `App.call`'s `UNKNOWN_COMMAND`
 - **Uncaught handler exceptions propagate.** Only `CliExit`, `ParseError` (a handler
   validating its own input, exit 2), timeout, and cancellation become envelopes; anything
   else is a bug and surfaces as a traceback
@@ -96,6 +104,7 @@ src/treaty/
   _scaffold.py   file templates for `treaty init`; generated projects pass the audit
   _scalars.py    ScalarSpec and ScalarRegistry: custom scalar classes and their constraints
   _resources.py  ResourceSpec, resource_graph(), Resolver: typed handler resources
+  _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _command.py    Command record, build_command(), handler signature inspection
   _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, idempotency_key)
