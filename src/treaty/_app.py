@@ -35,6 +35,7 @@ from ._parse import (
     Invocation,
     Route,
     build_from_mapping,
+    format_hint,
     parse_command_args,
     resolve_path,
     split_globals,
@@ -280,6 +281,7 @@ class App:
                             "prefix": ".".join(route.prefix),
                             "available": self._invocations(route.prefix),
                         },
+                        suggestion=format_hint(route.tokens[0]),
                     )
                 ),
             )

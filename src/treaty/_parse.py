@@ -44,6 +44,16 @@ def without_value(token: str) -> str:
     return token.partition("=")[0] if token.startswith("--") else token
 
 
+FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
+
+
+def format_hint(token: str) -> str | None:
+    """Point agents that guess another output-representation flag at ``--format``"""
+    if without_value(token) in FORMAT_GUESSES:
+        return "use --format json (or --format human) to choose the output representation"
+    return None
+
+
 def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
     fmt: str | None = None
     max_output: str | None = None
@@ -204,6 +214,7 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
                     "command": command.path.value,
                     "known": [f.flag for f in command.fields],
                 },
+                suggestion=format_hint(tok),
             )
         if found.flag_type is FlagType.BOOLEAN:
             if has_eq:
