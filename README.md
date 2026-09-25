@@ -127,6 +127,15 @@ deployctl push --token-from-file /run/secrets/tok  # reads the file, one trailin
 DEPLOYCTL_TOKEN=... deployctl push                 # the default variable
 ```
 
+## Validation errors
+
+Phase 1 keeps going past a bad value, an unknown flag, or a refused secret, so one run
+reports every argument error (REQ-F-015). The envelope's `error.errors` lists each one with
+its `field`, `message`, and `context`; with several, the headline `message` is
+`Validation failed: N errors` and `context.fields` names them. A single error keeps its own
+message and context and lists itself. Only an unreadable rest of the line stops parsing at
+once: a flag with no value at the end, or invalid `--raw-payload` JSON.
+
 ## Paths
 
 A field annotated `pathlib.Path` (or `Path | None`, `tuple[Path, ...]`) reaches the handler as a

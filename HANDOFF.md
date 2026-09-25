@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 175 passed |
+| `uv run pytest` | 183 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 11 of 11, levels 1 to 3 |
@@ -54,6 +54,9 @@ The two do not share code.
 - **`treaty audit --strict` fails on warnings and errors, never advice.** It raises
   `AUDIT_FAILED` (79) with the full report as `data`; without `--strict` the audit always
   exits 0 on a completed run
+- **`error.errors` is always present on a validation error.** A single failure lists
+  itself, so agents read one shape. An unknown flag followed by a bare token consumes that
+  token as its value rather than reporting it as an unexpected positional
 - **Uncaught handler exceptions propagate.** Only `CliExit`, `ParseError` (a handler
   validating its own input, exit 2), timeout, and cancellation become envelopes; anything
   else is a bug and surfaces as a traceback
@@ -98,7 +101,9 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 2. `resolve_mode` picks human or JSON
 3. `resolve_path` consumes tokens by longest known prefix
 4. `parse_command_args` (argv) or `build_from_mapping` (exec, raw payload) yields an
-   `Invocation`: args dataclass plus `timeout` and `confirmed`
+   `Invocation`: args dataclass plus `timeout` and `confirmed`. Field errors are collected
+   in a `_Collector` and raised together as one `ParseError.combine(...)`; only a flag with
+   no value at the end or bad raw-payload JSON aborts at once
 5. `_Run.execute` applies the destructive preview rule, runs the handler under
    `call_with_timeout` inside `cancellation_handlers`, and returns an `Envelope`
 6. `_Run.emit` writes JSON or human output and returns the exit code
@@ -108,7 +113,7 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-011, F-012,
-F-013, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002, C-003, C-004, C-007, C-012,
+F-013, F-015, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002, C-003, C-004, C-007, C-012,
 C-015, C-016, C-020 (`filepath` only), O-021, O-022, O-032, O-039, O-041, O-050.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per

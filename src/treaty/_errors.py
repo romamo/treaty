@@ -7,7 +7,7 @@ run ends with a non-zero exit and an envelope.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from ._values import ExitCodeName
 
@@ -25,7 +25,11 @@ class SchemaError(TreatyError):
 
 
 class ParseError(Exception):
-    """Argument parsing failed before the handler ran; maps to ``ARG_ERROR``"""
+    """Argument parsing failed before the handler ran; maps to ``ARG_ERROR``
+
+    ``errors`` holds the individual failures when the parser collected several
+    in one run (REQ-F-015); a single failure is its own only item.
+    """
 
     def __init__(
         self,
@@ -33,11 +37,49 @@ class ParseError(Exception):
         *,
         context: Mapping[str, object] | None = None,
         suggestion: str | None = None,
+        errors: Sequence[ParseError] = (),
     ) -> None:
         super().__init__(message)
         self.message = message
         self.context: dict[str, object] = dict(context or {})
         self.suggestion = suggestion
+        self.errors: tuple[ParseError, ...] = tuple(errors)
+
+    @classmethod
+    def combine(cls, errors: Sequence[ParseError]) -> ParseError:
+        """One error carrying all of ``errors``; a single error is returned unchanged"""
+        if len(errors) == 1:
+            return errors[0]
+        fields = [e.field for e in errors if e.field is not None]
+        return cls(
+            f"Validation failed: {len(errors)} errors",
+            context={"error_count": len(errors), "fields": fields},
+            suggestion="fix every entry in errors, then reissue once",
+            errors=errors,
+        )
+
+    @property
+    def field(self) -> str | None:
+        """The flag, field, or argument this error is about, when it is about one"""
+        for key in ("flag", "field", "argument"):
+            value = self.context.get(key)
+            if isinstance(value, str):
+                return value
+        return None
+
+    def items(self) -> list[dict[str, object]]:
+        """The ``errors`` entries for the envelope: every collected error, or this one"""
+        out: list[dict[str, object]] = []
+        for e in self.errors or (self,):
+            item: dict[str, object] = {"message": e.message}
+            if e.field is not None:
+                item["field"] = e.field
+            if e.context:
+                item["context"] = dict(e.context)
+            if e.suggestion is not None:
+                item["suggestion"] = e.suggestion
+            out.append(item)
+        return out
 
 
 class CliExit(Exception):

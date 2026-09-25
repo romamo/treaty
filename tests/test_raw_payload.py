@@ -72,7 +72,7 @@ def test_raw_payload_cannot_combine_with_flags() -> None:
 
 def test_raw_payload_rejected_when_not_supported() -> None:
     code, env = run_json(["plain", "--raw-payload", "{}"])
-    assert code == 2 and env["error"]["context"]["flag"] == "raw-payload"
+    assert code == 2 and env["error"]["errors"][0]["context"]["flag"] == "raw-payload"
 
 
 def test_raw_payload_advertised_in_manifest() -> None:

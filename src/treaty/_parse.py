@@ -142,6 +142,24 @@ def misplaced_flag_target(route: Route, known: Collection[CommandPath]) -> Comma
     return None
 
 
+class _Collector:
+    """Phase 1 keeps going past a field error so one run reports them all (REQ-F-015)
+
+    Errors that make the rest of the input unreadable (a flag with no value at
+    the end, invalid ``--raw-payload`` JSON) are raised at once instead.
+    """
+
+    def __init__(self) -> None:
+        self.errors: list[ParseError] = []
+
+    def add(self, exc: ParseError) -> None:
+        self.errors.append(exc)
+
+    def finish(self) -> None:
+        if self.errors:
+            raise ParseError.combine(self.errors)
+
+
 def parse_command_args(
     command: Command, tokens: tuple[str, ...], env: Mapping[str, str]
 ) -> Invocation:
@@ -156,23 +174,45 @@ def parse_command_args(
     pos_index = 0
     i = 0
     only_positional = False
+    errors = _Collector()
 
     def assign(field: FieldInfo, raw: str) -> None:
+        try:
+            parsed = field.parse(raw)
+        except ParseError as exc:
+            errors.add(exc)
+            return
         if field.flag_type is FlagType.ARRAY:
-            arrays.setdefault(field.name, []).append(field.parse(raw))
+            arrays.setdefault(field.name, []).append(parsed)
         elif field.name in values:
-            raise ParseError(f"{field.flag!r} given more than once", context={"flag": field.flag})
+            errors.add(
+                ParseError(f"{field.flag!r} given more than once", context={"flag": field.flag})
+            )
         else:
-            values[field.name] = field.parse(raw)
+            values[field.name] = parsed
+
+    def value_after(tok: str, flag: str, has_eq: bool, inline: str) -> str:
+        """The token's value, consuming the next token when it is not inline"""
+        nonlocal i
+        if has_eq:
+            return inline
+        if i + 1 < len(tokens):
+            i += 1
+            return tokens[i]
+        raise ParseError(f"{tok!r} needs a value", context={"flag": flag})
 
     while i < len(tokens):
         tok = tokens[i]
         if only_positional or not tok.startswith("-") or tok == "-":
             if pos_index >= len(positionals):
-                raise ParseError(
-                    f"unexpected argument {tok!r}",
-                    context={"argument": tok, "command": command.path.value},
+                errors.add(
+                    ParseError(
+                        f"unexpected argument {tok!r}",
+                        context={"argument": tok, "command": command.path.value},
+                    )
                 )
+                i += 1
+                continue
             field = positionals[pos_index]
             assign(field, tok)
             if field.flag_type is not FlagType.ARRAY:
@@ -189,13 +229,7 @@ def parse_command_args(
             name, eq, inline = tok[2:].partition("=")
             has_eq = bool(eq)
             if name == TIMEOUT_FLAG and command.has_network_io:
-                if has_eq:
-                    raw = inline
-                elif i + 1 < len(tokens):
-                    raw = tokens[i + 1]
-                    i += 1
-                else:
-                    raise ParseError(f"{tok!r} needs a value", context={"flag": TIMEOUT_FLAG})
+                raw = value_after(tok, TIMEOUT_FLAG, has_eq, inline)
                 if timeout is not None:
                     raise ParseError(
                         "'timeout' given more than once", context={"flag": TIMEOUT_FLAG}
@@ -204,13 +238,7 @@ def parse_command_args(
                 i += 1
                 continue
             if name == RAW_PAYLOAD_FLAG and command.supports_raw_payload:
-                if has_eq:
-                    raw = inline
-                elif i + 1 < len(tokens):
-                    raw = tokens[i + 1]
-                    i += 1
-                else:
-                    raise ParseError(f"{tok!r} needs a value", context={"flag": RAW_PAYLOAD_FLAG})
+                raw = value_after(tok, RAW_PAYLOAD_FLAG, has_eq, inline)
                 if raw_payload is not None:
                     raise ParseError(
                         "'raw-payload' given more than once", context={"flag": RAW_PAYLOAD_FLAG}
@@ -219,13 +247,7 @@ def parse_command_args(
                 i += 1
                 continue
             if name == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-                if has_eq:
-                    raw = inline
-                elif i + 1 < len(tokens):
-                    raw = tokens[i + 1]
-                    i += 1
-                else:
-                    raise ParseError(f"{tok!r} needs a value", context={"flag": IDEMPOTENCY_FLAG})
+                raw = value_after(tok, IDEMPOTENCY_FLAG, has_eq, inline)
                 if key is not None:
                     raise ParseError(
                         f"'{IDEMPOTENCY_FLAG}' given more than once",
@@ -244,19 +266,20 @@ def parse_command_args(
                 continue
             found = command.field_by_flag(name)
             if found is not None and found.secret:
-                raise direct_secret_error(found.flag)
+                errors.add(direct_secret_error(found.flag))
+                if not has_eq and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                    i += 1  # the value that was meant for it; never echoed
+                i += 1
+                continue
             if found is None and (split := split_source_flag(name)) is not None:
                 base, source = split
                 owner = command.field_by_flag(base)
                 if owner is not None and owner.secret:
-                    if has_eq:
-                        ref = inline
-                    elif i + 1 < len(tokens):
-                        ref = tokens[i + 1]
-                        i += 1
-                    else:
-                        raise ParseError(f"{tok!r} needs a value", context={"flag": name})
-                    _take_secret(secrets, owner, SecretRef(source, ref))
+                    ref = value_after(tok, name, has_eq, inline)
+                    try:
+                        _take_secret(secrets, owner, SecretRef(source, ref))
+                    except ParseError as exc:
+                        errors.add(exc)
                     i += 1
                     continue
             if found is None and name.startswith("no-"):
@@ -268,33 +291,33 @@ def parse_command_args(
             name, has_eq, inline = tok[1:], False, ""
             found = command.field_by_short(name) if len(name) == 1 else None
         if found is None:
-            raise ParseError(
-                f"unknown flag {without_value(tok)!r}",
-                context={
-                    "flag": name,
-                    "command": command.path.value,
-                    "known": known_flags(command),
-                },
-                suggestion=format_hint(tok),
+            errors.add(
+                ParseError(
+                    f"unknown flag {without_value(tok)!r}",
+                    context={
+                        "flag": name,
+                        "command": command.path.value,
+                        "known": known_flags(command),
+                    },
+                    suggestion=format_hint(tok),
+                )
             )
+            if not has_eq and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                i += 1  # skip what looks like its value rather than misread it as positional
+            i += 1
+            continue
         if found.flag_type is FlagType.BOOLEAN:
             if has_eq:
-                values[found.name] = found.parse(inline)
+                assign(found, inline)
             elif found.name in values:
-                raise ParseError(
-                    f"{found.flag!r} given more than once", context={"flag": found.flag}
+                errors.add(
+                    ParseError(f"{found.flag!r} given more than once", context={"flag": found.flag})
                 )
             else:
                 values[found.name] = not negated
             i += 1
             continue
-        if has_eq:
-            raw = inline
-        elif i + 1 < len(tokens):
-            raw = tokens[i + 1]
-            i += 1
-        else:
-            raise ParseError(f"{tok!r} needs a value", context={"flag": found.flag})
+        raw = value_after(tok, found.flag, has_eq, inline)
         assign(found, raw)
         i += 1
 
@@ -306,6 +329,7 @@ def parse_command_args(
                 "Cannot combine --raw-payload with individual flags",
                 context={"flag": RAW_PAYLOAD_FLAG, "also_given": sorted(values | secrets)},
             )
+        errors.finish()
         mapping = _decode_raw_payload(raw_payload)
         built = build_from_mapping(command, mapping, env)
         return Invocation(
@@ -314,9 +338,12 @@ def parse_command_args(
             confirmed=confirmed,
             idempotency_key=key or built.idempotency_key,
         )
-    _apply_secrets(command, values, secrets, env)
+    _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
-        args=_finish(command, values), timeout=timeout, confirmed=confirmed, idempotency_key=key
+        args=_finish(command, values, errors),
+        timeout=timeout,
+        confirmed=confirmed,
+        idempotency_key=key,
     )
 
 
@@ -335,6 +362,7 @@ def _apply_secrets(
     values: dict[str, object],
     secrets: dict[str, SecretRef],
     env: Mapping[str, str],
+    errors: _Collector,
 ) -> None:
     """Resolve every secret field in phase 1: named source, else its default variable"""
     for f in command.fields:
@@ -347,7 +375,10 @@ def _apply_secrets(
                 ref = SecretRef(SecretSource.ENV, var)
             else:
                 continue
-        values[f.name] = f.parse(resolve_secret(f.flag, ref, env))
+        try:
+            values[f.name] = f.parse(resolve_secret(f.flag, ref, env))
+        except ParseError as exc:
+            errors.add(exc)
 
 
 def _decode_raw_payload(raw: str) -> Mapping[str, object]:
@@ -376,17 +407,22 @@ def known_flags(command: Command) -> list[str]:
     return flags
 
 
-def _finish(command: Command, values: dict[str, object]) -> object:
+def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
+    """Report missing fields alongside everything collected, then build the dataclass"""
+    failed = {e.field for e in errors.errors}
     missing = [
         f.env_flag if f.secret else f.flag
         for f in command.fields
-        if f.required and f.name not in values
+        if f.required and f.name not in values and f.flag not in failed
     ]
     if missing:
-        raise ParseError(
-            f"missing required: {', '.join(missing)}",
-            context={"missing": missing, "command": command.path.value},
+        errors.add(
+            ParseError(
+                f"missing required: {', '.join(missing)}",
+                context={"missing": missing, "command": command.path.value},
+            )
         )
+    errors.finish()
     for f in command.fields:
         if f.name not in values:
             values[f.name] = None if f.default is MISSING else f.default
@@ -402,52 +438,56 @@ def build_from_mapping(
     timeout: Timeout | None = None
     confirmed = False
     idempotency_key: IdempotencyKey | None = None
+    errors = _Collector()
     for key, value in mapping.items():
-        flag = key.replace("_", "-")
-        if flag == TIMEOUT_FLAG and command.has_network_io:
-            timeout = Timeout.parse(value)
-            continue
-        if flag == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-            if not isinstance(value, str):
-                raise ParseError(f"{key!r} expects a string", context={"field": key})
-            idempotency_key = IdempotencyKey(value)
-            continue
-        if flag == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
-            if not isinstance(value, bool):
-                raise ParseError(
-                    f"{key!r} expects a boolean", context={"field": key, "value": value}
-                )
-            confirmed = value
-            continue
-        found = command.field_by_flag(flag)
-        if found is not None and found.secret:
-            raise direct_secret_error(found.flag)
-        if found is None and (split := split_source_flag(flag)) is not None:
-            base, source = split
-            owner = command.field_by_flag(base)
-            if owner is not None and owner.secret:
+        try:
+            flag = key.replace("_", "-")
+            if flag == TIMEOUT_FLAG and command.has_network_io:
+                timeout = Timeout.parse(value)
+                continue
+            if flag == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
                 if not isinstance(value, str):
                     raise ParseError(f"{key!r} expects a string", context={"field": key})
-                _take_secret(secrets, owner, SecretRef(source, value))
+                idempotency_key = IdempotencyKey(value)
                 continue
-        if found is None:
-            raise ParseError(
-                f"unknown field {key!r}",
-                context={
-                    "field": key,
-                    "command": command.path.value,
-                    "known": known_flags(command),
-                },
-            )
-        if found.name in values:
-            raise ParseError(f"{key!r} given more than once", context={"field": key})
-        if value is None and found.classified.optional:
-            values[found.name] = None
-            continue
-        values[found.name] = _check_json_value(found, value)
-    _apply_secrets(command, values, secrets, env)
+            if flag == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
+                if not isinstance(value, bool):
+                    raise ParseError(
+                        f"{key!r} expects a boolean", context={"field": key, "value": value}
+                    )
+                confirmed = value
+                continue
+            found = command.field_by_flag(flag)
+            if found is not None and found.secret:
+                raise direct_secret_error(found.flag)
+            if found is None and (split := split_source_flag(flag)) is not None:
+                base, source = split
+                owner = command.field_by_flag(base)
+                if owner is not None and owner.secret:
+                    if not isinstance(value, str):
+                        raise ParseError(f"{key!r} expects a string", context={"field": key})
+                    _take_secret(secrets, owner, SecretRef(source, value))
+                    continue
+            if found is None:
+                raise ParseError(
+                    f"unknown field {key!r}",
+                    context={
+                        "field": key,
+                        "command": command.path.value,
+                        "known": known_flags(command),
+                    },
+                )
+            if found.name in values:
+                raise ParseError(f"{key!r} given more than once", context={"field": key})
+            if value is None and found.classified.optional:
+                values[found.name] = None
+                continue
+            values[found.name] = _check_json_value(found, value)
+        except ParseError as exc:
+            errors.add(exc)
+    _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
-        args=_finish(command, values),
+        args=_finish(command, values, errors),
         timeout=timeout,
         confirmed=confirmed,
         idempotency_key=idempotency_key,

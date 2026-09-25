@@ -32,6 +32,8 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - `Path` fields (REQ-F-045, the `filepath` preset of REQ-C-020): `..` segments,
   percent-encodings, and null bytes are rejected in phase 1 on every input route, with
   `rejected_pattern` and a decoded or absolute suggestion; `path-typed` audit rule
+- All validation errors in one run (REQ-F-015): both parse routes collect field errors and
+  report them in `error.errors`; every error already carried `phase`
 - Response size cap (REQ-F-052): 1 MiB default, `--max-output` and
   `TREATY_MAX_OUTPUT_BYTES`, `meta.truncated` with a hint, and a `FIELD_TRUNCATED` warning
   per cut field (REQ-F-064)
@@ -56,8 +58,6 @@ matching audit rule so adoption never requires reading the spec.
 
 - `--yes` and `--non-interactive` for commands declaring `interactive=True` (REQ-C-005),
   exit `4` when a prompt would block
-- Validate-before-execute ordering with `phase` on every error (REQ-F-015); today only
-  parse and preview errors set `phase: validation`
 - Pagination metadata on list commands: `--limit`, `--cursor`, `meta.pagination`
   (REQ-F-018)
 - `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028) and a

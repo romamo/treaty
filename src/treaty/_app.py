@@ -391,6 +391,7 @@ class _Run:
                 suggestion=exc.suggestion,
                 phase="validation",
                 fix_required="correct the arguments and reissue",
+                errors=exc.items(),
             ),
             **kw,
         )
@@ -620,8 +621,14 @@ class _Run:
             self.out.write(json.dumps(envelope.data, indent=2, sort_keys=True) + "\n")
         if envelope.error is not None:
             self.err.write(f"{self.app.name}: {envelope.error.code}: {envelope.error.message}\n")
-            for key, value in envelope.error.context.items():
-                self.err.write(f"  {key}: {value}\n")
+            errors = envelope.error.errors or ()
+            if len(errors) > 1:
+                for item in errors:
+                    where = f"{item['field']}: " if "field" in item else ""
+                    self.err.write(f"  - {where}{item['message']}\n")
+            else:
+                for key, value in envelope.error.context.items():
+                    self.err.write(f"  {key}: {value}\n")
             if envelope.error.suggestion is not None:
                 self.err.write(f"hint: {envelope.error.suggestion}\n")
         self.out.flush()

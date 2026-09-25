@@ -23,6 +23,8 @@ class ErrorDetail:
     retry_after_ms: int | None = None
     fix_required: str | None = None
     phase: str | None = None
+    errors: Sequence[Mapping[str, object]] | None = None
+    """Every validation failure of the run (REQ-F-015); present on validation errors only"""
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -46,6 +48,8 @@ class ErrorDetail:
             out["fix_required"] = self.fix_required
         if self.phase is not None:
             out["phase"] = self.phase
+        if self.errors is not None:
+            out["errors"] = [dict(e) for e in self.errors]
         return out
 
 
