@@ -69,11 +69,20 @@ def render_command(name: str, command: Command) -> str:
         lines.append("")
     if flags:
         lines.append("Flags")
-        labels = [f"--{f.flag}" + (f", -{f.spec.short}" if f.spec.short else "") for f in flags]
-        width = max(len(label) for label in labels)
-        for f, label in zip(flags, labels, strict=True):
-            suffix = " (required)" if f.required else ""
-            lines.append(f"  {label:<{width}}  {f.spec.description}{suffix}")
+        rows: list[tuple[str, str]] = []
+        for f in flags:
+            if f.secret:
+                var = command.secret_env_vars[f.name]
+                need = " (required)" if f.required else ""
+                rows.append((f"--{f.env_flag} VAR", f"{f.spec.description}: read from $VAR{need}"))
+                rows.append((f"--{f.file_flag} PATH", f"{f.spec.description}: read from PATH"))
+                rows.append((f"${var}", f"{f.spec.description}: default when neither is given"))
+                continue
+            label = f"--{f.flag}" + (f", -{f.spec.short}" if f.spec.short else "")
+            rows.append((label, f.spec.description + (" (required)" if f.required else "")))
+        width = max(len(label) for label, _ in rows)
+        for label, text in rows:
+            lines.append(f"  {label:<{width}}  {text}")
         lines.append("")
     lines.append(f"Danger level: {command.danger_level.value}")
     if command.examples:

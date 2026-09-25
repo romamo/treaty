@@ -11,6 +11,7 @@ from typing import Any
 
 from ._errors import ParseError, RegistrationError
 from ._paths import PATTERN_TYPE, check_path
+from ._secrets import source_flags
 from ._types import Classified, FlagType, classify
 
 _META = "treaty"
@@ -87,10 +88,25 @@ class FieldInfo:
 
     @property
     def secret(self) -> bool:
+        """Declared or name-inferred; a boolean can never be a secret"""
         if self.spec.secret is not None:
             return self.spec.secret
+        if self.flag_type is FlagType.BOOLEAN:
+            return False
         lowered = self.name.lower()
         return any(part in lowered for part in _SECRET_NAME_PARTS)
+
+    @property
+    def env_flag(self) -> str:
+        return source_flags(self.flag)[0]
+
+    @property
+    def file_flag(self) -> str:
+        return source_flags(self.flag)[1]
+
+    def exposed_flags(self) -> tuple[str, ...]:
+        """Flag names the parser accepts for this field: the secret variants, or the name"""
+        return source_flags(self.flag) if self.secret else (self.flag,)
 
     def scrub(self, exc: ParseError) -> ParseError:
         """Replace an echoed value with ``[REDACTED]`` when this field holds a secret"""
@@ -112,6 +128,25 @@ class FieldInfo:
             return _coerce(target, raw, self.flag)
         except ParseError as exc:
             raise self.scrub(exc) from None
+
+    def to_flag_entries(self) -> dict[str, dict[str, object]]:
+        """Manifest entries keyed by exposed flag; a secret shows only its two sources"""
+        if not self.secret:
+            return {self.flag: self.to_flag_entry()}
+        what = self.spec.description
+        return {
+            self.env_flag: {
+                "type": "string",
+                "required": False,
+                "description": f"Name of the environment variable holding: {what}",
+            },
+            self.file_flag: {
+                "type": "string",
+                "required": False,
+                "description": f"Path of the file holding: {what}",
+                "pattern_type": PATTERN_TYPE,
+            },
+        }
 
     def to_flag_entry(self) -> dict[str, object]:
         entry: dict[str, object] = {
@@ -178,6 +213,23 @@ def _coerce(target: Classified, raw: str, flag: str) -> object:
             raise RegistrationError("nested arrays are not supported")
 
 
+def _check_secret_field(cls: type, info: FieldInfo) -> None:
+    """REQ-C-016: a secret is a named scalar that arrives via env var or file, never argv"""
+    where = f"{cls.__qualname__}.{info.name}"
+    how = "declared secret" if info.spec.secret else "inferred a secret from its name"
+    if info.positional:
+        raise RegistrationError(
+            f"{where}: {how}; secrets cannot be positional, declare it with "
+            f"Flag(...) to get --{info.env_flag} and --{info.file_flag} (REQ-C-016)"
+        )
+    if info.flag_type in (FlagType.BOOLEAN, FlagType.ARRAY):
+        raise RegistrationError(
+            f"{where}: {how}, but a {info.flag_type.value} cannot hold a secret; pass secret=False"
+        )
+    if info.spec.short is not None:
+        raise RegistrationError(f"{where}: a secret cannot have a short flag")
+
+
 def inspect_fields(cls: type) -> tuple[FieldInfo, ...]:
     """Read an arguments dataclass into ordered ``FieldInfo`` records"""
     if not dataclasses.is_dataclass(cls):
@@ -217,16 +269,17 @@ def inspect_fields(cls: type) -> tuple[FieldInfo, ...]:
                 f"{cls.__qualname__}.{f.name}: required positional after optional positional"
             )
         required = default is MISSING and not classified.optional
-        infos.append(
-            FieldInfo(
-                name=f.name,
-                flag=f.name.replace("_", "-"),
-                classified=classified,
-                required=required,
-                default=default,
-                spec=spec,
-            )
+        info = FieldInfo(
+            name=f.name,
+            flag=f.name.replace("_", "-"),
+            classified=classified,
+            required=required,
+            default=default,
+            spec=spec,
         )
+        if info.secret:
+            _check_secret_field(cls, info)
+        infos.append(info)
     shorts = [i.spec.short for i in infos if i.spec.short is not None]
     if len(shorts) != len(set(shorts)):
         raise RegistrationError(f"{cls.__qualname__}: duplicate short flags {shorts}")

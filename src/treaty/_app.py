@@ -173,6 +173,7 @@ class App:
             self._register(
                 build_command(
                     fn,
+                    app_name=self.name,
                     path=cmd_path,
                     description=description,
                     danger_level=DangerLevel(danger_level),
@@ -322,7 +323,7 @@ class App:
         if globals_.help:
             return run.help_command(mode, command)
         try:
-            invocation = parse_command_args(command, route.tokens)
+            invocation = parse_command_args(command, route.tokens, environ)
         except ParseError as exc:
             return run.emit(mode, run.arg_error(exc))
         with cancellation_handlers(out):
@@ -803,4 +804,4 @@ class _Run:
                     context={"line": line_no, "_cmd": command.path.value},
                 )
             mapping["dry_run"] = True
-        return build_from_mapping(command, mapping)
+        return build_from_mapping(command, mapping, self.env)

@@ -23,8 +23,12 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   framework `--idempotency-key` with a per-app record store (REQ-C-007)
 - `exec` stdin cap (64 KiB, `STDIN_TOO_LARGE`) with an uncapped `--input-file`
   (REQ-F-054, REQ-O-039)
-- Secret flags (REQ-F-034, REQ-F-051): `secret=` on `Flag` and `Arg`, inferred from the
-  name by default; their values and any unknown `--name=value` are never echoed in errors
+- Secret flags (REQ-F-034, REQ-F-051): `secret=` on `Flag`, inferred from the name by
+  default; their values and any unknown `--name=value` are never echoed in errors
+- Secrets only via env var or file (REQ-C-016, REQ-O-022): `--<name>-from-env` and
+  `--<name>-from-file` replace the direct flag, `<APP>_<NAME>` is the default source and is
+  listed in `secret_env_vars`; positional, boolean, array, and short-flag secrets are
+  registration errors
 - `Path` fields (REQ-F-045, the `filepath` preset of REQ-C-020): `..` segments,
   percent-encodings, and null bytes are rejected in phase 1 on every input route, with
   `rejected_pattern` and a decoded or absolute suggestion; `path-typed` audit rule
@@ -58,9 +62,6 @@ matching audit rule so adoption never requires reading the spec.
   (REQ-F-018)
 - `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028) and a
   `would_affect` object on dry runs (REQ-C-004)
-- Secrets only via env var or file (REQ-C-016, REQ-O-022): `--<name>-from-env` and
-  `--<name>-from-file` for secret fields, a registration error for direct secret flags, and
-  `secret_env_vars` in the manifest
 - Pager suppression and locale-invariant serialization audit (REQ-F-010, REQ-F-005);
   both likely already hold and need tests, not code
 - `REDIRECTED` exit `13` with `error.redirect` for renamed commands and `aliases` in the

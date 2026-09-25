@@ -110,11 +110,22 @@ each cut adds a `FIELD_TRUNCATED` warning naming the field. Human mode is not ca
 
 ## Secrets
 
-A field declared `Flag(secret=True)` or `Arg(secret=True)`, or whose name contains `token`,
-`secret`, `password`, `key`, `credential`, or `auth`, never has its value echoed: validation
-errors show `"value": "[REDACTED]"` in JSON and human mode alike. Pass `secret=False` to opt a
-name like `author` back out. An unrecognized `--name=value` token is reported as `--name`,
-since the framework cannot know whether the value was a secret.
+A field declared `Flag(secret=True)`, or whose name contains `token`, `secret`, `password`,
+`key`, `credential`, or `auth`, never takes its value on the command line (REQ-C-016). The
+framework exposes `--<name>-from-env VAR` and `--<name>-from-file PATH` instead
+(REQ-O-022), and reads `<APP>_<NAME>` when neither is given; the manifest lists that default
+in `secret_env_vars`. The value is read in the validation phase, coerced and pattern-checked
+like any field, and handed to the handler as the field. A direct `--<name> VALUE`, a missing
+variable, an unreadable or empty file, or a file path with `..` all exit `2` before anything
+runs, and no error ever echoes the value: it shows as `"value": "[REDACTED]"`. Booleans are
+never secrets; pass `secret=False` to opt a name like `author` out. A secret cannot be
+positional, an array, or carry a short flag.
+
+```bash
+deployctl push --token-from-env DEPLOY_TOKEN      # reads $DEPLOY_TOKEN
+deployctl push --token-from-file /run/secrets/tok  # reads the file, one trailing newline dropped
+DEPLOYCTL_TOKEN=... deployctl push                 # the default variable
+```
 
 ## Paths
 

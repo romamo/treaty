@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import typing
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -14,6 +14,7 @@ from ._effect import can_carry_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._schema import JsonSchema, is_payload_type, schema_for
+from ._secrets import default_env_var
 from ._timeout import Timeout
 from ._types import FlagType, is_dataclass_type
 from ._values import CommandPath, ExitCodeName, Scope
@@ -56,6 +57,8 @@ class Command:
     supports_raw_payload: bool
     cleanup: Cleanup | None
     human: HumanRenderer | None
+    secret_env_vars: Mapping[str, str]
+    """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
 
     def field_by_flag(self, flag: str) -> FieldInfo | None:
         for f in self.fields:
@@ -77,6 +80,7 @@ GLOBAL_FLAGS = frozenset({"format", "help", "max-output", "schema"})
 def build_command(
     fn: Handler,
     *,
+    app_name: str,
     path: CommandPath,
     description: str,
     danger_level: DangerLevel,
@@ -134,6 +138,7 @@ def build_command(
         supports_raw_payload=supports_raw_payload,
         cleanup=cleanup,
         human=human,
+        secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
     )
 
 

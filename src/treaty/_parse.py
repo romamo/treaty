@@ -15,6 +15,13 @@ from ._errors import ParseError
 from ._flags import FieldInfo
 from ._idempotency import IdempotencyKey
 from ._paths import check_path
+from ._secrets import (
+    SecretRef,
+    SecretSource,
+    direct_secret_error,
+    resolve_secret,
+    split_source_flag,
+)
 from ._timeout import Timeout
 from ._types import Classified, FlagType
 from ._values import CommandPath
@@ -135,8 +142,11 @@ def misplaced_flag_target(route: Route, known: Collection[CommandPath]) -> Comma
     return None
 
 
-def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
+def parse_command_args(
+    command: Command, tokens: tuple[str, ...], env: Mapping[str, str]
+) -> Invocation:
     values: dict[str, object] = {}
+    secrets: dict[str, SecretRef] = {}
     arrays: dict[str, list[object]] = {}
     timeout: Timeout | None = None
     confirmed = False
@@ -233,6 +243,22 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
                 i += 1
                 continue
             found = command.field_by_flag(name)
+            if found is not None and found.secret:
+                raise direct_secret_error(found.flag)
+            if found is None and (split := split_source_flag(name)) is not None:
+                base, source = split
+                owner = command.field_by_flag(base)
+                if owner is not None and owner.secret:
+                    if has_eq:
+                        ref = inline
+                    elif i + 1 < len(tokens):
+                        ref = tokens[i + 1]
+                        i += 1
+                    else:
+                        raise ParseError(f"{tok!r} needs a value", context={"flag": name})
+                    _take_secret(secrets, owner, SecretRef(source, ref))
+                    i += 1
+                    continue
             if found is None and name.startswith("no-"):
                 found = command.field_by_flag(name[3:])
                 negated = found is not None and found.flag_type is FlagType.BOOLEAN
@@ -247,7 +273,7 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
                 context={
                     "flag": name,
                     "command": command.path.value,
-                    "known": [f.flag for f in command.fields],
+                    "known": known_flags(command),
                 },
                 suggestion=format_hint(tok),
             )
@@ -275,22 +301,53 @@ def parse_command_args(command: Command, tokens: tuple[str, ...]) -> Invocation:
     for name, items in arrays.items():
         values[name] = tuple(items)
     if raw_payload is not None:
-        if values:
+        if values or secrets:
             raise ParseError(
                 "Cannot combine --raw-payload with individual flags",
-                context={"flag": RAW_PAYLOAD_FLAG, "also_given": sorted(values)},
+                context={"flag": RAW_PAYLOAD_FLAG, "also_given": sorted(values | secrets)},
             )
         mapping = _decode_raw_payload(raw_payload)
-        built = build_from_mapping(command, mapping)
+        built = build_from_mapping(command, mapping, env)
         return Invocation(
             args=built.args,
             timeout=timeout,
             confirmed=confirmed,
             idempotency_key=key or built.idempotency_key,
         )
+    _apply_secrets(command, values, secrets, env)
     return Invocation(
         args=_finish(command, values), timeout=timeout, confirmed=confirmed, idempotency_key=key
     )
+
+
+def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
+    if field.name in secrets:
+        raise ParseError(
+            f"{field.flag!r} given more than once; use one of --{field.env_flag} "
+            f"or --{field.file_flag}",
+            context={"flag": field.flag + ref.source.suffix},
+        )
+    secrets[field.name] = ref
+
+
+def _apply_secrets(
+    command: Command,
+    values: dict[str, object],
+    secrets: dict[str, SecretRef],
+    env: Mapping[str, str],
+) -> None:
+    """Resolve every secret field in phase 1: named source, else its default variable"""
+    for f in command.fields:
+        if not f.secret:
+            continue
+        ref = secrets.get(f.name)
+        if ref is None:
+            var = command.secret_env_vars[f.name]
+            if env.get(var):
+                ref = SecretRef(SecretSource.ENV, var)
+            else:
+                continue
+        values[f.name] = f.parse(resolve_secret(f.flag, ref, env))
 
 
 def _decode_raw_payload(raw: str) -> Mapping[str, object]:
@@ -307,7 +364,7 @@ def _decode_raw_payload(raw: str) -> Mapping[str, object]:
 
 
 def known_flags(command: Command) -> list[str]:
-    flags = [f.flag for f in command.fields]
+    flags = [name for f in command.fields for name in f.exposed_flags()]
     if command.supports_raw_payload:
         flags.append(RAW_PAYLOAD_FLAG)
     if command.has_network_io:
@@ -320,7 +377,11 @@ def known_flags(command: Command) -> list[str]:
 
 
 def _finish(command: Command, values: dict[str, object]) -> object:
-    missing = [f.flag for f in command.fields if f.required and f.name not in values]
+    missing = [
+        f.env_flag if f.secret else f.flag
+        for f in command.fields
+        if f.required and f.name not in values
+    ]
     if missing:
         raise ParseError(
             f"missing required: {', '.join(missing)}",
@@ -332,9 +393,12 @@ def _finish(command: Command, values: dict[str, object]) -> object:
     return command.args_type(**values)
 
 
-def build_from_mapping(command: Command, mapping: Mapping[str, object]) -> Invocation:
+def build_from_mapping(
+    command: Command, mapping: Mapping[str, object], env: Mapping[str, str]
+) -> Invocation:
     """Build an invocation from already-typed JSON values, as ``exec`` receives them"""
     values: dict[str, object] = {}
+    secrets: dict[str, SecretRef] = {}
     timeout: Timeout | None = None
     confirmed = False
     idempotency_key: IdempotencyKey | None = None
@@ -356,6 +420,16 @@ def build_from_mapping(command: Command, mapping: Mapping[str, object]) -> Invoc
             confirmed = value
             continue
         found = command.field_by_flag(flag)
+        if found is not None and found.secret:
+            raise direct_secret_error(found.flag)
+        if found is None and (split := split_source_flag(flag)) is not None:
+            base, source = split
+            owner = command.field_by_flag(base)
+            if owner is not None and owner.secret:
+                if not isinstance(value, str):
+                    raise ParseError(f"{key!r} expects a string", context={"field": key})
+                _take_secret(secrets, owner, SecretRef(source, value))
+                continue
         if found is None:
             raise ParseError(
                 f"unknown field {key!r}",
@@ -371,6 +445,7 @@ def build_from_mapping(command: Command, mapping: Mapping[str, object]) -> Invoc
             values[found.name] = None
             continue
         values[found.name] = _check_json_value(found, value)
+    _apply_secrets(command, values, secrets, env)
     return Invocation(
         args=_finish(command, values),
         timeout=timeout,

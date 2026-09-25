@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 163 passed |
+| `uv run pytest` | 175 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 11 of 11, levels 1 to 3 |
@@ -35,6 +35,11 @@ The two do not share code.
   `pattern_type: filepath`; `check_path` runs on argv, `exec`, and `--raw-payload` values
   and refuses `..`, `%XX`, and null bytes. `../x` from a subdirectory is therefore refused
   too; the suggestion carries the resolved absolute path, which is the intended recovery
+- **A secret field has no direct flag.** `secret=True`, or a name containing token, secret,
+  password, key, credential, or auth (never on a boolean), turns `--x` into
+  `--x-from-env VAR` and `--x-from-file PATH` with `<APP>_<X>` as the default variable.
+  `Command.secret_env_vars` maps field name to that variable; `_apply_secrets` resolves them
+  in phase 1 on both parse routes and feeds the text through `FieldInfo.parse`
 - **Positional arguments are also flags.** Every field appears in the manifest `flags` map
   and can be passed as `--name=value`, because `FlagEntry` has no positional marker
 - **In-house parser.** `argparse` is not used anywhere; every parse failure is a
@@ -103,11 +108,13 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-011, F-012,
-F-013, F-045 (paths), F-048, F-069, C-001, C-002, C-004, C-012, C-015, C-020 (`filepath`
-only), O-021, O-032, O-041, O-050.
+F-013, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002, C-003, C-004, C-007, C-012,
+C-015, C-016, C-020 (`filepath` only), O-021, O-022, O-032, O-039, O-041, O-050.
 
-Framework flags the parser knows: `--format`, `--help`, `--schema`, and per command
-`--timeout` (network), `--confirm-destructive` (destructive), `--raw-payload` (opt-in).
+Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
+command `--timeout` (network), `--confirm-destructive` (destructive), `--idempotency-key`
+(non-safe), `--raw-payload` (opt-in), and `--<name>-from-env` / `--<name>-from-file` for
+each secret field.
 
 ## Gotchas
 

@@ -45,7 +45,9 @@ def command_entry(
         exit_codes[str(entry.code.value)] = entry.to_json()
     if shared is not None:
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
-    flags: dict[str, object] = {f.flag: f.to_flag_entry() for f in command.fields}
+    flags: dict[str, object] = {}
+    for f in command.fields:
+        flags.update(f.to_flag_entries())
     if command.has_network_io:
         flags["timeout"] = {
             "type": "number",
@@ -89,6 +91,10 @@ def command_entry(
         out["examples"] = [e.to_json() for e in command.examples]
     if command.has_network_io:
         out["has_network_io"] = True
+    if command.secret_env_vars:
+        out["secret_env_vars"] = [
+            command.secret_env_vars[f.name] for f in command.fields if f.secret
+        ]
     return out
 
 
