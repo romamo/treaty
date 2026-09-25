@@ -62,6 +62,23 @@ printf '%s\n' '{"_cmd":"deploy.rollback","service":"api","_opts":{"to":"1.3.9"}}
   | deployctl exec --ignore-errors --dry-run
 ```
 
+## Flag order
+
+`--format`, `--help`, `--schema`, and `--max-output` are global: they are accepted anywhere
+before `--`, so a command cannot declare a flag with those names. Every other flag, including
+`--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`, belongs to a
+command and goes after the full command path:
+
+```bash
+deployctl --format json deploy rollback api --dry-run   # ok
+deployctl deploy rollback api --dry-run --format json   # ok
+deployctl --dry-run deploy rollback api                 # ARG_ERROR
+```
+
+A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
+words resolve to in `context.command`, and puts the corrected order in `suggestion`. Human
+mode prints every error's suggestion as a final `hint:` line on stderr.
+
 ## Timeouts
 
 Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
@@ -79,8 +96,6 @@ bytes and cuts the list, object, or string where no child dominates to the longe
 that fits. `meta` gets `truncated`, `total_bytes`, and a `truncation_hint` giving the cap
 that returns everything (plus `total_count` and `returned_count` when `data` is a list), and
 each cut adds a `FIELD_TRUNCATED` warning naming the field. Human mode is not capped.
-`--format`, `--help`, `--schema`, and `--max-output` are global, so a command cannot
-declare a flag with those names.
 
 ## Secrets
 
