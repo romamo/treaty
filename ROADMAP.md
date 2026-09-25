@@ -51,6 +51,40 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `error.context`, when a failure deserves its own exit code); short, because every
   mechanical step is now an audit rule
 
+## 0.1.1: cloudfall adoption
+
+Gaps found on 2026-09-25 by reading the first real consumer, `romamo/cloudfall`
+(commit `b9677a6`): its argparse CLI, agent toolset, and MCP server declare every
+operation three times, and none of them could be ported until these land. In order:
+
+- **Custom scalars** via a registry, not a protocol on the domain class:
+  `app.scalar(ResourceId, parse=ResourceId.from_boundary, pattern=r"...")` and
+  `app.scalar(TcpPort, parse=..., base=int, minimum=1, maximum=65535)`. `classify` in
+  `_types.py` takes the registry; the manifest and `--schema` carry the pattern or bounds;
+  `exec` and `--raw-payload` serialise back through the base type; a `ValueError` from
+  the parser is one entry in `error.errors`. The REQ-C-020 presets (`uuid`, `semver`)
+  become built-in registrations
+- **Typed resources** on the handler signature instead of a global pre-dispatch hook:
+  any parameter after `ctx` names a class with an `acquire(cls, args, ctx)` classmethod,
+  resolved after validation, cached per run, composable, and a `CliExit` raised inside
+  becomes an ordinary envelope. Replaces cloudfall's resolve-project, chdir, and
+  validate-config sequence with one class. Resources must not `chdir`: `exec` runs
+  several requests in one process. Shared flags such as `--project` live on a
+  `kw_only=True` base args dataclass
+- **Streaming handlers** (`streaming=True`): the handler is a generator and every yield
+  is one JSONL envelope with a sequence number in `meta`; `timeout` defaults to `None`
+  for these commands; cancellation runs `cleanup=` and ends the stream with the normal
+  `CANCELLED` envelope. Needed for a serve command that must announce its URL and then
+  block; the same machinery later carries REQ-O-004 list streaming
+- **MCP adapter** (`treaty[mcp]`, moved up from Later): `treaty mcp module:app` runs
+  in-process, one tool per command, input schema from `parameters` and result schema
+  from `output_schema` as `--schema` already emits them. Destructive commands get a
+  `confirm_destructive` boolean and an unconfirmed call returns the
+  `CONFIRMATION_REQUIRED` envelope with the dry-run preview, so the gate is identical on
+  the CLI and over MCP. Calls go through the `exec` invocation path so idempotency,
+  timeouts, effect validation, and output caps apply. In-process rather than one
+  subprocess per call because consumers like cloudfall import ansible at startup
+
 ## 0.2.0: level 2 coverage
 
 Every remaining P0 requirement the kit cannot yet check. Each new declaration gets a
@@ -87,8 +121,6 @@ matching audit rule so adoption never requires reading the spec.
 - **pydantic adapter** (`treaty[pydantic]`): a protocol seam in `_flags.py` and
   `_schema.py` so a `BaseModel` can serve as args or output type. First adapter to build
   when the extras are revisited
-- **MCP adapter** (`treaty[mcp]`): one MCP tool per manifest entry over the exec dispatch
-  path. A product-scope decision, not a framework gap
 - **rich adapter** (`treaty[rich]`): human-mode rendering only. Low value
 - Shell completion generated from the manifest
 - Windows CI: signals are POSIX-only in the tests; the daemon-thread timeout already works
