@@ -21,6 +21,8 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - Handler-raised `ParseError` becomes a validation-phase exit 2 envelope
 - `effect` on every mutating and destructive response (REQ-C-003, REQ-C-004) and a
   framework `--idempotency-key` with a per-app record store (REQ-C-007)
+- `exec` stdin cap (64 KiB, `STDIN_TOO_LARGE`) with an uncapped `--input-file`
+  (REQ-F-054, REQ-O-039)
 - Secret flags (REQ-F-034, REQ-F-051): `secret=` on `Flag` and `Arg`, inferred from the
   name by default; their values and any unknown `--name=value` are never echoed in errors
 - Response size cap (REQ-F-052): 1 MiB default, `--max-output` and
@@ -51,7 +53,6 @@ matching audit rule so adoption never requires reading the spec.
   parse and preview errors set `phase: validation`
 - Pagination metadata on list commands: `--limit`, `--cursor`, `meta.pagination`
   (REQ-F-018)
-- Stdin payload cap with `--input-file` fallback (REQ-F-054, REQ-O-039)
 - `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028) and a
   `would_affect` object on dry runs (REQ-C-004)
 - Secrets only via env var or file (REQ-C-016, REQ-O-022): `--<name>-from-env` and

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn
 
-from ._cap import DEFAULT_CAP, OutputCap, cap_envelope
+from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, StdinCap, cap_envelope
 from ._command import (
     Cleanup,
     Command,
@@ -69,6 +69,9 @@ class NoArgs:
 @dataclass(frozen=True, slots=True)
 class ExecArgs:
     ignore_errors: bool = Flag(default=False, description="Continue past a failed line")
+    input_file: str | None = Flag(
+        default=None, description="Read the plan from this file instead of stdin; - is stdin"
+    )
     dry_run: bool = Flag(
         default=False, description="Forward dry_run to every mutating or destructive line"
     )
@@ -98,6 +101,7 @@ class App:
         state: Mapping[str, object] | None = None,
         default_timeout: float | None = DEFAULT_TIMEOUT.seconds,
         max_output_bytes: int = DEFAULT_CAP.bytes,
+        max_stdin_bytes: int = DEFAULT_STDIN_CAP.bytes,
         state_dir: str | Path | None = None,
         enable_exec: bool = True,
     ) -> None:
@@ -108,6 +112,7 @@ class App:
         self.description = description
         self.default_timeout = Timeout(default_timeout)
         self.max_output = OutputCap(max_output_bytes)
+        self.max_stdin = StdinCap(max_stdin_bytes)
         self.state_dir = None if state_dir is None else Path(state_dir)
         self.exits = ExitCodeRegistry()
         self._state: Mapping[str, object] = dict(state or {})
@@ -637,16 +642,11 @@ class _Run:
     # exec (REQ-O-050)
 
     def exec(self, args: ExecArgs, stdin: IO[str]) -> int:
-        """Dispatch each stdin line in-process; JSONL envelopes out; 0, 1, or 2"""
-        if stdin.isatty():
-            # Reading a terminal would block until the user types EOF
-            return self.emit(
-                OutputMode.JSON,
-                self._stream_error("STDIN_IS_TTY", "exec reads JSONL from stdin, not a terminal"),
-            )
-        # Drain the whole plan before dispatching: a caller that writes everything before
-        # reading would otherwise deadlock once our output fills the stdout pipe
-        plan = stdin.read().splitlines()
+        """Dispatch each plan line in-process; JSONL envelopes out; 0, 1, or 2"""
+        text = self._read_plan(args, stdin)
+        if isinstance(text, Envelope):
+            return self.emit(OutputMode.JSON, text)
+        plan = text.splitlines()
         any_failed = False
         parsed_any = False
         lines_seen = 0
@@ -664,13 +664,55 @@ class _Run:
         if not lines_seen:
             return self.emit(
                 OutputMode.JSON,
-                self._stream_error("EMPTY_STREAM", "no DispatchRequest lines on stdin"),
+                self._stream_error(
+                    "EMPTY_STREAM", "no DispatchRequest lines in the plan", context={"lines": 0}
+                ),
             )
         if not parsed_any:
             return FrameworkCode.ARG_ERROR.value
         return FrameworkCode.GENERAL_ERROR.value if any_failed else 0
 
-    def _stream_error(self, code: str, message: str) -> Envelope:
+    def _read_plan(self, args: ExecArgs, stdin: IO[str]) -> str | Envelope:
+        """The whole plan, read before dispatch so a write-then-read caller cannot deadlock"""
+        if args.input_file is not None and args.input_file != "-":
+            try:
+                return Path(args.input_file).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return self._stream_error(
+                    "INPUT_FILE_UNREADABLE",
+                    f"cannot read --input-file: {exc}",
+                    context={"input_file": args.input_file},
+                    fix_required="pass a readable UTF-8 file, or - to read stdin",
+                )
+        if stdin.isatty():
+            # Reading a terminal would block until the user types EOF
+            return self._stream_error(
+                "STDIN_IS_TTY", "exec reads JSONL from stdin, not a terminal", context={"lines": 0}
+            )
+        try:
+            cap = StdinCap.resolve(self.env, self.app.max_stdin)
+        except ParseError as exc:
+            return self.arg_error(exc)
+        # One more character than the cap is always more bytes than the cap
+        text = stdin.read(cap.bytes + 1)
+        if len(text.encode()) > cap.bytes:
+            return self._stream_error(
+                "STDIN_TOO_LARGE",
+                f"stdin plan exceeds the {cap.bytes}-byte limit",
+                context={"limit_bytes": cap.bytes},
+                fix_required="write the plan to a file and pass --input-file <path>",
+            )
+        return text
+
+    def _stream_error(
+        self,
+        code: str,
+        message: str,
+        *,
+        context: Mapping[str, object],
+        fix_required: str = "pipe one DispatchRequest JSON object per line into exec, "
+        "or pass --input-file",
+    ) -> Envelope:
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
         return self._envelope(
             entry.code.value,
@@ -678,9 +720,9 @@ class _Run:
                 code=code,
                 message=message,
                 retryable=False,
-                context={"lines": 0},
+                context=context,
                 phase="validation",
-                fix_required="pipe one DispatchRequest JSON object per line into exec",
+                fix_required=fix_required,
             ),
         )
 

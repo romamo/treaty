@@ -1,8 +1,10 @@
 import io
 import json
+import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 from conftest import spec_validator
 
@@ -157,6 +159,7 @@ def test_exec_drains_stdin_before_writing() -> None:
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        env={**os.environ, "TREATY_MAX_STDIN_BYTES": str(len(plan))},
     )
     assert proc.stdin is not None and proc.stdout is not None
 
@@ -174,3 +177,70 @@ def test_exec_drains_stdin_before_writing() -> None:
         out = proc.stdout.read()
         proc.wait(timeout=10)
     assert proc.returncode == 0 and out.count(b"\n") == 12000
+
+
+def run_exec_raw(app: App, argv: list[str], stdin: str, env: dict[str, str]) -> tuple[int, dict]:
+    out = io.StringIO()
+    code = app.run(argv, stdin=io.StringIO(stdin), stdout=out, stderr=io.StringIO(), env=env)
+    envelope = json.loads(out.getvalue().splitlines()[0])
+    spec_validator("response-envelope").validate(envelope)
+    return code, envelope
+
+
+LINE = '{"_cmd": "deploy.status", "service": "api"}\n'
+
+
+def test_stdin_over_the_cap_is_rejected_before_dispatch(app: App) -> None:
+    exact = LINE * 2
+    env = {"TREATY_MAX_STDIN_BYTES": str(len(exact))}
+    code, _ = run_exec_raw(app, ["exec"], exact, env)
+    assert code == 0
+    code, envelope = run_exec_raw(app, ["exec"], exact + "\n", env)
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "STDIN_TOO_LARGE"
+    assert error["context"] == {"limit_bytes": len(exact)}
+    assert "--input-file" in error["fix_required"]
+
+
+def test_default_stdin_cap_is_64_kib(app: App) -> None:
+    code, envelope = run_exec_raw(app, ["exec"], LINE * 2000, {})
+    assert code == 2 and envelope["error"]["context"]["limit_bytes"] == 65_536
+
+
+def test_input_file_has_no_cap_and_dash_means_stdin(app: App, tmp_path: Path) -> None:
+    plan = tmp_path / "plan.jsonl"
+    plan.write_text(LINE * 2000)
+    out = io.StringIO()
+    code = app.run(["exec", "--input-file", str(plan)], stdout=out, env={}, isatty=False)
+    assert code == 0 and len(out.getvalue().splitlines()) == 2000
+    code, _ = run_exec_raw(app, ["exec", "--input-file", "-"], LINE * 2000, {})
+    assert code == 2
+
+
+def test_unreadable_input_file_is_arg_error(app: App, tmp_path: Path) -> None:
+    code, envelope = run_exec_raw(app, ["exec", "--input-file", str(tmp_path / "no")], "", {})
+    assert code == 2 and envelope["error"]["code"] == "INPUT_FILE_UNREADABLE"
+
+
+def test_invalid_stdin_cap_env_is_arg_error(app: App) -> None:
+    code, envelope = run_exec_raw(app, ["exec"], LINE, {"TREATY_MAX_STDIN_BYTES": "lots"})
+    assert code == 2 and envelope["error"]["context"]["source"] == "TREATY_MAX_STDIN_BYTES"
+
+
+def test_oversized_pipe_fails_fast_for_a_write_everything_caller() -> None:
+    """Past the cap exec exits instead of reading on, so the writer gets EPIPE, not a hang"""
+    plan = b'{"_cmd": "version"}\n' * 12000
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "from treaty._cli import main; main()", "exec"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    assert proc.stdin is not None and proc.stdout is not None
+    try:
+        proc.stdin.write(plan)
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+    out = proc.stdout.read()
+    assert proc.wait(timeout=10) == 2 and json.loads(out)["error"]["code"] == "STDIN_TOO_LARGE"

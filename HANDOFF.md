@@ -59,7 +59,7 @@ src/treaty/
   _cli.py        the `treaty` console script (audit, rules, init, conformance)
   _profile.py    probes from examples and danger levels, profile writer, kit runner
   _scaffold.py   file templates for `treaty init`; generated projects pass the audit
-  _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation
+  _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _command.py    Command record, build_command(), handler signature inspection
   _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, idempotency_key)
   _dispatch.py   DispatchRequest line parser for exec

@@ -24,7 +24,7 @@ Discovered during §42 evaluation on 2026-09-24.
 
 ### §61: `exec` deadlocks callers that write the whole plan before reading (fixed 2026-09-24)
 `exec` writes each envelope as it reads each line. With a 228KB plan, a caller that writes everything before reading blocks once the 64KB stdout pipe fills. There is no stdin size limit, STDIN_TOO_LARGE error or `--input-file` alternative.
-Fixed: `exec` now reads stdin to EOF before dispatching, so a write-everything-then-read caller always finishes writing; results still stream per line. Still no stdin size limit or `--input-file`.
+Fixed: `exec` now reads stdin to EOF before dispatching, so a write-everything-then-read caller always finishes writing; results still stream per line. Stdin cap and `--input-file` added 2026-09-25: a piped plan over 64 KiB (`TREATY_MAX_STDIN_BYTES`) exits 2 `STDIN_TOO_LARGE` before dispatch, and `--input-file PATH` reads any size from a file.
 Discovered during §61 evaluation on 2026-09-24.
 
 ### §71: no documented install; stale wheel in `dist/`

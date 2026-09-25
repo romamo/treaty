@@ -64,6 +64,35 @@ class OutputCap:
 
 DEFAULT_CAP = OutputCap(1_048_576)
 
+STDIN_ENV_VAR = "TREATY_MAX_STDIN_BYTES"
+
+
+@dataclass(frozen=True, slots=True)
+class StdinCap:
+    """Most bytes ``exec`` reads from a pipe (REQ-F-054); ``--input-file`` has no cap"""
+
+    bytes: int
+
+    def __post_init__(self) -> None:
+        if self.bytes < 1:
+            raise InvalidValue("stdin cap must be at least 1 byte")
+
+    @classmethod
+    def resolve(cls, env: Mapping[str, str], default: StdinCap) -> StdinCap:
+        raw = env.get(STDIN_ENV_VAR)
+        if raw is None:
+            return default
+        try:
+            return cls(int(raw))
+        except ValueError:
+            raise ParseError(
+                f"{STDIN_ENV_VAR} must be a whole number of bytes, at least 1",
+                context={"source": STDIN_ENV_VAR, "value": raw},
+            ) from None
+
+
+DEFAULT_STDIN_CAP = StdinCap(65_536)
+
 
 @dataclass(frozen=True, slots=True)
 class _Cut:
