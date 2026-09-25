@@ -45,6 +45,7 @@ from ._parse import (
     split_globals,
     without_value,
 )
+from ._resources import Resolver
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._signals import Cancelled, CancelSignal, cancellation_handlers
@@ -368,6 +369,12 @@ class App:
             return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
 
 
+def _invoke(command: Command, args: object, ctx: Ctx) -> object:
+    """Acquire the handler's resources, each once and in dependency order, then run it"""
+    resolver = Resolver(command.resource_graph, args, ctx)
+    return command.handler(args, ctx, *resolver.all(command.resources))
+
+
 def _previewing(command: Command, invocation: Invocation) -> bool:
     """A destructive command run without --confirm-destructive or --dry-run"""
     return command.danger_level is DangerLevel.DESTRUCTIVE and not (
@@ -521,7 +528,7 @@ class _Run:
             assert dataclasses.is_dataclass(args) and not isinstance(args, type)
             args = dataclasses.replace(args, dry_run=True)
         try:
-            result = call_with_timeout(lambda: command.handler(args, ctx), timeout)
+            result = call_with_timeout(lambda: _invoke(command, args, ctx), timeout)
         except CliExit as exc:
             return self._exit_envelope(command, exc, started, full_meta)
         except ParseError as exc:

@@ -169,6 +169,44 @@ base). `pattern=` on a field of a registered type is a registration error, as is
 an unregistered class. `pattern_type` takes the REQ-C-020 presets `alphanumeric_id`,
 `uuid`, `semver`, and `url`; `filepath` stays with `pathlib.Path`.
 
+## Resources
+
+A handler can take more parameters after `ctx`. Each one is annotated with a class that has
+an `acquire` classmethod, and the framework calls it after validation, once per run, before
+the handler:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Project:
+    directory: Path
+
+    @classmethod
+    def acquire(cls, args: ProjectArgs, ctx: Ctx) -> Self:
+        directory = args.project or Path(ctx.env["PWD"])
+        if not (directory / "servers").is_dir():
+            raise Exit.NO_PROJECT("not a project", context={"directory": str(directory)})
+        return cls(directory)
+
+@dataclass(frozen=True, slots=True)
+class Config:
+    @classmethod
+    def acquire(cls, args: ProjectArgs, ctx: Ctx, project: Project) -> Self: ...
+
+@app.command("deploy", description="Deploy a component", exit_codes=["NO_PROJECT"])
+def deploy(args: DeployArgs, ctx: Ctx, config: Config, project: Project) -> Receipt: ...
+```
+
+`acquire` takes the same `(args, ctx)` as a handler plus, optionally, other resources by
+annotation, so resources compose. Each class is acquired at most once per run and shared,
+in dependency order, and acquisition runs under the command's timeout. A `CliExit` raised
+inside `acquire` becomes that exit's envelope and a `ParseError` becomes `ARG_ERROR`, so a
+missing project fails before any handler runs. A class without a classmethod `acquire`, a
+missing `Ctx` annotation, or a dependency cycle is a registration error. Resources are not
+part of the manifest: the flags they read, such as `--project`, live on the args dataclass,
+typically a `kw_only=True` base class shared by every command. Resources must not change
+process state such as the working directory, because `exec` runs many requests in one
+process.
+
 ## Destructive commands
 
 A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without

@@ -65,6 +65,13 @@ The two do not share code.
   parser on both input routes. Registration happens before the commands that use the class:
   an unregistered annotation is a `SchemaError` at command registration, and an
   unregistered dataclass in an output is still an ordinary nested object
+- **Resources are handler parameters, not a pre-dispatch hook.** `_resources.py`:
+  parameters after `ctx` name classes with a classmethod `acquire(cls, args, ctx, *deps)`;
+  `dependency_params` validates the signature shape for handlers and `acquire` alike,
+  `resource_graph` walks the closure at registration (missing `acquire`, cycles), and
+  `Resolver` acquires each class once per run inside `_invoke`, which runs under the
+  timeout so a `CliExit` or `ParseError` from `acquire` takes the normal envelope path. A
+  wrong return type from `acquire` is a `TypeError` and propagates as a bug
 - **Uncaught handler exceptions propagate.** Only `CliExit`, `ParseError` (a handler
   validating its own input, exit 2), timeout, and cancellation become envelopes; anything
   else is a bug and surfaces as a traceback
@@ -80,6 +87,7 @@ src/treaty/
   _profile.py    probes from examples and danger levels, profile writer, kit runner
   _scaffold.py   file templates for `treaty init`; generated projects pass the audit
   _scalars.py    ScalarSpec and ScalarRegistry: custom scalar classes and their constraints
+  _resources.py  ResourceSpec, resource_graph(), Resolver: typed handler resources
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _command.py    Command record, build_command(), handler signature inspection
   _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, idempotency_key)

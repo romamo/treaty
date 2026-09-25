@@ -41,6 +41,10 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   pattern_type=, minimum=, maximum=, serialize=)`; the registry reaches `classify`,
   `schema_for`, and `to_jsonable`; both input routes check the constraint and then call the
   parser; the manifest and `--schema` carry the pattern, preset, and bounds
+- Typed resources (cloudfall gap 2): handler parameters after `ctx` name classes with a
+  classmethod `acquire(cls, args, ctx, *deps)`; acquired once per run in dependency order
+  under the command timeout; `CliExit` and `ParseError` from `acquire` take the normal
+  envelope path; cycles and missing `acquire` fail at registration
 
 ## 0.1.0: first release
 
@@ -64,13 +68,9 @@ operation three times, and none of them could be ported until these land. In ord
 - **Custom scalars**: done, see above. Still open from it: built-in `ScalarSpec`
   presets that pair `pattern_type` with a matching regex, so `uuid` and `semver` are
   checked in phase 1 rather than only declared
-- **Typed resources** on the handler signature instead of a global pre-dispatch hook:
-  any parameter after `ctx` names a class with an `acquire(cls, args, ctx)` classmethod,
-  resolved after validation, cached per run, composable, and a `CliExit` raised inside
-  becomes an ordinary envelope. Replaces cloudfall's resolve-project, chdir, and
-  validate-config sequence with one class. Resources must not `chdir`: `exec` runs
-  several requests in one process. Shared flags such as `--project` live on a
-  `kw_only=True` base args dataclass
+- **Typed resources**: done, see above. Still open from it: a `release` counterpart to
+  `acquire` for resources that hold a lock or a connection, run after the handler and on
+  cancellation alongside `cleanup=`
 - **Streaming handlers** (`streaming=True`): the handler is a generator and every yield
   is one JSONL envelope with a sequence number in `meta`; `timeout` defaults to `None`
   for these commands; cancellation runs `cleanup=` and ends the stream with the normal
