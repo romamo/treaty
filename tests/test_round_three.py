@@ -587,9 +587,9 @@ def test_deeply_nested_input_is_an_arg_error() -> None:
     assert code == 2
 
 
-def test_single_command_help_carries_its_full_exit_table() -> None:
-    code, [env], _ = run(echo_app(), ["echo", "--help"])
-    assert {"0", "1", "2", "5", "10", "130", "143"} <= set(env["data"]["echo"]["exit_codes"])
+def test_single_command_schema_carries_its_full_exit_table() -> None:
+    code, [env], _ = run(echo_app(), ["echo", "--schema"])
+    assert {"0", "1", "2", "5", "10", "130", "143"} <= set(env["data"]["exit_codes"])
 
 
 def test_exec_file_with_a_bom_and_physical_line_numbers(tmp_path: Path) -> None:

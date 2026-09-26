@@ -311,9 +311,12 @@ as an alternative to individual flags. The payload is checked against the same f
 `tool <cmd> --schema` prints the command's manifest entry plus `parameters` and a draft-07
 `output_schema` derived from the handler's return annotation. Commands with
 `supports_raw_payload=True` also get `raw_payload_schema`, the JSON Schema of their args
-dataclass. `tool --schema` prints the whole manifest with each command's full exit-code
-table (a valid ManifestResponse, so without `parameters` or `raw_payload_schema`);
+dataclass. `tool --schema` prints the same manifest as `tool manifest`: codes every
+command shares sit once in the root `exit_codes`, and each entry lists only its own
+additions (a valid ManifestResponse, so without `parameters` or `raw_payload_schema`);
 `tool <group> --schema` prints one group's subtree. The output is JSON in every mode.
+Piped `--help` writes its text to stderr and prints only a pointer on stdout:
+`{"data": null, "meta": {"help": true, "schema_ref": "deploy --schema"}}`.
 
 ## MCP
 

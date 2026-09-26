@@ -39,7 +39,7 @@ from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Flag
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
-from ._manifest import build_manifest, build_schema_manifest, command_entry, command_schema
+from ._manifest import build_manifest, command_schema
 from ._mode import OutputMode, resolve_mode
 from ._parse import (
     Invocation,
@@ -1413,33 +1413,29 @@ class _Run:
             subtree = {
                 p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
             }
-            data = build_schema_manifest(subtree, self.app.exits, self.app.version)
+            data = build_manifest(subtree, self.app.exits, self.app.version)
         return self.emit(mode, self._envelope(0, data=data))
 
     def help_root(self, mode: OutputMode, prefix: tuple[str, ...]) -> int:
-        if mode is OutputMode.JSON:
-            if not prefix:
-                return self.emit(mode, self._envelope(0, data=self.app.manifest()))
-            # Group help is the group's subtree, not the whole tree (same scoping as --schema)
-            subtree = {
-                p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
-            }
-            data = build_manifest(subtree, self.app.exits, self.app.version)
-            return self.emit(mode, self._envelope(0, data=data))
-        self.out.write(
-            render_root(
-                self.app.name, self.app.description, self.app.commands, self.app._groups, prefix
-            )
+        text = render_root(
+            self.app.name, self.app.description, self.app.commands, self.app._groups, prefix
         )
-        return 0
+        return self._help(mode, prefix, text)
 
     def help_command(self, mode: OutputMode, command: Command) -> int:
-        if mode is OutputMode.JSON:
-            # One entry alone: its full exit table, since no root table comes with it
-            full = command_entry(command, self.app.exits, self.app.commands)
-            return self.emit(mode, self._envelope(0, data={command.path.value: full}))
-        self.out.write(render_command(self.app.name, command))
-        return 0
+        return self._help(mode, command.path.parts, render_command(self.app.name, command))
+
+    def _help(self, mode: OutputMode, parts: tuple[str, ...], text: str) -> int:
+        """Help text on stdout for a person; in JSON mode it goes to stderr and stdout gets
+        only a pointer to ``--schema`` (REQ-F-048)"""
+        if mode is not OutputMode.JSON:
+            self.out.write(text)
+            return 0
+        self.err.write(text)
+        self.err.flush()
+        schema_ref = " ".join((*parts, "--schema"))
+        meta = {"help": True, "schema_ref": schema_ref}
+        return self.emit(mode, self._envelope(0, meta=meta))
 
     # exec (REQ-O-050)
 

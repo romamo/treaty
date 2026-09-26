@@ -135,17 +135,33 @@ def test_flag_before_unknown_command_lists_available(app: App) -> None:
     assert "hunter2" not in json.dumps(env)
 
 
-def test_no_args_json_mode_returns_manifest(app: App) -> None:
-    code, env = run_json(app, [])
-    assert code == 0 and "commands" in env["data"]
+def help_json(app: App, argv: list[str]) -> tuple[int, dict, str]:
+    code, out, err = run(app, argv)
+    envelope = json.loads(out)
+    spec_validator("response-envelope").validate(envelope)
+    return code, envelope, err
 
 
-def test_group_help_json_scopes_to_subtree(app: App) -> None:
-    code, env = run_json(app, ["deploy", "--help"])
-    assert code == 0
-    assert set(env["data"]["commands"]) == {"deploy.rollback", "deploy.status"}
-    code, env = run_json(app, ["deploy"])
-    assert code == 0 and "manifest" not in env["data"]["commands"]
+def test_no_args_json_mode_points_to_schema(app: App) -> None:
+    code, env, err = help_json(app, [])
+    assert code == 0 and env["ok"] is True and env["data"] is None
+    assert env["meta"]["help"] is True and env["meta"]["schema_ref"] == "--schema"
+    assert "Command groups" in err
+
+
+def test_group_help_json_points_to_its_schema(app: App) -> None:
+    for argv in (["deploy", "--help"], ["deploy"]):
+        code, env, err = help_json(app, argv)
+        assert code == 0 and env["data"] is None
+        assert env["meta"]["schema_ref"] == "deploy --schema"
+        assert "rollback" in err and "manifest" not in err
+
+
+def test_command_help_json_routes_text_to_stderr(app: App) -> None:
+    code, env, err = help_json(app, ["deploy", "rollback", "--help"])
+    assert code == 0 and env["data"] is None
+    assert env["meta"] == env["meta"] | {"help": True, "schema_ref": "deploy rollback --schema"}
+    assert "--dry-run" in err
 
 
 def test_human_mode_help_and_errors(app: App) -> None:

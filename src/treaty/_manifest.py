@@ -222,20 +222,6 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
     return schema
 
 
-def build_schema_manifest(
-    commands: Mapping[CommandPath, Command], exits: ExitCodeRegistry, framework_version: str
-) -> dict[str, object]:
-    """``tool --schema``: the manifest with every entry in ``--schema`` form"""
-    manifest = build_manifest(commands, exits, framework_version)
-    # Full exit tables per entry, but still a valid CommandEntry: parameters and
-    # raw_payload_schema belong to a single command's --schema only
-    manifest["commands"] = {
-        path.value: command_entry(cmd, exits, commands)
-        for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
-    }
-    return manifest
-
-
 def build_manifest(
     commands: Mapping[CommandPath, Command], exits: ExitCodeRegistry, framework_version: str
 ) -> dict[str, object]:
