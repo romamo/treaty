@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to check, e.g. refs/tags/v0.0.1
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The spec commit treaty is verified against; tests find it as the sibling checkout
+  SPEC_REF: 91dedd24634b373f848305ecc0c3bcb777518806
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+
+      - run: uv sync --locked
+      - run: uv run ruff check src tests examples
+      - run: uv run ruff format --check src tests examples
+      - run: uv run mypy src examples
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Fetch the spec as a sibling checkout
+        run: |
+          git init -q ../cli-agent-ergonomics
+          cd ../cli-agent-ergonomics
+          git fetch -q --depth 1 https://github.com/cli-agent-spec/cli-agent-spec "$SPEC_REF"
+          git checkout -q FETCH_HEAD
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+
+      - run: uv sync --locked
+      - run: uv run pytest -rs

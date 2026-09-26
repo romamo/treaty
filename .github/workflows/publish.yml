@@ -18,23 +18,20 @@ concurrency:
 
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
-  # The spec commit the release was verified against
-  SPEC_REF: 91dedd24634b373f848305ecc0c3bcb777518806
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: refs/tags/${{ inputs.tag || github.ref_name }}
+
   build:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
-          persist-credentials: false
-
-      - uses: actions/checkout@v7
-        with:
-          repository: cli-agent-spec/cli-agent-spec
-          ref: ${{ env.SPEC_REF }}
-          path: _spec
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@v10.2.0
@@ -43,14 +40,6 @@ jobs:
 
       - name: Check the tag matches the project version
         run: test "v$(uv version --short)" = "$TAG"
-
-      - run: uv sync --locked
-      - run: uv run ruff check src tests examples
-      - run: uv run ruff format --check src tests
-      - run: uv run mypy src
-      - run: uv run pytest
-        env:
-          TREATY_SPEC_DIR: ${{ github.workspace }}/_spec
 
       - run: uv build --out-dir dist
 
