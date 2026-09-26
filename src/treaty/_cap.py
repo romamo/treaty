@@ -154,7 +154,12 @@ def _truncated(
         **envelope.extra_meta,
         "truncated": True,
         "total_bytes": total,
-        "truncation_hint": hint if argv else f"set {ENV_VAR}={total} and call again",
+        # An in-process caller (MCP) cannot pass --max-output, and the server's
+        # environment is fixed at launch: it can only ask for less
+        "truncation_hint": hint
+        if argv
+        else f"ask for less data (a filter or a smaller page); the full response is {total} "
+        f"bytes, and the server's {ENV_VAR} sets the cap",
     }
     root = next((c for c in cuts if c.path == ()), None)
     if root is not None and data is not None and isinstance(envelope.data, list):

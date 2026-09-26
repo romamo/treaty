@@ -15,11 +15,19 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ._errors import RegistrationError
 
 # REQ-C-020 presets a scalar may claim instead of a pattern; filepath belongs to Path fields
 PATTERN_TYPES = frozenset({"alphanumeric_id", "uuid", "semver", "url"})
+# What each preset accepts; alphanumeric_id rejects /, ., ?, #, and % (REQ-C-020)
+PRESET_PATTERNS = {
+    "alphanumeric_id": r"[A-Za-z0-9][A-Za-z0-9_-]*",
+    "uuid": r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+    "semver": r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?",
+}
 _BASES: dict[type, str] = {str: "string", int: "integer", float: "number"}
 _BUILTIN = (str, int, float, bool, Path)
 
@@ -70,6 +78,8 @@ class ScalarSpec:
         schema: dict[str, object] = {"type": self.json_type, "title": self.cls.__name__}
         if self.pattern is not None:
             schema["pattern"] = self.pattern
+        if self.pattern_type in ("alphanumeric_id", "semver"):
+            schema["pattern"] = f"^{PRESET_PATTERNS[self.pattern_type]}$"
         if self.pattern_type == "uuid":
             schema["format"] = "uuid"
         if self.pattern_type == "url":
@@ -86,6 +96,10 @@ class ScalarSpec:
             assert isinstance(base_value, str)
             if not re.fullmatch(self.pattern, base_value):
                 return "does not match pattern", {"pattern": self.pattern}
+        if self.pattern_type is not None:
+            assert isinstance(base_value, str)
+            if not _matches_preset(self.pattern_type, base_value):
+                return f"is not a valid {self.pattern_type}", {"pattern_type": self.pattern_type}
         if self.minimum is not None:
             assert isinstance(base_value, (int, float))
             if base_value < self.minimum:
@@ -95,6 +109,13 @@ class ScalarSpec:
             if base_value > self.maximum:
                 return f"must be at most {self.maximum}", {"maximum": self.maximum}
         return None
+
+
+def _matches_preset(preset: str, value: str) -> bool:
+    if preset == "url":
+        parts = urlsplit(value)
+        return parts.scheme in ("http", "https") and bool(parts.netloc)
+    return re.fullmatch(PRESET_PATTERNS[preset], value) is not None
 
 
 def default_serializer(cls: type, base: type) -> Callable[[Any], object]:

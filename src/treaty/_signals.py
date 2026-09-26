@@ -63,9 +63,10 @@ class Cancellation:
     def armed(self) -> Iterator[None]:
         """Let a signal raise ``Cancelled`` here; one held since the last window raises now"""
         assert not self._armed, "armed() windows do not nest"
-        self.check()
+        # Armed before the check, so a signal between the two raises instead of being held
         self._armed = True
         try:
+            self.check()
             yield
         finally:
             self._armed = False

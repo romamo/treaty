@@ -121,6 +121,9 @@ class FieldInfo:
         """Replace an echoed value with ``[REDACTED]`` when this field holds a secret"""
         if self.secret and "value" in exc.context:
             exc.context["value"] = REDACTED
+        if self.secret and exc.suggestion is not None:
+            # A suggestion rebuilds the value (a decoded or resolved path)
+            exc.suggestion = f"fix the value behind --{self.env_flag} or --{self.file_flag}"
         return exc
 
     def parse(self, raw: str) -> object:
@@ -210,7 +213,7 @@ def _jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
     if isinstance(value, tuple):
         return [_jsonable_default(v, scalar) for v in value]
     if scalar is not None and isinstance(value, scalar.cls):
-        return scalar.serialize(value)
+        return _jsonable_default(scalar.serialize(value), None)
     if isinstance(value, float) and not math.isfinite(value):
         raise RegistrationError(f"default {value!r} is not a finite number")
     if value is not None and not isinstance(value, (bool, int, float, str)):
@@ -240,6 +243,13 @@ def apply_scalar(
         raise ParseError(
             f"value for {flag!r} is not a valid {spec.cls.__name__}: {exc}",
             context={**ctx, "cause": str(exc)},
+        ) from None
+    except Exception as exc:  # noqa: BLE001 - a scalar's parse= is user code
+        # Not a declared rejection, but still nothing ran: exit 2 naming the parser's error
+        raise ParseError(
+            f"the {spec.cls.__name__} parser for {flag!r} raised {type(exc).__name__}",
+            context={**ctx, "value": REDACTED if secret else base_value},
+            suggestion=f"{spec.cls.__name__}'s parse= should raise ValueError for bad input",
         ) from None
 
 
@@ -312,6 +322,23 @@ def _check_secret_field(cls: type, info: FieldInfo) -> None:
 
 
 _POSITIONAL_NAME = re.compile(r"[a-z][a-z0-9_]*")
+
+
+def _check_flag_names(cls: type, infos: list[FieldInfo]) -> None:
+    """Flags the parser derives must not collide with another field's flag"""
+    flags = {i.flag: i for i in infos}
+    for info in infos:
+        derived: list[str] = []
+        if info.flag_type is FlagType.BOOLEAN:
+            derived.append(f"no-{info.flag}")  # --no-cache negates cache
+        if info.secret:
+            derived.extend((info.env_flag, info.file_flag))
+        for flag in derived:
+            if flag in flags and flags[flag] is not info:
+                raise RegistrationError(
+                    f"{cls.__qualname__}: field {flags[flag].name!r} takes --{flag}, which "
+                    f"{info.name!r} needs; rename one of them"
+                )
 
 
 def _check_positionals(cls: type, positionals: list[FieldInfo]) -> None:
@@ -387,6 +414,7 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             _check_secret_field(cls, info)
         infos.append(info)
     _check_positionals(cls, [i for i in infos if i.positional])
+    _check_flag_names(cls, infos)
     shorts = [i.spec.short for i in infos if i.spec.short is not None]
     if len(shorts) != len(set(shorts)):
         raise RegistrationError(f"{cls.__qualname__}: duplicate short flags {shorts}")

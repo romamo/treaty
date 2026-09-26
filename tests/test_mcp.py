@@ -231,3 +231,26 @@ def test_capped_and_tuple_outputs_validate_like_an_mcp_client() -> None:
     validator = validator_for(entry.output_schema)
     validator.check_schema(entry.output_schema)
     validator(entry.output_schema).validate(envelope.to_json())
+
+
+def test_replayed_noop_matches_a_closed_effect_enum() -> None:
+    from dataclasses import dataclass
+    from typing import Literal
+
+    from jsonschema.validators import validator_for
+
+    @dataclass(frozen=True, slots=True)
+    class Made:
+        effect: Literal["created"]
+        name: str
+
+    app = App("mk", version="1", state_dir=None)
+
+    @app.command("mk", description="Make", danger_level="mutating")
+    def mk(args: NoArgs, ctx: Ctx) -> Made:
+        return Made("created", "x")
+
+    entry = next(e for e in tool_entries(app) if e.name == "mk")
+    validator = validator_for(entry.output_schema)(entry.output_schema)
+    replay = {"ok": True, "data": {"effect": "noop", "name": "x"}, "error": None}
+    validator.validate({**replay, "warnings": [], "meta": {}})

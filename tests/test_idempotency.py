@@ -227,6 +227,7 @@ def test_prune_keeps_a_lock_that_is_held(tmp_path: Path) -> None:
         os.utime(lock, (stale, stale))
         with claim(tmp_path, other) as slot:
             slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
+            slot.prune(time.time())
         assert lock.exists()
 
         def contend() -> None:
@@ -247,6 +248,7 @@ def test_prune_removes_an_idle_expired_lock(tmp_path: Path) -> None:
     os.utime(lock, (stale, stale))
     with claim(tmp_path, IdempotencyKey("other")) as slot:
         slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
+        slot.prune(time.time())
     assert not lock.exists()
 
 
@@ -279,6 +281,7 @@ def test_prune_keeps_a_record_whose_key_is_held(tmp_path: Path) -> None:
         os.utime(record, (stale, stale))
         with claim(tmp_path, IdempotencyKey("other")) as other:
             other.save(Record("fp", "create", {"effect": "created"}, time.time()))
+            other.prune(time.time())
         assert record.exists(), "a record was pruned while its key was held"
 
 

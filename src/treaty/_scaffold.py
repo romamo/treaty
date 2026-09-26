@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import keyword
 import re
+import sys
 from dataclasses import dataclass
 
 from ._errors import ParseError
@@ -18,6 +20,17 @@ class ProjectName:
         if not _NAME_RE.fullmatch(self.value):
             raise ParseError(
                 "name must be lowercase letters, digits, and hyphens, starting with a letter",
+                context={"name": self.value},
+            )
+        package = self.value.replace("-", "_")
+        if keyword.iskeyword(package) or keyword.issoftkeyword(package):
+            raise ParseError(
+                f"{self.value!r} is a Python keyword, so its package cannot be imported",
+                context={"name": self.value},
+            )
+        if package == "treaty" or package in sys.stdlib_module_names:
+            raise ParseError(
+                f"{self.value!r} would shadow the {package} module it imports",
                 context={"name": self.value},
             )
 

@@ -56,11 +56,13 @@ def test_raw_payload_schema_only_when_supported(app: App) -> None:
     assert raw["additionalProperties"] is False
 
 
-def test_root_schema_is_manifest_with_extended_entries(app: App) -> None:
+def test_root_schema_is_a_manifest_with_full_exit_tables(app: App) -> None:
     code, data = run_json(app, ["--schema"])
     assert code == 0 and data["etag"] == app.manifest()["etag"]
-    assert all("parameters" in entry for entry in data["commands"].values())
+    spec_validator("manifest-response").validate(data)
     assert set(data["commands"]) == set(app.manifest()["commands"])
+    # Not hoisted: each entry carries the shared codes too
+    assert all("0" in entry["exit_codes"] for entry in data["commands"].values())
 
 
 def test_schema_is_json_even_on_a_tty(app: App) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import io
 import json
@@ -432,7 +433,7 @@ class App:
             if command.streaming:
                 envelopes = run.stream(command, invocation, mode)
                 if invocation.no_stream:
-                    return run.emit(mode, buffer_stream(envelopes), render=command.human)
+                    return run.emit(mode, buffer_stream(envelopes), render=_each(command.human))
                 return run.emit_stream(mode, envelopes, render=command.human)
             return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
 
@@ -441,6 +442,34 @@ def _invoke(command: Command, args: object, ctx: Ctx) -> object:
     """Acquire the handler's resources, each once and in dependency order, then run it"""
     resolver = Resolver(command.resource_graph, args, ctx)
     return command.handler(args, ctx, *resolver.all(command.resources))
+
+
+# Shorter values would redact every digit or letter they share with a traceback
+MIN_REDACTED = 4
+
+
+def _text(exc: BaseException) -> str:
+    """``str(exc)``, even for an exception whose own ``__str__`` raises"""
+    try:
+        return str(exc)
+    except Exception:  # noqa: BLE001 - __str__ is user code
+        return f"<{type(exc).__name__} whose str() failed>"
+
+
+def _traceback(exc: BaseException) -> str:
+    return "".join(traceback.format_exception(exc))
+
+
+def _warned(envelope: Envelope, code: str, message: str, command: Command) -> Envelope:
+    warning = WarningDetail(code, message, context={"command": command.path.value})
+    return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+
+
+def _each(render: HumanRenderer | None) -> HumanRenderer | None:
+    """``human=`` renders one event; --no-stream data is the list of them"""
+    if render is None:
+        return None
+    return lambda events: "".join(render(e) for e in events)
 
 
 def _still_running(running: Sequence[Pending]) -> Pending | None:
@@ -572,54 +601,67 @@ class _Run:
                 meta=full_meta,
             )
         call = fingerprint(command.path, invocation.args, self.app.scalars)
-        try:
-            # The wait for an earlier call's lock is bounded by this call's timeout
-            with claim(
-                directory, key, wait_seconds=timeout.seconds, waiting=self.cancellation.armed
-            ) as slot:
-                return self._claimed(
-                    command,
-                    invocation,
-                    mode,
-                    slot,
-                    call,
-                    meta=meta,
-                    started=started,
-                    full_meta=full_meta,
+        with contextlib.ExitStack() as held:
+            # Only acquiring the key is guarded here: the call itself reports its own errors
+            try:
+                # The wait for an earlier call's lock is bounded by this call's timeout
+                slot = held.enter_context(
+                    claim(
+                        directory,
+                        key,
+                        wait_seconds=timeout.seconds,
+                        waiting=self.cancellation.armed,
+                    )
                 )
-        except KeyBusy as exc:
-            entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
-            return self._envelope(
-                entry.code.value,
-                error=ErrorDetail(
-                    code="IDEMPOTENCY_KEY_BUSY",
-                    message=f"an earlier call with this idempotency key still runs after "
-                    f"{exc.seconds:g}s",
-                    retryable=entry.retryable,
-                    context={"command": command.path.value, "timeout_ms": timeout.milliseconds},
-                    phase="execution",
-                    suggestion="retry with the same key once the earlier call has finished",
-                ),
+            except KeyBusy as exc:
+                entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
+                return self._envelope(
+                    entry.code.value,
+                    error=ErrorDetail(
+                        code="IDEMPOTENCY_KEY_BUSY",
+                        message=f"an earlier call with this idempotency key still runs after "
+                        f"{exc.seconds:g}s",
+                        # Nothing ran, so retrying with the same key is safe
+                        retryable=True,
+                        context={
+                            "command": command.path.value,
+                            "timeout_ms": timeout.milliseconds,
+                        },
+                        phase="execution",
+                        suggestion="retry with the same key once the earlier call has finished",
+                    ),
+                    started=started,
+                    meta=full_meta,
+                )
+            except Cancelled as exc:
+                return self._cancelled(
+                    command, exc.signal, started, full_meta, handler_started=False
+                )
+            except RecordCorrupt as exc:
+                return self._state_error(
+                    "IDEMPOTENCY_RECORD_CORRUPT",
+                    str(exc),
+                    f"delete {exc.path}; its call must then be checked by hand",
+                    started,
+                    full_meta,
+                )
+            except OSError as exc:
+                return self._state_error(
+                    "STATE_DIR_UNWRITABLE",
+                    f"cannot use the idempotency state directory {directory}: {exc.strerror}",
+                    "make it writable, or point TREATY_STATE_DIR at a writable directory",
+                    started,
+                    full_meta,
+                )
+            return self._claimed(
+                command,
+                invocation,
+                mode,
+                slot,
+                call,
+                meta=meta,
                 started=started,
-                meta=full_meta,
-            )
-        except Cancelled as exc:
-            return self._cancelled(command, exc.signal, started, full_meta)
-        except RecordCorrupt as exc:
-            return self._state_error(
-                "IDEMPOTENCY_RECORD_CORRUPT",
-                str(exc),
-                f"delete {exc.path}; its call must then be checked by hand",
-                started,
-                full_meta,
-            )
-        except OSError as exc:
-            return self._state_error(
-                "STATE_DIR_UNWRITABLE",
-                f"cannot use the idempotency state directory {directory}: {exc.strerror}",
-                "make it writable, or point TREATY_STATE_DIR at a writable directory",
-                started,
-                full_meta,
+                full_meta=full_meta,
             )
 
     def _state_error(
@@ -683,13 +725,23 @@ class _Run:
             slot.save(Record(call, command.path.value, envelope.data, time.time()))
         except OSError as exc:
             # The call succeeded; its envelope must not be lost to the record
-            warning = WarningDetail(
+            return _warned(
+                envelope,
                 "IDEMPOTENCY_NOT_RECORDED",
                 f"the result was not recorded ({exc.strerror}); a retry with this key "
                 "runs the call again",
-                context={"command": command.path.value},
+                command,
             )
-            return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        try:
+            slot.prune(time.time())
+        except OSError as exc:
+            return _warned(
+                envelope,
+                "IDEMPOTENCY_PRUNE_FAILED",
+                f"the result was recorded, but expired records could not be removed "
+                f"({exc.strerror})",
+                command,
+            )
         return envelope
 
     def _execute(
@@ -904,17 +956,35 @@ class _Run:
         finally:
             # Run the handler's finally blocks now, unless a timed-out worker still holds it
             if events is not None and timeout.seconds is None and isinstance(events, Generator):
-                events.close()
+                try:
+                    events.close()
+                except Exception as exc:  # noqa: BLE001 - the handler's finally is user code
+                    # The terminal envelope is already decided; the failure goes to stderr
+                    self.err.write(self._redactor(command, args)(_traceback(exc)))
         yield self._envelope(
             0, started=started, meta={**full_meta, "seq": seq, "end": True, "total": seq}
         )
 
     def _cancelled(
-        self, command: Command, sig: CancelSignal, started: float, meta: Mapping[str, object]
+        self,
+        command: Command,
+        sig: CancelSignal,
+        started: float,
+        meta: Mapping[str, object],
+        *,
+        handler_started: bool = True,
     ) -> Envelope:
-        """Run the cleanup hook, then build the CANCELLED envelope (REQ-F-013, REQ-F-069)"""
-        if command.cleanup is not None:
-            command.cleanup()
+        """Run the cleanup hook, then build the CANCELLED envelope (REQ-F-013, REQ-F-069)
+
+        Before the handler started there is nothing to clean up and nothing partial.
+        """
+        context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
+        if handler_started and command.cleanup is not None:
+            try:
+                command.cleanup()
+            except Exception as exc:  # noqa: BLE001 - cleanup= is user code
+                self.err.write("".join(traceback.format_exception(exc)))
+                context["cleanup_failed"] = type(exc).__qualname__
         entry = self.app.exits.by_code(sig.exit_code)
         return self._envelope(
             sig.exit_code,
@@ -922,11 +992,11 @@ class _Run:
                 code="CANCELLED",
                 message=f"{command.path} cancelled by {sig.name}",
                 retryable=entry.retryable,
-                context={"signal": sig.name, "command": command.path.value},
+                context=context,
                 phase="execution",
             ),
             started=started,
-            meta={**meta, "partial": True},
+            meta={**meta, "partial": True} if handler_started else dict(meta),
         )
 
     def _exit_envelope(
@@ -1010,7 +1080,11 @@ class _Run:
         if problem is not None:
             self.err.write(f"{where}; its result was not recorded: {problem}\n")
             return
-        slot.save(Record(call, command.path.value, data, time.time()))
+        try:
+            slot.save(Record(call, command.path.value, data, time.time()))
+            slot.prune(time.time())
+        except OSError as exc:
+            self.err.write(f"{where}; recording its result failed: {exc.strerror}\n")
 
     def _redactor(self, command: Command, args: object) -> Callable[[str], str]:
         """Replace every spelling of the run's secret values: the value, its serialized
@@ -1018,13 +1092,14 @@ class _Run:
         spellings: set[str] = set()
         for f in command.fields:
             value = getattr(args, f.name, None) if f.secret else None
-            if value is None:
+            # A default is in the source anyway; redacting it (max_tokens=1) garbles text
+            if value is None or value == f.default:
                 continue
             forms: list[object] = [value, str(value), repr(value)]
             if not isinstance(value, (str, int, float)):
                 forms.append(to_jsonable(value, self.app.scalars))
             for form in forms:
-                if isinstance(form, str) and form:
+                if isinstance(form, str) and len(form) >= MIN_REDACTED:
                     spellings.update({form, repr(form)[1:-1]})
         ordered = sorted(spellings, key=len, reverse=True)
 
@@ -1072,13 +1147,13 @@ class _Run:
         so every exit still carries an envelope. Secret argument values are redacted.
         ``sys.exit()`` counts: a handler ends a run by returning or raising ``Exit``."""
         redact = self._redactor(command, args)
-        self.err.write(redact("".join(traceback.format_exception(exc))))
+        self.err.write(redact(_traceback(exc)))
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
                 code="HANDLER_CRASHED",
-                message=redact(f"{command.path} raised {type(exc).__name__}: {exc}"),
+                message=redact(f"{command.path} raised {type(exc).__name__}: {_text(exc)}"),
                 retryable=False,
                 context={"command": command.path.value, "exception": type(exc).__qualname__},
                 phase="execution",
@@ -1116,8 +1191,14 @@ class _Run:
         return code
 
     def _emit_human(self, envelope: Envelope, render: HumanRenderer | None) -> int:
+        code = envelope.exit_code
         if envelope.data is not None and render is not None:
-            self.out.write(render(envelope.data))
+            try:
+                self.out.write(render(envelope.data))
+            except Exception as exc:  # noqa: BLE001 - human= is user code
+                self.err.write("".join(traceback.format_exception(exc)))
+                self.err.write(f"{self.app.name}: HANDLER_CRASHED: the human renderer failed\n")
+                code = FrameworkCode.GENERAL_ERROR.value
         elif envelope.data is not None:
             self.out.write(json.dumps(envelope.data, indent=2, sort_keys=True) + "\n")
         if envelope.error is not None:
@@ -1134,7 +1215,7 @@ class _Run:
                 self.err.write(f"hint: {envelope.error.suggestion}\n")
         self.out.flush()
         self.err.flush()
-        return envelope.exit_code
+        return code
 
     def schema(self, mode: OutputMode, path: CommandPath | None, prefix: tuple[str, ...]) -> int:
         """``--schema`` is machine output in every mode; the envelope carries it as data"""
@@ -1184,8 +1265,9 @@ class _Run:
         any_failed = False
         parsed_any = False
         lines_seen = 0
+        last: Envelope | None = None
         for line_no, envelope in self._exec_lines(args, plan):
-            lines_seen = line_no
+            lines_seen, last = line_no, envelope
             write_envelope(cap_envelope(envelope, self.cap), self.out)
             if envelope.error is not None and envelope.error.code != "DISPATCH_PARSE_ERROR":
                 parsed_any = True
@@ -1196,7 +1278,10 @@ class _Run:
                 if not args.ignore_errors:
                     break
         if (received := self.cancellation.received) is not None:
-            # A signal ends the plan whatever --ignore-errors says (REQ-F-069)
+            # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
+            # between lines left no CANCELLED line, so the plan says where it stopped.
+            if last is None or last.error is None or last.error.code != "CANCELLED":
+                write_envelope(self._plan_cancelled(received, lines_seen), self.out)
             return received.exit_code
         if not lines_seen:
             return self.emit(
@@ -1208,6 +1293,20 @@ class _Run:
         if not parsed_any:
             return FrameworkCode.ARG_ERROR.value
         return FrameworkCode.GENERAL_ERROR.value if any_failed else 0
+
+    def _plan_cancelled(self, sig: CancelSignal, lines_run: int) -> Envelope:
+        entry = self.app.exits.by_code(sig.exit_code)
+        return self._envelope(
+            sig.exit_code,
+            error=ErrorDetail(
+                code="CANCELLED",
+                message=f"exec plan cancelled by {sig.name} after line {lines_run}",
+                retryable=entry.retryable,
+                context={"signal": sig.name, "lines_run": lines_run},
+                phase="execution",
+            ),
+            meta={"partial": lines_run > 0},
+        )
 
     def _read_plan(self, args: ExecArgs, stdin: IO[str]) -> str | Envelope:
         """The whole plan, read before dispatch so a write-then-read caller cannot deadlock"""
@@ -1232,8 +1331,12 @@ class _Run:
             return self.arg_error(exc)
         # One more character than the cap is always more bytes than the cap
         try:
-            text = stdin.read(cap.bytes + 1)
+            # A writer that keeps the pipe open must still be able to cancel the read
+            with self.cancellation.armed():
+                text = stdin.read(cap.bytes + 1)
             size = len(text.encode("utf-8"))
+        except Cancelled as exc:
+            return self._plan_cancelled(exc.signal, 0)
         except (UnicodeDecodeError, UnicodeEncodeError) as exc:
             # A strict stdin fails to decode; a surrogateescape one fails to re-encode
             return self._stream_error(

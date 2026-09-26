@@ -52,9 +52,10 @@ def test_rollback_entry_contents(app: App) -> None:
         "enum_values": ["fast", "safe"],
     }
     assert flags["tags"]["type"] == "array" and flags["tags"]["default"] == []
-    assert set(entry["exit_codes"]) == {"6", "79", "80"}  # 6: idempotency key reuse
+    # 6: idempotency key reuse; 4: unusable state directory or record
+    assert set(entry["exit_codes"]) == {"4", "6", "79", "80"}
     assert flags["idempotency-key"]["type"] == "string"
-    assert set(manifest["exit_codes"]) == {"0", "1", "2", "130", "143"}
+    assert set(manifest["exit_codes"]) == {"0", "1", "2", "10", "130", "143"}
     assert manifest["exit_codes"]["143"] == {
         "name": "CANCELLED_SIGTERM",
         "description": "Cancelled by SIGTERM; external state may be partially modified",
@@ -95,4 +96,15 @@ def test_etag_is_stable_and_changes_with_registrations(app: App) -> None:
 def test_schema_entry_keeps_full_exit_table(app: App) -> None:
     code, envelope = run_json(app, ["deploy", "rollback", "--schema"])
     assert code == 0
-    assert set(envelope["data"]["exit_codes"]) == {"0", "1", "2", "6", "79", "80", "130", "143"}
+    assert set(envelope["data"]["exit_codes"]) == {
+        "0",
+        "1",
+        "2",
+        "4",
+        "6",
+        "10",
+        "79",
+        "80",
+        "130",
+        "143",
+    }

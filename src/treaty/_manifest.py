@@ -18,7 +18,13 @@ CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
 IDEMPOTENCY_KEY = IDEMPOTENCY_FLAG.replace("-", "_")
 NO_STREAM_KEY = NO_STREAM_FLAG.replace("-", "_")
 TIMEOUT_KEY = TIMEOUT_FLAG
-_ALWAYS = (FrameworkCode.SUCCESS, FrameworkCode.GENERAL_ERROR, FrameworkCode.ARG_ERROR)
+# TIMEOUT is shared: every handler runs under a deadline unless it is set to 0
+_ALWAYS = (
+    FrameworkCode.SUCCESS,
+    FrameworkCode.GENERAL_ERROR,
+    FrameworkCode.ARG_ERROR,
+    FrameworkCode.TIMEOUT,
+)
 
 
 # REQ-F-079: split_globals accepts these anywhere on every command path
@@ -102,8 +108,10 @@ def command_entry(
             "description": "Repeat calls with the same key return the original result "
             "with effect noop instead of running again",
         }
-        conflict = exits.framework(FrameworkCode.CONFLICT)
-        exit_codes.setdefault(str(conflict.code.value), conflict.to_json())
+        # A reused key is CONFLICT; an unusable state directory or record is PRECONDITION
+        for code in (FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION):
+            entry = exits.framework(code)
+            exit_codes.setdefault(str(entry.code.value), entry.to_json())
     if command.streaming:
         flags["no-stream"] = {
             "type": "boolean",
@@ -220,8 +228,10 @@ def build_schema_manifest(
 ) -> dict[str, object]:
     """``tool --schema``: the manifest with every entry in ``--schema`` form"""
     manifest = build_manifest(commands, exits, framework_version)
+    # Full exit tables per entry, but still a valid CommandEntry: parameters and
+    # raw_payload_schema belong to a single command's --schema only
     manifest["commands"] = {
-        path.value: command_schema(cmd, exits, commands)
+        path.value: command_entry(cmd, exits, commands)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
     return manifest

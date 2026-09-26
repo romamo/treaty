@@ -42,7 +42,7 @@ def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
         if tokens and tokens[0] == app.name:
             tokens = tokens[1:]
         if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
-            return tuple(t for t in tokens if t not in PREVIEW_FLAGS)
+            return _without_globals(tuple(t for t in tokens if t not in PREVIEW_FLAGS))
     return None
 
 
@@ -91,13 +91,15 @@ def argument_order_for(app: App) -> dict[str, object] | None:
         argv = _argv_from_example(app, command)
         if argv is None:
             continue
-        argv = _without_globals(argv)
         head = len(command.path.parts)
         while head < len(argv) and not argv[head].startswith("-"):
             head += 1
         local = list(argv[head:])
         if command.danger_level is DangerLevel.DESTRUCTIVE:
             local.append("--dry-run")
+            if len(local) < 2:
+                # Still a preview: the handler sees dry_run=True; the kit needs two tokens
+                local.append("--confirm-destructive")
         if len(local) < 2 or "--" in local:
             continue
         return {

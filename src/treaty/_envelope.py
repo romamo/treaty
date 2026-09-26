@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import IO
 
 from ._errors import RegistrationError
+
+
+def json_safe(value: object) -> object:
+    """Error context echoes rejected input, which may be NaN or an int too long for
+    ``str()``; both become text so the envelope stays valid JSON"""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, int) and not isinstance(value, bool) and value.bit_length() > 1000:
+        return f"an integer of {value.bit_length()} bits"
+    if isinstance(value, dict):
+        return {k: json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(v) for v in value]
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +52,7 @@ class ErrorDetail:
         if self.cause is not None:
             out["cause"] = self.cause
         if self.context:
-            out["context"] = dict(self.context)
+            out["context"] = json_safe(dict(self.context))
         if self.suggestion is not None:
             out["suggestion"] = self.suggestion
         if self.fix_command is not None:
@@ -49,7 +64,7 @@ class ErrorDetail:
         if self.phase is not None:
             out["phase"] = self.phase
         if self.errors is not None:
-            out["errors"] = [dict(e) for e in self.errors]
+            out["errors"] = [json_safe(dict(e)) for e in self.errors]
         return out
 
 

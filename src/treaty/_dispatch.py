@@ -19,11 +19,21 @@ class DispatchRequest:
     payload: Mapping[str, object] = field(default_factory=dict)
 
 
+def _no_constant(name: str) -> object:
+    raise ValueError(f"{name} is not valid JSON")
+
+
+def loads_strict(text: str) -> object:
+    """``json.loads`` without the NaN and Infinity extensions; also raises ``ValueError``
+    for an integer longer than the interpreter's digit limit"""
+    return json.loads(text, parse_constant=_no_constant)
+
+
 def parse_dispatch_line(line: str, line_no: int) -> DispatchRequest:
     ctx: dict[str, object] = {"line": line_no}
     try:
-        raw = json.loads(line)
-    except json.JSONDecodeError as exc:
+        raw = loads_strict(line)
+    except ValueError as exc:
         raise ParseError(
             f"line {line_no}: invalid JSON", context={**ctx, "cause": str(exc)}
         ) from None

@@ -13,6 +13,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import MISSING, dataclass
 
 from ._command import Command, DangerLevel
+from ._dispatch import loads_strict
 from ._errors import ParseError
 from ._flags import FieldInfo, apply_scalar
 from ._idempotency import IdempotencyKey
@@ -66,6 +67,14 @@ _NEGATIVE_NUMBER = re.compile(r"-(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?")
 def _is_negative(tok: str, command: Command) -> bool:
     """``-5`` is a value, not a flag, unless the command has a digit short flag"""
     return bool(_NEGATIVE_NUMBER.fullmatch(tok)) and command.field_by_short(tok[1]) is None
+
+
+def describe_number(value: int | float) -> str:
+    """A non-finite float or an out-of-range int for an error, never as a JSON number
+    (NaN is invalid JSON, and str() refuses an int past the digit limit)"""
+    if isinstance(value, float):
+        return str(value)
+    return f"an integer of {value.bit_length()} bits"
 
 
 def _repeated(flag: str) -> ParseError:
@@ -198,7 +207,7 @@ def parse_command_args(
     key: IdempotencyKey | None = None
     no_stream = False
     positionals = [f for f in command.fields if f.positional]
-    loose: list[str] = []
+    pos_index = 0
     i = 0
     only_positional = False
     errors = _Collector()
@@ -233,7 +242,25 @@ def parse_command_args(
     while i < len(tokens):
         tok = tokens[i]
         if only_positional or not tok.startswith("-") or tok == "-" or _is_negative(tok, command):
-            loose.append(tok)
+            # Values fill positionals in argv order; a slot a flag already set is skipped
+            while (
+                pos_index < len(positionals)
+                and positionals[pos_index].flag_type is not FlagType.ARRAY
+                and positionals[pos_index].name in values
+            ):
+                pos_index += 1
+            if pos_index >= len(positionals):
+                errors.add(
+                    ParseError(
+                        f"unexpected argument {tok!r}",
+                        context={"argument": tok, "command": command.path.value},
+                    )
+                )
+            else:
+                field = positionals[pos_index]
+                assign(field, tok)
+                if field.flag_type is not FlagType.ARRAY:
+                    pos_index += 1
             i += 1
             continue
         if tok == "--":
@@ -335,20 +362,6 @@ def parse_command_args(
         assign(found, raw)
         i += 1
 
-    # Positional values fill, in order, the positional fields no flag has set
-    open_slots = [f for f in positionals if f.name not in values and f.name not in arrays]
-    for tok in loose:
-        if not open_slots:
-            errors.add(
-                ParseError(
-                    f"unexpected argument {tok!r}",
-                    context={"argument": tok, "command": command.path.value},
-                )
-            )
-            continue
-        assign(open_slots[0], tok)
-        if open_slots[0].flag_type is not FlagType.ARRAY:
-            open_slots.pop(0)
     for name, items in arrays.items():
         values[name] = tuple(items)
     if raw_payload is not None:
@@ -365,6 +378,10 @@ def parse_command_args(
             raise _repeated(TIMEOUT_FLAG)
         if key is not None and built.idempotency_key not in (None, key):
             raise _repeated(IDEMPOTENCY_FLAG)
+        for flag, given in ((CONFIRM_FLAG, confirmed), (NO_STREAM_FLAG, no_stream)):
+            spellings = (flag, flag.replace("-", "_"))
+            if given and any(mapping.get(k) is False for k in spellings):
+                raise _repeated(flag)
         return Invocation(
             args=built.args,
             timeout=timeout or built.timeout,
@@ -418,11 +435,15 @@ def _apply_secrets(
 
 def _decode_raw_payload(raw: str) -> Mapping[str, object]:
     try:
-        decoded = json.loads(raw)
+        decoded = loads_strict(raw)
     except json.JSONDecodeError as exc:
         raise ParseError(
             "--raw-payload is not valid JSON",
             context={"flag": RAW_PAYLOAD_FLAG, "cause": exc.msg, "position": exc.pos},
+        ) from None
+    except ValueError as exc:
+        raise ParseError(
+            "--raw-payload is not valid JSON", context={"flag": RAW_PAYLOAD_FLAG, "cause": str(exc)}
         ) from None
     if not isinstance(decoded, dict):
         raise ParseError("--raw-payload must be a JSON object", context={"flag": RAW_PAYLOAD_FLAG})
@@ -583,11 +604,16 @@ def _check_base(target: Classified, value: object, flag: str) -> object:
         case FlagType.NUMBER:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ParseError(f"{flag!r} expects a number", context=ctx)
-            if not math.isfinite(value):
+            try:
+                number = float(value)
+            except OverflowError:
+                number = math.inf
+            if not math.isfinite(number):
                 raise ParseError(
-                    f"{flag!r} expects a finite number", context={**ctx, "value": str(value)}
+                    f"{flag!r} expects a finite number",
+                    context={"field": flag, "value": describe_number(value)},
                 )
-            return float(value)
+            return number
         case FlagType.STRING:
             if isinstance(value, str):
                 return check_path(value, flag) if target.path else value

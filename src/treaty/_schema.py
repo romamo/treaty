@@ -8,6 +8,7 @@ integer ``Enum``, ``X | None``, ``list[T]``, ``tuple[T, ...]``, fixed ``tuple[A,
 
 from __future__ import annotations
 
+import contextvars
 import dataclasses
 import math
 import types
@@ -92,7 +93,23 @@ def _enum_schema(cls: type[Enum]) -> JsonSchema:
     raise SchemaError(f"{cls.__qualname__}: enum values must be all strings or all integers")
 
 
+_BUILDING: contextvars.ContextVar[frozenset[type]] = contextvars.ContextVar(
+    "treaty_schema_building", default=frozenset()
+)
+
+
 def _dataclass_schema(cls: type, scalars: ScalarRegistry) -> JsonSchema:
+    building = _BUILDING.get()
+    if cls in building:
+        raise SchemaError(f"{cls.__qualname__} refers to itself; recursive outputs have no schema")
+    token = _BUILDING.set(building | {cls})
+    try:
+        return _dataclass_fields_schema(cls, scalars)
+    finally:
+        _BUILDING.reset(token)
+
+
+def _dataclass_fields_schema(cls: type, scalars: ScalarRegistry) -> JsonSchema:
     hints = typing.get_type_hints(cls)
     properties: dict[str, JsonSchema] = {}
     required: list[str] = []

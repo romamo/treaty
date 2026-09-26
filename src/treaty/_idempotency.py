@@ -158,7 +158,11 @@ class Slot:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(body)
         os.replace(tmp, self.path)
-        _prune(self.path.parent, record.created_at)
+
+    def prune(self, now: float) -> None:
+        """Remove other keys' expired records and idle locks; separate from ``save`` so a
+        failure here is never mistaken for an unrecorded result"""
+        _prune(self.path.parent, now)
 
 
 Waiting = Callable[[], AbstractContextManager[None]]
@@ -266,8 +270,7 @@ def _prune(directory: Path, now: float) -> None:
     for path in directory.iterdir():
         if path.suffix == ".json" and _expired(path, now):
             _prune_record(path, now)
-        elif path.suffix == ".lock" and sys.platform != "win32" and _expired(path, now):
-            # Windows cannot unlink a file another process has open, so its locks stay
+        elif path.suffix == ".lock" and _expired(path, now):
             _unlink_idle_lock(path)
 
 
@@ -295,6 +298,14 @@ def _prune_record(path: Path, now: float) -> None:
 
 def _unlink_idle_lock(path: Path) -> None:
     """A lock file's mtime never changes, so age alone says nothing about a holder"""
+    if sys.platform == "win32":
+        # Windows refuses to delete a file any process has open, which is exactly the
+        # in-use test; a file created after the unlink is a new lock (see _acquire)
+        try:
+            path.unlink()
+        except PermissionError, FileNotFoundError:
+            return
+        return
     try:
         handle = os.fdopen(os.open(path, os.O_WRONLY), "w")
     except FileNotFoundError:

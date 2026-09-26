@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import typing
+from typing import Any
 
 from ._types import is_dataclass_type, strip_optional
 
@@ -25,6 +26,18 @@ def can_carry_effect(output_type: object) -> bool:
         assert isinstance(base, type)
         return any(f.name == "effect" for f in dataclasses.fields(base))
     return base is dict or typing.get_origin(base) is dict
+
+
+def with_replay_effect(schema: dict[str, Any]) -> dict[str, Any]:
+    """An idempotent replay reports ``effect: "noop"``, so a closed ``effect`` enum in the
+    output schema must admit it, or the replay breaks the schema agents validate against"""
+    if "anyOf" in schema:
+        return {**schema, "anyOf": [with_replay_effect(s) for s in schema["anyOf"]]}
+    effect = schema.get("properties", {}).get("effect")
+    if not isinstance(effect, dict) or "enum" not in effect or "noop" in effect["enum"]:
+        return schema
+    properties = {**schema["properties"], "effect": {**effect, "enum": [*effect["enum"], "noop"]}}
+    return {**schema, "properties": properties}
 
 
 def effect_problem(data: object, preview: bool) -> str | None:

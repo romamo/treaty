@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ._effect import can_carry_effect
+from ._effect import can_carry_effect, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._resources import ResourceSpec, dependency_params, resource_graph
@@ -127,8 +127,7 @@ def build_command(
         )
     shadowed: list[str] = []
     for f in fields:
-        if f.positional:
-            continue
+        # A positional is also accepted as --<name>, so it may not take a global's name
         if f.flag in GLOBAL_FLAGS:
             shadowed.append(f"--{f.flag} collides with --{f.flag}")
         elif f.spec.short is not None and f.spec.short in GLOBAL_SHORTS:
@@ -180,12 +179,15 @@ def build_command(
             )
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
+    output_schema = schema_for(output_type, scalars)
+    if danger_level is not DangerLevel.SAFE:
+        output_schema = with_replay_effect(output_schema)
     return Command(
         path=path,
         handler=fn,
         args_type=args_type,
         output_type=output_type,
-        output_schema=schema_for(output_type, scalars),
+        output_schema=output_schema,
         args_schema=schema_for(args_type, scalars),
         fields=fields,
         description=description,

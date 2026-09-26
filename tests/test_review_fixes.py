@@ -248,10 +248,31 @@ def test_unlistable_default_fails_registration() -> None:
             return {}
 
 
-def test_positional_given_by_flag_leaves_the_rest_in_order() -> None:
-    for argv in (["cp", "--src", "a", "b"], ["cp", "b", "--src", "a"]):
-        code, [env] = run(round_two_app(), argv)
-        assert code == 0 and env["data"] == {"src": "a", "dst": "b"}
+@dataclass(frozen=True, slots=True)
+class Cat:
+    files: tuple[str, ...] = Arg(description="Files")
+
+
+def test_positionals_fill_in_argv_order_skipping_slots_set_by_flag() -> None:
+    app = round_two_app()
+    code, [env] = run(app, ["cp", "--src", "a", "b"])
+    assert code == 0 and env["data"] == {"src": "a", "dst": "b"}
+    # a took the src slot, so --src b is a conflicting repeat, never a silent swap
+    code, [env] = run(app, ["cp", "a", "--src", "b"])
+    assert code == 2 and "src" in [e.get("field") for e in env["error"]["errors"]]
+    code, [env] = run(app, ["cp", "a", "--src", "a", "b"])
+    assert code == 0 and env["data"] == {"src": "a", "dst": "b"}
+
+
+def test_array_positional_mixes_values_and_flags() -> None:
+    app = App("t", version="1")
+
+    @app.command("cat", description="Cat")
+    def cat(args: Cat, ctx: Ctx) -> dict[str, list[str]]:
+        return {"files": list(args.files)}
+
+    code, [env] = run(app, ["cat", "a.txt", "--files", "b.txt", "--", "-c.txt"])
+    assert code == 0 and env["data"] == {"files": ["a.txt", "b.txt", "-c.txt"]}
 
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-Infinity"])

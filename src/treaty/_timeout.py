@@ -13,6 +13,7 @@ caller wait for it; the idempotency layer holds the key's lock until then.
 
 from __future__ import annotations
 
+import math
 import threading
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
@@ -42,6 +43,8 @@ class Timeout:
             raise ParseError("'timeout' expects a number of seconds", context={"flag": "timeout"})
         try:
             value = float(raw)
+        except OverflowError:
+            value = math.inf  # a huge integer: out of range below
         except ValueError:
             raise ParseError(
                 "'timeout' expects a number of seconds",
@@ -50,7 +53,7 @@ class Timeout:
         if not 0 <= value <= MAX_SECONDS:
             raise ParseError(
                 f"'timeout' must be between 0 and {MAX_SECONDS:g} seconds",
-                context={"flag": "timeout", "value": raw, "maximum": MAX_SECONDS},
+                context={"flag": "timeout", "value": _shown(raw), "maximum": MAX_SECONDS},
                 suggestion="pass 0 to disable the limit",
             )
         return cls(None) if value == 0 else cls(value)
@@ -58,6 +61,13 @@ class Timeout:
     @property
     def milliseconds(self) -> int | None:
         return None if self.seconds is None else int(self.seconds * 1000)
+
+
+def _shown(raw: int | float | str) -> str:
+    """The rejected value as text: NaN is invalid JSON and a huge int refuses str()"""
+    if isinstance(raw, int):
+        return f"an integer of {raw.bit_length()} bits" if raw.bit_length() > 64 else str(raw)
+    return str(raw)[:32]
 
 
 class TimeoutExpired(Exception):
