@@ -68,3 +68,40 @@ jobs:
 
       - run: uv sync --locked
       - run: uv run pytest -rs
+
+  scaffold:
+    # The documented path for a new project: init beside a spec checkout, then the kit
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Fetch the spec beside the new project
+        working-directory: ${{ runner.temp }}
+        run: |
+          git init -q cli-agent-ergonomics
+          cd cli-agent-ergonomics
+          git fetch -q --depth 1 https://github.com/cli-agent-spec/cli-agent-spec "$SPEC_REF"
+          git checkout -q FETCH_HEAD
+
+      - name: Scaffold a project, test it, and run the kit against it
+        working-directory: ${{ runner.temp }}
+        run: |
+          uv run --locked --project "$GITHUB_WORKSPACE" treaty init shop-tool --treaty-source "$GITHUB_WORKSPACE"
+          cd shop-tool
+          uv sync
+          uv run pytest -q
+          uv run treaty conformance shop_tool.cli:app --run

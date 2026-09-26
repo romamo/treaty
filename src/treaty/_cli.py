@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import os
 import stat
 import subprocess
 import sys
@@ -21,6 +20,7 @@ from ._flags import Arg, Flag
 from ._profile import (
     SPEC_FALLBACK,
     build_profile,
+    default_command,
     has_kit,
     probes_for,
     run_kit,
@@ -272,7 +272,8 @@ class ConformanceArgs:
     command: tuple[str, ...] = Flag(
         default=(),
         description="Executable argv for probes; default the launcher next to the profile "
-        "(conformance/<name>), else the app name on PATH",
+        "(conformance/<name>), on Windows the app's console script in this environment, "
+        "else the app name on PATH",
     )
     run: bool = Flag(default=False, description="Run the spec kit after writing the profile")
     spec_dir: Path | None = Flag(
@@ -350,15 +351,15 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     spec_dir = resolve_spec_dir(args.spec_dir, ctx.env) if args.run else None
     probes = probes_for(app)
     profile_path = out or Path("conformance") / f"{app.name}.json"
-    wrapper = profile_path.parent / app.name
-    beside_profile = False
     if args.command:
-        command = list(args.command)
-    elif wrapper.is_file() and os.access(wrapper, os.X_OK):
-        # The scaffold's launcher next to the profile; the kit resolves it from there
-        command, beside_profile = [f"./{app.name}"], True
+        command, beside_profile = list(args.command), False
     else:
-        command = [app.name]
+        command, beside_profile = default_command(
+            app.name,
+            profile_path.parent,
+            Path(sys.executable).parent,
+            windows=sys.platform == "win32",
+        )
     effect = "updated" if profile_path.exists() else "created"
     write_profile(build_profile(app, command, probes, beside_profile=beside_profile), profile_path)
     result = ConformanceOut(effect, str(profile_path), len(probes), False, None, ())
