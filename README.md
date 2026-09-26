@@ -52,13 +52,19 @@ plus `GENERAL_ERROR`, `ARG_ERROR`, and `TIMEOUT` everywhere and `CONFLICT` and
 
 ## Install
 
-treaty is not on PyPI yet; install from a checkout. Both commands are non-interactive and
-safe to repeat:
+Every command here is non-interactive and safe to repeat:
 
 ```bash
-uv tool install --reinstall /path/to/treaty   # the treaty CLI on PATH
-uv add --editable /path/to/treaty             # the library, inside a uv project
-treaty --version                               # verify: prints a JSON envelope, exits 0
+uv tool install treaty         # the treaty CLI on PATH
+uv add treaty                  # the library, inside a uv project
+treaty --version               # verify: prints a JSON envelope, exits 0
+```
+
+To track unreleased changes, install from a checkout instead:
+
+```bash
+uv tool install --reinstall /path/to/treaty
+uv add --editable /path/to/treaty
 ```
 
 ## Built-ins
@@ -346,15 +352,17 @@ that skips when the spec checkout is absent.
 
 ## Start a project
 
-Run it beside the treaty checkout, so that `../cli-agent-ergonomics` is the spec for the
-kit and `--treaty-source` (needed until treaty is on PyPI) points at the checkout:
+Run it beside a `cli-agent-ergonomics` checkout, which is the spec for the kit:
 
 ```bash
-cd ..                                  # the directory holding treaty/ and cli-agent-ergonomics/
-uv run --project treaty treaty init shop-tool --treaty-source treaty
+cd ..                                  # the directory holding cli-agent-ergonomics/
+uvx treaty init shop-tool
 cd shop-tool && uv sync && uv run pytest
 uv run treaty conformance shop_tool.cli:app --run
 ```
+
+The new project depends on `treaty` from PyPI; `--treaty-source /path/to/treaty` pins a local
+checkout instead.
 
 `init` scaffolds a package with one command per danger level, typed outputs, declared exit
 codes, a test using `app.run()`, and a conformance profile. `conformance` derives probes
