@@ -1,0 +1,83 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish, e.g. v0.0.1
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  # The spec commit the release was verified against
+  SPEC_REF: 91dedd24634b373f848305ecc0c3bcb777518806
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v7
+        with:
+          repository: cli-agent-spec/cli-agent-spec
+          ref: ${{ env.SPEC_REF }}
+          path: _spec
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.14"
+
+      - name: Check the tag matches the project version
+        run: test "v$(uv version --short)" = "$TAG"
+
+      - run: uv sync --locked
+      - run: uv run ruff check src tests examples
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src
+      - run: uv run pytest
+        env:
+          TREATY_SPEC_DIR: ${{ github.workspace }}/_spec
+
+      - run: uv build --out-dir dist
+
+      - name: Smoke-test the wheel
+        run: |
+          uv venv --python 3.14 _smoke
+          VIRTUAL_ENV=_smoke uv pip install dist/*.whl
+          _smoke/bin/treaty --version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/treaty/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@v1.14.2
