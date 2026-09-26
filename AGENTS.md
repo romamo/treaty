@@ -2,17 +2,19 @@
 
 ## Install
 
-treaty is not on PyPI yet; install from a checkout. Both commands are non-interactive,
-need no input, and exit 0 when repeated:
+Both commands are non-interactive, need no input, and exit 0 when repeated:
 
 ```bash
-uv tool install --reinstall /path/to/treaty   # the treaty CLI on PATH
-uv add --editable /path/to/treaty             # the library, inside a uv project
+uv tool install treaty   # the treaty CLI on PATH
+uv add treaty            # the library, inside a uv project
 ```
 
+For unreleased changes, install from a checkout instead: `uv tool install --reinstall
+/path/to/treaty` and `uv add --editable /path/to/treaty`.
+
 Verify with `treaty --version`: it prints a JSON envelope with `data.version` and exits 0.
-Add the `mcp` extra (`/path/to/treaty[mcp]`) to get `treaty-mcp module:app`, which serves
-any treaty app's commands as MCP tools over stdio.
+Add the `mcp` extra (`treaty[mcp]`) to get `treaty-mcp module:app`, which serves any
+treaty app's commands as MCP tools over stdio.
 
 ## Running the CLI
 
