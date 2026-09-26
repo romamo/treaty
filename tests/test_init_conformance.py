@@ -16,7 +16,9 @@ from treaty._profile import SPEC_FALLBACK, has_kit, probes_for
 
 def run_cli(argv: list[str], *, isatty: bool = False) -> tuple[int, dict | str]:
     out = io.StringIO()
-    code = cli.run(argv, stdout=out, stderr=io.StringIO(), env=dict(os.environ), isatty=isatty)
+    # CI and TREATY_FORMAT force JSON mode, which would override isatty=True
+    env = {k: v for k, v in os.environ.items() if k not in ("CI", "TREATY_FORMAT")}
+    code = cli.run(argv, stdout=out, stderr=io.StringIO(), env=env, isatty=isatty)
     text = out.getvalue()
     return code, (text if isatty else json.loads(text))
 
