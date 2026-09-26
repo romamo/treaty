@@ -37,7 +37,7 @@ jobs:
           path: _spec
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
 
