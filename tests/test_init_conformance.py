@@ -7,11 +7,11 @@ from pathlib import Path
 
 import fixture_audit_app
 import pytest
-from conftest import SPEC_DIR, needs_sh_launcher
+from conftest import SPEC_DIR
 
 from treaty._cli import cli, resolve_spec_dir
 from treaty._errors import CliExit
-from treaty._profile import SPEC_FALLBACK, has_kit, probes_for
+from treaty._profile import SPEC_FALLBACK, default_command, has_kit, probes_for
 
 
 def run_cli(argv: list[str], *, isatty: bool = False) -> tuple[int, dict | str]:
@@ -96,21 +96,22 @@ def test_conformance_writes_profile_without_running(tmp_path: Path, monkeypatch)
     assert "add --run" in text
 
 
-@needs_sh_launcher
 def test_conformance_runs_kit_against_example(tmp_path: Path, monkeypatch) -> None:
     if not (SPEC_DIR / "conformance" / "run.py").is_file():
         pytest.skip("spec checkout not found")
     root = Path(__file__).resolve().parents[1]
     monkeypatch.chdir(tmp_path)
     monkeypatch.syspath_prepend(str(root))
-    launcher = str(root / "conformance" / "deployctl")
+    # The interpreter runs the example on every OS; the checked-in launcher is /bin/sh
     code, env = run_cli(
         [
             "conformance",
             "examples.deployctl:app",
             "--run",
             "--command",
-            launcher,
+            sys.executable,
+            "--command",
+            str(root / "examples" / "deployctl.py"),
             "--spec-dir",
             str(SPEC_DIR),
         ]
@@ -119,6 +120,45 @@ def test_conformance_runs_kit_against_example(tmp_path: Path, monkeypatch) -> No
     assert env["data"]["ran"] is True
     assert env["data"]["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}
     assert all(c["status"] == "pass" for c in env["data"]["checks"])
+
+
+def test_default_command_is_the_launcher_beside_the_profile_on_posix(tmp_path: Path) -> None:
+    profile_dir, scripts = tmp_path / "conformance", tmp_path / ".venv" / "bin"
+    profile_dir.mkdir()
+    assert default_command("shop-tool", profile_dir, scripts, windows=False) == (
+        ["shop-tool"],
+        False,
+    )
+    launcher = profile_dir / "shop-tool"
+    launcher.write_text("#!/bin/sh\n")
+    launcher.chmod(0o755)
+    assert default_command("shop-tool", profile_dir, scripts, windows=False) == (
+        ["./shop-tool"],
+        True,
+    )
+
+
+def test_default_command_on_windows_is_the_console_script_not_the_launcher(
+    tmp_path: Path,
+) -> None:
+    profile_dir, scripts = tmp_path / "conformance", tmp_path / ".venv" / "Scripts"
+    profile_dir.mkdir()
+    scripts.mkdir(parents=True)
+    (profile_dir / "shop-tool").write_text("#!/bin/sh\n")  # Windows cannot run it
+    assert default_command("shop-tool", profile_dir, scripts, windows=True) == (
+        ["shop-tool"],
+        False,
+    )
+    (scripts / "shop-tool.exe").write_bytes(b"MZ")
+    assert default_command("shop-tool", profile_dir, scripts, windows=True) == (
+        ["../.venv/Scripts/shop-tool.exe"],
+        True,
+    )
+    # Beside the profile it keeps a slash, or the kit would search PATH for it
+    assert default_command("shop-tool", scripts, scripts, windows=True) == (
+        ["./shop-tool.exe"],
+        True,
+    )
 
 
 def test_conformance_without_spec_dir_is_precondition(tmp_path: Path, monkeypatch) -> None:

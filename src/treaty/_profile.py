@@ -114,6 +114,32 @@ def argument_order_for(app: App) -> dict[str, object] | None:
     return None
 
 
+def default_command(
+    name: str, profile_dir: Path, scripts_dir: Path, *, windows: bool
+) -> tuple[list[str], bool]:
+    """The probes' argv when none is given, and whether it is relative to the profile
+
+    On POSIX, the scaffold's ``/bin/sh`` launcher next to the profile. Windows cannot run
+    it, so there the app's console script in ``scripts_dir`` (the running venv) takes its
+    place, written relative to the profile like the launcher. Otherwise the app name, which
+    the kit resolves through PATH."""
+    if windows:
+        script = scripts_dir / f"{name}.exe"
+        if script.is_file():
+            try:
+                relative = Path(os.path.relpath(script, profile_dir)).as_posix()
+            except ValueError:
+                # On another drive than the profile, so only an absolute path reaches it
+                return [str(script)], False
+            # A bare name would be looked up on PATH instead of next to the profile
+            return [relative if "/" in relative else f"./{relative}"], True
+    else:
+        launcher = profile_dir / name
+        if launcher.is_file() and os.access(launcher, os.X_OK):
+            return [f"./{name}"], True
+    return [name], False
+
+
 def build_profile(
     app: App, command: Sequence[str], probes: Sequence[Probe], *, beside_profile: bool = False
 ) -> dict[str, object]:
