@@ -1,7 +1,7 @@
 # treaty
 
 Zero-dependency Python CLI framework that implements the
-[CLI Agent Spec](../cli-agent-ergonomics): a manifest an agent can read in one call,
+[CLI Agent Spec](https://github.com/cli-agent-spec/cli-agent-spec): a manifest an agent can read in one call,
 a response envelope on every exit, and typed exit codes with retry semantics.
 
 The manifest is the treaty between the CLI author and the agent. Exit code
@@ -87,9 +87,9 @@ including `--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-
 belongs to a command and goes after the full command path:
 
 ```bash
-deployctl --format json deploy rollback api --dry-run   # ok
-deployctl deploy rollback api --dry-run --format json   # ok
-deployctl --dry-run deploy rollback api                 # ARG_ERROR
+deployctl --format json deploy rollback api --to 1.3.9 --dry-run   # ok
+deployctl deploy rollback api --to 1.3.9 --dry-run --format json   # ok
+deployctl --dry-run deploy rollback api --to 1.3.9                 # ARG_ERROR
 ```
 
 Any option repeated with a different value exits `2` naming the option; repeating the same
@@ -151,8 +151,9 @@ Phase 1 keeps going past a bad value, an unknown flag, or a refused secret, so o
 reports every argument error (REQ-F-015). The envelope's `error.errors` lists each one with
 its `field`, `message`, and `context`; with several, the headline `message` is
 `Validation failed: N errors` and `context.fields` names them. A single error keeps its own
-message and context and lists itself. Only an unreadable rest of the line stops parsing at
-once: a flag with no value at the end, or invalid `--raw-payload` JSON.
+message and context and lists itself. Framework flags (`--timeout`, `--idempotency-key`,
+a repeat with a different value) and a flag with no value at the end are collected the same
+way; only invalid `--raw-payload` JSON stops parsing at once.
 
 ## Paths
 
@@ -287,7 +288,9 @@ without a second write. A handler's own `except Exception` cannot swallow the si
 retry waiting for an idempotency key is interrupted too. A signal that arrives after the
 handler returned is held: the finished result is written with its own exit code, since
 the work it reports did happen. An `exec` plan stops at the first signal, even with
-`--ignore-errors`, and exits `130` or `143`. Both codes appear in every command's `exit_codes` map.
+`--ignore-errors`, and exits `130` or `143`. A reader that closes stdout early
+(`tool logs | head`) ends the run with `141` (`OUTPUT_CLOSED`): the cleanup hook runs and
+nothing more is written. All three codes appear in every command's `exit_codes` map.
 
 ## Raw payloads
 
@@ -341,8 +344,12 @@ that skips when the spec checkout is absent.
 
 ## Start a project
 
+Run it beside the treaty checkout, so that `../cli-agent-ergonomics` is the spec for the
+kit and `--treaty-source` (needed until treaty is on PyPI) points at the checkout:
+
 ```bash
-uv run treaty init shop-tool          # add --treaty-source ../treaty until treaty is on PyPI
+cd ..                                  # the directory holding treaty/ and cli-agent-ergonomics/
+uv run --project treaty treaty init shop-tool --treaty-source treaty
 cd shop-tool && uv sync && uv run pytest
 uv run treaty conformance shop_tool.cli:app --run
 ```

@@ -50,14 +50,22 @@ class Classified:
     """A registered custom scalar: parsed through its spec after the base type"""
 
 
+def resolve_alias(tp: object) -> object:
+    """``type Port = int`` (PEP 695) names its value; follow aliases of aliases too"""
+    while isinstance(tp, typing.TypeAliasType):
+        tp = tp.__value__
+    return tp
+
+
 def strip_optional(tp: object) -> tuple[object, bool]:
+    tp = resolve_alias(tp)
     origin = typing.get_origin(tp)
     if origin is not types.UnionType and origin is not typing.Union:
         return tp, False
     members = [a for a in typing.get_args(tp) if a is not types.NoneType]
     if len(members) != 1 or len(members) == len(typing.get_args(tp)):
         raise SchemaError(f"unsupported union {tp!r}; only 'X | None' is allowed")
-    return members[0], True
+    return resolve_alias(members[0]), True
 
 
 def classify(tp: object, scalars: ScalarRegistry) -> Classified:

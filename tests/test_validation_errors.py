@@ -113,17 +113,16 @@ def test_secret_errors_are_collected_with_the_rest() -> None:
     assert "abc" not in json.dumps(env)
 
 
-def test_a_flag_without_a_value_at_the_end_still_stops_at_once() -> None:
+def test_a_flag_without_a_value_at_the_end_is_collected_with_the_rest() -> None:
     code, env, _ = run(["deploy", "api", "--env", "nope", "--replicas"])
     error = error_of(env)
-    assert error["message"] == "'--replicas' needs a value"
-    assert error["errors"] == [
-        {
-            "field": "replicas",
-            "message": "'--replicas' needs a value",
-            "context": {"flag": "replicas"},
-        }
-    ]
+    fields = [e.get("field") for e in error["errors"]]
+    assert code == 2 and "env" in fields and "replicas" in fields
+    assert {
+        "field": "replicas",
+        "message": "'--replicas' needs a value",
+        "context": {"flag": "replicas"},
+    } in error["errors"]
 
 
 def test_exec_collects_per_line_field_errors() -> None:

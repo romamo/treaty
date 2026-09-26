@@ -240,127 +240,137 @@ def parse_command_args(
         raise ParseError(f"{tok!r} needs a value", context={"flag": flag})
 
     while i < len(tokens):
-        tok = tokens[i]
-        if only_positional or not tok.startswith("-") or tok == "-" or _is_negative(tok, command):
-            # Values fill positionals in argv order; a slot a flag already set is skipped
-            while (
-                pos_index < len(positionals)
-                and positionals[pos_index].flag_type is not FlagType.ARRAY
-                and positionals[pos_index].name in values
+        # Every token error is collected (REQ-F-015); only the loop's own state moves on
+        try:
+            tok = tokens[i]
+            if (
+                only_positional
+                or not tok.startswith("-")
+                or tok == "-"
+                or _is_negative(tok, command)
             ):
-                pos_index += 1
-            if pos_index >= len(positionals):
-                errors.add(
-                    ParseError(
-                        f"unexpected argument {tok!r}",
-                        context={"argument": tok, "command": command.path.value},
-                    )
-                )
-            else:
-                field = positionals[pos_index]
-                assign(field, tok)
-                if field.flag_type is not FlagType.ARRAY:
+                # Values fill positionals in argv order; a slot a flag already set is skipped
+                while (
+                    pos_index < len(positionals)
+                    and positionals[pos_index].flag_type is not FlagType.ARRAY
+                    and positionals[pos_index].name in values
+                ):
                     pos_index += 1
-            i += 1
-            continue
-        if tok == "--":
-            only_positional = True
-            i += 1
-            continue
-        negated = False
-        found: FieldInfo | None
-        if tok.startswith("--"):
-            name, eq, inline = tok[2:].partition("=")
-            has_eq = bool(eq)
-            if name == TIMEOUT_FLAG and command.has_network_io:
-                parsed_timeout = Timeout.parse(value_after(tok, TIMEOUT_FLAG, has_eq, inline))
-                if timeout is not None and timeout != parsed_timeout:
-                    raise _repeated(TIMEOUT_FLAG)
-                timeout = parsed_timeout
-                i += 1
-                continue
-            if name == RAW_PAYLOAD_FLAG and command.supports_raw_payload:
-                raw = value_after(tok, RAW_PAYLOAD_FLAG, has_eq, inline)
-                if raw_payload is not None and raw_payload != raw:
-                    raise _repeated(RAW_PAYLOAD_FLAG)
-                raw_payload = raw
-                i += 1
-                continue
-            if name == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-                parsed_key = IdempotencyKey(value_after(tok, IDEMPOTENCY_FLAG, has_eq, inline))
-                if key is not None and key != parsed_key:
-                    raise _repeated(IDEMPOTENCY_FLAG)
-                key = parsed_key
-                i += 1
-                continue
-            if name == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
-                if has_eq:
-                    raise ParseError(
-                        f"'{CONFIRM_FLAG}' takes no value", context={"flag": CONFIRM_FLAG}
+                if pos_index >= len(positionals):
+                    errors.add(
+                        ParseError(
+                            f"unexpected argument {tok!r}",
+                            context={"argument": tok, "command": command.path.value},
+                        )
                     )
-                confirmed = True
+                else:
+                    field = positionals[pos_index]
+                    assign(field, tok)
+                    if field.flag_type is not FlagType.ARRAY:
+                        pos_index += 1
                 i += 1
                 continue
-            if name == NO_STREAM_FLAG and command.streaming:
-                if has_eq:
-                    raise ParseError(
-                        f"'{NO_STREAM_FLAG}' takes no value", context={"flag": NO_STREAM_FLAG}
-                    )
-                no_stream = True
+            if tok == "--":
+                only_positional = True
                 i += 1
                 continue
-            found = command.field_by_flag(name)
-            if found is not None and found.secret:
-                errors.add(direct_secret_error(found.flag))
-                if not has_eq and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
-                    i += 1  # the value that was meant for it; never echoed
-                i += 1
-                continue
-            if found is None and (split := split_source_flag(name)) is not None:
-                base, source = split
-                owner = command.field_by_flag(base)
-                if owner is not None and owner.secret:
-                    ref = value_after(tok, name, has_eq, inline)
-                    try:
-                        _take_secret(secrets, owner, SecretRef(source, ref))
-                    except ParseError as exc:
-                        errors.add(exc)
+            negated = False
+            found: FieldInfo | None
+            if tok.startswith("--"):
+                name, eq, inline = tok[2:].partition("=")
+                has_eq = bool(eq)
+                if name == TIMEOUT_FLAG and command.accepts_timeout:
+                    parsed_timeout = Timeout.parse(value_after(tok, TIMEOUT_FLAG, has_eq, inline))
+                    if timeout is not None and timeout != parsed_timeout:
+                        raise _repeated(TIMEOUT_FLAG)
+                    timeout = parsed_timeout
                     i += 1
                     continue
-            if found is None and name.startswith("no-"):
-                found = command.field_by_flag(name[3:])
-                negated = found is not None and found.flag_type is FlagType.BOOLEAN
-                if not negated:
-                    found = None
-        else:
-            name, has_eq, inline = tok[1:], False, ""
-            found = command.field_by_short(name) if len(name) == 1 else None
-        if found is None:
-            errors.add(
-                ParseError(
-                    f"unknown flag {without_value(tok)!r}",
-                    context={
-                        "flag": name,
-                        "command": command.path.value,
-                        "known": known_flags(command),
-                    },
-                    suggestion=format_hint(tok),
-                )
-            )
-            if not has_eq and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
-                i += 1  # skip what looks like its value rather than misread it as positional
-            i += 1
-            continue
-        if found.flag_type is FlagType.BOOLEAN:
-            if has_eq:
-                assign(found, inline, negated=negated)
+                if name == RAW_PAYLOAD_FLAG and command.supports_raw_payload:
+                    raw = value_after(tok, RAW_PAYLOAD_FLAG, has_eq, inline)
+                    if raw_payload is not None and raw_payload != raw:
+                        raise _repeated(RAW_PAYLOAD_FLAG)
+                    raw_payload = raw
+                    i += 1
+                    continue
+                if name == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
+                    parsed_key = IdempotencyKey(value_after(tok, IDEMPOTENCY_FLAG, has_eq, inline))
+                    if key is not None and key != parsed_key:
+                        raise _repeated(IDEMPOTENCY_FLAG)
+                    key = parsed_key
+                    i += 1
+                    continue
+                if name == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
+                    if has_eq:
+                        raise ParseError(
+                            f"'{CONFIRM_FLAG}' takes no value", context={"flag": CONFIRM_FLAG}
+                        )
+                    confirmed = True
+                    i += 1
+                    continue
+                if name == NO_STREAM_FLAG and command.streaming:
+                    if has_eq:
+                        raise ParseError(
+                            f"'{NO_STREAM_FLAG}' takes no value", context={"flag": NO_STREAM_FLAG}
+                        )
+                    no_stream = True
+                    i += 1
+                    continue
+                found = command.field_by_flag(name)
+                if found is not None and found.secret:
+                    errors.add(direct_secret_error(found.flag))
+                    if not has_eq and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                        i += 1  # the value that was meant for it; never echoed
+                    i += 1
+                    continue
+                if found is None and (split := split_source_flag(name)) is not None:
+                    base, source = split
+                    owner = command.field_by_flag(base)
+                    if owner is not None and owner.secret:
+                        ref = value_after(tok, name, has_eq, inline)
+                        try:
+                            _take_secret(secrets, owner, SecretRef(source, ref))
+                        except ParseError as exc:
+                            errors.add(exc)
+                        i += 1
+                        continue
+                if found is None and name.startswith("no-"):
+                    found = command.field_by_flag(name[3:])
+                    negated = found is not None and found.flag_type is FlagType.BOOLEAN
+                    if not negated:
+                        found = None
             else:
-                store(found, not negated)
+                name, has_eq, inline = tok[1:], False, ""
+                found = command.field_by_short(name) if len(name) == 1 else None
+            if found is None:
+                errors.add(
+                    ParseError(
+                        f"unknown flag {without_value(tok)!r}",
+                        context={
+                            "flag": name,
+                            "command": command.path.value,
+                            "known": known_flags(command),
+                        },
+                        suggestion=format_hint(tok),
+                    )
+                )
+                if not has_eq and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                    i += 1  # skip what looks like its value rather than misread it as positional
+                i += 1
+                continue
+            if found.flag_type is FlagType.BOOLEAN:
+                if has_eq:
+                    assign(found, inline, negated=negated)
+                else:
+                    store(found, not negated)
+                i += 1
+                continue
+            raw = value_after(tok, found.flag, has_eq, inline)
+            assign(found, raw)
             i += 1
-            continue
-        raw = value_after(tok, found.flag, has_eq, inline)
-        assign(found, raw)
-        i += 1
+        except ParseError as exc:
+            errors.add(exc)
+            i += 1
 
     for name, items in arrays.items():
         values[name] = tuple(items)
@@ -454,7 +464,7 @@ def known_flags(command: Command) -> list[str]:
     flags = [name for f in command.fields for name in f.exposed_flags()]
     if command.supports_raw_payload:
         flags.append(RAW_PAYLOAD_FLAG)
-    if command.has_network_io:
+    if command.accepts_timeout:
         flags.append(TIMEOUT_FLAG)
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         flags.append(CONFIRM_FLAG)
@@ -502,7 +512,7 @@ def build_from_mapping(
     for key, value in mapping.items():
         try:
             flag = key.replace("_", "-")
-            if flag == TIMEOUT_FLAG and command.has_network_io:
+            if flag == TIMEOUT_FLAG and command.accepts_timeout:
                 timeout = Timeout.parse(value)
                 continue
             if flag == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
@@ -607,6 +617,8 @@ def _check_base(target: Classified, value: object, flag: str) -> object:
         case FlagType.INTEGER:
             if isinstance(value, int) and not isinstance(value, bool):
                 return value
+            if isinstance(value, float) and value.is_integer():
+                return int(value)  # JSON Schema counts 2.0 as an integer, and clients send it
             raise ParseError(f"{flag!r} expects an integer", context=ctx)
         case FlagType.NUMBER:
             if isinstance(value, bool) or not isinstance(value, (int, float)):

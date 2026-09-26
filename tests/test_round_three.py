@@ -664,7 +664,7 @@ def test_mcp_structured_content_escapes_lone_surrogates() -> None:
     assert cleaned == {"files": ["caf\\udce9.txt"], "caf\\udce9.txt": 1}
 
 
-def test_unhashable_args_with_an_idempotency_key_still_write_an_envelope(tmp_path: Path) -> None:
+def test_idempotency_key_works_when_args_serialize_to_non_json(tmp_path: Path) -> None:
     app = App("pay", version="1", state_dir=tmp_path)
 
     @dataclass(frozen=True, slots=True)
@@ -682,4 +682,8 @@ def test_unhashable_args_with_an_idempotency_key_still_write_an_envelope(tmp_pat
         return {"effect": "created"}
 
     code, [env], _ = run(app, ["charge", "9.99", "--idempotency-key", "k"])
-    assert code == 1 and env["error"]["code"] == "INVALID_ARGS"
+    assert code == 0 and env["data"]["effect"] == "created"
+    code, [env], _ = run(app, ["charge", "9.99", "--idempotency-key", "k"])
+    assert code == 0 and env["data"]["effect"] == "noop"
+    code, [env], _ = run(app, ["charge", "1.00", "--idempotency-key", "k"])
+    assert code == 6 and env["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"

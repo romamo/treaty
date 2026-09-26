@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 381 passed |
+| `uv run pytest` | 394 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -23,8 +23,8 @@ The two do not share code.
 
 ## Decisions already made
 
-- **Zero runtime dependencies in core.** Extras `[rich]` and `[pydantic]` are reserved in
-  `pyproject.toml` but empty; adapters are postponed (see `ROADMAP.md`)
+- **Zero runtime dependencies in core.** The only extra is `[mcp]`; `[rich]` and `[pydantic]`
+  adapters are postponed and not declared yet (see `ROADMAP.md`)
 - **Python 3.14 only.** Handlers rely on native deferred annotations; modules that declare
   args dataclasses inside functions must not use `from __future__ import annotations`
 - **Args are frozen slotted dataclasses** with `Arg(...)` and `Flag(...)` markers; handlers
@@ -146,8 +146,9 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 3. `resolve_path` consumes tokens by longest known prefix
 4. `parse_command_args` (argv) or `build_from_mapping` (exec, raw payload) yields an
    `Invocation`: args dataclass plus `timeout` and `confirmed`. Field errors are collected
-   in a `_Collector` and raised together as one `ParseError.combine(...)`; only a flag with
-   no value at the end or bad raw-payload JSON aborts at once
+   in a `_Collector` and raised together as one `ParseError.combine(...)`; every token error,
+   framework flags and a trailing flag with no value included, is collected; only bad
+   raw-payload JSON aborts at once
 5. `_Run.execute` applies the destructive preview rule, runs the handler under
    `call_with_timeout` inside `cancellation_handlers`, and returns an `Envelope`
 6. `_Run.emit` writes JSON or human output and returns the exit code
@@ -158,7 +159,7 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-011, F-012,
 F-013, F-015, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002, C-003, C-004, C-007, C-012,
-C-015, C-016, C-020 (`filepath` only), O-021, O-022, O-032, O-039, O-041, O-050.
+C-015, C-016, C-020 (all presets), O-021, O-022, O-032, O-039, O-041, O-050.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network), `--confirm-destructive` (destructive), `--idempotency-key`

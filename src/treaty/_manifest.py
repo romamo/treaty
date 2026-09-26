@@ -66,7 +66,7 @@ def shared_exit_codes(exits: ExitCodeRegistry) -> dict[str, object]:
     for code in _ALWAYS:
         entry = exits.framework(code)
         table[str(entry.code.value)] = entry.to_json()
-    for signal_code in (130, 143):
+    for signal_code in (130, 141, 143):
         entry = exits.by_code(signal_code)
         table[str(signal_code)] = entry.to_json()
     return table
@@ -89,7 +89,7 @@ def command_entry(
     flags: dict[str, object] = {}
     for f in command.fields:
         flags.update(f.to_flag_entries())
-    if command.has_network_io:
+    if command.accepts_timeout:
         flags["timeout"] = {
             "type": "number",
             "required": False,
@@ -188,7 +188,7 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         properties[f.name] = prop
         if f.required:  # an X | None field without a default is optional, as the parser says
             required.append(f.name)
-    if command.has_network_io:
+    if command.accepts_timeout:
         properties[TIMEOUT_KEY] = {
             "type": "number",
             "description": "Seconds before the framework aborts with TIMEOUT; 0 disables it",
@@ -245,7 +245,14 @@ def build_manifest(
         path.value: command_entry(cmd, exits, commands, shared=shared)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
-    digest = hashlib.sha256(canonical_json(entries).encode()).hexdigest()
+    # Everything an agent caches: a new global flag or shared code must change the etag
+    shape = {
+        "schema_version": SCHEMA_VERSION,
+        "flags": GLOBAL_FLAG_ENTRIES,
+        "exit_codes": shared,
+        "commands": entries,
+    }
+    digest = hashlib.sha256(canonical_json(shape).encode()).hexdigest()
     etag = Etag(f"sha256:{digest[:32]}")
     return {
         "schema_version": SCHEMA_VERSION,

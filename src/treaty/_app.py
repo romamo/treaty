@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import dataclasses
 import io
 import json
@@ -362,6 +363,10 @@ class App:
         except ParseError as exc:
             return run.arg_error(exc, meta=meta)
         if command.streaming:
+            if invocation.timeout is None and self.effective_timeout(command, None).seconds is None:
+                # Buffered in-process, an endless stream would never return: bound it by
+                # the app's default unless the caller passed its own timeout
+                invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
             return buffer_stream(run.stream(command, invocation, OutputMode.JSON, meta=meta))
         return run.execute(command, invocation, OutputMode.JSON, meta=meta)
 
@@ -427,15 +432,18 @@ class App:
             return run.emit(mode, run.arg_error(exc))
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
-            if command.path == EXEC_PATH:
-                assert isinstance(invocation.args, ExecArgs)
-                return run.exec(invocation.args, inp)
-            if command.streaming:
-                envelopes = run.stream(command, invocation, mode)
-                if invocation.no_stream:
-                    return run.emit(mode, buffer_stream(envelopes), render=_each(command.human))
-                return run.emit_stream(mode, envelopes, render=command.human)
-            return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
+            try:
+                if command.path == EXEC_PATH:
+                    assert isinstance(invocation.args, ExecArgs)
+                    return run.exec(invocation.args, inp)
+                if command.streaming:
+                    envelopes = run.stream(command, invocation, mode)
+                    if invocation.no_stream:
+                        return run.emit(mode, buffer_stream(envelopes), render=_each(command.human))
+                    return run.emit_stream(mode, envelopes, render=command.human)
+                return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
+            except BrokenPipeError:
+                return run.output_closed(command)
 
 
 def _invoke(command: Command, args: object, ctx: Ctx) -> object:
@@ -602,9 +610,6 @@ class _Run:
             )
         try:
             call = fingerprint(command.path, invocation.args, self.app.scalars)
-        except SchemaError as exc:
-            message = f"{command.path}: its arguments cannot be hashed for the key: {exc}"
-            return self._broken(command, "INVALID_ARGS", message, started, full_meta)
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
             return self._crashed(command, invocation.args, exc, started, full_meta)
         with contextlib.ExitStack() as held:
@@ -817,7 +822,10 @@ class _Run:
         except KeyboardInterrupt:
             self.abandoned = _still_running(running)
             return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
-        except (Exception, SystemExit) as exc:  # noqa: BLE001 - the handler boundary; see _crashed
+        except GeneratorExit:
+            raise
+        except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
+            # asyncio.CancelledError, SystemExit, trio.Cancelled: user code, not a signal
             return self._crashed(command, args, exc, started, full_meta)
         try:
             data = self._payload(result)
@@ -900,9 +908,16 @@ class _Run:
             return Timeout(left)
 
         def partial() -> dict[str, object]:
-            return {**full_meta, "seq": seq, "partial": True}
+            """Partial means some events were delivered before the failure"""
+            return {**full_meta, "seq": seq, "partial": seq > 0}
 
         running: list[Pending] = []
+        # One context for every next(): what the generator sets survives between events
+        stream_context = contextvars.copy_context()
+
+        def latest(pending: Pending) -> None:
+            running[:] = [pending]  # only the current worker matters; a stream may be endless
+
         try:
             self.cancellation.check()
             produced = call_with_timeout(
@@ -910,6 +925,7 @@ class _Run:
                 remaining(),
                 running.append,
                 self.cancellation.armed,
+                stream_context,
             )
             if isinstance(produced, Iterable) and not isinstance(produced, (str, bytes, Mapping)):
                 # Registration accepts Iterable[T]: a returned list streams its items
@@ -925,7 +941,9 @@ class _Run:
                 event = call_with_timeout(
                     lambda: next(produced, _END),
                     remaining(),
-                    interruptible=self.cancellation.armed,
+                    latest,
+                    self.cancellation.armed,
+                    stream_context,
                 )
                 if event is _END:
                     break
@@ -966,12 +984,15 @@ class _Run:
             message = f"{command.path} yielded {exc}"
             yield self._broken(command, "INVALID_OUTPUT", message, started, partial())
             return
-        except (Exception, SystemExit) as exc:  # noqa: BLE001 - the handler boundary; see _crashed
+        except GeneratorExit:
+            raise  # the consumer closed the stream; nothing more may be yielded
+        except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
             yield self._crashed(command, args, exc, started, partial())
             return
         finally:
             # Run the handler's finally blocks now, unless a timed-out worker still holds it
-            if events is not None and timeout.seconds is None and isinstance(events, Generator):
+            held = any(p.worker.is_alive() for p in running)
+            if events is not None and not held and isinstance(events, Generator):
                 try:
                     events.close()
                 except Exception as exc:  # noqa: BLE001 - the handler's finally is user code
@@ -1169,7 +1190,7 @@ class _Run:
         self,
         command: Command,
         args: object,
-        exc: Exception | SystemExit,
+        exc: BaseException,
         started: float,
         meta: Mapping[str, object],
     ) -> Envelope:
@@ -1203,6 +1224,21 @@ class _Run:
             return envelope.exit_code
         return self._emit_human(envelope, render)
 
+    def output_closed(self, command: Command) -> int:
+        """The reader went away (``tool logs | head``): nothing more can be written, so
+        clean up like a cancellation and exit 141, the SIGPIPE convention"""
+        if command.cleanup is not None:
+            try:
+                command.cleanup()
+            except Exception as exc:  # noqa: BLE001 - cleanup= is user code
+                self.err.write(_traceback(exc))
+        if self.out is sys.stdout:
+            # The interpreter flushes stdout at exit; a dead pipe would raise there too
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
+        return 141
+
     def emit_stream(
         self,
         mode: OutputMode,
@@ -1212,6 +1248,17 @@ class _Run:
     ) -> int:
         """Write each envelope as it arrives; the exit code is the terminal envelope's,
         or GENERAL_ERROR when the human renderer failed on a successful stream"""
+        # Closed on any exit, so a dead reader (BrokenPipeError) still runs the handler's
+        # finally blocks instead of leaving them to garbage collection
+        with contextlib.closing(envelopes):
+            return self._write_stream(mode, envelopes, render)
+
+    def _write_stream(
+        self,
+        mode: OutputMode,
+        envelopes: Generator[Envelope],
+        render: HumanRenderer | None,
+    ) -> int:
         code = 0
         render_failed = False
         for envelope in drain(envelopes):

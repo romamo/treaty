@@ -80,6 +80,11 @@ class Command:
     resource_graph: Mapping[type, ResourceSpec]
     """Every resource reachable from ``resources``, validated at registration"""
 
+    @property
+    def accepts_timeout(self) -> bool:
+        """``--timeout``: network commands, and streams, which may never end on their own"""
+        return self.has_network_io or self.streaming
+
     def field_by_flag(self, flag: str) -> FieldInfo | None:
         for f in self.fields:
             if f.flag == flag:
@@ -143,7 +148,7 @@ def build_command(
     for f in fields:
         f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
     framework_flags = {
-        "timeout": has_network_io,
+        "timeout": has_network_io or streaming,
         "raw-payload": supports_raw_payload,
         "confirm-destructive": danger_level is DangerLevel.DESTRUCTIVE,
         "no-stream": streaming,
@@ -203,7 +208,7 @@ def build_command(
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
         streaming=streaming,
         resources=resources,
-        resource_graph=resource_graph(resources, str(path)),
+        resource_graph=resource_graph(resources, str(path), args_type),
     )
 
 

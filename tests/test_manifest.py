@@ -55,7 +55,7 @@ def test_rollback_entry_contents(app: App) -> None:
     # 6: idempotency key reuse; 4: unusable state directory or record
     assert set(entry["exit_codes"]) == {"4", "6", "79", "80"}
     assert flags["idempotency-key"]["type"] == "string"
-    assert set(manifest["exit_codes"]) == {"0", "1", "2", "10", "130", "143"}
+    assert set(manifest["exit_codes"]) == {"0", "1", "2", "10", "130", "141", "143"}
     assert manifest["exit_codes"]["143"] == {
         "name": "CANCELLED_SIGTERM",
         "description": "Cancelled by SIGTERM; external state may be partially modified",
@@ -106,5 +106,6 @@ def test_schema_entry_keeps_full_exit_table(app: App) -> None:
         "79",
         "80",
         "130",
+        "141",
         "143",
     }

@@ -16,7 +16,7 @@ _NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 _TAKEN = frozenset(
     {
         *("treaty", "pytest", "tests", "conformance", "dist", "build"),
-        *("pluggy", "iniconfig", "packaging", "pygments"),
+        *("pluggy", "iniconfig", "packaging", "pygments", "py"),
     }
 )
 

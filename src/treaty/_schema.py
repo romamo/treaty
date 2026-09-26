@@ -19,13 +19,14 @@ from typing import Any
 
 from ._errors import SchemaError
 from ._scalars import ScalarRegistry
-from ._types import is_dataclass_type, strip_optional
+from ._types import is_dataclass_type, resolve_alias, strip_optional
 
 JsonSchema = dict[str, Any]
 
 
 def schema_for(tp: object, scalars: ScalarRegistry) -> JsonSchema:
     """Return a draft-07 schema fragment for a supported annotation"""
+    tp = resolve_alias(tp)
     if tp is object or tp is Any:
         return {}
     if tp is types.NoneType:

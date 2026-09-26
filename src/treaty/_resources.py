@@ -27,6 +27,8 @@ class ResourceSpec:
     cls: type
     acquire: Callable[..., object]
     deps: tuple[type, ...]
+    args_type: type | None = None
+    """The args class ``acquire`` is annotated to read, when it names one"""
 
 
 def dependency_params(fn: Callable[..., object], where: str) -> tuple[type, ...]:
@@ -59,11 +61,17 @@ def resource_spec(cls: type) -> ResourceSpec:
             f"{cls.__qualname__} is not a resource: it needs a classmethod acquire(cls, args, ctx)"
         )
     deps = dependency_params(acquire, f"{cls.__qualname__}.acquire")
-    return ResourceSpec(cls=cls, acquire=acquire, deps=deps)
+    first = next(iter(inspect.signature(acquire).parameters))
+    wanted = typing.get_type_hints(acquire).get(first)
+    args_type = wanted if isinstance(wanted, type) and wanted is not object else None
+    return ResourceSpec(cls=cls, acquire=acquire, deps=deps, args_type=args_type)
 
 
-def resource_graph(roots: Sequence[type], where: str) -> dict[type, ResourceSpec]:
-    """Every resource reachable from ``roots``; fails on a cycle or a class without acquire"""
+def resource_graph(
+    roots: Sequence[type], where: str, args_type: type | None = None
+) -> dict[type, ResourceSpec]:
+    """Every resource reachable from ``roots``; fails on a cycle, a class without acquire,
+    or an ``acquire`` that reads an args class the command's args do not extend"""
     specs: dict[type, ResourceSpec] = {}
     visiting: list[type] = []
 
@@ -75,6 +83,12 @@ def resource_graph(roots: Sequence[type], where: str) -> dict[type, ResourceSpec
             return
         visiting.append(cls)
         spec = resource_spec(cls)
+        wanted = spec.args_type
+        if args_type is not None and wanted is not None and not issubclass(args_type, wanted):
+            raise RegistrationError(
+                f"{where}: {cls.__qualname__}.acquire reads {wanted.__qualname__}, but the "
+                f"command's args are {args_type.__qualname__}; subclass {wanted.__qualname__}"
+            )
         for dep in spec.deps:
             visit(dep)
         visiting.pop()

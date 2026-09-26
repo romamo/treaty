@@ -5,6 +5,7 @@ description = "Zero-dependency Python CLI framework implementing the CLI Agent S
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["cli", "agent", "ai", "manifest", "json", "exit-codes"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -25,8 +26,6 @@ treaty = "treaty._cli:main"
 treaty-mcp = "treaty._mcp:main"
 
 [project.optional-dependencies]
-rich = ["rich>=13"]
-pydantic = ["pydantic>=2"]
 mcp = [
     "mcp>=2,<3",
 ]

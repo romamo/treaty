@@ -80,7 +80,7 @@ class ExitCode:
 
     @property
     def is_signal(self) -> bool:
-        return self.value in (130, 143)
+        return self.value in (130, 141, 143)
 
 
 @dataclass(frozen=True, slots=True)

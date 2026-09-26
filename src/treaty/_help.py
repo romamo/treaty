@@ -25,18 +25,31 @@ def render_root(
         for p, c in sorted(commands.items(), key=lambda kv: kv[0].value)
         if p.parts[:depth] == prefix and len(p.parts) == depth + 1
     ]
+    # A group is any path segment with commands under it, declared with app.group() or
+    # implied by a dotted registration such as db.migrate.up
+    declared = {p.parts: d for p, d in groups.items()}
+    implied = sorted(
+        {
+            p.parts[: depth + 1]
+            for p in commands
+            if p.parts[:depth] == prefix and len(p.parts) > depth + 1
+        }
+        | {parts for parts in declared if parts[:depth] == prefix and len(parts) == depth + 1}
+    )
     group_rows = [
-        (p, d)
-        for p, d in sorted(groups.items(), key=lambda kv: kv[0].value)
-        if p.parts[:depth] == prefix and len(p.parts) == depth + 1
+        (parts[-1], declared.get(parts, f"{len(_under(commands, parts))} commands"))
+        for parts in implied
     ]
+    global_labels = ["--format", "--help", "--max-output", "--schema", "--version"]
     width = max(
-        [len(p.parts[-1]) for p, _ in listed] + [len(p.parts[-1]) for p, _ in group_rows] + [8]
+        [len(p.parts[-1]) for p, _ in listed]
+        + [len(label) for label, _ in group_rows]
+        + [len(label) for label in global_labels]
     )
     if group_rows:
         lines.append("Command groups")
-        for p, d in group_rows:
-            lines.append(f"  {p.parts[-1]:<{width}}  {d}")
+        for label, d in group_rows:
+            lines.append(f"  {label:<{width}}  {d}")
         lines.append("")
     if listed:
         lines.append("Commands")
@@ -53,6 +66,10 @@ def render_root(
     return "\n".join(lines) + "\n"
 
 
+def _under(commands: Mapping[CommandPath, Command], parts: tuple[str, ...]) -> list[CommandPath]:
+    return [p for p in commands if p.parts[: len(parts)] == parts]
+
+
 def _framework_rows(command: Command) -> list[tuple[str, str]]:
     """The flags treaty adds to this command, so a person can find how to apply it"""
     rows: list[tuple[str, str]] = []
@@ -60,7 +77,7 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
         rows.append(("--confirm-destructive", "Apply; without it the command only previews"))
     if command.danger_level is not DangerLevel.SAFE:
         rows.append(("--idempotency-key KEY", "Repeat calls with KEY replay the first result"))
-    if command.has_network_io:
+    if command.accepts_timeout:
         rows.append(("--timeout SECONDS", "Abort with TIMEOUT after SECONDS; 0 disables it"))
     if command.supports_raw_payload:
         rows.append(("--raw-payload JSON", "All field values as one JSON object"))

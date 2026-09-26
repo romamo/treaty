@@ -117,6 +117,8 @@ def cap_envelope(envelope: Envelope, cap: OutputCap, *, argv: bool = True) -> En
     total = len(serialize(envelope).encode())
     if total <= cap.bytes or envelope.data is None:
         return envelope
+    if len(serialize(dataclasses.replace(envelope, data=None)).encode()) > cap.bytes:
+        return envelope  # error or meta alone exceed the cap; cutting data cannot help
     data: object = copy.deepcopy(envelope.data)
     cuts: list[_Cut] = []
     visited: set[FieldPath] = set()

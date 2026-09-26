@@ -230,6 +230,13 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
             fix_required="choose an empty directory with --directory",
         )
     source = str(Path(args.treaty_source).resolve()) if args.treaty_source else None
+    if source is not None and not (Path(source) / "pyproject.toml").is_file():
+        # Caught now, not as a "Distribution not found" from uv sync in the new project
+        raise Exit.ARG_ERROR(
+            f"--treaty-source {args.treaty_source} is not a treaty checkout",
+            context={"treaty_source": source},
+            suggestion="pass the directory that holds treaty's pyproject.toml",
+        )
     files = render(name, source)
     if not args.dry_run:
         for rel, content in files.items():

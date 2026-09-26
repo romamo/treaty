@@ -75,9 +75,8 @@ Gaps found on 2026-09-25 by reading the first real consumer, `romamo/cloudfall`
 operation three times, and none of them could be ported until these land. All four
 landed the same day; what remains under each is follow-up work:
 
-- **Custom scalars**: done, see above. Still open from it: built-in `ScalarSpec`
-  presets that pair `pattern_type` with a matching regex, so `uuid` and `semver` are
-  checked in phase 1 rather than only declared
+- **Custom scalars**: done, see above, including phase-1 checks for the `alphanumeric_id`,
+  `uuid`, `semver`, and `url` presets
 - **Typed resources**: done, see above. Still open from it: a `release` counterpart to
   `acquire` for resources that hold a lock or a connection, run after the handler and on
   cancellation alongside `cleanup=`
@@ -106,9 +105,8 @@ matching audit rule so adoption never requires reading the spec.
 
 ## 0.3.0: richer contracts
 
-- The remaining validation presets of REQ-C-020 (`alphanumeric_id`, `uuid`, `semver`,
-  `url`) and the resource-id patterns of REQ-F-045 (`?`, `#`, encoded metacharacters);
-  `filepath` is done
+- The resource-id patterns of REQ-F-045 (`?`, `#`, encoded metacharacters) beyond the
+  REQ-C-020 presets, which are all done
 - Conditional argument rules (REQ-C-026) and `option_placement: strict` for commands that
   forward trailing arguments (REQ-C-027)
 - Multi-step commands with a step manifest and `completed_steps` on timeout and

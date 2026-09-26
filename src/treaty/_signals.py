@@ -75,7 +75,12 @@ class Cancellation:
 
     def handle(self, sig: CancelSignal, stdout: IO[str]) -> None:
         if self.received is not None:
-            stdout.flush()
+            try:
+                stdout.flush()
+            except RuntimeError, OSError:
+                # The signal landed inside a blocked write (reentrant flush) or the reader
+                # is gone; the second signal means "exit now", so exit without it
+                pass
             os._exit(sig.exit_code)
         self.received = sig
         if not self._armed:

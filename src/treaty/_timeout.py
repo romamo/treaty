@@ -13,6 +13,7 @@ caller wait for it; the idempotency layer holds the key's lock until then.
 
 from __future__ import annotations
 
+import contextvars
 import math
 import threading
 from collections.abc import Callable
@@ -102,6 +103,7 @@ def call_with_timeout[T](
     timeout: Timeout,
     running: Callable[[Pending], None] | None = None,
     interruptible: Callable[[], AbstractContextManager[None]] = nullcontext,
+    context: contextvars.Context | None = None,
 ) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
 
@@ -109,15 +111,19 @@ def call_with_timeout[T](
     waits (a signal) can still wait for the handler or hold its locks until it ends.
     Only the handler itself, or the wait for its worker, runs inside ``interruptible()``:
     an exception raised while ``Thread.start`` holds its internal locks corrupts them.
+    The worker runs in ``context``, or a copy of the caller's: contextvars the host set
+    reach the handler, and a stream passing one context keeps what its generator set.
     """
     if timeout.seconds is None:
         with interruptible():
             return fn()
     slot = Outcome()
 
+    run_in = context if context is not None else contextvars.copy_context()
+
     def target() -> None:
         try:
-            slot.result = fn()
+            slot.result = run_in.run(fn)
         except BaseException as exc:  # noqa: BLE001 - re-raised on the calling thread below
             slot.exc = exc
 

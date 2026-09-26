@@ -3,6 +3,7 @@
 from ._app import App, ExecArgs, Group, NoArgs
 from ._command import DangerLevel, Example
 from ._context import Ctx
+from ._envelope import Envelope, ErrorDetail, WarningDetail
 from ._errors import CliExit, Exit, ParseError, RegistrationError, SchemaError, TreatyError
 from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
 from ._flags import Arg, Flag
@@ -18,6 +19,8 @@ __all__ = [
     "CommandPath",
     "Ctx",
     "DangerLevel",
+    "Envelope",
+    "ErrorDetail",
     "Example",
     "ExecArgs",
     "Exit",
@@ -37,4 +40,5 @@ __all__ = [
     "SideEffects",
     "Timeout",
     "TreatyError",
+    "WarningDetail",
 ]

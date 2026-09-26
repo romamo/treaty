@@ -333,6 +333,48 @@ def _check_secret_field(cls: type, info: FieldInfo) -> None:
 _POSITIONAL_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 
+def _checked_default(target: Classified, default: object, where: str) -> object:
+    """A default of the field's own type, so the manifest never publishes a contradiction;
+    an enum's value becomes its member, as a parsed argument would"""
+    if default is None and target.optional:
+        return None
+    if target.scalar is not None:
+        if not isinstance(default, target.scalar.cls):
+            raise RegistrationError(
+                f"{where}: default {default!r} is not a {target.scalar.cls.__qualname__}"
+            )
+        return default
+    match target.flag_type:
+        case FlagType.ARRAY:
+            assert target.item is not None
+            if not isinstance(default, tuple):
+                raise RegistrationError(f"{where}: an array default must be a tuple")
+            return tuple(_checked_default(target.item, d, where) for d in default)
+        case FlagType.ENUM:
+            value = default.value if isinstance(default, Enum) else default
+            if value not in target.enum_values:
+                raise RegistrationError(
+                    f"{where}: default {default!r} is not one of {list(target.enum_values)}"
+                )
+            return target.enum_cls(value) if target.enum_cls is not None else value
+        case FlagType.BOOLEAN:
+            ok = isinstance(default, bool)
+        case FlagType.INTEGER:
+            ok = isinstance(default, int) and not isinstance(default, bool)
+        case FlagType.NUMBER:
+            ok = isinstance(default, (int, float)) and not isinstance(default, bool)
+        case FlagType.STRING:
+            if target.path and isinstance(default, str):
+                return Path(default)  # what a parsed argument would be
+            ok = isinstance(default, Path) if target.path else isinstance(default, str)
+    if not ok:
+        raise RegistrationError(
+            f"{where}: default {default!r} does not match the field's type "
+            f"({target.flag_type.value})"
+        )
+    return default
+
+
 def _check_flag_names(cls: type, infos: list[FieldInfo]) -> None:
     """Flags the parser derives must not collide with another field's flag"""
     flags = {i.flag: i for i in infos}
@@ -410,6 +452,8 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: required positional after optional positional"
             )
+        if default is not MISSING:
+            default = _checked_default(classified, default, f"{cls.__qualname__}.{f.name}")
         required = default is MISSING and not classified.optional
         info = FieldInfo(
             name=f.name,

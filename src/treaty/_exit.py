@@ -143,6 +143,11 @@ _FRAMEWORK: tuple[tuple[FrameworkCode, str, bool, SideEffects], ...] = (
 _SIGNALS: tuple[tuple[str, int, str], ...] = (
     ("CANCELLED_SIGINT", 130, "Cancelled by SIGINT; external state may be partially modified"),
     ("CANCELLED_SIGTERM", 143, "Cancelled by SIGTERM; external state may be partially modified"),
+    (
+        "OUTPUT_CLOSED",
+        141,
+        "The reader closed stdout (SIGPIPE); output was cut short, state may be partial",
+    ),
 )
 
 
