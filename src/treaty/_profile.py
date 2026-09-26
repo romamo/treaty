@@ -109,7 +109,7 @@ def argument_order_for(app: App) -> dict[str, object] | None:
             "local_args": local,
             "global_flag": "--format",
             "value": "json",
-            "alternate_value": "human",
+            "alternate_value": "plain",
         }
     return None
 

@@ -27,7 +27,7 @@ from ._command import (
     DangerLevel,
     Example,
     Handler,
-    HumanRenderer,
+    PlainRenderer,
     build_command,
 )
 from ._context import Ctx
@@ -52,6 +52,7 @@ from ._parse import (
     split_globals,
     without_value,
 )
+from ._plain import render_event, render_plain
 from ._resources import Resolver
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
@@ -207,7 +208,7 @@ class App:
         timeout: float | None | _Inherit = INHERIT,
         supports_raw_payload: bool = False,
         cleanup: Cleanup | None = None,
-        human: HumanRenderer | None = None,
+        plain: PlainRenderer | None = None,
         streaming: bool = False,
     ) -> Callable[[Handler], Handler]:
         cmd_path = CommandPath(path)
@@ -232,7 +233,7 @@ class App:
                     timeout=command_timeout,
                     supports_raw_payload=supports_raw_payload,
                     cleanup=cleanup,
-                    human=human,
+                    plain=plain,
                     scalars=self.scalars,
                     streaming=streaming,
                 )
@@ -265,7 +266,10 @@ class App:
                 )
 
     def _register_builtins(self, enable_exec: bool) -> None:
-        @self.command("manifest", description="Print the command manifest for agents")
+        # The manifest is for agents: plain mode keeps it JSON, indented for reading
+        @self.command(
+            "manifest", description="Print the command manifest for agents", plain=_json_text
+        )
         def manifest(args: NoArgs, ctx: Ctx) -> dict[str, object]:
             return build_manifest(self._commands, self.exits, self.version)
 
@@ -480,10 +484,10 @@ class App:
             if command.streaming:
                 envelopes = run.stream(command, invocation, mode)
                 if invocation.no_stream:
-                    return run.emit(mode, buffer_stream(envelopes), render=_each(command.human))
+                    return run.emit(mode, buffer_stream(envelopes), render=_each(command.plain))
                 run.in_flight = command
-                return run.emit_stream(mode, envelopes, render=command.human)
-            return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
+                return run.emit_stream(mode, envelopes, render=command.plain)
+            return run.emit(mode, run.execute(command, invocation, mode), render=command.plain)
 
 
 def _invoke(command: Command, args: object, ctx: Ctx) -> object:
@@ -554,8 +558,13 @@ def _warned(envelope: Envelope, code: str, message: str, command: Command) -> En
     return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
 
 
-def _each(render: HumanRenderer | None) -> HumanRenderer | None:
-    """``human=`` renders one event; --no-stream data is the list of them"""
+def _json_text(data: Any) -> str:
+    """Machine output in plain mode: the data alone, indented, without the envelope"""
+    return json.dumps(data, indent=2, sort_keys=True) + "\n"
+
+
+def _each(render: PlainRenderer | None) -> PlainRenderer | None:
+    """``plain=`` renders one event; --no-stream data is the list of them"""
     if render is None:
         return None
     return lambda events: "".join(render(e) for e in events)
@@ -1316,12 +1325,12 @@ class _Run:
     # Output
 
     def emit(
-        self, mode: OutputMode, envelope: Envelope, *, render: HumanRenderer | None = None
+        self, mode: OutputMode, envelope: Envelope, *, render: PlainRenderer | None = None
     ) -> int:
         if mode is OutputMode.JSON:
             write_envelope(cap_envelope(envelope, self.cap), self.out)
             return envelope.exit_code
-        return self._emit_human(envelope, render)
+        return self._emit_plain(envelope, render)
 
     def output_closed(self) -> int:
         """The reader went away (``tool logs | head``): nothing more can be written, so exit
@@ -1345,10 +1354,10 @@ class _Run:
         mode: OutputMode,
         envelopes: Generator[Envelope],
         *,
-        render: HumanRenderer | None,
+        render: PlainRenderer | None,
     ) -> int:
         """Write each envelope as it arrives; the exit code is the terminal envelope's,
-        or GENERAL_ERROR when the human renderer failed on a successful stream"""
+        or GENERAL_ERROR when the plain renderer failed on a successful stream"""
         # Closed on any exit, so a dead reader (BrokenPipeError) still runs the handler's
         # finally blocks instead of leaving them to garbage collection
         with contextlib.closing(envelopes):
@@ -1358,7 +1367,7 @@ class _Run:
         self,
         mode: OutputMode,
         envelopes: Generator[Envelope],
-        render: HumanRenderer | None,
+        render: PlainRenderer | None,
     ) -> int:
         code = 0
         render_failed = False
@@ -1367,28 +1376,34 @@ class _Run:
                 write_envelope(cap_envelope(envelope, self.cap), self.out)
                 code = envelope.exit_code
                 continue
-            code = self._emit_human(envelope, render)
+            code = self._emit_plain(envelope, render, fallback=render_event)
             if code != envelope.exit_code:
-                # One traceback is enough: later events print as JSON
+                # One traceback is enough: later events use the plain fallback
                 render_failed, render = True, None
         if render_failed and code == 0:
             return FrameworkCode.GENERAL_ERROR.value
         return code
 
-    def _emit_human(self, envelope: Envelope, render: HumanRenderer | None) -> int:
+    def _emit_plain(
+        self,
+        envelope: Envelope,
+        render: PlainRenderer | None,
+        *,
+        fallback: PlainRenderer = render_plain,
+    ) -> int:
         code = envelope.exit_code
         if envelope.data is not None and render is not None:
             try:
                 text = render(envelope.data)
-            except Exception as exc:  # noqa: BLE001 - human= is user code
+            except Exception as exc:  # noqa: BLE001 - plain= is user code
                 self.err.write("".join(traceback.format_exception(exc)))
-                self.err.write(f"{self.app.name}: HANDLER_CRASHED: the human renderer failed\n")
+                self.err.write(f"{self.app.name}: HANDLER_CRASHED: the plain renderer failed\n")
                 code = FrameworkCode.GENERAL_ERROR.value
             else:
                 # Outside the renderer's try: a closed stdout is not a renderer bug
                 self.out.write(text)
         elif envelope.data is not None:
-            self.out.write(json.dumps(envelope.data, indent=2, sort_keys=True) + "\n")
+            self.out.write(fallback(envelope.data))
         if envelope.error is not None:
             self.err.write(f"{self.app.name}: {envelope.error.code}: {envelope.error.message}\n")
             errors = envelope.error.errors or ()
@@ -1414,7 +1429,7 @@ class _Run:
                 p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
             }
             data = build_schema_manifest(subtree, self.app.exits, self.app.version)
-        return self.emit(mode, self._envelope(0, data=data))
+        return self.emit(mode, self._envelope(0, data=data), render=_json_text)
 
     def help_root(self, mode: OutputMode, prefix: tuple[str, ...]) -> int:
         if mode is OutputMode.JSON:

@@ -31,7 +31,7 @@ def test_cli_turns_a_blank_name_into_an_arg_error() -> None:
     assert env.error.code == "ARG_ERROR" and "blank" in env.error.message
 
 
-def test_cli_prints_plain_text_in_human_mode() -> None:
+def test_cli_prints_the_greeting_in_plain_mode() -> None:
     out = io.StringIO()
-    code = app.run(["greet", "Ada", "--format", "human"], stdout=out, stderr=io.StringIO())
+    code = app.run(["greet", "Ada", "--format", "plain"], stdout=out, stderr=io.StringIO())
     assert code == 0 and out.getvalue() == "Hello, Ada!\n"

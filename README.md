@@ -103,8 +103,29 @@ value is accepted, and array flags accumulate. A negative number such as `-5` is
 not a flag.
 
 A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
-words resolve to in `context.command`, and puts the corrected order in `suggestion`. Human
+words resolve to in `context.command`, and puts the corrected order in `suggestion`. Plain
 mode prints every error's suggestion as a final `hint:` line on stderr.
+
+## Output formats
+
+`--format` takes `json` or `plain`. With no flag, `TREATY_FORMAT` decides; without that,
+the format is `json` when stdout is not a terminal or `CI` is set, and `plain` otherwise.
+
+`json` writes the full response envelope. `plain` writes the result data as text and
+errors as prose on stderr. A command renders its own text with `plain=`, which receives
+`data` as JSON values (dicts and lists, after secret redaction):
+
+```python
+@app.command("greet", description="Say hello", plain=lambda data: f"{data['message']}\n")
+```
+
+Without `plain=`, the result prints as flat lines, one item each: `key: value`, with dotted
+paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. An
+array prints each element as its own block, the way a stream prints its events.
+`manifest` and `--schema` stay JSON in plain mode, since they are read by programs.
+
+Breaking after 0.0.3: `plain` replaces `human`, and `plain=` replaces `human=`. `human` is no
+longer accepted anywhere; `--format human` exits `2` listing the allowed values.
 
 ## Timeouts
 
@@ -132,7 +153,7 @@ increasing precedence. Past the cap the framework follows whichever child holds 
 bytes and cuts the list, object, or string where no child dominates to the longest prefix
 that fits. `meta` gets `truncated`, `total_bytes`, and a `truncation_hint` giving the cap
 that returns everything (plus `total_count` and `returned_count` when `data` is a list), and
-each cut adds a `FIELD_TRUNCATED` warning naming the field. Human mode is not capped.
+each cut adds a `FIELD_TRUNCATED` warning naming the field. Plain mode is not capped.
 
 ## Secrets
 
@@ -263,7 +284,7 @@ The manifest declares `streaming_default: true` and a `--no-stream` flag (REQ-O-
 which returns one envelope with every event in `data` and `meta.total`; a failure under
 `--no-stream` keeps the events seen so far in `data`. In `exec`, each event line carries
 `_line` and `_cmd`. Streaming commands must be `safe`: the effect and idempotency
-contracts describe one response. In human mode `human=` renders each event.
+contracts describe one response. In plain mode `plain=` renders each event.
 
 ## Destructive commands
 

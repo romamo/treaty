@@ -33,7 +33,7 @@ GLOBAL_FLAG_ENTRIES: dict[str, object] = {
         "type": "enum",
         "required": False,
         "enum_values": [m.value for m in OutputMode],
-        "description": "Output representation; defaults to json when stdout is not a terminal",
+        "description": "Output representation; json when stdout is not a terminal, plain otherwise",
     },
     "max-output": {
         "type": "integer",

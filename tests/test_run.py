@@ -148,7 +148,7 @@ def test_group_help_json_scopes_to_subtree(app: App) -> None:
     assert code == 0 and "manifest" not in env["data"]["commands"]
 
 
-def test_human_mode_help_and_errors(app: App) -> None:
+def test_plain_mode_help_and_errors(app: App) -> None:
     code, out, err = run(app, [], isatty=True)
     assert code == 0 and "Command groups" in out and "deploy" in out
     code, out, err = run(app, ["deploy", "rollback", "--help"], isatty=True)
@@ -157,7 +157,7 @@ def test_human_mode_help_and_errors(app: App) -> None:
     assert code == 79 and out == "" and "DEPLOY_CONFLICT" in err
 
 
-def test_human_mode_error_ends_with_suggestion(app: App) -> None:
+def test_plain_mode_error_ends_with_suggestion(app: App) -> None:
     code, out, err = run(app, ["--dry-run", "deploy", "rollback", "api"], isatty=True)
     assert code == 2 and out == ""
     assert err.splitlines()[-1] == (
@@ -178,7 +178,7 @@ def test_root_version_flag_aliases_version_command(app: App) -> None:
     code, env = run_json(app, ["--version"])
     assert code == 0 and env["data"] == {"name": "deployctl", "version": "1.4.0"}
     code, out, _ = run(app, ["--version"], isatty=True)
-    assert code == 0 and '"version": "1.4.0"' in out
+    assert code == 0 and out == "name: deployctl\nversion: 1.4.0\n"
 
 
 def test_version_flag_not_aliased_below_root(app: App) -> None:

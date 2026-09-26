@@ -9,7 +9,7 @@ from ._errors import ParseError
 
 
 class OutputMode(StrEnum):
-    HUMAN = "human"
+    PLAIN = "plain"
     JSON = "json"
 
 
@@ -31,4 +31,4 @@ def resolve_mode(explicit: str | None, env: Mapping[str, str], stdout_isatty: bo
         return resolve_mode(forced, {}, stdout_isatty)
     if not stdout_isatty or env.get("CI"):
         return OutputMode.JSON
-    return OutputMode.HUMAN
+    return OutputMode.PLAIN

@@ -55,7 +55,7 @@ def run_cli(argv: list[str], *, isatty: bool) -> tuple[int, str]:
     return code, out.getvalue()
 
 
-def test_cli_audit_json_and_human(monkeypatch, tmp_path) -> None:
+def test_cli_audit_json_and_plain(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     code, out = run_cli(["audit", "fixture_audit_app:app", "--limit", "2"], isatty=False)
     assert code == 0
@@ -102,7 +102,7 @@ def test_cli_audit_strict() -> None:
     assert code == 0 and json.loads(out)["ok"]
 
 
-def test_cli_audit_strict_renders_human_report() -> None:
+def test_cli_audit_strict_renders_plain_report() -> None:
     out, err = io.StringIO(), io.StringIO()
     code = cli.run(
         ["audit", "fixture_audit_app:app", "--strict"],

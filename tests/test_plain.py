@@ -1,5 +1,10 @@
+import io
+import json
+from dataclasses import dataclass
+
 import pytest
 
+from treaty import App, Ctx
 from treaty._plain import render_event, render_plain
 
 
@@ -56,3 +61,54 @@ def test_event_blank_line_only_after_containers() -> None:
 def test_non_json_values_fail() -> None:
     with pytest.raises(TypeError, match="JSON values"):
         render_plain({"x": object()})
+
+
+# Plain mode through the CLI
+
+
+@dataclass(frozen=True, slots=True)
+class NoArgs:
+    pass
+
+
+def plain_app() -> App:
+    app = App("showctl", version="1")
+
+    @app.command("show", description="Show a release")
+    def show(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"service": "api", "release": {"tag": "1.3.9"}}
+
+    return app
+
+
+def run(argv: list[str], env: dict[str, str] | None = None) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    code = plain_app().run(argv, stdout=out, stderr=err, env=env or {}, isatty=True)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_command_without_a_renderer_prints_flat_lines() -> None:
+    assert run(["show"]) == (0, "service: api\nrelease.tag: 1.3.9\n", "")
+
+
+def test_explicit_plain_on_a_pipe_matches_the_terminal_default() -> None:
+    out = io.StringIO()
+    code = plain_app().run(["show", "--format", "plain"], stdout=out, stderr=io.StringIO(), env={})
+    assert code == 0 and out.getvalue() == "service: api\nrelease.tag: 1.3.9\n"
+
+
+@pytest.mark.parametrize(
+    ("argv", "env"),
+    [(["show", "--format", "human"], {}), (["show"], {"TREATY_FORMAT": "human"})],
+)
+def test_human_is_an_unknown_format(argv: list[str], env: dict[str, str]) -> None:
+    out = io.StringIO()
+    code = plain_app().run(argv, stdout=out, stderr=io.StringIO(), env=env, isatty=False)
+    error = json.loads(out.getvalue())["error"]
+    assert code == 2 and error["code"] == "ARG_ERROR"
+    assert error["context"]["allowed"] == ["plain", "json"]
+
+
+def test_manifest_stays_json_in_plain_mode() -> None:
+    code, out, _ = run(["manifest"])
+    assert code == 0 and "show" in json.loads(out)["commands"]

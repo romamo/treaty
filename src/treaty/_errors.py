@@ -85,8 +85,8 @@ class ParseError(Exception):
 class CliExit(Exception):
     """Raised by a handler to end the run with a declared exit code
 
-    ``data`` must have the handler's return type: the command's human renderer
-    receives it on failed runs too.
+    ``data`` must have the handler's return type. In plain mode the command's renderer
+    receives it on failed runs too, converted to JSON values like a successful result.
     """
 
     def __init__(

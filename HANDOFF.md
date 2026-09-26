@@ -48,9 +48,13 @@ The two do not share code.
   returning the preview as `data` with error code `CONFIRMATION_REQUIRED` (REQ-O-021)
 - **Timeouts use a daemon thread**, not `SIGALRM`, so they work on Windows, off the main
   thread, and inside blocking C calls. A timed-out handler is abandoned, not killed
-- **Commands may set `human=`**, a renderer for human mode; JSON mode ignores it. It also
-  renders `data` on failed runs, so a `CliExit` must carry `data` of the handler's return
-  type (the error line goes to stderr)
+- **`--format` is `json` or `plain`**, named for the representation, not the reader
+  (REQ-O-001). `human` was removed after 0.0.3 with no alias
+- **Commands may set `plain=`**, a renderer for plain mode; JSON mode ignores it. It
+  receives `data` as JSON values, after secret redaction, not the handler's return value.
+  It also renders `data` on failed runs, so a `CliExit` must carry `data` of the handler's
+  return type (the error line goes to stderr). Without `plain=`, `_plain.py` prints flat
+  `key: value` lines; `manifest` and `--schema` stay indented JSON
 - **`treaty audit --strict` fails on warnings and errors, never advice.** It raises
   `AUDIT_FAILED` (79) with the full report as `data`; without `--strict` the audit always
   exits 0 on a completed run
@@ -91,7 +95,7 @@ The two do not share code.
 - **Every exit writes an envelope.** A handler exception becomes `HANDLER_CRASHED`
   (exit 1) with the redacted traceback on stderr. Broad `except Exception` exists only
   where user code runs: the handler, a scalar's `parse=`/`serialize=`, `cleanup=`,
-  `human=`, and an exception's `__str__`. Nowhere else
+  `plain=`, and an exception's `__str__`. Nowhere else
 - **Exit codes must be declared.** A handler raises only what its manifest entry lists:
   `exit_codes=`, plus `GENERAL_ERROR`, `ARG_ERROR`, `TIMEOUT`, and on mutating commands
   `CONFLICT` and `PRECONDITION`. Anything else is `UNDECLARED_EXIT_CODE`
@@ -122,10 +126,11 @@ src/treaty/
   _errors.py     TreatyError family (registration), ParseError, CliExit, Exit factory
   _exit.py       ExitCodeEntry, FrameworkCode, ExitCodeRegistry, signal entries
   _flags.py      Arg/Flag markers, FieldInfo, inspect_fields(), token coercion
-  _help.py       human-mode help renderer (root, group, command)
+  _help.py       plain-mode help renderer (root, group, command)
   _idempotency.py  IdempotencyKey VO, per-key locked record store, state dir lookup
   _manifest.py   build_manifest(), command_entry(), command_schema(), etag
   _mode.py       OutputMode resolution (--format, TREATY_FORMAT, CI, tty)
+  _plain.py      plain fallback: flat key: value lines for commands without plain=
   _parse.py      globals, path routing, per-command parsing, mapping builder, raw payload
   _schema.py     annotation to draft-07 schema, to_jsonable()
   _paths.py      check_path(): null bytes, percent-encoding, and .. in Path flags
@@ -142,7 +147,7 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Execution path
 
 1. `split_globals` strips `--format`, `--help`, `--schema`
-2. `resolve_mode` picks human or JSON
+2. `resolve_mode` picks plain or JSON
 3. `resolve_path` consumes tokens by longest known prefix
 4. `parse_command_args` (argv) or `build_from_mapping` (exec, raw payload) yields an
    `Invocation`: args dataclass plus `timeout` and `confirmed`. Field errors are collected
@@ -151,7 +156,7 @@ tests/           one file per feature; conftest.py holds the shared app fixture
    raw-payload JSON aborts at once
 5. `_Run.execute` applies the destructive preview rule, runs the handler under
    `call_with_timeout` inside `cancellation_handlers`, and returns an `Envelope`
-6. `_Run.emit` writes JSON or human output and returns the exit code
+6. `_Run.emit` writes JSON or plain output and returns the exit code
 
 `exec` loops steps 4 to 6 per stdin line with `_cmd` and `_line` added to `meta`.
 

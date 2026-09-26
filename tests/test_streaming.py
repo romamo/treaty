@@ -43,7 +43,7 @@ def stream_app(*, timeout: float | None | str = "inherit") -> App:
         description="Emit events",
         streaming=True,
         exit_codes=["NO_SPACE"],
-        human=lambda e: f"[{e['n']}] {e['text']}\n",
+        plain=lambda e: f"[{e['n']}] {e['text']}\n",
         **extra,  # type: ignore[arg-type]
     )
     def tail(args: TailArgs, ctx: Ctx) -> Iterator[Event]:
@@ -62,14 +62,14 @@ def stream_app(*, timeout: float | None | str = "inherit") -> App:
 
 
 def run(
-    argv: list[str], *, app: App | None = None, stdin: str = "", human: bool = False
+    argv: list[str], *, app: App | None = None, stdin: str = "", plain: bool = False
 ) -> tuple[int, list[dict], str]:
     CLOSED.clear()
     out, err = io.StringIO(), io.StringIO()
     code = (app or stream_app()).run(
-        argv, stdin=io.StringIO(stdin), stdout=out, stderr=err, env={}, isatty=human
+        argv, stdin=io.StringIO(stdin), stdout=out, stderr=err, env={}, isatty=plain
     )
-    if human:
+    if plain:
         return code, [], out.getvalue() + err.getvalue()
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     return code, lines, err.getvalue()
@@ -121,8 +121,8 @@ def test_no_stream_takes_no_value() -> None:
     assert lines[0]["error"]["errors"][0]["message"] == "'no-stream' takes no value"
 
 
-def test_human_mode_renders_each_event_and_nothing_for_the_end() -> None:
-    code, _, text = run(["tail", "2"], human=True)
+def test_plain_mode_renders_each_event_and_nothing_for_the_end() -> None:
+    code, _, text = run(["tail", "2"], plain=True)
     assert code == 0
     assert text == "[1] line 1\n[2] line 2\n"
 
@@ -156,8 +156,8 @@ def test_no_stream_failure_keeps_the_events_seen_so_far() -> None:
     assert lines[0]["meta"]["total"] == 2
 
 
-def test_human_mode_failure_goes_to_stderr_after_rendered_events() -> None:
-    code, _, text = run(["tail", "5", "--fail-at", "2"], human=True)
+def test_plain_mode_failure_goes_to_stderr_after_rendered_events() -> None:
+    code, _, text = run(["tail", "5", "--fail-at", "2"], plain=True)
     assert code == 80
     assert text.startswith("[1] line 1\n")
     assert "logctl: NO_SPACE: disk full" in text
@@ -233,7 +233,7 @@ def test_manifest_declares_streaming_default_and_no_stream_and_validates() -> No
 
 
 def test_help_advertises_streaming() -> None:
-    code, _, text = run(["tail", "--help"], human=True)
+    code, _, text = run(["tail", "--help"], plain=True)
     assert code == 0
     assert "Streams one JSONL envelope per event; --no-stream returns a single envelope" in text
 

@@ -54,6 +54,9 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   keys, secrets as `_from_env` and `_from_file`; output schema is the envelope; calls go
   through the new `App.call`, so confirmation, idempotency, timeouts, effects, and caps
   apply; streams come back buffered
+- `--format plain` replaces `--format human` (REQ-O-001), with no alias; `plain=` replaces
+  `human=`; commands without a renderer print flat `key: value` lines instead of indented
+  JSON; `manifest` and `--schema` stay JSON
 
 ## 0.1.0: first release
 
@@ -120,7 +123,7 @@ matching audit rule so adoption never requires reading the spec.
 - **pydantic adapter** (`treaty[pydantic]`): a protocol seam in `_flags.py` and
   `_schema.py` so a `BaseModel` can serve as args or output type. First adapter to build
   when the extras are revisited
-- **rich adapter** (`treaty[rich]`): human-mode rendering only. Low value
+- **rich adapter** (`treaty[rich]`): terminal rendering only, never a `--format` value. Low value
 - Shell completion generated from the manifest
 - Windows CI: signals are POSIX-only in the tests; the daemon-thread timeout already works
   there

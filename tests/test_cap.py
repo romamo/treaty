@@ -135,10 +135,10 @@ def test_exec_caps_each_line() -> None:
     assert "truncated" not in second["meta"]
 
 
-def test_human_mode_is_not_capped() -> None:
+def test_plain_mode_is_not_capped() -> None:
     out = io.StringIO()
     big_app().run(["items"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
-    assert len(json.loads(out.getvalue())) == 1000
+    assert out.getvalue().count("name: item-") == 1000
 
 
 def test_command_flag_named_like_a_global_is_rejected() -> None:
