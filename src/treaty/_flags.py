@@ -13,7 +13,7 @@ from typing import Any
 
 from ._errors import ParseError, RegistrationError
 from ._paths import PATTERN_TYPE, check_path
-from ._scalars import ScalarRegistry, ScalarSpec
+from ._scalars import ScalarRegistry, ScalarSpec, anchored
 from ._secrets import source_flags
 from ._types import Classified, FlagType, classify
 
@@ -177,12 +177,12 @@ class FieldInfo:
         if self.spec.short is not None:
             entry["short"] = self.spec.short
         if self.spec.pattern is not None:
-            entry["pattern"] = self.spec.pattern
+            entry["pattern"] = anchored(self.spec.pattern)
         if self.path:
             entry["pattern_type"] = PATTERN_TYPE
         if (scalar := self.scalar) is not None:
             if scalar.pattern is not None:
-                entry["pattern"] = scalar.pattern
+                entry["pattern"] = anchored(scalar.pattern)
             if scalar.pattern_type is not None:
                 entry["pattern_type"] = scalar.pattern_type
         return entry
@@ -235,6 +235,15 @@ def apply_scalar(
         raise ParseError(f"value for {flag!r} {problem}", context={**ctx, **detail})
     try:
         return spec.parse(base_value)
+    except ParseError as exc:
+        # The parser's own rejection: its message and suggestion are the ones to show,
+        # unless they could quote a secret
+        if secret:
+            raise ParseError(
+                f"value for {flag!r} is not a valid {spec.cls.__name__}", context=ctx
+            ) from None
+        exc.context.setdefault("flag", flag)  # so the field is not also reported missing
+        raise
     except (TypeError, ValueError) as exc:
         if secret:
             raise ParseError(

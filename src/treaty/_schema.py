@@ -146,6 +146,11 @@ def to_jsonable(value: object, scalars: ScalarRegistry) -> object:
         raise SchemaError(f"{value!r} is not a finite number, and JSON has no NaN or Infinity")
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, int) and not isinstance(value, bool) and value.bit_length() > 10_000:
+        try:
+            str(value)
+        except ValueError:
+            raise SchemaError("an integer too long to write as JSON") from None
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, Path):

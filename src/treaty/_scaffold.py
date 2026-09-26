@@ -9,7 +9,10 @@ from dataclasses import dataclass
 
 from ._errors import ParseError
 
-_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# PEP 508 names end in a letter or digit; no doubled hyphens
+_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+# The scaffold's own directories and dependencies: a project named after one breaks
+_TAKEN = frozenset({"treaty", "pytest", "tests", "conformance"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,18 +22,19 @@ class ProjectName:
     def __post_init__(self) -> None:
         if not _NAME_RE.fullmatch(self.value):
             raise ParseError(
-                "name must be lowercase letters, digits, and hyphens, starting with a letter",
+                "name must be lowercase letters, digits, and single hyphens, starting with a "
+                "letter and ending with a letter or digit",
                 context={"name": self.value},
             )
         package = self.value.replace("-", "_")
-        if keyword.iskeyword(package) or keyword.issoftkeyword(package):
+        if keyword.iskeyword(package):
             raise ParseError(
                 f"{self.value!r} is a Python keyword, so its package cannot be imported",
                 context={"name": self.value},
             )
-        if package == "treaty" or package in sys.stdlib_module_names:
+        if package in _TAKEN or package in sys.stdlib_module_names:
             raise ParseError(
-                f"{self.value!r} would shadow the {package} module it imports",
+                f"{self.value!r} would collide with the {package} module or directory it uses",
                 context={"name": self.value},
             )
 
@@ -215,6 +219,13 @@ def test_delete_needs_confirmation() -> None:
   "command": ["./{n}"],
   "timeout_seconds": 5,
   "manifest": ["manifest"],
+  "argument_order": {{
+    "command_path": ["delete", "widget"],
+    "local_args": ["--dry-run", "--confirm-destructive"],
+    "global_flag": "--format",
+    "value": "json",
+    "alternate_value": "human"
+  }},
   "probes": [
     {{ "name": "status", "argv": ["status", "widget"], "kind": "read" }},
     {{ "name": "unknown flag", "argv": ["status", "widget", "--no-such-flag"], "kind": "invalid" }},

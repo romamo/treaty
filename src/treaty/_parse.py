@@ -583,7 +583,14 @@ def _check_patterned(field: FieldInfo, target: Classified, value: object) -> obj
     if isinstance(value, str):
         field.check_pattern(value)
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        field.check_pattern(str(value))  # the argv token argv would have carried
+        try:
+            token = str(value)  # the token argv would have carried
+        except ValueError:
+            raise ParseError(
+                f"{field.flag!r} is too large",
+                context={"field": field.flag, "value": describe_number(value)},
+            ) from None
+        field.check_pattern(token)
     base = _check_base(target, value, field.flag)
     if target.scalar is None:
         return base

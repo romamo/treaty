@@ -267,11 +267,19 @@ def _load(path: Path, now: float) -> Record | None:
 def _prune(directory: Path, now: float) -> None:
     """Remove expired records and idle lock files; the saving key's own lock is held
     by the caller, so its fresh record is never touched"""
+    failure: OSError | None = None
     for path in directory.iterdir():
-        if path.suffix == ".json" and _expired(path, now):
-            _prune_record(path, now)
-        elif path.suffix == ".lock" and _expired(path, now):
-            _unlink_idle_lock(path)
+        if path.suffix not in (".json", ".lock") or not path.is_file():
+            continue  # not treaty's: a directory or other entry someone left here
+        try:
+            if path.suffix == ".json" and _expired(path, now):
+                _prune_record(path, now)
+            elif path.suffix == ".lock" and _expired(path, now):
+                _unlink_idle_lock(path)
+        except OSError as exc:
+            failure = failure or exc  # one stuck entry must not stop the rest
+    if failure is not None:
+        raise failure
 
 
 def _expired(path: Path, now: float) -> bool:

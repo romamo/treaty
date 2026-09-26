@@ -39,9 +39,11 @@ class Cancelled(BaseException):
     cannot swallow it.
     """
 
-    def __init__(self, sig: CancelSignal) -> None:
+    def __init__(self, sig: CancelSignal, *, held: bool = False) -> None:
         super().__init__(f"cancelled by {sig.name}")
         self.signal = sig
+        self.held = held
+        """Raised at a window's start for a signal that arrived before it"""
 
 
 class Cancellation:
@@ -57,7 +59,7 @@ class Cancellation:
         """Raise a signal held since the last window, before a handler starts"""
         if self._pending is not None:
             sig, self._pending = self._pending, None
-            raise Cancelled(sig)
+            raise Cancelled(sig, held=True)
 
     @contextmanager
     def armed(self) -> Iterator[None]:

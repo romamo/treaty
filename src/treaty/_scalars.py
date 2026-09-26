@@ -77,9 +77,10 @@ class ScalarSpec:
     def json_schema(self) -> dict[str, object]:
         schema: dict[str, object] = {"type": self.json_type, "title": self.cls.__name__}
         if self.pattern is not None:
-            schema["pattern"] = self.pattern
+            # Checked with re.fullmatch; JSON Schema patterns search, so anchor them
+            schema["pattern"] = anchored(self.pattern)
         if self.pattern_type in ("alphanumeric_id", "semver"):
-            schema["pattern"] = f"^{PRESET_PATTERNS[self.pattern_type]}$"
+            schema["pattern"] = anchored(PRESET_PATTERNS[self.pattern_type])
         if self.pattern_type == "uuid":
             schema["format"] = "uuid"
         if self.pattern_type == "url":
@@ -111,9 +112,17 @@ class ScalarSpec:
         return None
 
 
+def anchored(pattern: str) -> str:
+    """A ``re.fullmatch`` pattern as the anchored form JSON Schema and FlagEntry expect"""
+    return f"^(?:{pattern})$"
+
+
 def _matches_preset(preset: str, value: str) -> bool:
     if preset == "url":
-        parts = urlsplit(value)
+        try:
+            parts = urlsplit(value)
+        except ValueError:
+            return False  # e.g. an unclosed IPv6 bracket: not a URL, not a crash
         return parts.scheme in ("http", "https") and bool(parts.netloc)
     return re.fullmatch(PRESET_PATTERNS[preset], value) is not None
 

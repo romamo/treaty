@@ -101,8 +101,9 @@ def _danger_level(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.danger_level is not DangerLevel.SAFE:
             continue
-        leaf = c.path.parts[-1]
-        if any(leaf.startswith(v) for v in _DESTRUCTIVE_VERBS):
+        # The leading word only: "settings" is not "set", "dropdown" is not "drop"
+        verb = re.split(r"[-_]", c.path.parts[-1])[0]
+        if verb in _DESTRUCTIVE_VERBS:
             yield Finding(
                 "danger-level",
                 Severity.WARNING,
@@ -110,7 +111,7 @@ def _danger_level(app: App) -> Iterator[Finding]:
                 "name suggests a destructive operation but danger_level is safe",
                 'danger_level="destructive" and add dry_run: bool = Flag(default=False, ...)',
             )
-        elif any(leaf.startswith(v) for v in _MUTATING_VERBS):
+        elif verb in _MUTATING_VERBS:
             yield Finding(
                 "danger-level",
                 Severity.WARNING,
@@ -186,7 +187,11 @@ def _network_io(app: App) -> Iterator[Finding]:
             )
 
 
-_PATH_NAME_HINTS = re.compile(r"(^|_)(path|dir|directory|file|folder)($|_)|(path|dir|file)$")
+# Whole words, plus the common fused forms; "profile" and "tempo" are not paths
+_PATH_NAME_HINTS = re.compile(
+    r"(^|_)(path|dir|directory|file|folder|filepath|dirpath|filename|dirname)($|_)"
+    r"|^(out|in|src|dst|log|config|work)(file|dir|path)$"
+)
 
 
 def _path_typed(app: App) -> Iterator[Finding]:

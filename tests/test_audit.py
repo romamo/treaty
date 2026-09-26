@@ -114,3 +114,25 @@ def test_cli_audit_strict_renders_human_report() -> None:
     assert code == 79
     assert "fixture_audit_app:app:" in out.getvalue() and "Next steps" in out.getvalue()
     assert "AUDIT_FAILED" in err.getvalue()
+
+
+def test_heuristics_skip_words_that_only_start_like_a_verb_or_end_like_a_path() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, Flag
+    from treaty._audit import audit
+
+    @dataclass(frozen=True, slots=True)
+    class Prefs:
+        profile: str = Flag(default="default", description="Profile name")
+        outfile: str = Flag(default="-", description="Where to write")
+
+    app = App("prefs", version="1")
+
+    @app.command("settings", description="Show settings", examples=[("x", "prefs settings")])
+    def settings(args: Prefs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    by_rule = {r.id: r for r in audit(app, "prefs:app", limit=10).rules}
+    assert by_rule["danger-level"].findings == ()
+    assert [f.message.split()[0] for f in by_rule["path-typed"].findings] == ["outfile"]

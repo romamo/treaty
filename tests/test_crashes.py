@@ -37,7 +37,7 @@ def crash_app(*, default_timeout: float | None = 60.0) -> App:
     def opaque(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"x": object()}
 
-    @app.command("where", description="Exits with a Path in its context")
+    @app.command("where", description="Exits with a Path in its context", exit_codes=["NOT_FOUND"])
     def where(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise Exit.NOT_FOUND("missing", context={"path": Path("/srv/app")})
 
@@ -45,7 +45,7 @@ def crash_app(*, default_timeout: float | None = 60.0) -> App:
     def done(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise Exit.SUCCESS("done")
 
-    @app.command("scalar", description="Exits with scalar data")
+    @app.command("scalar", description="Exits with scalar data", exit_codes=["NOT_FOUND"])
     def scalar(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise CliExit(ExitCodeName("NOT_FOUND"), "missing", data="oops")
 

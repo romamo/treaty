@@ -336,7 +336,7 @@ def test_probes_drop_global_options_from_examples() -> None:
     class Show:
         item: str = Arg(description="Item")
 
-    @app.command("show", description="Show", examples=[("x", "t show widget --format human")])
+    @app.command("show", description="Show", examples=[("x", "t --format human show widget")])
     def show(args: Show, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -344,7 +344,195 @@ def test_probes_drop_global_options_from_examples() -> None:
     assert probe.argv == ("show", "widget")
 
 
-@pytest.mark.parametrize("name", ["class", "treaty", "json"])
+@pytest.mark.parametrize("name", ["class", "treaty", "json", "shop-", "tests", "pytest"])
 def test_init_rejects_names_that_cannot_be_a_package(name: str) -> None:
     with pytest.raises(ParseError):
         ProjectName(name)
+
+
+# Fourth review round
+
+
+@dataclass(frozen=True, slots=True)
+class Region:
+    value: str
+
+    def __post_init__(self) -> None:
+        if self.value not in ("eu", "us"):
+            raise ParseError(f"unknown region {self.value}", suggestion="use eu or us")
+
+
+def test_scalar_parser_parse_error_keeps_its_message_and_suggestion() -> None:
+    app = App("rg", version="1")
+    app.scalar(Region, parse=Region)
+
+    @dataclass(frozen=True, slots=True)
+    class Go:
+        region: Region = Flag(description="Region")
+
+    @app.command("go", description="Go")
+    def go(args: Go, ctx: Ctx) -> dict[str, str]:
+        return {"region": args.region.value}
+
+    code, [env], _ = run(app, ["go", "--region", "xx"])
+    assert code == 2 and env["error"]["message"] == "unknown region xx"
+    assert env["error"]["suggestion"] == "use eu or us"
+
+
+def test_failing_human_renderer_on_a_stream_exits_1_with_one_traceback() -> None:
+    app = App("hr", version="1")
+
+    def broken(event: object) -> str:
+        raise KeyError("renderer bug")
+
+    @app.command("tick", description="Events", streaming=True, human=broken)
+    def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        yield {"n": 1}
+        yield {"n": 2}
+
+    code, _, text = run(app, ["tick"], isatty=True)
+    assert code == 1 and text.count("Traceback") == 1
+
+
+def test_signal_held_before_the_handler_skips_cleanup() -> None:
+    ran: list[str] = []
+    app = App("held", version="1", default_timeout=None)
+
+    @dataclass(frozen=True, slots=True)
+    class Loud:
+        value: str
+
+    def loud(raw: str) -> Loud:
+        signal.raise_signal(signal.SIGTERM)  # lands while the line is validated
+        return Loud(raw)
+
+    app.scalar(Loud, parse=loud)
+
+    @dataclass(frozen=True, slots=True)
+    class Args:
+        v: Loud = Flag(description="V")
+
+    @app.command("go", description="Go", cleanup=lambda: ran.append("cleanup"))
+    def go(args: Args, ctx: Ctx) -> dict[str, str]:
+        ran.append("handler")
+        return {}
+
+    code, [env], _ = run(app, ["exec"], stdin=io.StringIO('{"_cmd": "go", "v": "x"}\n'))
+    assert code == 143 and env["error"]["code"] == "CANCELLED"
+    assert ran == [] and "partial" not in env["meta"]
+
+
+@pytest.mark.parametrize("name", ["match", "type", "shop-tool", "z9"])
+def test_init_accepts_soft_keywords_and_plain_names(name: str) -> None:
+    ProjectName(name)
+
+
+@dataclass(frozen=True, slots=True)
+class Url:
+    value: str
+
+
+def test_malformed_url_preset_input_is_an_arg_error() -> None:
+    app = App("u", version="1")
+    app.scalar(Url, parse=Url, pattern_type="url")
+
+    @dataclass(frozen=True, slots=True)
+    class Fetch:
+        url: Url = Arg(description="URL")
+
+    @app.command("fetch", description="Fetch")
+    def fetch(args: Fetch, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, [env], _ = run(app, ["fetch", "http://[::1"])
+    assert code == 2 and env["error"]["code"] == "ARG_ERROR"
+
+
+def test_optional_positional_is_not_required_in_the_payload_schema() -> None:
+    from treaty._manifest import payload_schema
+
+    app = App("o", version="1")
+
+    @dataclass(frozen=True, slots=True)
+    class Hello:
+        name: str | None = Arg(description="Name")
+
+    @app.command("hi", description="Hi", supports_raw_payload=True)
+    def hi(args: Hello, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    command = next(c for p, c in app.commands.items() if p.value == "hi")
+    assert "required" not in payload_schema(command)
+
+
+def test_undeclared_framework_exit_is_rejected_like_a_custom_one() -> None:
+    from treaty import Exit
+
+    app = App("nf", version="1")
+
+    @app.command("get", description="Get")
+    def get(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        raise Exit.NOT_FOUND("missing")
+
+    code, [env], _ = run(app, ["get"])
+    assert code == 1 and env["error"]["code"] == "UNDECLARED_EXIT_CODE"
+
+
+def test_replay_schema_and_failed_data_validate_as_an_mcp_client_would() -> None:
+    from typing import Literal
+
+    from jsonschema.validators import validator_for
+
+    from treaty._mcp import tool_entries
+
+    @dataclass(frozen=True, slots=True)
+    class Up:
+        effect: Literal["updated"] | None
+
+    app = App("up", version="1")
+    app.exit_code("TAKEN", 80, description="Taken", retryable=False, side_effects="none")
+
+    @app.command("up", description="Up", danger_level="mutating", exit_codes=["TAKEN"])
+    def up(args: NoArgs, ctx: Ctx) -> Up:
+        return Up("updated")
+
+    schema = next(e for e in tool_entries(app) if e.name == "up").output_schema
+    validator = validator_for(schema)(schema)
+    base = {"warnings": [], "meta": {}}
+    validator.validate({**base, "ok": True, "data": {"effect": "noop"}, "error": None})
+    failed = {"code": "TAKEN", "message": "taken", "retryable": False}
+    validator.validate({**base, "ok": False, "data": {"holder": "bob"}, "error": failed})
+
+
+def test_huge_ints_are_errors_not_crashes_in_process_and_in_output() -> None:
+    app = App("hg", version="1")
+
+    @dataclass(frozen=True, slots=True)
+    class Size:
+        size: int = Flag(default=1, pattern=r"\d+", description="Size")
+
+    @app.command("size", description="Size")
+    def size(args: Size, ctx: Ctx) -> dict[str, int]:
+        return {"n": 10**5000}
+
+    assert app.call("size", {"size": 10**5000}, env={}).exit_code == 2
+    code, [env], _ = run(app, ["size"])
+    assert code == 1 and env["error"]["code"] == "INVALID_OUTPUT"
+
+
+def test_prune_skips_foreign_entries_and_keeps_going(tmp_path: Path) -> None:
+    import time as clock
+
+    from treaty._idempotency import TTL_SECONDS, IdempotencyKey, Record, claim
+
+    stale = clock.time() - TTL_SECONDS - 3600
+    (tmp_path / "stray.json").mkdir()
+    os.utime(tmp_path / "stray.json", (stale, stale))
+    with claim(tmp_path, IdempotencyKey("old")) as slot:
+        slot.save(Record("fp", "c", {"effect": "created"}, stale))
+        old = slot.path
+    os.utime(old, (stale, stale))
+    with claim(tmp_path, IdempotencyKey("new")) as slot:
+        slot.save(Record("fp", "c", {"effect": "created"}, clock.time()))
+        slot.prune(clock.time())
+    assert not old.exists() and (tmp_path / "stray.json").is_dir()

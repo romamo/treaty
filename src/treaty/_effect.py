@@ -34,10 +34,19 @@ def with_replay_effect(schema: dict[str, Any]) -> dict[str, Any]:
     if "anyOf" in schema:
         return {**schema, "anyOf": [with_replay_effect(s) for s in schema["anyOf"]]}
     effect = schema.get("properties", {}).get("effect")
-    if not isinstance(effect, dict) or "enum" not in effect or "noop" in effect["enum"]:
+    if not isinstance(effect, dict):
         return schema
-    properties = {**schema["properties"], "effect": {**effect, "enum": [*effect["enum"], "noop"]}}
+    properties = {**schema["properties"], "effect": _admit_noop(effect)}
     return {**schema, "properties": properties}
+
+
+def _admit_noop(effect: dict[str, Any]) -> dict[str, Any]:
+    """``Literal[...]`` is an enum; ``Literal[...] | None`` wraps it in anyOf"""
+    if "anyOf" in effect:
+        return {**effect, "anyOf": [_admit_noop(s) for s in effect["anyOf"]]}
+    if "enum" not in effect or "noop" in effect["enum"]:
+        return effect
+    return {**effect, "enum": [*effect["enum"], "noop"]}
 
 
 def effect_problem(data: object, preview: bool) -> str | None:

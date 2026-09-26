@@ -805,7 +805,9 @@ class _Run:
             )
         except Cancelled as exc:
             self.abandoned = _still_running(running)
-            return self._cancelled(command, exc.signal, started, full_meta)
+            # A held signal raised before fn() or before the worker started: nothing ran
+            ran = not exc.held or bool(running)
+            return self._cancelled(command, exc.signal, started, full_meta, handler_started=ran)
         except KeyboardInterrupt:
             self.abandoned = _still_running(running)
             return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
@@ -846,7 +848,8 @@ class _Run:
                     retryable=False,
                     context={"command": command.path.value, "flag": "confirm-destructive"},
                     phase="validation",
-                    fix_required="rerun with --confirm-destructive to apply",
+                    fix_required="rerun with --confirm-destructive to apply "
+                    "(confirm_destructive: true in exec, MCP, or --raw-payload)",
                 ),
                 started=started,
                 meta=full_meta,
@@ -893,12 +896,14 @@ class _Run:
         def partial() -> dict[str, object]:
             return {**full_meta, "seq": seq, "partial": True}
 
+        running: list[Pending] = []
         try:
             self.cancellation.check()
             produced = call_with_timeout(
                 lambda: _invoke(command, args, ctx),
                 remaining(),
-                interruptible=self.cancellation.armed,
+                running.append,
+                self.cancellation.armed,
             )
             if not isinstance(produced, Iterator):
                 raise TypeError(
@@ -940,7 +945,9 @@ class _Run:
             )
             return
         except Cancelled as exc:
-            yield self._cancelled(command, exc.signal, started, {**full_meta, "seq": seq})
+            ran = events is not None or not exc.held or bool(running)
+            meta_now = {**full_meta, "seq": seq}
+            yield self._cancelled(command, exc.signal, started, meta_now, handler_started=ran)
             return
         except KeyboardInterrupt:
             sig = CancelSignal("SIGINT", 130)
@@ -1007,8 +1014,14 @@ class _Run:
         started: float,
         meta: Mapping[str, object],
     ) -> Envelope:
-        framework_names = {ExitCodeName(c.name) for c in FrameworkCode}
-        if exc.name not in command.exit_codes and exc.name not in framework_names:
+        # The codes the manifest lists for this command without a declaration; any other
+        # framework code (NOT_FOUND, RATE_LIMITED, ...) must be declared like a custom one
+        implicit = {FrameworkCode.SUCCESS, FrameworkCode.GENERAL_ERROR, FrameworkCode.ARG_ERROR}
+        implicit.add(FrameworkCode.TIMEOUT)
+        if command.danger_level is not DangerLevel.SAFE:
+            implicit |= {FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION}
+        allowed = {ExitCodeName(c.name) for c in implicit}
+        if exc.name not in command.exit_codes and exc.name not in allowed:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
             return self._envelope(
                 entry.code.value,
@@ -1076,15 +1089,23 @@ class _Run:
         except SchemaError as exc:
             self.err.write(f"{where}; its result was not recorded: {redact(str(exc))}\n")
             return
+        except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
+            self.err.write(f"{where}; serializing its result failed:\n")
+            self.err.write(redact(_traceback(exc)))
+            return
         problem = effect_problem(data, preview=False)
         if problem is not None:
             self.err.write(f"{where}; its result was not recorded: {problem}\n")
             return
         try:
             slot.save(Record(call, command.path.value, data, time.time()))
-            slot.prune(time.time())
         except OSError as exc:
             self.err.write(f"{where}; recording its result failed: {exc.strerror}\n")
+            return
+        try:
+            slot.prune(time.time())
+        except OSError as exc:
+            self.err.write(f"{where}; recorded, but pruning expired records failed: {exc}\n")
 
     def _redactor(self, command: Command, args: object) -> Callable[[str], str]:
         """Replace every spelling of the run's secret values: the value, its serialized
@@ -1180,14 +1201,21 @@ class _Run:
         *,
         render: HumanRenderer | None,
     ) -> int:
-        """Write each envelope as it arrives; the exit code is the terminal envelope's"""
+        """Write each envelope as it arrives; the exit code is the terminal envelope's,
+        or GENERAL_ERROR when the human renderer failed on a successful stream"""
         code = 0
+        render_failed = False
         for envelope in drain(envelopes):
             if mode is OutputMode.JSON:
                 write_envelope(cap_envelope(envelope, self.cap), self.out)
                 code = envelope.exit_code
-            else:
-                code = self._emit_human(envelope, render)
+                continue
+            code = self._emit_human(envelope, render)
+            if code != envelope.exit_code:
+                # One traceback is enough: later events print as JSON
+                render_failed, render = True, None
+        if render_failed and code == 0:
+            return FrameworkCode.GENERAL_ERROR.value
         return code
 
     def _emit_human(self, envelope: Envelope, render: HumanRenderer | None) -> int:

@@ -45,6 +45,11 @@ Design decisions: zero runtime dependencies in core, handlers are plain function
 over a frozen dataclass of arguments, and every command lives in one flat registry
 keyed by dot-path.
 
+A handler raises only the exit codes its manifest entry lists: the ones in `exit_codes=`,
+plus `GENERAL_ERROR`, `ARG_ERROR`, and `TIMEOUT` everywhere and `CONFLICT` and
+`PRECONDITION` on mutating commands. Anything else, including framework names such as
+`Exit.NOT_FOUND`, must be declared, or the run exits `1` with `UNDECLARED_EXIT_CODE`.
+
 ## Install
 
 treaty is not on PyPI yet; install from a checkout. Both commands are non-interactive and
@@ -295,8 +300,9 @@ as an alternative to individual flags. The payload is checked against the same f
 `tool <cmd> --schema` prints the command's manifest entry plus `parameters` and a draft-07
 `output_schema` derived from the handler's return annotation. Commands with
 `supports_raw_payload=True` also get `raw_payload_schema`, the JSON Schema of their args
-dataclass. `tool --schema` prints the whole manifest in that form; `tool <group> --schema`
-prints one group's subtree. The output is JSON in every mode.
+dataclass. `tool --schema` prints the whole manifest with each command's full exit-code
+table (a valid ManifestResponse, so without `parameters` or `raw_payload_schema`);
+`tool <group> --schema` prints one group's subtree. The output is JSON in every mode.
 
 ## MCP
 

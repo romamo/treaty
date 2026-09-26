@@ -90,8 +90,10 @@ def test_output_schema_wraps_the_envelope_and_streams_become_arrays() -> None:
     app = adapter_app()
     push = next(c for p, c in app.commands.items() if p.value == "push")
     tail = next(c for p, c in app.commands.items() if p.value == "log.tail")
-    assert output_schema(push)["else"]["properties"]["data"]["anyOf"][0]["title"] == "Pushed"
-    assert output_schema(tail)["else"]["properties"]["data"]["anyOf"][0] == {
+    assert (
+        output_schema(push)["else"]["then"]["properties"]["data"]["anyOf"][0]["title"] == "Pushed"
+    )
+    assert output_schema(tail)["else"]["then"]["properties"]["data"]["anyOf"][0] == {
         "type": "array",
         "items": {"type": "object", "additionalProperties": {"type": "integer"}},
     }

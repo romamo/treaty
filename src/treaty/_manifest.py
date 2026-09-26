@@ -171,7 +171,6 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
     properties: dict[str, JsonSchema] = {}
     required: list[str] = []
     base = command.args_schema
-    base_required = set(base.get("required", ()))
     for f in command.fields:
         if f.secret:
             what = f.spec.description
@@ -187,7 +186,7 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         prop = dict(base["properties"][f.name])
         prop["description"] = f.spec.description
         properties[f.name] = prop
-        if f.name in base_required:
+        if f.required:  # an X | None field without a default is optional, as the parser says
             required.append(f.name)
     if command.has_network_io:
         properties[TIMEOUT_KEY] = {

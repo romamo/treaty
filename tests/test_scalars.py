@@ -12,6 +12,8 @@ from conftest import spec_validator
 from treaty import App, Arg, Ctx, Flag, RegistrationError, SchemaError
 
 _ID = re.compile(r"[a-z][a-z0-9-]{0,62}")
+# Manifest and JSON Schema patterns are anchored; treaty matches with re.fullmatch
+ANCHORED = f"^(?:{_ID.pattern})$"
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +218,7 @@ def test_manifest_carries_pattern_and_base_types_and_validates() -> None:
     spec_validator("manifest-response").validate(manifest)
     flags = manifest["commands"]["deploy"]["flags"]
     assert flags["service"]["type"] == "string"
-    assert flags["service"]["pattern"] == _ID.pattern
+    assert flags["service"]["pattern"] == ANCHORED
     assert flags["port"] == {
         "type": "integer",
         "required": False,
@@ -224,7 +226,7 @@ def test_manifest_carries_pattern_and_base_types_and_validates() -> None:
         "default": 8080,
     }
     assert flags["peers"]["type"] == "array"
-    assert flags["peers"]["pattern"] == _ID.pattern
+    assert flags["peers"]["pattern"] == ANCHORED
 
 
 def test_schema_output_carries_constraints_on_args_and_output() -> None:
@@ -237,7 +239,7 @@ def test_schema_output_carries_constraints_on_args_and_output() -> None:
     assert args_schema["service"] == {
         "type": "string",
         "title": "ResourceId",
-        "pattern": _ID.pattern,
+        "pattern": ANCHORED,
     }
     assert args_schema["port"] == {
         "type": "integer",
@@ -249,7 +251,7 @@ def test_schema_output_carries_constraints_on_args_and_output() -> None:
         "anyOf": [{"type": "string", "title": "Release"}, {"type": "null"}]
     }
     output = env["data"]["output_schema"]["properties"]
-    assert output["service"]["pattern"] == _ID.pattern
+    assert output["service"]["pattern"] == ANCHORED
     assert output["peers"]["items"]["title"] == "ResourceId"
 
 

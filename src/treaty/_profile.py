@@ -41,8 +41,10 @@ def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
         tokens = shlex.split(example.command)
         if tokens and tokens[0] == app.name:
             tokens = tokens[1:]
+        # Globals may come before the path (tool --format json show x); drop them first
+        tokens = list(_without_globals(tuple(t for t in tokens if t not in PREVIEW_FLAGS)))
         if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
-            return _without_globals(tuple(t for t in tokens if t not in PREVIEW_FLAGS))
+            return tuple(tokens)
     return None
 
 
@@ -116,7 +118,8 @@ def build_profile(app: App, command: Sequence[str], probes: Sequence[Probe]) -> 
     """The kit resolves a slash-containing executable against the profile's directory,
     so anything relative is made absolute against the current directory here"""
     argv = list(command)
-    if argv and "/" in argv[0] and not Path(argv[0]).is_absolute():
+    beside_profile = argv[:1] == [f"./{app.name}"]
+    if argv and "/" in argv[0] and not Path(argv[0]).is_absolute() and not beside_profile:
         argv[0] = str(Path(argv[0]).resolve())
     profile: dict[str, object] = {
         "schema_version": "1.0",

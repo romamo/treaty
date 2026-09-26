@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import stat
 import subprocess
 import sys
@@ -339,8 +340,15 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     out = args.out
     spec_dir = resolve_spec_dir(args.spec_dir, ctx.env) if args.run else None
     probes = probes_for(app)
-    command = list(args.command) or [app.name]
     profile_path = out or Path("conformance") / f"{app.name}.json"
+    wrapper = profile_path.parent / app.name
+    if args.command:
+        command = list(args.command)
+    elif wrapper.is_file() and os.access(wrapper, os.X_OK):
+        # The scaffold's launcher next to the profile; the kit resolves it from there
+        command = [f"./{app.name}"]
+    else:
+        command = [app.name]
     effect = "updated" if profile_path.exists() else "created"
     write_profile(build_profile(app, command, probes), profile_path)
     result = ConformanceOut(effect, str(profile_path), len(probes), False, None, ())
