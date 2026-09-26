@@ -1,6 +1,6 @@
 [project]
 name = "treaty"
-version = "0.0.1"
+version = "0.0.2"
 description = "Zero-dependency Python CLI framework implementing the CLI Agent Spec: manifests, envelopes, typed exit codes"
 readme = "README.md"
 requires-python = ">=3.14"
