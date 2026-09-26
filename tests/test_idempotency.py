@@ -198,12 +198,13 @@ def test_invalid_key_is_arg_error(tmp_path: Path) -> None:
 
 def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> None:
     started: list[float] = []
+    release = threading.Event()
     app = App("slowctl", version="1", state_dir=tmp_path, default_timeout=0.2)
 
     @app.command("create", description="Slow create", danger_level="mutating")
     def create(args: CreateArgs, ctx: Ctx) -> Created:
         started.append(time.monotonic())
-        time.sleep(0.5)
+        release.wait(10)  # held until the test has seen the retry refused
         return Created("created", args.name, len(started), ctx.idempotency_key)
 
     first = app.call("create", {"name": "w", "idempotency_key": "k1"})
@@ -212,7 +213,7 @@ def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> No
     busy = app.call("create", {"name": "w", "idempotency_key": "k1"})
     assert busy.error is not None and busy.error.code == "IDEMPOTENCY_KEY_BUSY"
     assert len(started) == 1, "the retry ran the mutation beside the abandoned handler"
-    time.sleep(0.4)  # the abandoned handler finishes and its result is recorded
+    release.set()  # the abandoned handler finishes; the replay waits for its record
     replay = app.call("create", {"name": "w", "idempotency_key": "k1"})
     assert len(started) == 1
     assert replay.ok and isinstance(replay.data, dict) and replay.data["effect"] == "noop"
