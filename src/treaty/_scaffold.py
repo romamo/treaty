@@ -230,7 +230,7 @@ def test_delete_needs_confirmation() -> None:
     "local_args": ["--dry-run", "--confirm-destructive"],
     "global_flag": "--format",
     "value": "json",
-    "alternate_value": "human"
+    "alternate_value": "plain"
   }},
   "probes": [
     {{ "name": "status", "argv": ["status", "widget"], "kind": "read" }},

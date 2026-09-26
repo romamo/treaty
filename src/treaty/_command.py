@@ -25,7 +25,7 @@ from ._values import CommandPath, ExitCodeName, Scope
 Handler = Callable[..., Any]
 """``(args, ctx, *resources)``: extra parameters are annotated with resource classes"""
 Cleanup = Callable[[], None]
-HumanRenderer = Callable[[Any], str]
+PlainRenderer = Callable[[Any], str]
 
 
 class DangerLevel(StrEnum):
@@ -70,7 +70,7 @@ class Command:
     timeout: Timeout | None
     supports_raw_payload: bool
     cleanup: Cleanup | None
-    human: HumanRenderer | None
+    plain: PlainRenderer | None
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
     streaming: bool
@@ -117,7 +117,7 @@ def build_command(
     timeout: Timeout | None,
     supports_raw_payload: bool,
     cleanup: Cleanup | None,
-    human: HumanRenderer | None,
+    plain: PlainRenderer | None,
     scalars: ScalarRegistry,
     streaming: bool = False,
 ) -> Command:
@@ -204,7 +204,7 @@ def build_command(
         timeout=timeout,
         supports_raw_payload=supports_raw_payload,
         cleanup=cleanup,
-        human=human,
+        plain=plain,
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
         streaming=streaming,
         resources=resources,

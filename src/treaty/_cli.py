@@ -155,7 +155,7 @@ def render_audit(data: Any) -> str:
         ("List every finding as JSON", "treaty audit myapp.cli:app --all --format json"),
         ("Fail a CI step on warnings", "treaty audit myapp.cli:app --strict"),
     ],
-    human=render_audit,
+    plain=render_audit,
 )
 def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     if args.limit < 1:
@@ -218,7 +218,7 @@ def render_init(data: Any) -> str:
     danger_level="mutating",
     exit_codes=["CONFLICT"],
     examples=[("New project", "treaty init deployctl")],
-    human=render_init,
+    plain=render_init,
 )
 def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     name = ProjectName(args.name)
@@ -343,7 +343,7 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
     supports_raw_payload=True,
     examples=[("Write and run", "treaty conformance myapp.cli:app --run")],
     timeout=900,
-    human=render_conformance,
+    plain=render_conformance,
 )
 def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     app = load_app(args.target)

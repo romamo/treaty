@@ -134,7 +134,7 @@ def test_exec_collects_per_line_field_errors() -> None:
     assert [e["field"] for e in errors] == ["service", "replicas", "bogus"]
 
 
-def test_human_mode_lists_every_error() -> None:
+def test_plain_mode_lists_every_error() -> None:
     _, _, err = run(["deploy", "api", "--env", "staging2", "--replicas", "-1x"], isatty=True)
     assert "deployctl: ARG_ERROR: Validation failed: 2 errors" in err
     assert "  - env: 'env' must be one of staging, prod" in err

@@ -90,7 +90,7 @@ FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
 def format_hint(token: str) -> str | None:
     """Point agents that guess another output-representation flag at ``--format``"""
     if without_value(token) in FORMAT_GUESSES:
-        return "use --format json (or --format human) to choose the output representation"
+        return "use --format json (or --format plain) to choose the output representation"
     return None
 
 

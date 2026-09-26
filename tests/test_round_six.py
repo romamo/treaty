@@ -140,7 +140,7 @@ def test_cap_leaves_an_envelope_whose_error_alone_is_too_big() -> None:
     assert code == 80 and env["data"] == {"items": [1, 2, 3]}
 
 
-def test_human_help_lists_groups_implied_by_dotted_paths() -> None:
+def test_plain_help_lists_groups_implied_by_dotted_paths() -> None:
     app = App("a1", version="1", description="A1")
 
     @app.command("db.migrate.up", description="Apply migrations")

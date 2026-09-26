@@ -157,7 +157,7 @@ def hooks_app(cleanup_fails: bool = False) -> App:
         signal.raise_signal(signal.SIGTERM)
         return {}
 
-    @app.command("tick", description="Events", streaming=True, human=lambda e: f"n={e['n']}\n")
+    @app.command("tick", description="Events", streaming=True, plain=lambda e: f"n={e['n']}\n")
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         yield {"n": 2}
@@ -186,7 +186,7 @@ def test_failing_cleanup_still_gives_the_cancelled_envelope() -> None:
     assert "gone" in err
 
 
-def test_no_stream_in_human_mode_renders_every_event() -> None:
+def test_no_stream_in_plain_mode_renders_every_event() -> None:
     code, _, text = run(hooks_app(), ["tick", "--no-stream"], isatty=True)
     assert code == 0 and "n=1\nn=2\n" in text
 
@@ -338,7 +338,7 @@ def test_probes_drop_global_options_from_examples() -> None:
     class Show:
         item: str = Arg(description="Item")
 
-    @app.command("show", description="Show", examples=[("x", "t --format human show widget")])
+    @app.command("show", description="Show", examples=[("x", "t --format plain show widget")])
     def show(args: Show, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -381,13 +381,13 @@ def test_scalar_parser_parse_error_keeps_its_message_and_suggestion() -> None:
     assert env["error"]["suggestion"] == "use eu or us"
 
 
-def test_failing_human_renderer_on_a_stream_exits_1_with_one_traceback() -> None:
+def test_failing_plain_renderer_on_a_stream_exits_1_with_one_traceback() -> None:
     app = App("hr", version="1")
 
     def broken(event: object) -> str:
         raise KeyError("renderer bug")
 
-    @app.command("tick", description="Events", streaming=True, human=broken)
+    @app.command("tick", description="Events", streaming=True, plain=broken)
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         yield {"n": 2}

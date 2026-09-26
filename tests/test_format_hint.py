@@ -6,7 +6,7 @@ import pytest
 
 from treaty import App, Ctx, Flag
 
-HINT = "use --format json (or --format human) to choose the output representation"
+HINT = "use --format json (or --format plain) to choose the output representation"
 
 
 @dataclass(frozen=True, slots=True)

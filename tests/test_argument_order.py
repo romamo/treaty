@@ -20,8 +20,8 @@ def run(app: App, argv: list[str]) -> tuple[int, dict]:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["--format", "json", *ROLLBACK, "--format", "human"],
-        [*ROLLBACK, "--format=json", "--format", "human"],
+        ["--format", "json", *ROLLBACK, "--format", "plain"],
+        [*ROLLBACK, "--format=json", "--format", "plain"],
         ["--max-output", "5000", *ROLLBACK, "--max-output=6000"],
     ],
 )
@@ -64,7 +64,7 @@ def test_manifest_lists_global_options_at_the_root(app: App) -> None:
     _, env = run(app, ["manifest"])
     manifest = env["data"]
     assert set(manifest["flags"]) == {"format", "max-output", "schema", "help"}
-    assert manifest["flags"]["format"]["enum_values"] == ["human", "json"]
+    assert manifest["flags"]["format"]["enum_values"] == ["plain", "json"]
     for entry in manifest["commands"].values():
         assert not set(entry["flags"]) & set(manifest["flags"])
 

@@ -127,10 +127,10 @@ def test_closed_reader_on_builtins_and_errors_exits_141(argv: list[str]) -> None
     assert code == 141 and "Traceback" not in err, err
 
 
-def human_app(events: list[str]) -> App:
+def plain_app(events: list[str]) -> App:
     app = App("hum", version="1")
 
-    @app.command("show", description="Show", human=lambda d: f"{d['n']}\n")
+    @app.command("show", description="Show", plain=lambda d: f"{d['n']}\n")
     def show(args: NoArgs, ctx: Ctx) -> dict[str, int]:
         return {"n": 1}
 
@@ -147,16 +147,16 @@ def human_app(events: list[str]) -> App:
     return app
 
 
-def test_closed_stdout_in_human_mode_is_not_a_renderer_crash() -> None:
+def test_closed_stdout_in_plain_mode_is_not_a_renderer_crash() -> None:
     err = io.StringIO()
-    code = human_app([]).run(["show"], stdout=Dead(), stderr=err, env={}, isatty=True)
+    code = plain_app([]).run(["show"], stdout=Dead(), stderr=err, env={}, isatty=True)
     assert code == 141 and "renderer" not in err.getvalue()
 
 
 def test_closed_stdout_during_exec_closes_and_cleans_up_the_step() -> None:
     events: list[str] = []
     plan = io.StringIO('{"_cmd": "tick"}\n')
-    code = human_app(events).run(
+    code = plain_app(events).run(
         ["exec"], stdin=plan, stdout=Dead(live=2), stderr=io.StringIO(), env={}
     )
     assert code == 141 and events == ["finally", "cleanup"]

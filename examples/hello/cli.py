@@ -1,7 +1,7 @@
 """CLI layer: maps arguments to the domain and the result to output
 
 uv run -m examples.hello greet world
-uv run -m examples.hello greet Ada --shout --format human
+uv run -m examples.hello greet Ada --shout --format plain
 uv run -m examples.hello manifest
 """
 
@@ -29,7 +29,7 @@ def greet_text(data: Mapping[str, str]) -> str:
 @app.command(
     "greet",
     description="Say hello",
-    human=greet_text,
+    plain=greet_text,
     examples=[
         ("Greet the world", "hello greet world"),
         ("Greet Ada loudly", "hello greet Ada --shout"),
