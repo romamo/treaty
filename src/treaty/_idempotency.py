@@ -14,6 +14,7 @@ after 24 hours; an expired lock file is removed only while nobody holds it.
 
 from __future__ import annotations
 
+import dataclasses
 import errno
 import hashlib
 import json
@@ -24,12 +25,13 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
+from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import IO
 
 from ._errors import ParseError, SchemaError
 from ._scalars import ScalarRegistry
-from ._schema import to_jsonable
 from ._values import CommandPath
 
 if sys.platform == "win32":
@@ -112,16 +114,45 @@ class Record:
 
 
 def fingerprint(command: CommandPath, args: object, scalars: ScalarRegistry) -> str:
-    """Hash of the command and its arguments; the same key must always mean the same call"""
-    try:
-        hashed: object = to_jsonable(args, scalars)
-    except SchemaError:
-        # Only a stable identity is needed, not JSON: a Decimal inside a scalar's value
-        # has a deterministic repr, and a frozen args dataclass reprs field by field
-        hashed = {"repr": repr(args)}
-    payload = {"command": command.value, "args": hashed}
+    """Hash of the command and its arguments; the same key must always mean the same call,
+    in every process, so nothing that varies per run (an id(), set order) may enter it"""
+    payload = {"command": command.value, "args": _canonical(args, scalars, 0)}
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _canonical(value: object, scalars: ScalarRegistry, depth: int) -> object:
+    """A stable, JSON-ready identity for an argument value; SchemaError when there is none"""
+    if depth > 64:
+        raise SchemaError("arguments nest too deeply to fingerprint")
+    if (spec := scalars.for_value(value)) is not None:
+        return {
+            "scalar": type(value).__qualname__,
+            "value": _canonical(spec.serialize(value), scalars, depth + 1),
+        }
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return repr(value)  # exact, and NaN-safe for json.dumps
+    if isinstance(value, Enum):
+        return _canonical(value.value, scalars, depth + 1)
+    if isinstance(value, (Path, Decimal)):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v, scalars, depth + 1) for v in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_canonical(v, scalars, depth + 1) for v in value]
+        return {"set": sorted(items, key=lambda v: json.dumps(v, sort_keys=True))}
+    if isinstance(value, dict):
+        return {str(k): _canonical(v, scalars, depth + 1) for k, v in value.items()}
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        fields = {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+        return {type(value).__qualname__: _canonical(fields, scalars, depth + 1)}
+    state = getattr(value, "__dict__", None)
+    if isinstance(state, dict):
+        # A plain class: its fields, never its default repr with a memory address
+        return {type(value).__qualname__: _canonical(state, scalars, depth + 1)}
+    raise SchemaError(f"a {type(value).__qualname__} argument has no stable form to fingerprint")
 
 
 def state_dir(app_name: str, explicit: Path | None, env: Mapping[str, str]) -> Path | None:

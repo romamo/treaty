@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 394 passed |
+| `uv run pytest` | 413 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -162,9 +162,9 @@ F-013, F-015, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002, C-003, C-
 C-015, C-016, C-020 (all presets), O-021, O-022, O-032, O-039, O-041, O-050.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
-command `--timeout` (network), `--confirm-destructive` (destructive), `--idempotency-key`
-(non-safe), `--raw-payload` (opt-in), and `--<name>-from-env` / `--<name>-from-file` for
-each secret field.
+command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
+`--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), and
+`--<name>-from-env` / `--<name>-from-file` for each secret field.
 
 ## Gotchas
 

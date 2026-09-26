@@ -34,7 +34,12 @@ def render_root(
             for p in commands
             if p.parts[:depth] == prefix and len(p.parts) > depth + 1
         }
-        | {parts for parts in declared if parts[:depth] == prefix and len(parts) == depth + 1}
+        | {
+            parts
+            for parts in declared
+            # A declared group with no commands yet cannot be routed to, so it is not listed
+            if parts[:depth] == prefix and len(parts) == depth + 1 and _under(commands, parts)
+        }
     )
     group_rows = [
         (parts[-1], declared.get(parts, f"{len(_under(commands, parts))} commands"))

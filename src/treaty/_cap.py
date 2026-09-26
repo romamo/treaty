@@ -7,8 +7,9 @@ object a prefix of its keys, a string a prefix of its characters plus a marker.
 The cut is the longest prefix that still fits. Lists and objects keep at least
 one entry, so a single huge entry has its own fields cut instead of vanishing.
 Each cut is reported as a ``FIELD_TRUNCATED`` warning, and ``meta`` says how to
-get the full response. The cap governs ``data`` only: an envelope whose error or
-meta alone exceeds it is written as is.
+get the full response. The cap governs ``data`` only: when error or meta alone
+exceed it, ``data`` still gets the cap as its own budget, so the envelope is at most
+that oversized base plus the cap.
 """
 
 from __future__ import annotations
@@ -117,8 +118,11 @@ def cap_envelope(envelope: Envelope, cap: OutputCap, *, argv: bool = True) -> En
     total = len(serialize(envelope).encode())
     if total <= cap.bytes or envelope.data is None:
         return envelope
-    if len(serialize(dataclasses.replace(envelope, data=None)).encode()) > cap.bytes:
-        return envelope  # error or meta alone exceed the cap; cutting data cannot help
+    base = len(serialize(dataclasses.replace(envelope, data=None)).encode())
+    if base > cap.bytes:
+        # Error or meta alone exceed the cap, which cutting data cannot fix; data still
+        # gets the cap as its own budget, so the envelope stays bounded
+        return cap_envelope(envelope, OutputCap(base + cap.bytes), argv=argv)
     data: object = copy.deepcopy(envelope.data)
     cuts: list[_Cut] = []
     visited: set[FieldPath] = set()

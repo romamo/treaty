@@ -57,7 +57,6 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 
 ## 0.1.0: first release
 
-- Push to `romamo/treaty` (git initialised, first commit made)
 - Reserve `treaty` on PyPI with the 0.0.1 wheel
 - GitHub Actions: pytest, mypy, ruff, and the conformance kit against a spec checkout
 - `meta.schema_version` on every response (REQ-F-022), derived from a per-command

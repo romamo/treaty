@@ -7,7 +7,9 @@ import contextvars
 import dataclasses
 import io
 import json
+import math
 import os
+import re
 import sys
 import time
 import traceback
@@ -185,6 +187,7 @@ class App:
         prefix = CommandPath(path)
         if prefix in self._commands:
             raise RegistrationError(f"{prefix} is already a command")
+        self._check_nesting(prefix)
         if not description:
             raise RegistrationError(f"group {prefix} needs a description")
         self._groups[prefix] = description
@@ -243,10 +246,22 @@ class App:
             raise RegistrationError(f"{path} is already registered")
         if path in self._groups:
             raise RegistrationError(f"{path} is already a group")
+        self._check_nesting(path)
         for name in command.exit_codes:
             if name not in self.exits:
                 raise RegistrationError(f"{path}: exit code {name} is not registered")
         self._commands[path] = command
+
+    def _check_nesting(self, path: CommandPath) -> None:
+        """A command is a leaf: nothing may sit under it, and it may not sit under another
+        command, or `tool db migrate` would mean both 'db with argument migrate' and a group"""
+        for command in self._commands:
+            if command == path:
+                continue
+            if command.is_ancestor_of(path) or path.is_ancestor_of(command):
+                raise RegistrationError(
+                    f"{path} and {command} overlap: a command cannot also be a group"
+                )
 
     def _register_builtins(self, enable_exec: bool) -> None:
         @self.command("manifest", description="Print the command manifest for agents")
@@ -363,9 +378,18 @@ class App:
         except ParseError as exc:
             return run.arg_error(exc, meta=meta)
         if command.streaming:
+            # Buffered in-process, a stream returns only when it ends, so it always gets a
+            # deadline: the caller's, else the app default, even over a command's None
+            if invocation.timeout is not None and invocation.timeout.seconds is None:
+                return run.arg_error(
+                    ParseError(
+                        "a buffered stream needs a finite timeout; 0 would never return",
+                        context={"field": "timeout", "_cmd": path},
+                        suggestion="pass a timeout in seconds, or omit it for the app default",
+                    ),
+                    meta=meta,
+                )
             if invocation.timeout is None and self.effective_timeout(command, None).seconds is None:
-                # Buffered in-process, an endless stream would never return: bound it by
-                # the app's default unless the caller passed its own timeout
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
             return buffer_stream(run.stream(command, invocation, OutputMode.JSON, meta=meta))
         return run.execute(command, invocation, OutputMode.JSON, meta=meta)
@@ -389,7 +413,22 @@ class App:
         environ = env if env is not None else os.environ
         run = _Run(self, out, err, environ)
         try:
-            globals_, rest = split_globals(list(argv))
+            return self._route(run, list(argv), inp, environ, isatty)
+        except BrokenPipeError:
+            # The reader of stdout went away, on any path: help, schema, errors, results
+            return run.output_closed()
+
+    def _route(
+        self,
+        run: _Run,
+        argv: list[str],
+        inp: IO[str],
+        environ: Mapping[str, str],
+        isatty: bool | None,
+    ) -> int:
+        out = run.out
+        try:
+            globals_, rest = split_globals(argv)
             mode = resolve_mode(
                 globals_.format, environ, out.isatty() if isatty is None else isatty
             )
@@ -432,18 +471,16 @@ class App:
             return run.emit(mode, run.arg_error(exc))
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
-            try:
-                if command.path == EXEC_PATH:
-                    assert isinstance(invocation.args, ExecArgs)
-                    return run.exec(invocation.args, inp)
-                if command.streaming:
-                    envelopes = run.stream(command, invocation, mode)
-                    if invocation.no_stream:
-                        return run.emit(mode, buffer_stream(envelopes), render=_each(command.human))
-                    return run.emit_stream(mode, envelopes, render=command.human)
-                return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
-            except BrokenPipeError:
-                return run.output_closed(command)
+            if command.path == EXEC_PATH:
+                assert isinstance(invocation.args, ExecArgs)
+                return run.exec(invocation.args, inp)
+            if command.streaming:
+                envelopes = run.stream(command, invocation, mode)
+                if invocation.no_stream:
+                    return run.emit(mode, buffer_stream(envelopes), render=_each(command.human))
+                run.in_flight = command
+                return run.emit_stream(mode, envelopes, render=command.human)
+            return run.emit(mode, run.execute(command, invocation, mode), render=command.human)
 
 
 def _invoke(command: Command, args: object, ctx: Ctx) -> object:
@@ -451,6 +488,9 @@ def _invoke(command: Command, args: object, ctx: Ctx) -> object:
     resolver = Resolver(command.resource_graph, args, ctx)
     return command.handler(args, ctx, *resolver.all(command.resources))
 
+
+# ErrorDetail.code in response-envelope.json
+_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 
 # Shorter values would redact every digit or letter they share with a traceback
 MIN_REDACTED = 4
@@ -466,6 +506,33 @@ def _text(exc: BaseException) -> str:
 
 def _traceback(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
+
+
+class _Stderr:
+    """Diagnostics with no reader left are dropped: a closed stderr must neither cost the
+    stdout envelope nor pass for a closed stdout"""
+
+    def __init__(self, stream: IO[str]) -> None:
+        self._stream = stream
+
+    def write(self, text: str) -> None:
+        try:
+            self._stream.write(text)
+        except BrokenPipeError:
+            self._closed()
+
+    def flush(self) -> None:
+        try:
+            self._stream.flush()
+        except BrokenPipeError:
+            self._closed()
+
+    def _closed(self) -> None:
+        if self._stream is sys.stderr:
+            # So the interpreter's flush at exit does not raise on it either
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stderr.fileno())
+            os.close(devnull)
 
 
 def _warned(envelope: Envelope, code: str, message: str, command: Command) -> Envelope:
@@ -531,12 +598,14 @@ class _Run:
     def __init__(self, app: App, out: IO[str], err: IO[str], env: Mapping[str, str]) -> None:
         self.app = app
         self.out = out
-        self.err = err
+        self.err = _Stderr(err)
         self.env = env
         self.started = time.perf_counter()
         self.request_id = uuid.uuid4().hex[:12]
         self.cap = app.max_output
         self.cancellation = Cancellation()
+        self.in_flight: Command | None = None
+        """A streaming command whose events are still being written"""
         self.abandoned: Pending | None = None
         """Set by ``_execute`` when the handler outlived its timeout and still runs"""
 
@@ -610,6 +679,9 @@ class _Run:
             )
         try:
             call = fingerprint(command.path, invocation.args, self.app.scalars)
+        except SchemaError as exc:
+            message = f"{command.path}: its arguments cannot be fingerprinted for the key: {exc}"
+            return self._broken(command, "INVALID_ARGS", message, started, full_meta)
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
             return self._crashed(command, invocation.args, exc, started, full_meta)
         with contextlib.ExitStack() as held:
@@ -1073,6 +1145,19 @@ class _Run:
         if entry.code.value == 0:
             message = f"{command.path} raised {exc.name}; return the result instead of raising"
             return self._broken(command, "INVALID_EXIT", message, started, meta)
+        if not _ERROR_CODE.fullmatch(exc.code) or not isinstance(exc.message, str):
+            message = (
+                f"{command.path} raised {exc.name} with code {exc.code!r}; error codes are "
+                "UPPER_SNAKE_CASE and messages are text"
+            )
+            return self._broken(command, "INVALID_EXIT", message, started, meta)
+        retry_after = exc.retry_after_ms
+        if retry_after is not None:
+            if isinstance(retry_after, bool) or not isinstance(retry_after, (int, float)):
+                message = f"{command.path} raised {exc.name} with a non-numeric retry_after_ms"
+                return self._broken(command, "INVALID_EXIT", message, started, meta)
+            # A reset time already past (negative) means retry now; fractions round up
+            retry_after = max(0, math.ceil(retry_after))
         try:
             data = self._payload(exc.data)
             context = to_jsonable(exc.context, self.app.scalars)
@@ -1094,7 +1179,7 @@ class _Run:
                 suggestion=exc.suggestion,
                 fix_command=exc.fix_command,
                 fix_required=exc.fix_required,
-                retry_after_ms=exc.retry_after_ms if entry.retryable else None,
+                retry_after_ms=retry_after if entry.retryable else None,
                 phase="execution",
             ),
             started=started,
@@ -1224,10 +1309,12 @@ class _Run:
             return envelope.exit_code
         return self._emit_human(envelope, render)
 
-    def output_closed(self, command: Command) -> int:
-        """The reader went away (``tool logs | head``): nothing more can be written, so
-        clean up like a cancellation and exit 141, the SIGPIPE convention"""
-        if command.cleanup is not None:
+    def output_closed(self) -> int:
+        """The reader went away (``tool logs | head``): nothing more can be written, so exit
+        141, the SIGPIPE convention. A stream cut off mid-way runs its cleanup hook like a
+        cancellation; a finished handler has nothing left to clean up."""
+        command, self.in_flight = self.in_flight, None
+        if command is not None and command.cleanup is not None:
             try:
                 command.cleanup()
             except Exception as exc:  # noqa: BLE001 - cleanup= is user code
@@ -1278,11 +1365,14 @@ class _Run:
         code = envelope.exit_code
         if envelope.data is not None and render is not None:
             try:
-                self.out.write(render(envelope.data))
+                text = render(envelope.data)
             except Exception as exc:  # noqa: BLE001 - human= is user code
                 self.err.write("".join(traceback.format_exception(exc)))
                 self.err.write(f"{self.app.name}: HANDLER_CRASHED: the human renderer failed\n")
                 code = FrameworkCode.GENERAL_ERROR.value
+            else:
+                # Outside the renderer's try: a closed stdout is not a renderer bug
+                self.out.write(text)
         elif envelope.data is not None:
             self.out.write(json.dumps(envelope.data, indent=2, sort_keys=True) + "\n")
         if envelope.error is not None:
@@ -1351,17 +1441,17 @@ class _Run:
         parsed_any = False
         lines_seen = 0
         last: Envelope | None = None
-        for line_no, envelope in self._exec_lines(args, plan):
-            lines_seen, last = line_no, envelope
-            write_envelope(cap_envelope(envelope, self.cap), self.out)
-            if envelope.error is not None and envelope.error.code != "DISPATCH_PARSE_ERROR":
-                parsed_any = True
-            elif envelope.error is None:
-                parsed_any = True
-            if not envelope.ok:
-                any_failed = True
-                if not args.ignore_errors:
-                    break
+        # Closed on any exit, so a dead reader still closes the step in flight
+        with contextlib.closing(self._exec_lines(args, plan)) as lines:
+            for line_no, envelope in lines:
+                lines_seen, last = line_no, envelope
+                write_envelope(cap_envelope(envelope, self.cap), self.out)
+                if envelope.error is None or envelope.error.code != "DISPATCH_PARSE_ERROR":
+                    parsed_any = True
+                if not envelope.ok:
+                    any_failed = True
+                    if not args.ignore_errors:
+                        break
         if (received := self.cancellation.received) is not None:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
             # between lines left no CANCELLED line, so the plan says where it stopped.
@@ -1461,7 +1551,7 @@ class _Run:
             ),
         )
 
-    def _exec_lines(self, args: ExecArgs, plan: list[str]) -> Iterator[tuple[int, Envelope]]:
+    def _exec_lines(self, args: ExecArgs, plan: list[str]) -> Generator[tuple[int, Envelope]]:
         for line_no, raw in enumerate(plan, start=1):  # physical lines, as an editor counts
             if self.cancellation.received is not None:
                 return  # a signal stops the plan before its next line
@@ -1503,9 +1593,12 @@ class _Run:
                 envelopes = self.stream(command, invocation, OutputMode.JSON, meta=meta)
                 if invocation.no_stream:
                     yield line_no, buffer_stream(envelopes)
-                else:
+                    continue
+                self.in_flight = command
+                with contextlib.closing(envelopes):
                     for envelope in envelopes:
                         yield line_no, envelope
+                self.in_flight = None
                 continue
             yield line_no, self.execute(command, invocation, OutputMode.JSON, meta=meta)
 

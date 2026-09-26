@@ -42,6 +42,10 @@ class CommandPath:
     def is_direct_child_of(self, other: CommandPath) -> bool:
         return self.parent == other
 
+    def is_ancestor_of(self, other: CommandPath) -> bool:
+        """``db`` of ``db.migrate.up``; a path is not its own ancestor"""
+        return len(other.parts) > len(self.parts) and other.parts[: len(self.parts)] == self.parts
+
     def __str__(self) -> str:
         return self.value
 

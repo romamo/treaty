@@ -10,6 +10,7 @@ run.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import typing
 from collections.abc import Callable, Mapping, Sequence
@@ -84,7 +85,16 @@ def resource_graph(
         visiting.append(cls)
         spec = resource_spec(cls)
         wanted = spec.args_type
-        if args_type is not None and wanted is not None and not issubclass(args_type, wanted):
+        if args_type is not None and wanted is not None and typing.is_protocol(wanted):
+            # Structural: the args need the protocol's members, not a base class
+            fields = {f.name for f in dataclasses.fields(args_type)}
+            missing = sorted(typing.get_protocol_members(wanted) - fields - set(dir(args_type)))
+            if missing:
+                raise RegistrationError(
+                    f"{where}: {cls.__qualname__}.acquire reads {wanted.__qualname__}, but "
+                    f"the command's args {args_type.__qualname__} lack {missing}"
+                )
+        elif args_type is not None and wanted is not None and not issubclass(args_type, wanted):
             raise RegistrationError(
                 f"{where}: {cls.__qualname__}.acquire reads {wanted.__qualname__}, but the "
                 f"command's args are {args_type.__qualname__}; subclass {wanted.__qualname__}"

@@ -52,9 +52,16 @@ class Classified:
 
 def resolve_alias(tp: object) -> object:
     """``type Port = int`` (PEP 695) names its value; follow aliases of aliases too"""
-    while isinstance(tp, typing.TypeAliasType):
-        tp = tp.__value__
-    return tp
+    while True:
+        if isinstance(tp, typing.TypeAliasType):
+            tp = tp.__value__
+            continue
+        origin = typing.get_origin(tp)
+        if isinstance(origin, typing.TypeAliasType):
+            # A generic alias applied to arguments: type Vec[T] = list[T]; Vec[int]
+            tp = origin.__value__[typing.get_args(tp)]
+            continue
+        return tp
 
 
 def strip_optional(tp: object) -> tuple[object, bool]:

@@ -180,8 +180,8 @@ def misplaced_flag_target(route: Route, known: Collection[CommandPath]) -> Comma
 class _Collector:
     """Phase 1 keeps going past a field error so one run reports them all (REQ-F-015)
 
-    Errors that make the rest of the input unreadable (a flag with no value at
-    the end, invalid ``--raw-payload`` JSON) are raised at once instead.
+    Every argv token error is collected, a trailing flag with no value included; only
+    invalid ``--raw-payload`` JSON, which makes the payload unreadable, is raised at once.
     """
 
     def __init__(self) -> None:

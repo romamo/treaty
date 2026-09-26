@@ -104,7 +104,9 @@ mode prints every error's suggestion as a final `hint:` line on stderr.
 
 Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 `@app.command(..., timeout=5)` per command, and `--timeout` on any command declaring
-`has_network_io=True` (`--timeout 0` disables it; at most one year). On expiry the
+`has_network_io=True` and on every streaming command (`--timeout 0` disables it; at most
+one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
+caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
 response. Handlers read `ctx.timeout` to pass the same deadline to their network calls. An
 idempotency key stays locked until a timed-out or cancelled handler really finishes, so a

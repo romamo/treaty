@@ -19,7 +19,7 @@ from ._scalars import ScalarRegistry
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
 from ._timeout import Timeout
-from ._types import FlagType, is_dataclass_type
+from ._types import FlagType, is_dataclass_type, resolve_alias
 from ._values import CommandPath, ExitCodeName, Scope
 
 Handler = Callable[..., Any]
@@ -242,6 +242,7 @@ _STREAM_ORIGINS = (
 
 def _event_type(annotation: object, path: CommandPath) -> object:
     """The ``T`` of a streaming handler's ``Iterator[T]`` (or ``Iterable`` / ``Generator``)"""
+    annotation = resolve_alias(annotation)
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
     if origin not in _STREAM_ORIGINS or not args:
