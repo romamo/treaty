@@ -5,8 +5,9 @@ first signal raises ``Cancelled`` where the main thread is waiting on a handler;
 second flushes stdout and exits immediately so the envelope is never written twice.
 
 A signal that lands while the framework serializes or records a finished result is
-held until the next handler starts, so a completed run still writes its envelope and
-an ``exec`` plan stops before its next line.
+held: the completed run still writes its envelope and exits with its code, because
+the work it reports did happen. An ``exec`` plan stops at the first signal, even with
+``--ignore-errors``, and exits with the signal's code.
 """
 
 from __future__ import annotations
@@ -49,14 +50,20 @@ class Cancellation:
     def __init__(self) -> None:
         self._armed = False
         self._pending: CancelSignal | None = None
-        self._cancelling = False
+        self.received: CancelSignal | None = None
+        """The first signal of the run, raised or held"""
+
+    def check(self) -> None:
+        """Raise a signal held since the last window, before a handler starts"""
+        if self._pending is not None:
+            sig, self._pending = self._pending, None
+            raise Cancelled(sig)
 
     @contextmanager
     def armed(self) -> Iterator[None]:
         """Let a signal raise ``Cancelled`` here; one held since the last window raises now"""
-        if self._pending is not None:
-            sig, self._pending = self._pending, None
-            raise Cancelled(sig)
+        assert not self._armed, "armed() windows do not nest"
+        self.check()
         self._armed = True
         try:
             yield
@@ -64,10 +71,10 @@ class Cancellation:
             self._armed = False
 
     def handle(self, sig: CancelSignal, stdout: IO[str]) -> None:
-        if self._cancelling:
+        if self.received is not None:
             stdout.flush()
             os._exit(sig.exit_code)
-        self._cancelling = True
+        self.received = sig
         if not self._armed:
             self._pending = sig
             return

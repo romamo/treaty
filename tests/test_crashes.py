@@ -3,6 +3,7 @@
 import io
 import json
 import signal
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -167,3 +168,69 @@ def test_example_that_is_not_a_shell_command_is_rejected() -> None:
         @app.command("x", description="X", examples=[("Broken", "t x --name 'unclosed")])
         def x(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {}
+
+
+@pytest.mark.parametrize("default_timeout", [None, 60.0])
+def test_signal_ends_an_exec_plan_even_with_ignore_errors(default_timeout: float | None) -> None:
+    app = crash_app(default_timeout=default_timeout)
+
+    @app.command("kill", description="Signals its own process")
+    def kill(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        signal.raise_signal(signal.SIGTERM)
+        time.sleep(1)  # a worker thread keeps running until the main thread reacts
+        return {}
+
+    plan = io.StringIO('{"_cmd": "kill"}\n{"_cmd": "version"}\n{"_cmd": "version"}\n')
+    code, lines, _ = run(app, ["exec", "--ignore-errors"], stdin=plan)
+    assert code == 143 and [line["error"]["code"] for line in lines] == ["CANCELLED"]
+
+
+@dataclass(frozen=True, slots=True)
+class ApiKey:
+    value: str
+
+
+def test_crash_redacts_value_object_and_escaped_secrets() -> None:
+    app = App("vo", version="1")
+    app.scalar(ApiKey, parse=ApiKey, serialize=lambda k: k.value)
+
+    @dataclass(frozen=True, slots=True)
+    class Auth:
+        api_key: ApiKey = Flag(description="Key")
+
+    @app.command("auth", description="Leaks a value object")
+    def auth(args: Auth, ctx: Ctx) -> dict[str, str]:
+        raise KeyError(args.api_key.value)
+
+    code, [env], err = run(app, ["auth", "--api-key-from-env", "K"], env={"K": "a\\b-secret"})
+    assert code == 1 and "secret" not in env["error"]["message"] and "secret" not in err
+
+
+def test_signal_held_before_a_handler_keeps_it_from_starting() -> None:
+    started: list[str] = []
+    cancellation = Cancellation()
+    cancellation.handle(CancelSignal("SIGTERM", 143), io.StringIO())
+    with pytest.raises(Cancelled):
+        cancellation.check()
+        started.append("handler")
+    assert started == []
+
+
+def test_scalar_parser_error_does_not_echo_a_secret() -> None:
+    app = App("sp", version="1")
+
+    def strict(raw: str) -> ApiKey:
+        raise ValueError(f"expected sk- prefix, got {raw!r}")
+
+    app.scalar(ApiKey, parse=strict, serialize=lambda k: k.value)
+
+    @dataclass(frozen=True, slots=True)
+    class Auth:
+        api_key: ApiKey = Flag(description="Key")
+
+    @app.command("auth", description="Parses a secret")
+    def auth(args: Auth, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, [env], _ = run(app, ["auth", "--api-key-from-env", "K"], env={"K": "hunter2-SECRET"})
+    assert code == 2 and "hunter2" not in json.dumps(env)

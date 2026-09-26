@@ -141,13 +141,21 @@ def build_command(
             f"{path}: {'; '.join(shadowed)}: global options, which would never reach "
             "the handler (REQ-F-079)"
         )
+    for f in fields:
+        f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
     framework_flags = {
         "timeout": has_network_io,
         "raw-payload": supports_raw_payload,
         "confirm-destructive": danger_level is DangerLevel.DESTRUCTIVE,
         "no-stream": streaming,
     }
-    taken = sorted(f.flag for f in fields if framework_flags.get(f.flag, False))
+    taken = sorted(
+        f.flag
+        for f in fields
+        if framework_flags.get(f.flag, False)
+        # --no-<name> negates a boolean, so a boolean 'stream' would lose --no-stream
+        or (f.flag_type is FlagType.BOOLEAN and framework_flags.get(f"no-{f.flag}", False))
+    )
     if taken:
         raise RegistrationError(
             f"{path}: flags {taken} are supplied by the framework for this command and "

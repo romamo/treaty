@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, Ctx, Flag
+from treaty import App, Arg, Ctx, Flag, NoArgs
 from treaty._mcp import call_tool, input_schema, output_schema, tool_entries, tool_name
 
 mcp = pytest.importorskip("mcp")
@@ -90,8 +90,8 @@ def test_output_schema_wraps_the_envelope_and_streams_become_arrays() -> None:
     app = adapter_app()
     push = next(c for p, c in app.commands.items() if p.value == "push")
     tail = next(c for p, c in app.commands.items() if p.value == "log.tail")
-    assert output_schema(push)["properties"]["data"]["anyOf"][0]["title"] == "Pushed"
-    assert output_schema(tail)["properties"]["data"]["anyOf"][0] == {
+    assert output_schema(push)["else"]["properties"]["data"]["anyOf"][0]["title"] == "Pushed"
+    assert output_schema(tail)["else"]["properties"]["data"]["anyOf"][0] == {
         "type": "array",
         "items": {"type": "object", "additionalProperties": {"type": "integer"}},
     }
@@ -207,3 +207,27 @@ def test_console_script_usage_errors() -> None:
     assert main([]) == 2
     assert main(["--help"]) == 2
     assert main(["examples.nothing:app"]) == 2
+
+
+def test_capped_and_tuple_outputs_validate_like_an_mcp_client() -> None:
+    from dataclasses import dataclass
+
+    from jsonschema.validators import validator_for
+
+    @dataclass(frozen=True, slots=True)
+    class Wide:
+        pair: tuple[int, str]
+        fields: dict[str, str]
+
+    app = App("wide", version="1", max_output_bytes=4096)
+
+    @app.command("wide", description="Big output")
+    def wide(args: NoArgs, ctx: Ctx) -> Wide:
+        return Wide((1, "a"), {f"k{i}": "x" * 300 for i in range(20)})
+
+    entry = next(e for e in tool_entries(app) if e.name == "wide")
+    envelope = app.call("wide", {}, env={})
+    assert envelope.extra_meta["truncated"] is True
+    validator = validator_for(entry.output_schema)
+    validator.check_schema(entry.output_schema)
+    validator(entry.output_schema).validate(envelope.to_json())

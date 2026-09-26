@@ -354,7 +354,8 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
         raise Exit.PRECONDITION(
             f"the kit did not finish within {exc.timeout:g}s",
             context={"timeout_seconds": exc.timeout},
-            fix_required="rerun with a larger --timeout, or 0 to disable it",
+            fix_required="run the kit directly without a deadline: uv run --project "
+            f"{spec_dir} {spec_dir / 'conformance' / 'run.py'} {profile_path}",
             data=result,
         ) from None
     report = kit.envelope.get("data") if kit.envelope else None

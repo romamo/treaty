@@ -28,12 +28,12 @@ from ._command import (
 from ._context import Ctx
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import effect_problem
-from ._envelope import Envelope, ErrorDetail, write_envelope
+from ._envelope import Envelope, ErrorDetail, WarningDetail, write_envelope
 from ._errors import CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Flag
 from ._help import render_command, render_root
-from ._idempotency import Record, Slot, claim, fingerprint, state_dir
+from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._manifest import build_manifest, build_schema_manifest, command_schema
 from ._mode import OutputMode, resolve_mode
 from ._parse import (
@@ -324,16 +324,18 @@ class App:
         Field names use underscores; the framework keys ``confirm_destructive``,
         ``idempotency_key``, ``timeout``, and ``dry_run`` are accepted where the command
         declares them. A streaming command returns its buffered envelope, capped like
-        stdout (REQ-F-052). Nothing is written: the caller owns the envelope. Used by
+        stdout (REQ-F-052). Nothing is written to stdout: the caller owns the envelope;
+        handler tracebacks go to stderr. Used by
         the MCP adapter.
         """
         environ = env if env is not None else os.environ
-        run = _Run(self, io.StringIO(), io.StringIO(), environ)
+        # Tracebacks of crashed or late handlers go to the host process's stderr
+        run = _Run(self, io.StringIO(), sys.stderr, environ)
         try:
             cap = OutputCap.resolve(None, environ, self.max_output)
         except ParseError as exc:
             return run.arg_error(exc, meta={"_cmd": path})
-        return cap_envelope(self._call(run, path, arguments, environ), cap)
+        return cap_envelope(self._call(run, path, arguments, environ), cap, argv=False)
 
     def _call(
         self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
@@ -439,6 +441,11 @@ def _invoke(command: Command, args: object, ctx: Ctx) -> object:
     """Acquire the handler's resources, each once and in dependency order, then run it"""
     resolver = Resolver(command.resource_graph, args, ctx)
     return command.handler(args, ctx, *resolver.all(command.resources))
+
+
+def _still_running(running: Sequence[Pending]) -> Pending | None:
+    """The handler's worker when an interrupted wait left it running"""
+    return next((p for p in running if p.worker.is_alive()), None)
 
 
 def _previewing(command: Command, invocation: Invocation) -> bool:
@@ -565,31 +572,98 @@ class _Run:
                 meta=full_meta,
             )
         call = fingerprint(command.path, invocation.args, self.app.scalars)
-        with claim(directory, key) as slot:
-            if slot.record is None:
-                envelope = self._execute(command, invocation, mode, meta=meta)
-                pending = self.abandoned
-                if pending is not None:
-                    # A retry must wait for the abandoned handler, not run beside it
-                    slot.hand_off(lambda held: self._record_late(command, pending, held, call))
-                elif envelope.exit_code == 0:
-                    slot.save(Record(call, command.path.value, envelope.data, time.time()))
-                return envelope
-            if slot.record.fingerprint != call:
-                entry = self.app.exits.framework(FrameworkCode.CONFLICT)
-                return self._envelope(
-                    entry.code.value,
-                    error=ErrorDetail(
-                        code="IDEMPOTENCY_KEY_REUSED",
-                        message="this idempotency key was already used with different arguments",
-                        retryable=False,
-                        context={"command": slot.record.command},
-                        phase="validation",
-                        fix_required="use a new --idempotency-key, or repeat the original call",
-                    ),
+        try:
+            # The wait for an earlier call's lock is bounded by this call's timeout
+            with claim(
+                directory, key, wait_seconds=timeout.seconds, waiting=self.cancellation.armed
+            ) as slot:
+                return self._claimed(
+                    command,
+                    invocation,
+                    mode,
+                    slot,
+                    call,
+                    meta=meta,
                     started=started,
-                    meta=full_meta,
+                    full_meta=full_meta,
                 )
+        except KeyBusy as exc:
+            entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
+            return self._envelope(
+                entry.code.value,
+                error=ErrorDetail(
+                    code="IDEMPOTENCY_KEY_BUSY",
+                    message=f"an earlier call with this idempotency key still runs after "
+                    f"{exc.seconds:g}s",
+                    retryable=entry.retryable,
+                    context={"command": command.path.value, "timeout_ms": timeout.milliseconds},
+                    phase="execution",
+                    suggestion="retry with the same key once the earlier call has finished",
+                ),
+                started=started,
+                meta=full_meta,
+            )
+        except Cancelled as exc:
+            return self._cancelled(command, exc.signal, started, full_meta)
+        except RecordCorrupt as exc:
+            return self._state_error(
+                "IDEMPOTENCY_RECORD_CORRUPT",
+                str(exc),
+                f"delete {exc.path}; its call must then be checked by hand",
+                started,
+                full_meta,
+            )
+        except OSError as exc:
+            return self._state_error(
+                "STATE_DIR_UNWRITABLE",
+                f"cannot use the idempotency state directory {directory}: {exc.strerror}",
+                "make it writable, or point TREATY_STATE_DIR at a writable directory",
+                started,
+                full_meta,
+            )
+
+    def _state_error(
+        self, code: str, message: str, fix: str, started: float, meta: Mapping[str, object]
+    ) -> Envelope:
+        entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code=code, message=message, retryable=False, phase="validation", fix_required=fix
+            ),
+            started=started,
+            meta=meta,
+        )
+
+    def _claimed(
+        self,
+        command: Command,
+        invocation: Invocation,
+        mode: OutputMode,
+        slot: Slot,
+        call: str,
+        *,
+        meta: Mapping[str, object] | None,
+        started: float,
+        full_meta: Mapping[str, object],
+    ) -> Envelope:
+        """The key is ours: answer from its record, or run the call and record it"""
+        if slot.record is not None and slot.record.fingerprint != call:
+            entry = self.app.exits.framework(FrameworkCode.CONFLICT)
+            return self._envelope(
+                entry.code.value,
+                error=ErrorDetail(
+                    code="IDEMPOTENCY_KEY_REUSED",
+                    message="this idempotency key was already used with different arguments",
+                    retryable=False,
+                    context={"command": slot.record.command},
+                    phase="validation",
+                    fix_required="use a new --idempotency-key, or repeat the original call",
+                ),
+                started=started,
+                meta=full_meta,
+            )
+        if slot.record is not None:
             assert isinstance(slot.record.data, dict)
             return self._envelope(
                 0,
@@ -597,6 +671,26 @@ class _Run:
                 started=started,
                 meta={**full_meta, "idempotency_hit": True},
             )
+        envelope = self._execute(command, invocation, mode, meta=meta)
+        pending = self.abandoned
+        if pending is not None:
+            # A retry must wait for the abandoned handler, not run beside it
+            slot.hand_off(lambda held: self._record_late(command, invocation, pending, held, call))
+            return envelope
+        if envelope.exit_code != 0:
+            return envelope
+        try:
+            slot.save(Record(call, command.path.value, envelope.data, time.time()))
+        except OSError as exc:
+            # The call succeeded; its envelope must not be lost to the record
+            warning = WarningDetail(
+                "IDEMPOTENCY_NOT_RECORDED",
+                f"the result was not recorded ({exc.strerror}); a retry with this key "
+                "runs the call again",
+                context={"command": command.path.value},
+            )
+            return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        return envelope
 
     def _execute(
         self,
@@ -628,11 +722,17 @@ class _Run:
         if preview_only:
             assert dataclasses.is_dataclass(args) and not isinstance(args, type)
             args = dataclasses.replace(args, dry_run=True)
+        running: list[Pending] = []
         try:
-            with self.cancellation.armed():
-                result = call_with_timeout(lambda: _invoke(command, args, ctx), timeout)
+            self.cancellation.check()
+            result = call_with_timeout(
+                lambda: _invoke(command, args, ctx),
+                timeout,
+                running.append,
+                self.cancellation.armed,
+            )
         except CliExit as exc:
-            return self._exit_envelope(command, exc, started, full_meta)
+            return self._exit_envelope(command, args, exc, started, full_meta)
         except ParseError as exc:
             # A handler validating its own input before any side effect
             return self.arg_error(exc, started=started, meta=full_meta)
@@ -652,10 +752,12 @@ class _Run:
                 meta=full_meta,
             )
         except Cancelled as exc:
+            self.abandoned = _still_running(running)
             return self._cancelled(command, exc.signal, started, full_meta)
         except KeyboardInterrupt:
+            self.abandoned = _still_running(running)
             return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
-        except Exception as exc:  # noqa: BLE001 - the one handler boundary; see _crashed
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 - the handler boundary; see _crashed
             return self._crashed(command, args, exc, started, full_meta)
         try:
             data = self._payload(result)
@@ -663,6 +765,8 @@ class _Run:
             return self._broken(
                 command, "INVALID_OUTPUT", f"{command.path} returned {exc}", started, full_meta
             )
+        except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is handler code
+            return self._crashed(command, args, exc, started, full_meta)
         if command.danger_level is not DangerLevel.SAFE:
             problem = effect_problem(data, preview=_dry_run_requested(args))
             if problem is not None:
@@ -738,8 +842,12 @@ class _Run:
             return {**full_meta, "seq": seq, "partial": True}
 
         try:
-            with self.cancellation.armed():
-                produced = call_with_timeout(lambda: _invoke(command, args, ctx), remaining())
+            self.cancellation.check()
+            produced = call_with_timeout(
+                lambda: _invoke(command, args, ctx),
+                remaining(),
+                interruptible=self.cancellation.armed,
+            )
             if not isinstance(produced, Iterator):
                 raise TypeError(
                     f"{command.path} is streaming but returned {type(produced).__name__}, "
@@ -747,15 +855,19 @@ class _Run:
                 )
             events = produced
             while True:
-                with self.cancellation.armed():
-                    event = call_with_timeout(lambda: next(produced, _END), remaining())
+                self.cancellation.check()
+                event = call_with_timeout(
+                    lambda: next(produced, _END),
+                    remaining(),
+                    interruptible=self.cancellation.armed,
+                )
                 if event is _END:
                     break
                 seq += 1
                 data = self._payload(event)
                 yield self._envelope(0, data=data, started=started, meta={**full_meta, "seq": seq})
         except CliExit as exc:
-            yield self._exit_envelope(command, exc, started, partial())
+            yield self._exit_envelope(command, args, exc, started, partial())
             return
         except ParseError as exc:
             yield self.arg_error(exc, started=started, meta=partial())
@@ -786,7 +898,7 @@ class _Run:
             message = f"{command.path} yielded {exc}"
             yield self._broken(command, "INVALID_OUTPUT", message, started, partial())
             return
-        except Exception as exc:  # noqa: BLE001 - the one handler boundary; see _crashed
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 - the handler boundary; see _crashed
             yield self._crashed(command, args, exc, started, partial())
             return
         finally:
@@ -818,7 +930,12 @@ class _Run:
         )
 
     def _exit_envelope(
-        self, command: Command, exc: CliExit, started: float, meta: Mapping[str, object]
+        self,
+        command: Command,
+        args: object,
+        exc: CliExit,
+        started: float,
+        meta: Mapping[str, object],
     ) -> Envelope:
         framework_names = {ExitCodeName(c.name) for c in FrameworkCode}
         if exc.name not in command.exit_codes and exc.name not in framework_names:
@@ -849,6 +966,8 @@ class _Run:
         except SchemaError as err:
             message = f"{command.path} raised {exc.name} with {err}"
             return self._broken(command, "INVALID_EXIT", message, started, meta)
+        except Exception as err:  # noqa: BLE001 - a scalar's serialize= is handler code
+            return self._crashed(command, args, err, started, meta)
         assert isinstance(context, dict)
         return self._envelope(
             entry.code.value,
@@ -869,17 +988,52 @@ class _Run:
             meta=meta,
         )
 
-    def _record_late(self, command: Command, pending: Pending, slot: Slot, call: str) -> None:
+    def _record_late(
+        self, command: Command, invocation: Invocation, pending: Pending, slot: Slot, call: str
+    ) -> None:
         """Record an abandoned handler's result once it finishes, so a retry replays it
-        instead of applying the mutation again; a failure is reported on stderr only,
-        since TIMEOUT was already the response"""
+        instead of applying the mutation again. TIMEOUT or CANCELLED was already the
+        response, so anything that keeps the result from being recorded goes to stderr."""
         outcome = pending.wait()
+        redact = self._redactor(command, invocation.args)
+        where = f"{command.path} finished after its response was written"
         if outcome.exc is not None:
-            self.err.write("".join(traceback.format_exception(outcome.exc)))
+            self.err.write(f"{where}, but failed:\n")
+            self.err.write(redact("".join(traceback.format_exception(outcome.exc))))
             return
-        data = self._payload(outcome.result)
-        if effect_problem(data, preview=False) is None:
-            slot.save(Record(call, command.path.value, data, time.time()))
+        try:
+            data = self._payload(outcome.result)
+        except SchemaError as exc:
+            self.err.write(f"{where}; its result was not recorded: {redact(str(exc))}\n")
+            return
+        problem = effect_problem(data, preview=False)
+        if problem is not None:
+            self.err.write(f"{where}; its result was not recorded: {problem}\n")
+            return
+        slot.save(Record(call, command.path.value, data, time.time()))
+
+    def _redactor(self, command: Command, args: object) -> Callable[[str], str]:
+        """Replace every spelling of the run's secret values: the value, its serialized
+        form for a registered scalar, and the escaped form ``repr`` puts in messages"""
+        spellings: set[str] = set()
+        for f in command.fields:
+            value = getattr(args, f.name, None) if f.secret else None
+            if value is None:
+                continue
+            forms: list[object] = [value, str(value), repr(value)]
+            if not isinstance(value, (str, int, float)):
+                forms.append(to_jsonable(value, self.app.scalars))
+            for form in forms:
+                if isinstance(form, str) and form:
+                    spellings.update({form, repr(form)[1:-1]})
+        ordered = sorted(spellings, key=len, reverse=True)
+
+        def redact(text: str) -> str:
+            for spelling in ordered:
+                text = text.replace(spelling, REDACTED)
+            return text
+
+        return redact
 
     def _payload(self, value: object) -> object:
         """A result or exit ``data`` as envelope data: an object, an array, or null"""
@@ -910,23 +1064,14 @@ class _Run:
         self,
         command: Command,
         args: object,
-        exc: Exception,
+        exc: Exception | SystemExit,
         started: float,
         meta: Mapping[str, object],
     ) -> Envelope:
         """A handler bug: the traceback goes to stderr and the envelope names the exception,
-        so every exit still carries an envelope. Secret argument values are redacted."""
-        secrets = [
-            value
-            for f in command.fields
-            if f.secret and isinstance(value := getattr(args, f.name, None), str) and value
-        ]
-
-        def redact(text: str) -> str:
-            for value in secrets:
-                text = text.replace(value, REDACTED)
-            return text
-
+        so every exit still carries an envelope. Secret argument values are redacted.
+        ``sys.exit()`` counts: a handler ends a run by returning or raising ``Exit``."""
+        redact = self._redactor(command, args)
         self.err.write(redact("".join(traceback.format_exception(exc))))
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
         return self._envelope(
@@ -1050,6 +1195,9 @@ class _Run:
                 any_failed = True
                 if not args.ignore_errors:
                     break
+        if (received := self.cancellation.received) is not None:
+            # A signal ends the plan whatever --ignore-errors says (REQ-F-069)
+            return received.exit_code
         if not lines_seen:
             return self.emit(
                 OutputMode.JSON,
@@ -1128,6 +1276,8 @@ class _Run:
     def _exec_lines(self, args: ExecArgs, plan: list[str]) -> Iterator[tuple[int, Envelope]]:
         line_no = 0
         for raw in plan:
+            if self.cancellation.received is not None:
+                return  # a signal stops the plan before its next line
             line = raw.strip()
             if not line:
                 continue
@@ -1176,7 +1326,16 @@ class _Run:
     def _exec_invocation(
         self, command: Command, request: DispatchRequest, dry_run: bool, line_no: int
     ) -> Invocation:
-        mapping: dict[str, object] = {**request.payload, **request.opts}
+        mapping: dict[str, object] = {}
+        for key, value in (*request.payload.items(), *request.opts.items()):
+            # One field may be spelled dry_run in the payload and dry-run in _opts
+            name = key.replace("-", "_")
+            if name in mapping and mapping[name] != value:
+                raise ParseError(
+                    f"line {line_no}: {key!r} given twice with different values",
+                    context={"line": line_no, "_cmd": command.path.value, "field": key},
+                )
+            mapping[name] = value
         if dry_run and command.danger_level is not DangerLevel.SAFE:
             if command.field_by_flag("dry-run") is None:
                 raise ParseError(

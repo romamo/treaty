@@ -67,26 +67,43 @@ def tool_description(command: Command) -> str:
     return text
 
 
+# Treaty emits draft-07 (tuple ``items`` arrays among it); without this, MCP clients
+# validate with the latest draft and reject those schemas
+DRAFT_07 = "http://json-schema.org/draft-07/schema#"
+
+
 def input_schema(command: Command) -> JsonSchema:
     """The ``--raw-payload`` schema; MCP always buffers a stream, so no ``no_stream`` key"""
-    return payload_schema(command, stream_key=False)
+    return {"$schema": DRAFT_07, **payload_schema(command, stream_key=False)}
 
 
 def output_schema(command: Command) -> JsonSchema:
-    """The response envelope with the command's output schema as ``data``"""
+    """The response envelope with the command's output schema as ``data``
+
+    A capped response keeps a prefix of ``data``, which may lack required fields, so
+    ``data`` is checked against the command's schema only when ``meta.truncated`` is unset.
+    """
     data = command.output_schema
     if command.streaming:
         data = {"type": "array", "items": data}
+    truncated = {
+        "properties": {
+            "meta": {"properties": {"truncated": {"const": True}}, "required": ["truncated"]}
+        }
+    }
     return {
+        "$schema": DRAFT_07,
         "type": "object",
         "properties": {
             "ok": {"type": "boolean"},
-            "data": {"anyOf": [data, {"type": "null"}]},
+            "data": {},
             "error": {"type": ["object", "null"]},
             "warnings": {"type": "array"},
             "meta": {"type": "object"},
         },
         "required": ["ok", "data", "error", "warnings", "meta"],
+        "if": truncated,
+        "else": {"properties": {"data": {"anyOf": [data, {"type": "null"}]}}},
     }
 
 

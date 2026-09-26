@@ -7,6 +7,7 @@ context instead of a formatted message and a hard exit.
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Collection, Mapping
 from dataclasses import MISSING, dataclass
@@ -197,7 +198,7 @@ def parse_command_args(
     key: IdempotencyKey | None = None
     no_stream = False
     positionals = [f for f in command.fields if f.positional]
-    pos_index = 0
+    loose: list[str] = []
     i = 0
     only_positional = False
     errors = _Collector()
@@ -232,19 +233,7 @@ def parse_command_args(
     while i < len(tokens):
         tok = tokens[i]
         if only_positional or not tok.startswith("-") or tok == "-" or _is_negative(tok, command):
-            if pos_index >= len(positionals):
-                errors.add(
-                    ParseError(
-                        f"unexpected argument {tok!r}",
-                        context={"argument": tok, "command": command.path.value},
-                    )
-                )
-                i += 1
-                continue
-            field = positionals[pos_index]
-            assign(field, tok)
-            if field.flag_type is not FlagType.ARRAY:
-                pos_index += 1
+            loose.append(tok)
             i += 1
             continue
         if tok == "--":
@@ -346,6 +335,20 @@ def parse_command_args(
         assign(found, raw)
         i += 1
 
+    # Positional values fill, in order, the positional fields no flag has set
+    open_slots = [f for f in positionals if f.name not in values and f.name not in arrays]
+    for tok in loose:
+        if not open_slots:
+            errors.add(
+                ParseError(
+                    f"unexpected argument {tok!r}",
+                    context={"argument": tok, "command": command.path.value},
+                )
+            )
+            continue
+        assign(open_slots[0], tok)
+        if open_slots[0].flag_type is not FlagType.ARRAY:
+            open_slots.pop(0)
     for name, items in arrays.items():
         values[name] = tuple(items)
     if raw_payload is not None:
@@ -380,7 +383,7 @@ def parse_command_args(
 
 
 def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
-    if field.name in secrets:
+    if field.name in secrets and secrets[field.name] != ref:
         raise ParseError(
             f"{field.flag!r} given more than once; use one of --{field.env_flag} "
             f"or --{field.file_flag}",
@@ -558,12 +561,12 @@ def _check_field_value(field: FieldInfo, value: object) -> object:
 def _check_patterned(field: FieldInfo, target: Classified, value: object) -> object:
     if isinstance(value, str):
         field.check_pattern(value)
-    return _check_scalar(target, value, field.flag)
-
-
-def _check_scalar(target: Classified, value: object, flag: str) -> object:
-    base = _check_base(target, value, flag)
-    return base if target.scalar is None else apply_scalar(target.scalar, base, flag)
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        field.check_pattern(str(value))  # the argv token argv would have carried
+    base = _check_base(target, value, field.flag)
+    if target.scalar is None:
+        return base
+    return apply_scalar(target.scalar, base, field.flag, secret=field.secret)
 
 
 def _check_base(target: Classified, value: object, flag: str) -> object:
@@ -578,9 +581,13 @@ def _check_base(target: Classified, value: object, flag: str) -> object:
                 return value
             raise ParseError(f"{flag!r} expects an integer", context=ctx)
         case FlagType.NUMBER:
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                return float(value)
-            raise ParseError(f"{flag!r} expects a number", context=ctx)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ParseError(f"{flag!r} expects a number", context=ctx)
+            if not math.isfinite(value):
+                raise ParseError(
+                    f"{flag!r} expects a finite number", context={**ctx, "value": str(value)}
+                )
+            return float(value)
         case FlagType.STRING:
             if isinstance(value, str):
                 return check_path(value, flag) if target.path else value

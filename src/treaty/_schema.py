@@ -9,9 +9,10 @@ integer ``Enum``, ``X | None``, ``list[T]``, ``tuple[T, ...]``, fixed ``tuple[A,
 from __future__ import annotations
 
 import dataclasses
+import math
 import types
 import typing
-from enum import Enum
+from enum import Enum, Flag
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,9 @@ def _schema_for_base(base: object, scalars: ScalarRegistry) -> JsonSchema:
 
 def _enum_schema(cls: type[Enum]) -> JsonSchema:
     """The JSON type of the members' values, which is what ``to_jsonable`` emits"""
+    if issubclass(cls, Flag):
+        # Members combine (READ | WRITE), so any non-negative integer can be emitted
+        return {"type": "integer", "minimum": 0}
     values = [m.value for m in cls]
     if all(isinstance(v, str) for v in values):
         return {"type": "string", "enum": values}
@@ -118,14 +122,17 @@ def is_payload_type(tp: object) -> bool:
 
 def to_jsonable(value: object, scalars: ScalarRegistry) -> object:
     """Convert handler output into plain JSON types; fails on anything else"""
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, Path):
-        return str(value)
+    # A registered scalar first: a str or int subclass has its own serialize=
     if (spec := scalars.for_value(value)) is not None:
         return to_jsonable(spec.serialize(value), scalars)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise SchemaError(f"{value!r} is not a finite number, and JSON has no NaN or Infinity")
+    if isinstance(value, Enum):
+        return value.value
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
     if isinstance(value, (list, tuple)):
         return [to_jsonable(v, scalars) for v in value]
     if isinstance(value, dict):

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from treaty import App, Arg, Ctx, Exit, Flag
 
 app = App("deployctl", version="1.4.0")
-app.exit_code("CONFLICT", 79, description="Target already has a deployment in progress",
+app.exit_code("DEPLOY_CONFLICT", 79, description="Target already has a deployment in progress",
               retryable=False, side_effects="none")
 
 @dataclass(frozen=True, slots=True)
@@ -30,10 +30,10 @@ class Plan:
 deploy = app.group("deploy", description="Manage deployments")
 
 @deploy.command("rollback", description="Roll a service back to its previous release",
-                danger_level="destructive", exit_codes=["CONFLICT"])
+                danger_level="destructive", exit_codes=["DEPLOY_CONFLICT"])
 def rollback(args: Rollback, ctx: Ctx) -> Plan:
     if args.to is None:
-        raise Exit.CONFLICT("No previous release recorded", context={"service": args.service})
+        raise Exit.DEPLOY_CONFLICT("No previous release recorded", context={"service": args.service})
     effect = "would_update" if args.dry_run else "updated"
     return Plan(effect=effect, service=args.service, release=args.to)
 
@@ -102,8 +102,10 @@ Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 `has_network_io=True` (`--timeout 0` disables it; at most one year). On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
 response. Handlers read `ctx.timeout` to pass the same deadline to their network calls. An
-idempotency key stays locked until a timed-out handler really finishes, so a retry waits
-and replays its result instead of running beside it.
+idempotency key stays locked until a timed-out or cancelled handler really finishes, so a
+retry never runs beside it: it waits up to its own timeout, then replays the recorded
+result or exits `10` with `IDEMPOTENCY_KEY_BUSY`. An unusable state directory or a damaged
+record exits `4` (`STATE_DIR_UNWRITABLE`, `IDEMPOTENCY_RECORD_CORRUPT`).
 
 A handler that raises anything else exits `1` with `HANDLER_CRASHED`, naming the exception;
 the traceback goes to stderr with secret values redacted. A result or `Exit` payload the
@@ -276,9 +278,11 @@ it on to an upstream API.
 
 SIGINT and SIGTERM produce a `CANCELLED` envelope with exit `130` or `143`, run the
 command's optional `cleanup=` hook first, and a second signal during cleanup exits at once
-without a second write. A handler's own `except Exception` cannot swallow the signal. One
-that arrives after the handler returned is held: the finished result is written, and an
-`exec` plan stops before its next line. Both codes appear in every command's `exit_codes` map.
+without a second write. A handler's own `except Exception` cannot swallow the signal, and a
+retry waiting for an idempotency key is interrupted too. A signal that arrives after the
+handler returned is held: the finished result is written with its own exit code, since
+the work it reports did happen. An `exec` plan stops at the first signal, even with
+`--ignore-errors`, and exits `130` or `143`. Both codes appear in every command's `exit_codes` map.
 
 ## Raw payloads
 
@@ -326,7 +330,7 @@ out as a sibling directory:
 uv run --project ../cli-agent-ergonomics ../cli-agent-ergonomics/conformance/run.py conformance/deployctl.json
 ```
 
-The example CLI passes all eleven checks across levels 1 to 3. The same run is a pytest test
+The example CLI passes all twelve checks across levels 1 to 3. The same run is a pytest test
 that skips when the spec checkout is absent.
 
 ## Start a project
@@ -343,9 +347,10 @@ from each command's first example and danger level, writes the profile, and with
 executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. The kit is found
 via `--spec-dir`, then `TREATY_SPEC_DIR`, then `../cli-agent-ergonomics` relative to the
 current directory; a named location without `conformance/run.py` exits `4` instead of
-falling through. `--out` and
-`--directory` reject `..` segments, percent-encodings, and null bytes; pass an absolute path
-to write outside the working directory.
+falling through. `--out`, `--spec-dir`, and `--directory` reject `..` segments,
+percent-encodings, and null bytes like every `Path` flag; pass an absolute path to reach
+outside the working directory. Streaming commands get no probes: the kit expects one
+envelope per run.
 
 ## Audit your CLI
 
@@ -353,13 +358,14 @@ to write outside the working directory.
 uv run treaty audit myapp.cli:app
 ```
 
-Nine ordered rules check the registry and print the next steps with a fix using your own
+Ten ordered rules check the registry and print the next steps with a fix using your own
 names: missing examples, danger levels that contradict command names, mutating commands
 without their own exit codes, retryable codes on non-idempotent commands, untyped outputs,
-undeclared network I/O, wide mutating commands without `--raw-payload`, missing cleanup
-hooks, and a missing conformance profile. `--all` lists everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so
-CI can gate on it, and piping the output gives an envelope an agent can act on. Rules see declarations only; the conformance kit
-covers runtime behaviour.
+undeclared network I/O, path-like fields not typed `Path`, wide mutating commands without
+`--raw-payload`, missing cleanup hooks, and a missing conformance profile. `--all` lists
+everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and
+piping the output gives an envelope an agent can act on. Rules see declarations only; the
+conformance kit covers runtime behaviour.
 
 ## Development
 

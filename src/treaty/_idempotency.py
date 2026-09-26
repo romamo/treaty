@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
@@ -87,6 +87,22 @@ class IdempotencyKey:
             )
 
 
+class KeyBusy(Exception):
+    """The key stayed locked by an earlier call for the whole wait"""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"idempotency key still in use after {seconds:g}s")
+        self.seconds = seconds
+
+
+class RecordCorrupt(Exception):
+    """A record file that treaty did not write, or that was damaged on disk"""
+
+    def __init__(self, path: Path, reason: str) -> None:
+        super().__init__(f"idempotency record {path} is unreadable: {reason}")
+        self.path = path
+
+
 @dataclass(frozen=True, slots=True)
 class Record:
     fingerprint: str
@@ -145,13 +161,26 @@ class Slot:
         _prune(self.path.parent, record.created_at)
 
 
+Waiting = Callable[[], AbstractContextManager[None]]
+
+
 @contextmanager
-def claim(directory: Path, key: IdempotencyKey) -> Iterator[Slot]:
-    """Lock the key's record for the duration of the block, or until a hand-off finishes"""
+def claim(
+    directory: Path,
+    key: IdempotencyKey,
+    *,
+    wait_seconds: float | None = None,
+    waiting: Waiting = nullcontext,
+) -> Iterator[Slot]:
+    """Lock the key's record for the duration of the block, or until a hand-off finishes
+
+    The wait for an earlier holder runs inside ``waiting()`` (where a signal may
+    interrupt it) and gives up with ``KeyBusy`` after ``wait_seconds``.
+    """
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = hashlib.sha256(key.value.encode()).hexdigest()[:32]
     record_path = directory / f"{name}.json"
-    lock = _acquire(directory / f"{name}.lock")
+    lock = _acquire(directory / f"{name}.lock", wait_seconds, waiting)
     slot = Slot(record_path, None)
     try:
         slot.record = _load(record_path, time.time())
@@ -173,14 +202,35 @@ def claim(directory: Path, key: IdempotencyKey) -> Iterator[Slot]:
             ).start()
 
 
-def _acquire(path: Path) -> IO[str]:
+def _acquire(path: Path, wait_seconds: float | None, waiting: Waiting) -> IO[str]:
     """Lock the file now at ``path``: a prune may unlink it between open and lock"""
+    deadline = None if wait_seconds is None else time.monotonic() + wait_seconds
     while True:
         lock = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600), "w")
-        _lock(lock)
+        acquired = False
+        try:
+            with waiting():
+                acquired = _wait_lock(lock, deadline)
+        finally:
+            if not acquired:
+                lock.close()
+        if not acquired:
+            assert wait_seconds is not None
+            raise KeyBusy(wait_seconds)
         if _is_current(lock, path):
             return lock
         _release(lock)
+
+
+def _wait_lock(handle: IO[str], deadline: float | None) -> bool:
+    if deadline is None:
+        _lock(handle)
+        return True
+    while not _try_lock(handle):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
 
 
 def _is_current(handle: IO[str], path: Path) -> bool:
@@ -200,26 +250,47 @@ def _release(handle: IO[str]) -> None:
 def _load(path: Path, now: float) -> Record | None:
     if not path.is_file():
         return None
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    record = Record(raw["fingerprint"], raw["command"], raw["data"], raw["created_at"])
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        record = Record(raw["fingerprint"], raw["command"], raw["data"], raw["created_at"])
+    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise RecordCorrupt(path, f"{type(exc).__name__}: {exc}") from None
+    if not isinstance(record.created_at, (int, float)) or not isinstance(record.data, dict):
+        raise RecordCorrupt(path, "created_at or data has the wrong type")
     return None if now - record.created_at > TTL_SECONDS else record
 
 
 def _prune(directory: Path, now: float) -> None:
+    """Remove expired records and idle lock files; the saving key's own lock is held
+    by the caller, so its fresh record is never touched"""
     for path in directory.iterdir():
-        if path.suffix not in (".json", ".lock"):
-            continue
-        try:
-            age = now - path.stat().st_mtime
-        except FileNotFoundError:
-            continue  # another process pruned it after iterdir()
-        if age <= TTL_SECONDS:
-            continue
-        if path.suffix == ".json":
-            path.unlink(missing_ok=True)
-        elif sys.platform != "win32":
+        if path.suffix == ".json" and _expired(path, now):
+            _prune_record(path, now)
+        elif path.suffix == ".lock" and sys.platform != "win32" and _expired(path, now):
             # Windows cannot unlink a file another process has open, so its locks stay
             _unlink_idle_lock(path)
+
+
+def _expired(path: Path, now: float) -> bool:
+    try:
+        return now - path.stat().st_mtime > TTL_SECONDS
+    except FileNotFoundError:
+        return False  # another process pruned it after iterdir()
+
+
+def _prune_record(path: Path, now: float) -> None:
+    """Only under the key's lock, and only if still expired there: a holder may have
+    replaced the record between the scan and now"""
+    lock_path = path.with_suffix(".lock")
+    handle = os.fdopen(os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600), "w")
+    with handle:
+        if not _try_lock(handle):
+            return
+        try:
+            if _is_current(handle, lock_path) and _expired(path, now):
+                path.unlink(missing_ok=True)
+        finally:
+            _unlock(handle)
 
 
 def _unlink_idle_lock(path: Path) -> None:
@@ -230,6 +301,8 @@ def _unlink_idle_lock(path: Path) -> None:
         return
     with handle:
         if _try_lock(handle):
-            if _is_current(handle, path):
-                path.unlink()
-            _unlock(handle)
+            try:
+                if _is_current(handle, path):
+                    path.unlink()
+            finally:
+                _unlock(handle)

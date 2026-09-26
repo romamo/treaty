@@ -112,7 +112,8 @@ class _Cut:
         )
 
 
-def cap_envelope(envelope: Envelope, cap: OutputCap) -> Envelope:
+def cap_envelope(envelope: Envelope, cap: OutputCap, *, argv: bool = True) -> Envelope:
+    """``argv=False`` for in-process calls, whose hint can only name the variable"""
     total = len(serialize(envelope).encode())
     if total <= cap.bytes or envelope.data is None:
         return envelope
@@ -121,7 +122,7 @@ def cap_envelope(envelope: Envelope, cap: OutputCap) -> Envelope:
     visited: set[FieldPath] = set()
 
     def fits(candidate: object, pending: list[_Cut]) -> bool:
-        trial = _truncated(envelope, candidate, pending, total)
+        trial = _truncated(envelope, candidate, pending, total, argv)
         return len(serialize(trial).encode()) <= cap.bytes
 
     while (target := _target(data, visited)) is not None:
@@ -141,16 +142,19 @@ def cap_envelope(envelope: Envelope, cap: OutputCap) -> Envelope:
         data = _replace(data, path, _prefix(node, kept))
         cuts.append(_Cut(path, len(node), kept))
         if best is not None:
-            return _truncated(envelope, data, cuts, total)
-    return _truncated(envelope, None, [_Cut((), total, 0)], total)
+            return _truncated(envelope, data, cuts, total, argv)
+    return _truncated(envelope, None, [_Cut((), total, 0)], total, argv)
 
 
-def _truncated(envelope: Envelope, data: object, cuts: list[_Cut], total: int) -> Envelope:
+def _truncated(
+    envelope: Envelope, data: object, cuts: list[_Cut], total: int, argv: bool
+) -> Envelope:
+    hint = f"rerun with --max-output {total} or {ENV_VAR}={total}"
     meta: dict[str, object] = {
         **envelope.extra_meta,
         "truncated": True,
         "total_bytes": total,
-        "truncation_hint": f"rerun with --max-output {total} or {ENV_VAR}={total}",
+        "truncation_hint": hint if argv else f"set {ENV_VAR}={total} and call again",
     }
     root = next((c for c in cuts if c.path == ()), None)
     if root is not None and data is not None and isinstance(envelope.data, list):

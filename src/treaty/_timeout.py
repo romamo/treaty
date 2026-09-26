@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 
 from ._errors import ParseError
@@ -86,10 +87,22 @@ class Pending:
         return self.outcome
 
 
-def call_with_timeout[T](fn: Callable[[], T], timeout: Timeout) -> T:
-    """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``"""
+def call_with_timeout[T](
+    fn: Callable[[], T],
+    timeout: Timeout,
+    running: Callable[[Pending], None] | None = None,
+    interruptible: Callable[[], AbstractContextManager[None]] = nullcontext,
+) -> T:
+    """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
+
+    ``running`` receives the worker as it starts, so a caller interrupted while it
+    waits (a signal) can still wait for the handler or hold its locks until it ends.
+    Only the handler itself, or the wait for its worker, runs inside ``interruptible()``:
+    an exception raised while ``Thread.start`` holds its internal locks corrupts them.
+    """
     if timeout.seconds is None:
-        return fn()
+        with interruptible():
+            return fn()
     slot = Outcome()
 
     def target() -> None:
@@ -99,10 +112,14 @@ def call_with_timeout[T](fn: Callable[[], T], timeout: Timeout) -> T:
             slot.exc = exc
 
     worker = threading.Thread(target=target, name="treaty-handler", daemon=True)
+    pending = Pending(worker, slot)
     worker.start()
-    worker.join(timeout.seconds)
+    if running is not None:
+        running(pending)
+    with interruptible():
+        worker.join(timeout.seconds)
     if worker.is_alive():
-        raise TimeoutExpired(timeout, Pending(worker, slot))
+        raise TimeoutExpired(timeout, pending)
     if slot.exc is not None:
         raise slot.exc
     return slot.result  # type: ignore[return-value]

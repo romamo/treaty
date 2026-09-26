@@ -5,16 +5,17 @@ import json
 import tomllib
 from collections.abc import Iterator
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from pathlib import Path
 
 import pytest
 
 from treaty import App, Arg, Ctx, Exit, Flag, RegistrationError
 from treaty._cli import cli
+from treaty._profile import argument_order_for
 from treaty._scaffold import ProjectName, render
 from treaty._scalars import ScalarRegistry
-from treaty._schema import schema_for
+from treaty._schema import schema_for, to_jsonable
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,3 +172,197 @@ def test_init_into_a_file_is_a_conflict(tmp_path: Path) -> None:
     target.write_text("x")
     code, [env] = run(cli, ["init", "demo", "--directory", str(target), "--dry-run"])
     assert code != 0 and env["error"]["code"] == "CONFLICT"
+
+
+# Second review round
+
+
+@dataclass(frozen=True, slots=True)
+class Copy:
+    src: str = Arg(description="Source")
+    dst: str = Arg(description="Destination")
+
+
+@dataclass(frozen=True, slots=True)
+class Ratio:
+    r: float = Flag(default=0.5, description="Ratio")
+
+
+@dataclass(frozen=True, slots=True)
+class Count:
+    n: int = Flag(default=1, pattern=r"[1-9]\d*", description="Positive count")
+
+
+def round_two_app() -> App:
+    app = App("r2", version="1")
+
+    @dataclass(frozen=True, slots=True)
+    class Out:
+        out: Path = Flag(default=Path("out.json"), description="Output file")
+
+    @app.command("write", description="Path default")
+    def write(args: Out, ctx: Ctx) -> dict[str, str]:
+        return {"out": str(args.out)}
+
+    @app.command("cp", description="Copy")
+    def cp(args: Copy, ctx: Ctx) -> dict[str, str]:
+        return {"src": args.src, "dst": args.dst}
+
+    @app.command("ratio", description="Ratio")
+    def ratio(args: Ratio, ctx: Ctx) -> dict[str, float]:
+        return {"r": args.r}
+
+    @app.command("nan", description="Returns NaN")
+    def nan(args: Ratio, ctx: Ctx) -> dict[str, float]:
+        return {"r": float("nan")}
+
+    @app.command("quit", description="Calls sys.exit")
+    def quit_(args: Ratio, ctx: Ctx) -> dict[str, float]:
+        raise SystemExit(3)
+
+    @app.command("count", description="Count")
+    def count(args: Count, ctx: Ctx) -> dict[str, int]:
+        return {"n": args.n}
+
+    return app
+
+
+def test_path_default_is_listed_in_the_manifest() -> None:
+    code, [env] = run(round_two_app(), ["manifest"])
+    assert code == 0
+    assert env["data"]["commands"]["write"]["flags"]["out"]["default"] == "out.json"
+    assert run(round_two_app(), ["write", "--schema"])[0] == 0
+
+
+def test_unlistable_default_fails_registration() -> None:
+    app = App("t", version="1")
+
+    @dataclass(frozen=True, slots=True)
+    class Odd:
+        when: float = Flag(default=float("inf"), description="Never")
+
+    with pytest.raises(RegistrationError, match="finite"):
+
+        @app.command("odd", description="Odd")
+        def odd(args: Odd, ctx: Ctx) -> dict[str, str]:
+            return {}
+
+
+def test_positional_given_by_flag_leaves_the_rest_in_order() -> None:
+    for argv in (["cp", "--src", "a", "b"], ["cp", "b", "--src", "a"]):
+        code, [env] = run(round_two_app(), argv)
+        assert code == 0 and env["data"] == {"src": "a", "dst": "b"}
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-Infinity"])
+def test_non_finite_numbers_are_rejected(value: str) -> None:
+    assert run(round_two_app(), ["ratio", "--r", value])[0] == 2
+
+
+def test_non_finite_output_is_invalid_output() -> None:
+    code, [env] = run(round_two_app(), ["nan"])
+    assert code == 1 and env["error"]["code"] == "INVALID_OUTPUT"
+
+
+def test_sys_exit_in_a_handler_still_writes_an_envelope() -> None:
+    code, [env] = run(round_two_app(), ["quit"])
+    assert code == 1 and env["error"]["code"] == "HANDLER_CRASHED"
+
+
+def test_pattern_applies_to_json_integers() -> None:
+    envelope = round_two_app().call("count", {"n": 0}, env={})
+    assert envelope.exit_code == 2
+
+
+def test_exec_line_conflicts_and_plan_dry_run() -> None:
+    app = round_two_app()
+    _, [line] = run(app, ["exec"], '{"_cmd": "count", "n": 3, "_opts": {"n": 5}}\n')
+    assert line["error"]["code"] == "ARG_ERROR"
+    code, [line] = run(
+        review_app(), ["exec", "--dry-run"], '{"_cmd": "rm", "target": "a", "dry-run": false}\n'
+    )
+    assert code == 0 and line["data"]["effect"] == "would_delete"
+
+
+def test_registration_rejects_positional_layouts_the_parser_cannot_serve() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Greedy:
+        files: tuple[str, ...] = Arg(description="Files")
+        dest: str = Arg(description="Destination")
+
+    @dataclass(frozen=True, slots=True)
+    class Capital:
+        Name: str = Arg(description="Name")
+
+    app = App("t", version="1")
+    for args_type, match in ((Greedy, "only the last positional"), (Capital, "lowercase")):
+        with pytest.raises(RegistrationError, match=match):
+            app.command(f"c{len(match)}", description="C")(
+                _handler_for(args_type)  # type: ignore[arg-type]
+            )
+
+
+def _handler_for(args_type: type) -> object:
+    def handler(args: args_type, ctx: Ctx) -> dict[str, str]:  # type: ignore[valid-type]
+        return {}
+
+    return handler
+
+
+def test_boolean_named_stream_is_rejected_on_streaming_commands() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Tail:
+        stream: bool = Flag(default=True, description="Follow")
+
+    app = App("t", version="1")
+    with pytest.raises(RegistrationError, match="supplied by the framework"):
+
+        @app.command("tail", description="Tail", streaming=True)
+        def tail(args: Tail, ctx: Ctx) -> Iterator[dict[str, int]]:
+            yield {}
+
+
+def test_same_secret_source_twice_is_accepted() -> None:
+    app = review_app()
+    out = io.StringIO()
+    code = app.run(
+        ["login", "--api-token-from-env", "T", "--api-token-from-env", "T"],
+        stdout=out,
+        stderr=io.StringIO(),
+        env={"T": "x"},
+        isatty=False,
+    )
+    assert code == 0, out.getvalue()
+
+
+def test_flag_enums_and_str_subclass_scalars_serialize_as_declared() -> None:
+    class Perm(IntFlag):
+        READ = 1
+        WRITE = 2
+
+    class Slug(str):
+        pass
+
+    scalars = ScalarRegistry()
+    assert schema_for(Perm, scalars) == {"type": "integer", "minimum": 0}
+    app = App("t", version="1")
+    app.scalar(Slug, parse=Slug, serialize=lambda s: f"slug:{s}")
+    assert to_jsonable(Slug("abc"), app.scalars) == "slug:abc"
+
+
+def test_argument_order_ignores_example_globals_and_streams() -> None:
+    app = App("fmtapp", version="1")
+
+    @dataclass(frozen=True, slots=True)
+    class Show:
+        item: str = Arg(description="Item")
+        limit: int = Flag(default=1, description="Limit")
+
+    @app.command(
+        "show", description="Show", examples=[("x", "fmtapp show x --format json --limit 3")]
+    )
+    def show(args: Show, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    order = argument_order_for(app)
+    assert order is not None and order["local_args"] == ["--limit", "3"]

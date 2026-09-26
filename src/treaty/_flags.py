@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 import re
 import typing
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from ._errors import ParseError, RegistrationError
@@ -128,7 +130,7 @@ class FieldInfo:
             raise RegistrationError(f"{self.name}: array without item type")
         try:
             self.check_pattern(raw)
-            return _coerce(target, raw, self.flag)
+            return _coerce(target, raw, self.flag, secret=self.secret)
         except ParseError as exc:
             raise self.scrub(exc) from None
 
@@ -203,15 +205,26 @@ class FieldInfo:
 def _jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, Path):
+        return str(value)
     if isinstance(value, tuple):
         return [_jsonable_default(v, scalar) for v in value]
     if scalar is not None and isinstance(value, scalar.cls):
         return scalar.serialize(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise RegistrationError(f"default {value!r} is not a finite number")
+    if value is not None and not isinstance(value, (bool, int, float, str)):
+        raise RegistrationError(f"default {value!r} cannot be listed in the manifest")
     return value
 
 
-def apply_scalar(spec: ScalarSpec, base_value: object, flag: str) -> object:
-    """Check the declared constraint, then hand the base value to the registered parser"""
+def apply_scalar(
+    spec: ScalarSpec, base_value: object, flag: str, *, secret: bool = False
+) -> object:
+    """Check the declared constraint, then hand the base value to the registered parser
+
+    A parser's message may quote the value, so a secret's error leaves it out.
+    """
     ctx: dict[str, object] = {"flag": flag, "value": base_value, "scalar": spec.cls.__name__}
     violation = spec.violation(base_value)
     if violation is not None:
@@ -220,15 +233,21 @@ def apply_scalar(spec: ScalarSpec, base_value: object, flag: str) -> object:
     try:
         return spec.parse(base_value)
     except (TypeError, ValueError) as exc:
+        if secret:
+            raise ParseError(
+                f"value for {flag!r} is not a valid {spec.cls.__name__}", context=ctx
+            ) from None
         raise ParseError(
             f"value for {flag!r} is not a valid {spec.cls.__name__}: {exc}",
             context={**ctx, "cause": str(exc)},
         ) from None
 
 
-def _coerce(target: Classified, raw: str, flag: str) -> object:
+def _coerce(target: Classified, raw: str, flag: str, *, secret: bool) -> object:
     base = _coerce_base(target, raw, flag)
-    return base if target.scalar is None else apply_scalar(target.scalar, base, flag)
+    if target.scalar is None:
+        return base
+    return apply_scalar(target.scalar, base, flag, secret=secret)
 
 
 def _coerce_base(target: Classified, raw: str, flag: str) -> object:
@@ -244,11 +263,17 @@ def _coerce_base(target: Classified, raw: str, flag: str) -> object:
                 ) from None
         case FlagType.NUMBER:
             try:
-                return float(raw)
+                number = float(raw)
             except ValueError:
                 raise ParseError(
                     f"{flag!r} expects a number", context={"flag": flag, "value": raw}
                 ) from None
+            if not math.isfinite(number):
+                # JSON has no NaN or Infinity, and they defeat minimum/maximum checks
+                raise ParseError(
+                    f"{flag!r} expects a finite number", context={"flag": flag, "value": raw}
+                )
+            return number
         case FlagType.ENUM:
             if raw not in target.enum_values:
                 raise ParseError(
@@ -284,6 +309,25 @@ def _check_secret_field(cls: type, info: FieldInfo) -> None:
         )
     if info.spec.short is not None:
         raise RegistrationError(f"{where}: a secret cannot have a short flag")
+
+
+_POSITIONAL_NAME = re.compile(r"[a-z][a-z0-9_]*")
+
+
+def _check_positionals(cls: type, positionals: list[FieldInfo]) -> None:
+    """Layouts the parser and ``PositionalEntry`` can express: one variadic, last"""
+    for info in positionals:
+        if not _POSITIONAL_NAME.fullmatch(info.name):
+            raise RegistrationError(
+                f"{cls.__qualname__}.{info.name}: positional names are lowercase letters, "
+                "digits, and underscores, starting with a letter"
+            )
+    variadic = [i for i in positionals if i.flag_type is FlagType.ARRAY]
+    if len(variadic) > 1 or (variadic and positionals[-1] is not variadic[0]):
+        raise RegistrationError(
+            f"{cls.__qualname__}.{variadic[0].name}: an array positional takes every "
+            "remaining value, so only the last positional may be one"
+        )
 
 
 def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
@@ -342,6 +386,7 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
         if info.secret:
             _check_secret_field(cls, info)
         infos.append(info)
+    _check_positionals(cls, [i for i in infos if i.positional])
     shorts = [i.spec.short for i in infos if i.spec.short is not None]
     if len(shorts) != len(set(shorts)):
         raise RegistrationError(f"{cls.__qualname__}: duplicate short flags {shorts}")

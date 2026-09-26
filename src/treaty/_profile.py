@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from ._audit import user_commands
 from ._command import Command, DangerLevel
+from ._parse import VALUED_GLOBALS
 
 if TYPE_CHECKING:
     from ._app import App
@@ -48,6 +49,8 @@ def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
     for command in user_commands(app):
+        if command.streaming:
+            continue  # JSONL, and possibly endless: the kit's probes expect one envelope
         argv = _argv_from_example(app, command)
         if argv is None:
             if any(f.required for f in command.fields):
@@ -64,15 +67,31 @@ def probes_for(app: App) -> list[Probe]:
     return probes
 
 
+def _without_globals(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """An example's own --format json would conflict with the value the kit moves around"""
+    out: list[str] = []
+    skip = False
+    for tok in argv:
+        name = tok[2:].partition("=")[0] if tok.startswith("--") else ""
+        if skip:
+            skip = False
+        elif name in VALUED_GLOBALS:
+            skip = "=" not in tok
+        elif tok not in ("--help", "-h", "--schema"):
+            out.append(tok)
+    return tuple(out)
+
+
 def argument_order_for(app: App) -> dict[str, object] | None:
     """The first example whose tokens after its positionals start with an option, so the kit
     can move ``--format`` around it (REQ-F-079); destructive ones are run with ``--dry-run``"""
     for command in user_commands(app):
-        if command.danger_level is DangerLevel.MUTATING:
+        if command.danger_level is DangerLevel.MUTATING or command.streaming:
             continue
         argv = _argv_from_example(app, command)
         if argv is None:
             continue
+        argv = _without_globals(argv)
         head = len(command.path.parts)
         while head < len(argv) and not argv[head].startswith("-"):
             head += 1

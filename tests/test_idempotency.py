@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import signal
 import threading
 import time
 from dataclasses import dataclass
@@ -207,9 +208,14 @@ def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> No
 
     first = app.call("create", {"name": "w", "idempotency_key": "k1"})
     assert first.error is not None and first.error.code == "TIMEOUT"
-    second = app.call("create", {"name": "w", "idempotency_key": "k1"})
+    # The retry waits no longer than its own timeout, and never runs beside the first
+    busy = app.call("create", {"name": "w", "idempotency_key": "k1"})
+    assert busy.error is not None and busy.error.code == "IDEMPOTENCY_KEY_BUSY"
     assert len(started) == 1, "the retry ran the mutation beside the abandoned handler"
-    assert second.ok and isinstance(second.data, dict) and second.data["effect"] == "noop"
+    time.sleep(0.4)  # the abandoned handler finishes and its result is recorded
+    replay = app.call("create", {"name": "w", "idempotency_key": "k1"})
+    assert len(started) == 1
+    assert replay.ok and isinstance(replay.data, dict) and replay.data["effect"] == "noop"
 
 
 def test_prune_keeps_a_lock_that_is_held(tmp_path: Path) -> None:
@@ -242,3 +248,54 @@ def test_prune_removes_an_idle_expired_lock(tmp_path: Path) -> None:
     with claim(tmp_path, IdempotencyKey("other")) as slot:
         slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
     assert not lock.exists()
+
+
+def test_signal_interrupts_a_retry_waiting_for_the_key(tmp_path: Path) -> None:
+    app, calls = counting_app(tmp_path)
+    released = threading.Event()
+
+    def hold() -> None:
+        with claim(tmp_path, IdempotencyKey("k1")):
+            released.wait(5)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    time.sleep(0.05)
+    threading.Timer(0.2, signal.raise_signal, args=(signal.SIGTERM,)).start()
+    try:
+        code, env = run(app, ["create", "widget", "--idempotency-key", "k1"])
+    finally:
+        released.set()
+        holder.join()
+    assert code == 143 and env["error"]["code"] == "CANCELLED" and calls == []
+
+
+def test_prune_keeps_a_record_whose_key_is_held(tmp_path: Path) -> None:
+    held = IdempotencyKey("held")
+    with claim(tmp_path, held) as slot:
+        slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
+        record = slot.path
+        stale = time.time() - TTL_SECONDS - 3600
+        os.utime(record, (stale, stale))
+        with claim(tmp_path, IdempotencyKey("other")) as other:
+            other.save(Record("fp", "create", {"effect": "created"}, time.time()))
+        assert record.exists(), "a record was pruned while its key was held"
+
+
+def test_corrupt_record_is_a_precondition_error(tmp_path: Path) -> None:
+    app, calls = counting_app(tmp_path)
+    run(app, ["create", "widget", "--idempotency-key", "k1"])
+    next(tmp_path.glob("*.json")).write_text("{not json")
+    code, env = run(app, ["create", "widget", "--idempotency-key", "k1"])
+    assert code == 4 and env["error"]["code"] == "IDEMPOTENCY_RECORD_CORRUPT"
+
+
+def test_unwritable_state_dir_is_a_precondition_error(tmp_path: Path) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir(mode=0o500)
+    app, calls = counting_app(locked / "state")
+    try:
+        code, env = run(app, ["create", "widget", "--idempotency-key", "k1"])
+    finally:
+        locked.chmod(0o700)
+    assert code == 4 and env["error"]["code"] == "STATE_DIR_UNWRITABLE" and calls == []
