@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import dataclasses
+import errno
 import io
 import json
 import math
@@ -414,7 +415,9 @@ class App:
         run = _Run(self, out, err, environ)
         try:
             return self._route(run, list(argv), inp, environ, isatty)
-        except BrokenPipeError:
+        except OSError as exc:
+            if not _closed_pipe(exc):
+                raise
             # The reader of stdout went away, on any path: help, schema, errors, results
             return run.output_closed()
 
@@ -508,6 +511,13 @@ def _traceback(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
+def _closed_pipe(exc: OSError) -> bool:
+    """Whether a write failed because its reader went away; Windows reports that as EINVAL"""
+    return isinstance(exc, BrokenPipeError) or (
+        sys.platform == "win32" and exc.errno == errno.EINVAL
+    )
+
+
 class _Stderr:
     """Diagnostics with no reader left are dropped: a closed stderr must neither cost the
     stdout envelope nor pass for a closed stdout"""
@@ -518,13 +528,17 @@ class _Stderr:
     def write(self, text: str) -> None:
         try:
             self._stream.write(text)
-        except BrokenPipeError:
+        except OSError as exc:
+            if not _closed_pipe(exc):
+                raise
             self._closed()
 
     def flush(self) -> None:
         try:
             self._stream.flush()
-        except BrokenPipeError:
+        except OSError as exc:
+            if not _closed_pipe(exc):
+                raise
             self._closed()
 
     def _closed(self) -> None:
