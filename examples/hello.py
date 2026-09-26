@@ -5,6 +5,7 @@ uv run examples/hello.py greet Ada --shout
 uv run examples/hello.py manifest
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from treaty import App, Arg, Ctx, Flag
@@ -23,9 +24,14 @@ class Greeting:
     message: str
 
 
+def greet_text(data: Mapping[str, object]) -> str:
+    return f"{data['message']}\n"
+
+
 @app.command(
     "greet",
     description="Say hello",
+    human=greet_text,
     examples=[
         ("Greet the world", "hello greet world"),
         ("Greet Ada loudly", "hello greet Ada --shout"),
