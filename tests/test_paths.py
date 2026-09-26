@@ -47,7 +47,11 @@ def run(argv: list[str], stdin: str = "") -> tuple[int, dict[str, object]]:
 def test_valid_paths_pass_unchanged_and_serialize_as_strings(tmp_path: Path) -> None:
     code, env = run(["copy", "/home/user/file.txt", "--dest", "out/x.txt", "--extra", "a.txt"])
     assert code == 0
-    assert env["data"] == {"source": "/home/user/file.txt", "dest": "out/x.txt", "extra": ["a.txt"]}
+    assert env["data"] == {
+        "source": str(Path("/home/user/file.txt")),
+        "dest": str(Path("out/x.txt")),
+        "extra": ["a.txt"],
+    }
 
 
 @pytest.mark.parametrize(
@@ -77,7 +81,9 @@ def test_suggestions_give_the_decoded_or_absolute_form() -> None:
     _, env = run(["copy", "files%2fetc"])
     assert env["error"]["suggestion"] == "pass the decoded path: --source files/etc"  # type: ignore[index]
     _, env = run(["copy", "../x"])
-    assert env["error"]["suggestion"].startswith("pass the absolute path if intended: --source /")  # type: ignore[index]
+    prefix = "pass the absolute path if intended: --source "
+    suggestion = env["error"]["suggestion"]  # type: ignore[index]
+    assert suggestion.startswith(prefix) and Path(suggestion.removeprefix(prefix)).is_absolute()
 
 
 def test_json_routes_apply_the_same_checks() -> None:

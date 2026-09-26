@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -14,6 +15,17 @@ SPEC_DIR = Path(
     os.environ.get("TREATY_SPEC_DIR", Path(__file__).resolve().parents[2] / "cli-agent-ergonomics")
 )
 SCHEMAS = SPEC_DIR / "schemas"
+
+WINDOWS = sys.platform == "win32"
+needs_posix_signals = pytest.mark.skipif(
+    WINDOWS, reason="Windows cannot deliver SIGINT or SIGTERM to a running process"
+)
+needs_posix_permissions = pytest.mark.skipif(
+    WINDOWS, reason="chmod cannot make a directory unwritable on Windows"
+)
+needs_sh_launcher = pytest.mark.skipif(
+    WINDOWS, reason="the conformance launcher is a /bin/sh script"
+)
 
 
 def spec_validator(name: str) -> Draft7Validator:

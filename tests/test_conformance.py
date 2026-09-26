@@ -4,13 +4,14 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import SPEC_DIR
+from conftest import SPEC_DIR, needs_sh_launcher
 
 KIT = SPEC_DIR / "conformance" / "run.py"
 PROFILE = Path(__file__).resolve().parents[1] / "conformance" / "deployctl.json"
 VENV_PYTHON = Path(sys.executable)
 
 
+@needs_sh_launcher
 def test_example_cli_passes_conformance_kit() -> None:
     if not KIT.is_file():
         pytest.skip(f"conformance kit not found at {KIT}; set TREATY_SPEC_DIR")

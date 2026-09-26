@@ -6,7 +6,9 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import spec_validator
+from conftest import needs_posix_signals, spec_validator
+
+pytestmark = needs_posix_signals
 
 SLOWCTL = Path(__file__).resolve().parents[1] / "examples" / "slowctl.py"
 

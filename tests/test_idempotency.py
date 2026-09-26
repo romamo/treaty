@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import spec_validator
+from conftest import needs_posix_permissions, spec_validator
 
 from treaty import App, Arg, Ctx, Exit, Flag, RegistrationError
 from treaty._idempotency import TTL_SECONDS, IdempotencyKey, Record, claim
@@ -294,6 +294,7 @@ def test_corrupt_record_is_a_precondition_error(tmp_path: Path) -> None:
     assert code == 4 and env["error"]["code"] == "IDEMPOTENCY_RECORD_CORRUPT"
 
 
+@needs_posix_permissions
 def test_unwritable_state_dir_is_a_precondition_error(tmp_path: Path) -> None:
     locked = tmp_path / "locked"
     locked.mkdir(mode=0o500)

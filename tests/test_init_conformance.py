@@ -7,7 +7,7 @@ from pathlib import Path
 
 import fixture_audit_app
 import pytest
-from conftest import SPEC_DIR
+from conftest import SPEC_DIR, needs_sh_launcher
 
 from treaty._cli import cli, resolve_spec_dir
 from treaty._errors import CliExit
@@ -67,7 +67,8 @@ def test_init_rejects_bad_name(tmp_path: Path, monkeypatch) -> None:
     assert code == 2 and env["error"]["context"]["name"] == "Bad_Name"
 
 
-def test_probes_derive_from_examples_and_danger_levels() -> None:
+def test_probes_derive_from_examples_and_danger_levels(monkeypatch) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     from examples.deployctl import app
 
     probes = {p.name: p for p in probes_for(app)}
@@ -95,6 +96,7 @@ def test_conformance_writes_profile_without_running(tmp_path: Path, monkeypatch)
     assert "add --run" in text
 
 
+@needs_sh_launcher
 def test_conformance_runs_kit_against_example(tmp_path: Path, monkeypatch) -> None:
     if not (SPEC_DIR / "conformance" / "run.py").is_file():
         pytest.skip("spec checkout not found")
@@ -125,7 +127,7 @@ def test_conformance_without_spec_dir_is_precondition(tmp_path: Path, monkeypatc
     monkeypatch.delenv("TREATY_SPEC_DIR", raising=False)
     code, env = run_cli(["conformance", "examples.deployctl:app", "--run", "--spec-dir", "/nope"])
     assert code == 4 and env["error"]["code"] == "PRECONDITION"
-    assert env["error"]["context"] == {"source": "--spec-dir", "spec_dir": "/nope"}
+    assert env["error"]["context"] == {"source": "--spec-dir", "spec_dir": str(Path("/nope"))}
     assert not (tmp_path / "conformance").exists()  # validated before the profile is written
 
 
@@ -135,10 +137,10 @@ def test_named_spec_dir_never_falls_back_to_sibling() -> None:
     with pytest.raises(CliExit) as flag:
         resolve_spec_dir(Path("/nope"), {})
     assert flag.value.name.value == "PRECONDITION"
-    assert flag.value.context == {"source": "--spec-dir", "spec_dir": "/nope"}
+    assert flag.value.context == {"source": "--spec-dir", "spec_dir": str(Path("/nope"))}
     with pytest.raises(CliExit) as env_var:
         resolve_spec_dir(None, {"TREATY_SPEC_DIR": "/nope"})
-    assert env_var.value.context == {"source": "TREATY_SPEC_DIR", "spec_dir": "/nope"}
+    assert env_var.value.context == {"source": "TREATY_SPEC_DIR", "spec_dir": str(Path("/nope"))}
     assert resolve_spec_dir(None, {}) == SPEC_FALLBACK.resolve()
 
 
@@ -154,7 +156,9 @@ def test_write_paths_reject_parent_segments(argv: list[str], flag: str, tmp_path
     assert code == 2 and env["error"]["code"] == "ARG_ERROR"
     assert env["error"]["phase"] == "validation" and env["error"]["context"]["flag"] == flag
     assert env["error"]["context"]["rejected_pattern"] == "path_traversal"
-    assert env["error"]["suggestion"].startswith(f"pass the absolute path if intended: --{flag} /")
+    prefix = f"pass the absolute path if intended: --{flag} "
+    suggestion = env["error"]["suggestion"]
+    assert suggestion.startswith(prefix) and Path(suggestion.removeprefix(prefix)).is_absolute()
     assert not any(tmp_path.rglob("*"))
 
 

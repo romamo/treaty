@@ -11,6 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from conftest import needs_posix_signals
 
 from treaty import App, Arg, Ctx, Flag, NoArgs, ParseError, RegistrationError, SchemaError
 from treaty._help import render_command
@@ -227,6 +228,7 @@ def test_signal_between_exec_lines_writes_a_cancelled_line() -> None:
     }
 
 
+@needs_posix_signals
 def test_signal_interrupts_exec_waiting_on_stdin() -> None:
     read_fd, write_fd = os.pipe()
     stdin = os.fdopen(read_fd, "r")
@@ -565,7 +567,7 @@ def echo_app() -> App:
 
 def test_parse_error_context_with_objects_still_writes_an_envelope() -> None:
     code, [env], _ = run(echo_app(), ["echo", "--text", "where"])
-    assert code == 2 and env["error"]["context"] == {"path": "/srv", "n": "1.5"}
+    assert code == 2 and env["error"]["context"] == {"path": str(Path("/srv")), "n": "1.5"}
 
 
 def test_exec_keeps_unicode_line_separators_inside_json_strings() -> None:
@@ -658,7 +660,8 @@ def test_leading_inline_flag_pattern_is_rejected_at_registration() -> None:
 def test_mcp_structured_content_escapes_lone_surrogates() -> None:
     from treaty._mcp import without_surrogates
 
-    name = os.fsdecode(b"caf\xe9.txt")
+    # A POSIX filename that is not UTF-8, as os.fsdecode returns it there
+    name = b"caf\xe9.txt".decode("utf-8", "surrogateescape")
     cleaned = without_surrogates({"files": [name], name: 1})
     json.dumps(cleaned, ensure_ascii=False).encode("utf-8")  # strict UTF-8 must succeed
     assert cleaned == {"files": ["caf\\udce9.txt"], "caf\\udce9.txt": 1}

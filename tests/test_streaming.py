@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import spec_validator
+from conftest import needs_posix_signals, spec_validator
 
 from treaty import App, Arg, Ctx, Exit, Flag, ParseError, RegistrationError
 
@@ -241,6 +241,7 @@ def test_help_advertises_streaming() -> None:
 # Signals
 
 
+@needs_posix_signals
 def test_sigint_during_a_stream_ends_it_with_cancelled_after_the_events() -> None:
     proc = subprocess.Popen(
         [sys.executable, str(SLOWCTL), "serve", "--interval", "0.05"],

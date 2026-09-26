@@ -106,7 +106,7 @@ def test_resources_are_acquired_once_in_dependency_order_and_shared() -> None:
     assert code == 0
     assert env["data"] == {
         "effect": "updated",
-        "directory": "/srv/app",
+        "directory": str(Path("/srv/app")),
         "component": "api",
         "same_project": True,
     }
@@ -124,14 +124,14 @@ def test_resources_see_the_dry_run_args_of_an_unconfirmed_destructive_run() -> N
 def test_resources_read_the_context() -> None:
     code, env = run(["deploy", "--component", "api", "--confirm-destructive"], env={"PWD": "/work"})
     assert code == 0
-    assert env["data"]["directory"] == "/work"
+    assert env["data"]["directory"] == str(Path("/work"))
 
 
 def test_cli_exit_inside_acquire_becomes_the_declared_exit() -> None:
     code, env = run(["deploy", "--component", "api", "--project", "/srv/missing"])
     assert code == 80
     assert env["error"]["code"] == "NO_PROJECT"
-    assert env["error"]["context"] == {"directory": "/srv/missing"}
+    assert env["error"]["context"] == {"directory": str(Path("/srv/missing"))}
     assert ACQUIRED == ["project"]
 
 
@@ -158,7 +158,7 @@ def test_exec_route_acquires_resources_too() -> None:
     )
     code, env = run(["exec"], stdin=line + "\n")
     assert code == 0
-    assert env["data"]["directory"] == "/srv/app"
+    assert env["data"]["directory"] == str(Path("/srv/app"))
 
 
 def test_manifest_does_not_mention_resources() -> None:
