@@ -48,6 +48,19 @@ class ToolEntry:
     open_world: bool
 
 
+def without_surrogates(value: object) -> object:
+    """A lone surrogate (a non-UTF-8 filename through os.fsdecode) becomes escaped text:
+    the SDK serializes structured content as strict UTF-8 and would drop the connection.
+    The text content already escapes it, since serialize() writes ASCII."""
+    if isinstance(value, str):
+        return value.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(value, dict):
+        return {without_surrogates(k): without_surrogates(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [without_surrogates(v) for v in value]
+    return value
+
+
 def tool_name(path: CommandPath) -> str:
     """``deploy.rollback`` as ``deploy_rollback``; parts never contain ``_`` so this is injective"""
     return path.value.replace(".", "_")
@@ -187,7 +200,7 @@ def build_server(app: App) -> Any:
         envelope = await asyncio.to_thread(call_tool, app, entries, params.name, arguments)
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=serialize(envelope))],
-            structured_content=envelope.to_json(),
+            structured_content=without_surrogates(envelope.to_json()),
             is_error=not envelope.ok,
         )
 

@@ -11,7 +11,7 @@ import sys
 import time
 import traceback
 import uuid
-from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn
@@ -35,7 +35,7 @@ from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Flag
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
-from ._manifest import build_manifest, build_schema_manifest, command_schema
+from ._manifest import build_manifest, build_schema_manifest, command_entry, command_schema
 from ._mode import OutputMode, resolve_mode
 from ._parse import (
     Invocation,
@@ -600,7 +600,13 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
-        call = fingerprint(command.path, invocation.args, self.app.scalars)
+        try:
+            call = fingerprint(command.path, invocation.args, self.app.scalars)
+        except SchemaError as exc:
+            message = f"{command.path}: its arguments cannot be hashed for the key: {exc}"
+            return self._broken(command, "INVALID_ARGS", message, started, full_meta)
+        except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
+            return self._crashed(command, invocation.args, exc, started, full_meta)
         with contextlib.ExitStack() as held:
             # Only acquiring the key is guarded here: the call itself reports its own errors
             try:
@@ -905,6 +911,9 @@ class _Run:
                 running.append,
                 self.cancellation.armed,
             )
+            if isinstance(produced, Iterable) and not isinstance(produced, (str, bytes, Mapping)):
+                # Registration accepts Iterable[T]: a returned list streams its items
+                produced = iter(produced)
             if not isinstance(produced, Iterator):
                 raise TypeError(
                     f"{command.path} is streaming but returned {type(produced).__name__}, "
@@ -1275,10 +1284,9 @@ class _Run:
 
     def help_command(self, mode: OutputMode, command: Command) -> int:
         if mode is OutputMode.JSON:
-            commands = self.app.manifest()["commands"]
-            assert isinstance(commands, dict)
-            entry = {command.path.value: commands[command.path.value]}
-            return self.emit(mode, self._envelope(0, data=entry))
+            # One entry alone: its full exit table, since no root table comes with it
+            full = command_entry(command, self.app.exits, self.app.commands)
+            return self.emit(mode, self._envelope(0, data={command.path.value: full}))
         self.out.write(render_command(self.app.name, command))
         return 0
 
@@ -1289,7 +1297,9 @@ class _Run:
         text = self._read_plan(args, stdin)
         if isinstance(text, Envelope):
             return self.emit(OutputMode.JSON, text)
-        plan = text.splitlines()
+        # Only \n ends a JSONL line: splitlines() would also break on U+2028, U+2029,
+        # and U+0085, which JSON allows raw inside strings
+        plan = text.removeprefix("\ufeff").split("\n")
         any_failed = False
         parsed_any = False
         lines_seen = 0
@@ -1340,7 +1350,7 @@ class _Run:
         """The whole plan, read before dispatch so a write-then-read caller cannot deadlock"""
         if args.input_file is not None and args.input_file != Path("-"):
             try:
-                return args.input_file.read_text(encoding="utf-8")
+                return args.input_file.read_text(encoding="utf-8-sig")  # tolerate a BOM
             except (OSError, UnicodeDecodeError) as exc:
                 return self._stream_error(
                     "INPUT_FILE_UNREADABLE",
@@ -1405,14 +1415,12 @@ class _Run:
         )
 
     def _exec_lines(self, args: ExecArgs, plan: list[str]) -> Iterator[tuple[int, Envelope]]:
-        line_no = 0
-        for raw in plan:
+        for line_no, raw in enumerate(plan, start=1):  # physical lines, as an editor counts
             if self.cancellation.received is not None:
                 return  # a signal stops the plan before its next line
             line = raw.strip()
             if not line:
                 continue
-            line_no += 1
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:

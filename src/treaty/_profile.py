@@ -114,13 +114,16 @@ def argument_order_for(app: App) -> dict[str, object] | None:
     return None
 
 
-def build_profile(app: App, command: Sequence[str], probes: Sequence[Probe]) -> dict[str, object]:
+def build_profile(
+    app: App, command: Sequence[str], probes: Sequence[Probe], *, beside_profile: bool = False
+) -> dict[str, object]:
     """The kit resolves a slash-containing executable against the profile's directory,
-    so anything relative is made absolute against the current directory here"""
+    so a relative one the caller gave is made absolute against the current directory.
+    ``beside_profile`` keeps a launcher treaty found next to the profile relative.
+    ``absolute()``, not ``resolve()``: a venv's bin/python is a symlink that must stay one."""
     argv = list(command)
-    beside_profile = argv[:1] == [f"./{app.name}"]
     if argv and "/" in argv[0] and not Path(argv[0]).is_absolute() and not beside_profile:
-        argv[0] = str(Path(argv[0]).resolve())
+        argv[0] = str(Path(argv[0]).absolute())
     profile: dict[str, object] = {
         "schema_version": "1.0",
         "tool": f"{app.name} {app.version}",

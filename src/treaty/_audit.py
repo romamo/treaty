@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ._command import Command, DangerLevel
-from ._exit import ExitCodeRegistry
+from ._exit import ExitCodeRegistry, FrameworkCode
 from ._types import FlagType
 
 if TYPE_CHECKING:
@@ -137,12 +137,19 @@ def _exit_codes(app: App) -> Iterator[Finding]:
         )
 
 
+FRAMEWORK_NAMES = frozenset(c.name for c in FrameworkCode)
+
+
 def _retryable(app: App) -> Iterator[Finding]:
     exits: ExitCodeRegistry = app.exits
     for c in user_commands(app):
         if c.danger_level is DangerLevel.SAFE:
             continue
         for name in c.exit_codes:
+            # A framework code cannot be redeclared, and a RATE_LIMITED or UNAVAILABLE call
+            # did nothing (side_effects "none"), so retrying it is safe on any command
+            if name.value in FRAMEWORK_NAMES:
+                continue
             if exits.by_name(name).retryable:
                 yield Finding(
                     "retryable",

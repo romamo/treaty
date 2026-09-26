@@ -13,7 +13,7 @@ from typing import Any
 
 from ._errors import ParseError, RegistrationError
 from ._paths import PATTERN_TYPE, check_path
-from ._scalars import ScalarRegistry, ScalarSpec, anchored
+from ._scalars import ScalarRegistry, ScalarSpec, anchored, check_pattern_publishable
 from ._secrets import source_flags
 from ._types import Classified, FlagType, classify
 
@@ -37,7 +37,7 @@ class FlagSpec:
         if self.short is not None and len(self.short) != 1:
             raise RegistrationError(f"short flag must be one character, got {self.short!r}")
         if self.pattern is not None:
-            re.compile(self.pattern)
+            check_pattern_publishable(self.pattern, "Flag")
 
 
 def Flag(

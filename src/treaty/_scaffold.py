@@ -12,7 +12,13 @@ from ._errors import ParseError
 # PEP 508 names end in a letter or digit; no doubled hyphens
 _NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 # The scaffold's own directories and dependencies: a project named after one breaks
-_TAKEN = frozenset({"treaty", "pytest", "tests", "conformance"})
+# (dist and build are gitignored; pluggy, iniconfig, packaging, pygments are pytest's)
+_TAKEN = frozenset(
+    {
+        *("treaty", "pytest", "tests", "conformance", "dist", "build"),
+        *("pluggy", "iniconfig", "packaging", "pygments"),
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -263,7 +263,9 @@ class ConformanceArgs:
         default=None, description="Profile path, default conformance/<name>.json"
     )
     command: tuple[str, ...] = Flag(
-        default=(), description="Executable argv for probes, default the app name on PATH"
+        default=(),
+        description="Executable argv for probes; default the launcher next to the profile "
+        "(conformance/<name>), else the app name on PATH",
     )
     run: bool = Flag(default=False, description="Run the spec kit after writing the profile")
     spec_dir: Path | None = Flag(
@@ -342,15 +344,16 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     probes = probes_for(app)
     profile_path = out or Path("conformance") / f"{app.name}.json"
     wrapper = profile_path.parent / app.name
+    beside_profile = False
     if args.command:
         command = list(args.command)
     elif wrapper.is_file() and os.access(wrapper, os.X_OK):
         # The scaffold's launcher next to the profile; the kit resolves it from there
-        command = [f"./{app.name}"]
+        command, beside_profile = [f"./{app.name}"], True
     else:
         command = [app.name]
     effect = "updated" if profile_path.exists() else "created"
-    write_profile(build_profile(app, command, probes), profile_path)
+    write_profile(build_profile(app, command, probes, beside_profile=beside_profile), profile_path)
     result = ConformanceOut(effect, str(profile_path), len(probes), False, None, ())
     if spec_dir is None:
         return result

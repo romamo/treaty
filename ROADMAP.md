@@ -5,7 +5,7 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 
 ## Done since the skeleton
 
-- `treaty audit module:app` console script: nine ordered static rules over the registry,
+- `treaty audit module:app` console script: ten ordered static rules over the registry,
   each with a generated fix, human and JSON output, `--all` and `--limit`; `treaty rules`
   lists the rule order
 - `human=` renderer hook on `@app.command` for commands whose human output should not be

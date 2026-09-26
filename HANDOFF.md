@@ -1,6 +1,6 @@
 # Handoff
 
-Status as of 2026-09-25. Read this before touching the code.
+Status as of 2026-09-26. Read this before touching the code.
 
 ## What this is
 
@@ -14,11 +14,11 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 183 passed |
+| `uv run pytest` | 381 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
-| Spec conformance kit against `examples/deployctl.py` | 11 of 11, levels 1 to 3 |
-| Git | initial commit on `main`; no remote, nothing pushed |
+| Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
+| Git | `main`, pushed to `origin` (github.com/romamo/treaty) |
 | PyPI | `treaty` is free; nothing published |
 
 ## Decisions already made
@@ -71,7 +71,7 @@ The two do not share code.
   `resource_graph` walks the closure at registration (missing `acquire`, cycles), and
   `Resolver` acquires each class once per run inside `_invoke`, which runs under the
   timeout so a `CliExit` or `ParseError` from `acquire` takes the normal envelope path. A
-  wrong return type from `acquire` is a `TypeError` and propagates as a bug
+  wrong return type from `acquire` is a `TypeError`, reported as `HANDLER_CRASHED`
 - **Streams are envelope lines, not bare items.** REQ-O-004 shows bare items plus a
   summary line; treaty writes one full envelope per yield with `meta.seq`, then a
   terminal envelope (`end`, `total`), because `exec` already speaks envelope lines and a
@@ -88,9 +88,17 @@ The two do not share code.
   `App.call`. `App.call` is the in-process dispatch API: `build_from_mapping` then
   `execute` or a buffered `stream`, writing nothing. An unknown tool name is
   `UNKNOWN_TOOL` with the tool names, distinct from `App.call`'s `UNKNOWN_COMMAND`
-- **Uncaught handler exceptions propagate.** Only `CliExit`, `ParseError` (a handler
-  validating its own input, exit 2), timeout, and cancellation become envelopes; anything
-  else is a bug and surfaces as a traceback
+- **Every exit writes an envelope.** A handler exception becomes `HANDLER_CRASHED`
+  (exit 1) with the redacted traceback on stderr. Broad `except Exception` exists only
+  where user code runs: the handler, a scalar's `parse=`/`serialize=`, `cleanup=`,
+  `human=`, and an exception's `__str__`. Nowhere else
+- **Exit codes must be declared.** A handler raises only what its manifest entry lists:
+  `exit_codes=`, plus `GENERAL_ERROR`, `ARG_ERROR`, `TIMEOUT`, and on mutating commands
+  `CONFLICT` and `PRECONDITION`. Anything else is `UNDECLARED_EXIT_CODE`
+- **Signals interrupt only a running handler.** `Cancellation.armed()` windows cover the
+  handler, the wait for its worker, the idempotency-key wait, and the exec stdin read; a
+  signal elsewhere is held and raised at the next window, so a finished result is still
+  written. An exec plan stops at the first signal whatever `--ignore-errors` says
 
 ## Layout
 
@@ -120,7 +128,9 @@ src/treaty/
   _mode.py       OutputMode resolution (--format, TREATY_FORMAT, CI, tty)
   _parse.py      globals, path routing, per-command parsing, mapping builder, raw payload
   _schema.py     annotation to draft-07 schema, to_jsonable()
-  _signals.py    SIGINT/SIGTERM handlers, re-entrancy guard
+  _paths.py      check_path(): null bytes, percent-encoding, and .. in Path flags
+  _secrets.py    secret sources (--x-from-env, --x-from-file) and their resolution
+  _signals.py    SIGINT/SIGTERM handlers, Cancellation (armed windows, held signals)
   _timeout.py    Timeout VO, call_with_timeout()
   _types.py      annotation classification shared by _flags and _schema
   _values.py     CommandPath, ExitCodeName, ExitCode, Scope, Etag
@@ -164,9 +174,11 @@ each secret field.
 - `ruff --fix` once rewrote a deliberate `getattr` into attribute access and broke mypy;
   check the diff after autofix
 - `tests/fixture_audit_app.py` is a deliberately flawed app; the audit tests count its
-  findings exactly, so adding a rule means updating `failed == 7` there
+  findings exactly, so adding a rule means updating `failed == 8` there
 - The kit resolves a `command` path containing a slash against the profile's directory;
-  `_profile.build_profile` absolutizes relative launcher paths for that reason
+  `_profile.build_profile` makes a relative `--command` absolute (with `absolute()`, so a
+  venv's `bin/python` symlink survives) and keeps the scaffold's `./<name>` launcher,
+  found next to the profile, relative
 - `run_kit` strips `VIRTUAL_ENV` before calling `uv run --project <spec>`, or uv warns
   about the mismatched environment on stderr
 - `treaty init` needs `--treaty-source <checkout>` until the package is on PyPI

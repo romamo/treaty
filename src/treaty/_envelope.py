@@ -6,23 +6,36 @@ import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import IO
 
 from ._errors import RegistrationError
 
+# Deeper than this, echoed input is cut: an agent needs the shape, not 1,000 brackets
+_MAX_DEPTH = 32
 
-def json_safe(value: object) -> object:
-    """Error context echoes rejected input, which may be NaN or an int too long for
-    ``str()``; both become text so the envelope stays valid JSON"""
-    if isinstance(value, float) and not math.isfinite(value):
-        return str(value)
-    if isinstance(value, int) and not isinstance(value, bool) and value.bit_length() > 1000:
-        return f"an integer of {value.bit_length()} bits"
-    if isinstance(value, dict):
-        return {k: json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [json_safe(v) for v in value]
-    return value
+
+def json_safe(value: object, depth: int = 0) -> object:
+    """Error context is diagnostic and holds whatever a parser or handler put there:
+    rejected input (NaN, an int too long for ``str()``, deep nesting) or objects such
+    as a Decimal or Path. Everything becomes JSON; unknown objects become their text."""
+    if depth > _MAX_DEPTH:
+        return "..."
+    if value is None or isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, int):
+        if value.bit_length() > 1000:
+            return f"an integer of {value.bit_length()} bits"
+        return int(value)  # an IntEnum or other subclass as a plain number
+    if isinstance(value, Enum):
+        return json_safe(value.value, depth + 1)
+    if isinstance(value, Mapping):
+        return {str(k): json_safe(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [json_safe(v, depth + 1) for v in value]
+    return str(value)
 
 
 @dataclass(frozen=True, slots=True)

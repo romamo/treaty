@@ -536,3 +536,150 @@ def test_prune_skips_foreign_entries_and_keeps_going(tmp_path: Path) -> None:
         slot.save(Record("fp", "c", {"effect": "created"}, clock.time()))
         slot.prune(clock.time())
     assert not old.exists() and (tmp_path / "stray.json").is_dir()
+
+
+# Fifth review round
+
+
+def echo_app() -> App:
+    from collections.abc import Iterable
+
+    app = App("echo", version="1")
+
+    @dataclass(frozen=True, slots=True)
+    class Text:
+        text: str = Flag(description="Text")
+
+    @app.command("echo", description="Echo", supports_raw_payload=True, exit_codes=["NOT_FOUND"])
+    def echo(args: Text, ctx: Ctx) -> dict[str, str]:
+        if args.text == "where":
+            raise ParseError("bad place", context={"path": Path("/srv"), "n": Decimal("1.5")})
+        return {"text": args.text}
+
+    @app.command("items", description="Items", streaming=True)
+    def items(args: NoArgs, ctx: Ctx) -> Iterable[dict[str, int]]:
+        return [{"a": 1}, {"a": 2}]
+
+    return app
+
+
+def test_parse_error_context_with_objects_still_writes_an_envelope() -> None:
+    code, [env], _ = run(echo_app(), ["echo", "--text", "where"])
+    assert code == 2 and env["error"]["context"] == {"path": "/srv", "n": "1.5"}
+
+
+def test_exec_keeps_unicode_line_separators_inside_json_strings() -> None:
+    plan = io.StringIO('{"_cmd": "echo", "text": "a b\u0085c"}\n')
+    code, [line], _ = run(echo_app(), ["exec"], stdin=plan)
+    assert code == 0 and line["data"]["text"] == "a b\u0085c"
+
+
+def test_deeply_nested_input_is_an_arg_error() -> None:
+    nested = "[" * 1000 + "]" * 1000
+    code, lines, _ = run(
+        echo_app(), ["exec"], stdin=io.StringIO(f'{{"_cmd": "echo", "text": {nested}}}\n')
+    )
+    assert lines[0]["error"]["code"] == "ARG_ERROR"  # exec exits 1 when any line fails
+    deeper = "[" * 100000 + "]" * 100000
+    code, [env], _ = run(echo_app(), ["echo", "--raw-payload", f'{{"text": {deeper}}}'])
+    assert code == 2
+
+
+def test_single_command_help_carries_its_full_exit_table() -> None:
+    code, [env], _ = run(echo_app(), ["echo", "--help"])
+    assert {"0", "1", "2", "5", "10", "130", "143"} <= set(env["data"]["echo"]["exit_codes"])
+
+
+def test_exec_file_with_a_bom_and_physical_line_numbers(tmp_path: Path) -> None:
+    plan = tmp_path / "plan.jsonl"
+    plan.write_text('{"_cmd": "version"}\n\n\n{"_cmd": "nope"}\n', encoding="utf-8-sig")
+    code, lines, _ = run(echo_app(), ["exec", "--input-file", str(plan), "--ignore-errors"])
+    assert [line["meta"]["_line"] for line in lines] == [1, 4] and lines[0]["ok"] is True
+
+
+def test_streaming_handler_may_return_an_iterable() -> None:
+    code, lines, _ = run(echo_app(), ["items"])
+    assert code == 0 and [line["data"] for line in lines[:2]] == [{"a": 1}, {"a": 2}]
+
+
+def test_profile_keeps_explicit_relative_commands_absolute_without_resolving_symlinks(
+    tmp_path: Path,
+) -> None:
+    from treaty._profile import build_profile
+
+    app = App("deployctl", version="1")
+    venv_python = tmp_path / "bin" / "python"
+    venv_python.parent.mkdir()
+    venv_python.symlink_to(Path(os.__file__))
+    cwd = Path.cwd()
+    os.chdir(tmp_path)
+    try:
+        explicit = build_profile(app, ["./deployctl"], [])["command"]
+        linked = build_profile(app, ["bin/python"], [])["command"]
+        found = build_profile(app, ["./deployctl"], [], beside_profile=True)["command"]
+    finally:
+        os.chdir(cwd)
+    assert explicit == [str(tmp_path / "deployctl")]
+    assert linked == [str(tmp_path / "bin" / "python")]
+    assert found == ["./deployctl"]
+
+
+def test_audit_does_not_ask_to_redeclare_framework_retryable_codes() -> None:
+    from treaty._audit import audit
+
+    app = App("rl", version="1")
+
+    @app.command(
+        "push",
+        description="Push",
+        danger_level="mutating",
+        exit_codes=["RATE_LIMITED"],
+        examples=[("x", "rl push")],
+    )
+    def push(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"effect": "created"}
+
+    by_rule = {r.id: r for r in audit(app, "rl:app", limit=10).rules}
+    assert by_rule["retryable"].findings == ()
+
+
+@pytest.mark.parametrize("name", ["dist", "build", "pluggy", "packaging"])
+def test_init_rejects_names_the_scaffold_or_pytest_use(name: str) -> None:
+    with pytest.raises(ParseError):
+        ProjectName(name)
+
+
+def test_leading_inline_flag_pattern_is_rejected_at_registration() -> None:
+    with pytest.raises(RegistrationError, match="scope inline flags"):
+        Flag(default="a", pattern="(?i)[a-z]+", description="Name")
+    Flag(default="a", pattern="(?i:[a-z]+)", description="Name")
+
+
+def test_mcp_structured_content_escapes_lone_surrogates() -> None:
+    from treaty._mcp import without_surrogates
+
+    name = os.fsdecode(b"caf\xe9.txt")
+    cleaned = without_surrogates({"files": [name], name: 1})
+    json.dumps(cleaned, ensure_ascii=False).encode("utf-8")  # strict UTF-8 must succeed
+    assert cleaned == {"files": ["caf\\udce9.txt"], "caf\\udce9.txt": 1}
+
+
+def test_unhashable_args_with_an_idempotency_key_still_write_an_envelope(tmp_path: Path) -> None:
+    app = App("pay", version="1", state_dir=tmp_path)
+
+    @dataclass(frozen=True, slots=True)
+    class Money:
+        amount: Decimal
+
+    app.scalar(Money, parse=lambda s: Money(Decimal(s)), serialize=lambda m: m.amount)
+
+    @dataclass(frozen=True, slots=True)
+    class Charge:
+        amount: Money = Arg(description="Amount")
+
+    @app.command("charge", description="Charge", danger_level="mutating")
+    def charge(args: Charge, ctx: Ctx) -> dict[str, str]:
+        return {"effect": "created"}
+
+    code, [env], _ = run(app, ["charge", "9.99", "--idempotency-key", "k"])
+    assert code == 1 and env["error"]["code"] == "INVALID_ARGS"

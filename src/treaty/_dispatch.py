@@ -26,7 +26,10 @@ def _no_constant(name: str) -> object:
 def loads_strict(text: str) -> object:
     """``json.loads`` without the NaN and Infinity extensions; also raises ``ValueError``
     for an integer longer than the interpreter's digit limit"""
-    return json.loads(text, parse_constant=_no_constant)
+    try:
+        return json.loads(text, parse_constant=_no_constant)
+    except RecursionError:
+        raise ValueError("JSON nested too deeply") from None
 
 
 def parse_dispatch_line(line: str, line_no: int) -> DispatchRequest:

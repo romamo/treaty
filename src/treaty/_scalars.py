@@ -64,7 +64,7 @@ class ScalarSpec:
         if (self.pattern is not None or self.pattern_type is not None) and self.base is not str:
             raise RegistrationError(f"{name}: a pattern needs base=str")
         if self.pattern is not None:
-            re.compile(self.pattern)
+            check_pattern_publishable(self.pattern, name)
         if (self.minimum is not None or self.maximum is not None) and self.base is str:
             raise RegistrationError(f"{name}: minimum and maximum need base=int or base=float")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
@@ -110,6 +110,19 @@ class ScalarSpec:
             if base_value > self.maximum:
                 return f"must be at most {self.maximum}", {"maximum": self.maximum}
         return None
+
+
+def check_pattern_publishable(pattern: str, where: str) -> None:
+    """The pattern and its anchored manifest form must both compile; a leading (?i)
+    works with re.fullmatch but not once wrapped in ^(?:...)$"""
+    try:
+        re.compile(pattern)
+        re.compile(anchored(pattern))
+    except re.error as exc:
+        raise RegistrationError(
+            f"{where}: pattern {pattern!r} is not publishable ({exc}); scope inline flags "
+            "as (?i:...) instead of a leading (?i)"
+        ) from None
 
 
 def anchored(pattern: str) -> str:
