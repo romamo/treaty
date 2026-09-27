@@ -94,20 +94,13 @@ testpaths = ["tests"]
 
 from dataclasses import dataclass
 
-from treaty import Affects, App, Arg, Ctx, Exit, Flag
+from treaty import Affects, App, Arg, Ctx, Exit, Flag, already_exists
 
 app = App("{n}", version="0.1.0", description="Describe what {n} does")
 app.exit_code(
-    "ALREADY_EXISTS",
+    "ITEM_IN_USE",
     79,
-    description="An item with that name already exists",
-    retryable=False,
-    side_effects="none",
-)
-app.exit_code(
-    "ITEM_NOT_FOUND",
-    80,
-    description="No item with that name exists",
+    description="The item is in use and cannot be deleted",
     retryable=False,
     side_effects="none",
 )
@@ -149,6 +142,7 @@ class Creation:
 class Deletion:
     effect: str
     name: str
+    status: str
     would_affect: Affects | None = None
 
 
@@ -167,13 +161,15 @@ def status(args: ItemArgs, ctx: Ctx) -> Item:
     "create",
     description="Create an item",
     danger_level="mutating",
-    exit_codes=["ALREADY_EXISTS"],
+    exit_codes=["CONFLICT"],
     supports_raw_payload=True,
     examples=[("Create an item", "{n} create widget --note first")],
 )
 def create(args: CreateArgs, ctx: Ctx) -> Creation:
     if args.name == "taken":
-        raise Exit.ALREADY_EXISTS("item exists", context={{"name": args.name}})
+        # A repeated create answers with the item that is there (exit 6, ALREADY_EXISTS)
+        existing = Creation(effect="noop", name=args.name, note="first")
+        raise already_exists(existing, conflict_id=args.name)
     effect = "would_create" if args.dry_run else "created"
     return Creation(effect=effect, name=args.name, note=args.note)
 
@@ -182,16 +178,21 @@ def create(args: CreateArgs, ctx: Ctx) -> Creation:
     "delete",
     description="Delete an item",
     danger_level="destructive",
-    exit_codes=["ITEM_NOT_FOUND"],
+    exit_codes=["ITEM_IN_USE"],
     examples=[("Preview a deletion", "{n} delete widget --dry-run")],
 )
 def delete(args: DeleteArgs, ctx: Ctx) -> Deletion:
+    if args.name == "busy":
+        raise Exit.ITEM_IN_USE("item is in use", context={{"name": args.name}})
     if args.name == "missing":
-        raise Exit.ITEM_NOT_FOUND("no such item", context={{"name": args.name}})
+        # Already gone is what a delete wants: succeed, and say so
+        return Deletion(effect="noop", name=args.name, status="not_found")
     if args.dry_run:
         affects = Affects(f"Deletes item {{args.name}}", (f"item/{{args.name}}",), 1)
-        return Deletion(effect="would_delete", name=args.name, would_affect=affects)
-    return Deletion(effect="deleted", name=args.name)
+        return Deletion(
+            effect="would_delete", name=args.name, status="found", would_affect=affects
+        )
+    return Deletion(effect="deleted", name=args.name, status="deleted")
 
 
 def main() -> None:
@@ -215,9 +216,15 @@ def test_status() -> None:
     assert code == 0 and envelope["data"]["name"] == "widget"
 
 
-def test_create_conflict_uses_declared_exit_code() -> None:
+def test_create_of_an_existing_item_returns_it() -> None:
     code, envelope = run(["create", "taken"])
-    assert code == 79 and envelope["error"]["code"] == "ALREADY_EXISTS"
+    assert code == 6 and envelope["error"]["code"] == "ALREADY_EXISTS"
+    assert envelope["data"]["name"] == "taken"
+
+
+def test_delete_of_a_missing_item_succeeds() -> None:
+    code, envelope = run(["delete", "missing", "--confirm-destructive"])
+    assert code == 0 and envelope["data"]["status"] == "not_found"
 
 
 def test_delete_needs_confirmation() -> None:

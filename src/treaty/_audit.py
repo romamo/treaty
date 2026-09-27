@@ -1004,6 +1004,64 @@ def _retry_hint(app: App) -> Iterator[Finding]:
             )
 
 
+def _effects(schema: object) -> set[str] | None:
+    """The ``effect`` values an output schema admits; None when it is open or absent"""
+    if not isinstance(schema, dict):
+        return None
+    if "anyOf" in schema:
+        found = [_effects(s) for s in schema["anyOf"]]
+        values = [v for v in found if v is not None]
+        return set().union(*values) if values else None
+    effect = schema.get("properties", {}).get("effect")
+    if not isinstance(effect, dict):
+        return None
+    if "anyOf" in effect:
+        return _effects({"anyOf": [{"properties": {"effect": e}} for e in effect["anyOf"]]})
+    enum = effect.get("enum")
+    return {str(v) for v in enum} if isinstance(enum, list) else None
+
+
+def creates(command: Command) -> bool:
+    """The output admits ``effect: "created"``, or, when it does not say, the name is a
+    create verb"""
+    effects = _effects(command.output_schema)
+    if effects is not None:
+        return "created" in effects
+    return command.path.parts[-1].split("-")[0] in ("create", "add", "new", "register")
+
+
+def _already_exists(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.danger_level is DangerLevel.SAFE or not creates(c):
+            continue
+        if "CONFLICT" not in {n.value for n in c.exit_codes}:
+            yield Finding(
+                "already-exists",
+                Severity.ADVICE,
+                c.path.value,
+                "a create command does not declare CONFLICT, so a retried create cannot answer "
+                "with the resource that already exists (REQ-C-028, heuristic)",
+                'exit_codes=("CONFLICT",), then raise treaty.already_exists(existing, '
+                "conflict_id=existing.id) when the resource is there",
+            )
+
+
+def _delete_not_found(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.danger_level is not DangerLevel.DESTRUCTIVE:
+            continue
+        if "NOT_FOUND" in {n.value for n in c.exit_codes}:
+            yield Finding(
+                "delete-not-found",
+                Severity.WARNING,
+                c.path.value,
+                "a delete declares NOT_FOUND; deleting what is already gone succeeds, so a "
+                "retried delete does not fail (REQ-C-028)",
+                'return {"effect": "noop", "status": "not_found"} when the resource is gone, '
+                "and drop NOT_FOUND from exit_codes",
+            )
+
+
 def _profile(app: App) -> Iterator[Finding]:
     if not any(Path("conformance").glob("*.json")):
         yield Finding(
@@ -1138,6 +1196,18 @@ RULES: tuple[Rule, ...] = (
         _env_prefix,
     ),
     Rule("retry-hint", "Rate-limit errors say how long to wait", Severity.WARNING, _retry_hint),
+    Rule(
+        "already-exists",
+        "Create commands answer a repeat with the existing resource",
+        Severity.ADVICE,
+        _already_exists,
+    ),
+    Rule(
+        "delete-not-found",
+        "Deleting a missing resource succeeds as a noop",
+        Severity.WARNING,
+        _delete_not_found,
+    ),
     Rule("profile", "A conformance profile exists for the spec kit", Severity.ADVICE, _profile),
 )
 

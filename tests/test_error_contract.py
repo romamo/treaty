@@ -10,7 +10,9 @@ import pytest
 from conftest import spec_validator
 
 from treaty import (
+    Affects,
     App,
+    Arg,
     Ctx,
     ErrorDetail,
     Exit,
@@ -19,6 +21,7 @@ from treaty import (
     NoArgs,
     RegistrationError,
     RetryStrategy,
+    already_exists,
 )
 from treaty._audit import audit
 from treaty._exit import FrameworkCode, framework_entries
@@ -222,3 +225,123 @@ def test_the_network_context_block_is_absent_for_non_network_errors() -> None:
 
     envelope = app.call("n", {}, env={})
     assert envelope.error is not None and envelope.error.network_context is None
+
+
+# REQ-C-028
+
+
+@dataclass(frozen=True, slots=True)
+class NameArgs:
+    name: str = Arg(description="Resource name")
+
+
+@dataclass(frozen=True, slots=True)
+class Resource:
+    id: str
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class Created:
+    effect: str
+    resource: Resource
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteArgs:
+    name: str = Arg(description="Resource name")
+    dry_run: bool = Flag(default=False, description="Preview")
+
+
+@dataclass(frozen=True, slots=True)
+class Removed:
+    effect: str
+    status: str
+    would_affect: Affects | None = None
+
+
+def resource_app() -> App:
+    store: dict[str, Resource] = {}
+    app = App("res", version="1.0.0")
+
+    @app.command("get", description="Get", danger_level="safe", exit_codes=["NOT_FOUND"])
+    def get(args: NameArgs, ctx: Ctx) -> Resource:
+        if args.name not in store:
+            raise Exit.NOT_FOUND(f"no {args.name}")
+        return store[args.name]
+
+    @app.command("create", description="Create", danger_level="mutating", exit_codes=["CONFLICT"])
+    def create(args: NameArgs, ctx: Ctx) -> Created:
+        if args.name in store:
+            raise already_exists(Created("noop", store[args.name]), conflict_id=args.name)
+        store[args.name] = Resource(args.name, 3)
+        return Created("created", store[args.name])
+
+    @app.command("delete", description="Delete", danger_level="destructive", exit_codes=())
+    def delete(args: DeleteArgs, ctx: Ctx) -> Removed:
+        if args.dry_run:
+            return Removed("would_delete", "found", Affects("Deletes it", (args.name,), 1))
+        if store.pop(args.name, None) is None:
+            return Removed("noop", "not_found")
+        return Removed("deleted", "deleted")
+
+    return app
+
+
+def test_create_called_twice_returns_the_resource_on_both_calls() -> None:
+    app = resource_app()
+    _, first = run(app, ["create", "foo"])
+    _, second = run(app, ["create", "foo"])
+    assert first["data"]["resource"] == second["data"]["resource"] == {"id": "foo", "size": 3}
+
+
+def test_second_call_is_ok_false_exit_6_already_exists_with_the_existing_resource() -> None:
+    app = resource_app()
+    run(app, ["create", "foo"])
+    code, envelope = run(app, ["create", "foo"])
+    error = envelope["error"]
+    assert code == 6 and envelope["ok"] is False and error["code"] == "ALREADY_EXISTS"
+    assert error["retryable"] is False and error["conflict_id"] == "foo"
+    assert envelope["data"]["resource"] == {"id": "foo", "size": 3}
+
+
+def test_agent_can_use_data_from_the_second_call_without_a_follow_up_get() -> None:
+    app = resource_app()
+    run(app, ["create", "foo"])
+    _, second = run(app, ["create", "foo"])
+    _, got = run(app, ["get", "foo"])
+    assert second["data"]["resource"] == got["data"]
+
+
+def test_delete_of_a_non_existent_resource_exits_0_with_not_found() -> None:
+    code, envelope = run(resource_app(), ["delete", "ghost", "--confirm-destructive"])
+    assert code == 0 and envelope["ok"] is True
+    data = envelope["data"]
+    assert data["effect"] == "noop" and data["status"] == "not_found"
+
+
+def test_conflict_6_is_declared_with_a_description_naming_already_exists() -> None:
+    entry = resource_app().manifest()["commands"]["create"]["exit_codes"]["6"]
+    assert entry["name"] == "CONFLICT" and "already exists" in entry["description"]
+
+
+def test_audit_asks_creates_for_conflict_and_deletes_to_drop_not_found() -> None:
+    app = App("aud", version="1.0.0")
+
+    @app.command("add", description="Add", danger_level="mutating", exit_codes=())
+    def make(args: NameArgs, ctx: Ctx) -> Created:
+        return Created("created", Resource(args.name, 1))
+
+    @app.command("drop", description="Drop", danger_level="destructive", exit_codes=["NOT_FOUND"])
+    def drop(args: DeleteArgs, ctx: Ctx) -> Removed:
+        return Removed("deleted", "deleted")
+
+    rules = {r.id: r for r in audit(app, "aud", limit=3).rules}
+    assert [f.command for f in rules["already-exists"].findings] == ["add"]
+    assert "treaty.already_exists(" in rules["already-exists"].findings[0].fix
+    assert [f.command for f in rules["delete-not-found"].findings] == ["drop"]
+    assert '"not_found"' in rules["delete-not-found"].findings[0].fix
+    # Declaring CONFLICT on the create answers the first rule
+    assert not [f for f in audit(resource_app(), "res", limit=3).rules if f.id == "already-exists"][
+        0
+    ].findings

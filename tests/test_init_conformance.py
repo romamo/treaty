@@ -46,7 +46,7 @@ def test_init_scaffolds_a_project_that_passes_audit(tmp_path: Path, monkeypatch)
     out = io.StringIO()
     assert (
         module.app.run(["create", "taken"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
-        == 79
+        == 6
     )
     monkeypatch.chdir(project)
     code, env = run_cli(["audit", "shop_tool.cli:app", "--all"])
