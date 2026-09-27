@@ -2,9 +2,12 @@
 
 uv run -m examples.hello greet world
 uv run -m examples.hello greet Ada --shout --format plain
+uv run -m examples.hello greet Ada --format csv
 uv run -m examples.hello manifest
 """
 
+import csv
+import io
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -12,8 +15,19 @@ from treaty import App, Arg, Ctx, Flag, Format
 
 from .greetings import Greeting, Name, greet
 
+
+def render_csv(data: Mapping[str, object]) -> str:
+    """Any flat result as a header row and one row of values"""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(data.keys())
+    writer.writerow(data.values())
+    return out.getvalue()
+
+
 app = App("hello", version="0.1")
 app.scalar(Name, parse=Name)
+app.format(Format.CSV, render=render_csv)
 
 
 @dataclass(frozen=True, slots=True)

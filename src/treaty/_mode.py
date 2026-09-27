@@ -25,26 +25,25 @@ def resolve_mode(
     env: Mapping[str, str],
     stdout_isatty: bool,
     offered: Collection[Format],
+    app_name: str,
 ) -> Format:
     if explicit is not None:
+        context = {
+            "flag": "format",
+            "value": explicit,
+            "allowed": [m.value for m in Format if m in offered],
+        }
         try:
-            mode: Format | None = Format(explicit)
+            mode = Format(explicit)
         except ValueError:
-            mode = None
-        # A format this app has no renderer for is as unknown as a misspelled one
-        if mode is None or mode not in offered:
-            raise ParseError(
-                f"unknown --format {explicit!r}",
-                context={
-                    "flag": "format",
-                    "value": explicit,
-                    "allowed": [m.value for m in Format if m in offered],
-                },
-            )
+            raise ParseError(f"unknown --format {explicit!r}", context=context) from None
+        if mode not in offered:
+            # A real format with no renderer registered, not a typo
+            raise ParseError(f"{app_name} does not offer --format {explicit!r}", context=context)
         return mode
     forced = env.get("TREATY_FORMAT")
     if forced is not None:
-        return resolve_mode(forced, {}, stdout_isatty, offered)
+        return resolve_mode(forced, {}, stdout_isatty, offered, app_name)
     if not stdout_isatty or env.get("CI"):
         return Format.JSON
     return Format.PLAIN

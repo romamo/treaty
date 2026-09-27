@@ -35,3 +35,9 @@ def test_cli_prints_the_greeting_in_plain_mode() -> None:
     out = io.StringIO()
     code = app.run(["greet", "Ada", "--format", "plain"], stdout=out, stderr=io.StringIO())
     assert code == 0 and out.getvalue() == "Hello, Ada!\n"
+
+
+def test_cli_prints_the_greeting_as_csv() -> None:
+    out = io.StringIO()
+    code = app.run(["greet", "Ada", "--format", "csv"], stdout=out, stderr=io.StringIO())
+    assert code == 0 and out.getvalue() == 'message\n"Hello, Ada!"\n'

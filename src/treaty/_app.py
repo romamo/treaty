@@ -469,7 +469,11 @@ class App:
         try:
             globals_, rest = split_globals(argv)
             mode = resolve_mode(
-                globals_.format, environ, out.isatty() if isatty is None else isatty, self.formats
+                globals_.format,
+                environ,
+                out.isatty() if isatty is None else isatty,
+                self.formats,
+                self.name,
             )
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output)
         except ParseError as exc:

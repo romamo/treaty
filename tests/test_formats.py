@@ -115,6 +115,15 @@ def test_a_known_format_without_a_renderer_is_not_offered(
     code = formats_app().run(argv, stdout=out, stderr=io.StringIO(), env=env, isatty=False)
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and error["code"] == "ARG_ERROR"
+    assert error["message"] == "showctl does not offer --format 'yaml'"
+    assert error["context"]["allowed"] == ["plain", "json", "csv"]
+
+
+def test_a_value_outside_format_is_unknown() -> None:
+    out = io.StringIO()
+    code = formats_app().run(["show", "--format", "xml"], stdout=out, stderr=io.StringIO(), env={})
+    error = json.loads(out.getvalue())["error"]
+    assert code == 2 and error["message"] == "unknown --format 'xml'"
     assert error["context"]["allowed"] == ["plain", "json", "csv"]
 
 
