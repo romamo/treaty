@@ -42,9 +42,14 @@ def read_trace_id(env: Mapping[str, str]) -> str | None:
 
 def logical_cwd(env: Mapping[str, str]) -> Path:
     """The working directory as ``pwd`` prints it: ``PWD`` when it names the same
-    directory as ``os.getcwd()``, so a symlinked ``/tmp`` stays ``/tmp`` (REQ-F-027)"""
-    physical = Path.cwd()
+    directory as ``os.getcwd()``, so a symlinked ``/tmp`` stays ``/tmp`` (REQ-F-027).
+    A working directory removed under the process has no physical path: then ``PWD``,
+    or the root, stands in, so help and version still answer (REQ-F-068)."""
     pwd = env.get("PWD")
+    try:
+        physical = Path.cwd()
+    except FileNotFoundError:
+        return Path(pwd) if pwd and os.path.isabs(pwd) else Path(os.sep)
     if pwd and os.path.isabs(pwd):
         try:
             if os.path.samefile(pwd, physical):

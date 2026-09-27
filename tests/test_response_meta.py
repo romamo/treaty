@@ -747,3 +747,25 @@ def test_a_compat_shape_of_a_steps_command_is_an_object() -> None:
         def apply(args: NoArgs, ctx: Ctx) -> Applied:
             ctx.step("check")
             return Applied("noop")
+
+
+@pytest.mark.skipif(WINDOWS, reason="Windows cannot remove a process's working directory")
+def test_help_and_version_answer_in_a_removed_working_directory(tmp_path: Path) -> None:
+    gone = tmp_path / "gone"
+    script = (
+        "import os, runpy, sys; os.rmdir(os.getcwd()); sys.argv[:] = sys.argv[1:]; "
+        "runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
+    for argv in (["--help"], ["--version"], ["where"]):
+        gone.mkdir()
+        proc = subprocess.run(
+            [sys.executable, "-c", script, str(METACTL), *argv],
+            cwd=gone,
+            env={"PATH": os.environ["PATH"], "PWD": str(gone)},
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert "Traceback" not in proc.stderr, argv
+        assert proc.returncode == 0 or json.loads(proc.stdout)["meta"]["cwd"] == str(gone), argv
