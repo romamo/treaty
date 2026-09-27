@@ -500,7 +500,7 @@ class App:
         self._notifier_hooks.append(fn)
         return fn
 
-    def silence_notifiers(self, env: MutableMapping[str, str]) -> None:
+    def _silence_notifiers(self, env: MutableMapping[str, str]) -> None:
         """The app's own ``suppress_update_notifier`` hooks, in registration order"""
         for hook in self._notifier_hooks:
             hook(env)
@@ -539,7 +539,7 @@ class App:
         if default:
             self.default_tokenizer = name
 
-    def renderer(self, command: Command, mode: Format) -> Renderer | None:
+    def _renderer(self, command: Command, mode: Format) -> Renderer | None:
         """The command's renderer for a text mode, else the app's; None is plain's built-in"""
         if mode is Format.ID:
             assert command.id_field is not None
@@ -955,7 +955,7 @@ class App:
         self._redirects[source] = Moved(target, RedirectReason(reason), permanent)
         self._commands[target] = dataclasses.replace(command, aliases=(*command.aliases, source))
 
-    def moved(self, words: Sequence[str]) -> tuple[CommandPath, Moved, tuple[str, ...]] | None:
+    def _moved(self, words: Sequence[str]) -> tuple[CommandPath, Moved, tuple[str, ...]] | None:
         """The redirect whose old path starts ``words``, with the words after it"""
         for source, moved in self._redirects.items():
             n = len(source.parts)
@@ -963,7 +963,7 @@ class App:
                 return source, moved, tuple(words[n:])
         return None
 
-    def check_fixes(self) -> None:
+    def _check_fixes(self) -> None:
         """Every declared ``fix_commands`` value names a command that exists and is not
         destructive, and every ``Deprecated(replacement=)`` a command; run once the table
         is in use, since a target may register late"""
@@ -978,15 +978,15 @@ class App:
                         "registered command"
                     )
             for error_code, fix in command.fix_commands.items():
-                problem = self.fix_problem(fix)
+                problem = self._fix_problem(fix)
                 if problem is not None:
                     raise RegistrationError(f"{path}: fix_commands[{error_code!r}]: {problem}")
-            problems = self.named_commands(command)
+            problems = self._named_commands(command)
             if problems:
                 raise RegistrationError(f"{path}: {problems[0]}")
         self._fixes_checked = True
 
-    def named_commands(self, command: Command) -> list[str]:
+    def _named_commands(self, command: Command) -> list[str]:
         """Each ``clearable_with`` and ``cleanup_command`` that does not run a command of
         this app (08-D2)"""
         found: list[str] = []
@@ -1005,7 +1005,7 @@ class App:
                     found.append(f"SideEffect(clearable_with=...): {problem}")
         return found
 
-    def fix_problem(self, fix: object) -> str | None:
+    def _fix_problem(self, fix: object) -> str | None:
         """Why ``fix`` cannot be an ``error.fix_command`` of this app, or None"""
         return fix_problem(
             fix, app_name=self.name, companions=self.companions, commands=self._commands
@@ -1332,11 +1332,10 @@ class App:
         return self._commands
 
     def manifest(self) -> dict[str, object]:
-        self.check_fixes()
+        self._check_fixes()
         return build_manifest(
             self._commands,
             self.exits,
-            self.version,
             self.formats,
             self.name,
             dependencies=[d.to_json() for d in self.dependencies],
@@ -1358,7 +1357,7 @@ class App:
         }
         return rows + sorted(secrets.items())
 
-    def effective_timeout(self, command: Command, override: Timeout | None) -> Timeout:
+    def _effective_timeout(self, command: Command, override: Timeout | None) -> Timeout:
         if override is not None:
             return override
         if command.timeout is not None:
@@ -1385,7 +1384,7 @@ class App:
         values stay raw. Used by the MCP adapter, which never unmasks.
         """
         environ = env if env is not None else os.environ
-        self.check_fixes()
+        self._check_fixes()
         # Tracebacks of crashed or late handlers go to the host process's stderr
         run = _Run(self, io.StringIO(), sys.stderr, environ)
         run.unmask = unmask
@@ -1415,7 +1414,7 @@ class App:
         except InvalidValue as exc:
             return run.arg_error(ParseError(str(exc), context={"_cmd": path}), meta=meta)
         command = self._commands.get(command_path)
-        if command is None and (found := self.moved(command_path.parts)) is not None:
+        if command is None and (found := self._moved(command_path.parts)) is not None:
             source, moved, _ = found
             return run.redirected(source, moved, moved.to.value, meta=meta)
         if command is None or command_path == EXEC_PATH:
@@ -1447,7 +1446,10 @@ class App:
                     ),
                     meta=meta,
                 )
-            if invocation.timeout is None and self.effective_timeout(command, None).seconds is None:
+            if (
+                invocation.timeout is None
+                and self._effective_timeout(command, None).seconds is None
+            ):
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
             return buffer_stream(
                 run.stream(command, invocation, Format.JSON, meta=meta, whole=True)
@@ -1464,7 +1466,7 @@ class App:
         # run() callers such as tests and embedders pass their own env
         quiet_children(os.environ, stdout_isatty=stdout_tty, stdin_isatty=stdin_tty)
         if suppress_updates({"CI": ci or ""}, interactive=stdout_tty and stdin_tty):
-            self.silence_notifiers(os.environ)  # REQ-F-050: before any command runs
+            self._silence_notifiers(os.environ)  # REQ-F-050: before any command runs
         # REQ-F-053: every line reaches a pipe reader as it is written, here and in children
         os.environ["PYTHONUNBUFFERED"] = "1"
         # The run decides from CI as it was started: the CI=1 set above for libraries
@@ -1513,7 +1515,7 @@ class App:
         env: Mapping[str, str] | None = None,
         isatty: bool | None = None,
     ) -> int:
-        self.check_fixes()
+        self._check_fixes()
         # A closed descriptor leaves its sys stream None: then only the exit code answers,
         # and stdin reads as empty
         out = stdout if stdout is not None else sys.stdout or io.StringIO()
@@ -1600,7 +1602,7 @@ class App:
         if route.path is None and not route.prefix and route.tokens == ("--version",):
             # Root-only alias so a command's own --version flag is never shadowed
             route = Route(path=VERSION_PATH, prefix=VERSION_PATH.parts, tokens=())
-        if route.path is None and route.tokens and (found := self.moved(rest)) is not None:
+        if route.path is None and route.tokens and (found := self._moved(rest)) is not None:
             source, moved, remaining = found
             replacement = shlex.join([self.name, *moved.to.parts, *remaining])
             return run.emit(mode, run.redirected(source, moved, replacement))
@@ -1663,7 +1665,7 @@ class App:
                 assert isinstance(invocation.args, ExecArgs)
                 run.argv = None  # a line's hint cannot rerun the whole plan
                 return run.exec(invocation.args)
-            render = self.renderer(command, mode)
+            render = self._renderer(command, mode)
             if command.streaming:
                 if invocation.no_stream:
                     envelopes = run.stream(command, invocation, mode, whole=True)
@@ -1712,7 +1714,7 @@ def _invoke(
     ``provided`` holds what the run already has, such as the settings. The run's teardown
     follows here, on the handler's thread, however it ended; a stream's follows its
     generator instead (REQ-C-017)."""
-    teardown, steps = ctx.teardown, ctx.steps
+    teardown, steps = ctx._teardown, ctx._steps
     if teardown is None:
         return _call(app, command, args, ctx, provided)
     teardown.begin()
@@ -2284,7 +2286,7 @@ class _Run:
             **child_settings(color=False, interactive=self.interactive, ci=quiet),
         }
         if quiet:
-            self.app.silence_notifiers(child_env)
+            self.app._silence_notifiers(child_env)
         if not command.preserve_locale:
             child_env.update(C_LOCALE)  # REQ-F-066: English messages, dot decimals
         proxies = ProxyConfig(self.env, invocation.proxy, invocation.no_proxy)
@@ -2346,9 +2348,9 @@ class _Run:
             color=mode is not Format.JSON and color_allowed(self.env, self.tty),
             headless=headless,
             cwd=self.cwd,
-            log_sink=self._log_sink(command, args, mode),
-            processes=self.processes,
-            prompter=Prompter(
+            _log_sink=self._log_sink(command, args, mode),
+            _processes=self.processes,
+            _prompter=Prompter(
                 command=command.path.value,
                 declared=command.interactive,
                 editor_alternatives=command.editor_alternatives,
@@ -2358,7 +2360,7 @@ class _Run:
                 stderr=self.err.stream,
                 env=self.env,
             ),
-            warn_sink=self._warn,
+            _warn_sink=self._warn,
             idempotency_key=idempotency_key,
             stdin_text=invocation.stdin_text,
             page=page,
@@ -2366,11 +2368,11 @@ class _Run:
             _config_file=self.config_file if command.config_write_scope is not None else None,
             trace_id=self.trace_id,
             project_root=self.project_root(command),
-            retrier=self.retrier,
-            locks=Locks(self.locks_dir(), deadline),
-            teardown=self.teardown,
-            steps=self.steps,
-            session=self.processes.session,
+            _retrier=self.retrier,
+            _locks=Locks(self.locks_dir(), deadline),
+            _teardown=self.teardown,
+            _steps=self.steps,
+            _session=self.processes.session,
             _cache=self.cache_for(command, invocation),
             _http=Http(
                 proxies,
@@ -3057,7 +3059,7 @@ class _Run:
         if _previewing(command, invocation) or _dry_run_requested(invocation.args):
             return self._execute(command, invocation, mode, meta=meta)
         started = time.perf_counter()
-        timeout = self.app.effective_timeout(command, invocation.timeout)
+        timeout = self.app._effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
         directory = state_dir(
             self.app.name, self.app.state_dir, self.env, self.settings.options.instance_id
@@ -3336,7 +3338,7 @@ class _Run:
         self.abandoned = None
         self.page = None
         started = time.perf_counter()
-        timeout = self.app.effective_timeout(command, invocation.timeout)
+        timeout = self.app._effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
         key = invocation.idempotency_key
         position = invocation.cursor if invocation.cursor is not None else Position()
@@ -3594,7 +3596,7 @@ class _Run:
             return
         started = time.perf_counter()
         waiting_since = started
-        timeout = self.app.effective_timeout(command, invocation.timeout)
+        timeout = self.app._effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
         ctx = self._ctx(command, invocation.args, mode, timeout, invocation=invocation)
         before = _process_cwd()
@@ -3982,7 +3984,7 @@ class _Run:
                 )
                 return self._broken(command, "INVALID_EXIT", message, started, meta)
         if exc.fix_command is not None:
-            problem = self.app.fix_problem(exc.fix_command)
+            problem = self.app._fix_problem(exc.fix_command)
             if problem is not None:
                 message = f"Command {command.path} raised {exc.name} with fix_command {problem}"
                 return self._broken(command, "INVALID_EXIT", message, started, meta)
@@ -4370,9 +4372,7 @@ class _Run:
             subtree = {
                 p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
             }
-            data = build_manifest(
-                subtree, self.app.exits, self.app.version, self.app.formats, self.app.name
-            )
+            data = build_manifest(subtree, self.app.exits, self.app.formats, self.app.name)
         return self.emit(mode, self._envelope(0, data=data), render=_json_text, settle=False)
 
     def show_config(self, mode: Format) -> int:
@@ -4652,7 +4652,7 @@ class _Run:
                 continue
             meta["_cmd"] = request.path.value
             command = self.app.commands.get(request.path)
-            if command is None and (found := self.app.moved(request.path.parts)) is not None:
+            if command is None and (found := self.app._moved(request.path.parts)) is not None:
                 source, moved, _ = found
                 # A plan line names the command by its path, so that is what it resends
                 yield line_no, self.redirected(source, moved, moved.to.value, meta=meta)

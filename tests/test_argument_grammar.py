@@ -26,7 +26,7 @@ from treaty import (
     RequiredWhen,
 )
 from treaty._audit import audit
-from treaty._cli import cli
+from treaty._cli import cli, read_baseline
 
 
 def run(
@@ -807,7 +807,9 @@ def test_removing_a_subcommand_without_a_prior_deprecation_release_fails_the_aud
     )
     assert all(
         r.passed
-        for r in audit(versioned_app("2.0.0", stage="gone"), "t", limit=3, baseline=released).rules
+        for r in audit(
+            versioned_app("2.0.0", stage="gone"), "t", limit=3, baseline=released, released="1.0.0"
+        ).rules
         if r.id == "additive"
     )
     baseline = tmp_path / "manifest.json"
@@ -892,3 +894,14 @@ def test_a_deprecated_replacement_must_be_a_registered_command() -> None:
         app.run(["a"], stdout=io.StringIO(), stderr=io.StringIO(), env={})
     with pytest.raises(RegistrationError, match="tool version"):
         Deprecated("soon")
+
+
+def test_a_baseline_audit_reads_the_released_app_version_from_meta_tool_version(
+    tmp_path: Any,
+) -> None:
+    saved = tmp_path / "manifest.json"
+    manifest = versioned_app("1.0.0", stage="both").manifest()
+    saved.write_text(json.dumps({"data": manifest, "meta": {"tool_version": "1.0.0"}}))
+    assert read_baseline(saved) == (manifest, "1.0.0")
+    saved.write_text(json.dumps(manifest))
+    assert read_baseline(saved) == (manifest, None)

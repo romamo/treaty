@@ -471,7 +471,7 @@ def _http_client(app: App) -> Iterator[Finding]:
 
 def _declared_commands(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        for problem in app.named_commands(c):
+        for problem in app._named_commands(c):
             yield Finding(
                 "declared-commands",
                 Severity.ERROR,
@@ -2035,12 +2035,14 @@ RULES: tuple[Rule, ...] = (
 _DEPRECATED_MARK = re.compile(r"\(deprecated since [^)]*\)$")
 
 
-def removals(app: App, baseline: Mapping[str, object]) -> Iterator[Finding]:
+def removals(
+    app: App, baseline: Mapping[str, object], released: str | None = None
+) -> Iterator[Finding]:
     """REQ-F-075 (04-D3): what the released manifest ``baseline`` lists that the app no
     longer has. A command may go once redirected, or once the baseline showed it
-    deprecated; a flag once the baseline showed it deprecated; anything at a new major."""
-    old_version = baseline.get("framework_version")
-    if isinstance(old_version, str) and _major(app.version) > _major(old_version):
+    deprecated; a flag once the baseline showed it deprecated; anything at a new major
+    than ``released``, the app version that served the baseline (its ``meta.tool_version``)"""
+    if released is not None and _major(app.version) > _major(released):
         return
     new = app.manifest()
     old_commands = baseline["commands"]
@@ -2049,7 +2051,7 @@ def removals(app: App, baseline: Mapping[str, object]) -> Iterator[Finding]:
     for path, entry in sorted(old_commands.items()):
         current = new_commands.get(path)
         if current is None:
-            if app.moved(tuple(path.split("."))) is None and not _deprecated(entry):
+            if app._moved(tuple(path.split("."))) is None and not _deprecated(entry):
                 yield Finding(
                     "additive",
                     Severity.ERROR,
@@ -2102,12 +2104,17 @@ ADDITIVE = Rule(
 
 
 def audit(
-    app: App, target: str, *, limit: int, baseline: Mapping[str, object] | None = None
+    app: App,
+    target: str,
+    *,
+    limit: int,
+    baseline: Mapping[str, object] | None = None,
+    released: str | None = None,
 ) -> AuditReport:
     results: list[RuleResult] = []
     rules = list(RULES)
     if baseline is not None:
-        rules.append(dataclasses.replace(ADDITIVE, check=lambda a: removals(a, baseline)))
+        rules.append(dataclasses.replace(ADDITIVE, check=lambda a: removals(a, baseline, released)))
     for rule in rules:
         findings = tuple(rule.check(app))
         results.append(RuleResult(rule.id, rule.title, rule.severity.value, not findings, findings))

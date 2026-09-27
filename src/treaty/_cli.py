@@ -164,8 +164,9 @@ def load_app(target: str) -> App:
     return obj
 
 
-def read_baseline(path: Path) -> dict[str, object]:
-    """A saved ``tool manifest`` response, or its ``data``"""
+def read_baseline(path: Path) -> tuple[dict[str, object], str | None]:
+    """A saved ``tool manifest`` response, or its ``data``; with the app version that
+    served it, when the response's ``meta.tool_version`` is there"""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -183,7 +184,9 @@ def read_baseline(path: Path) -> dict[str, object]:
             context={"baseline": str(path)},
             suggestion="save one with: tool manifest --format json > manifest.json",
         )
-    return manifest
+    meta = loaded.get("meta") if manifest is not loaded else None
+    released = meta.get("tool_version") if isinstance(meta, dict) else None
+    return manifest, released if isinstance(released, str) else None
 
 
 def _to_out(report: AuditReport, show_all: bool) -> AuditOut:
@@ -242,8 +245,8 @@ def render_audit(data: Any) -> str:
 )
 def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     app = load_app(args.target)
-    baseline = None if args.baseline is None else read_baseline(args.baseline)
-    report = audit(app, args.target, limit=args.limit, baseline=baseline)
+    baseline, released = (None, None) if args.baseline is None else read_baseline(args.baseline)
+    report = audit(app, args.target, limit=args.limit, baseline=baseline, released=released)
     out = _to_out(report, args.all)
     if args.strict:
         blocking = [f for r in report.rules for f in r.findings if f.severity in BLOCKING]
@@ -354,7 +357,7 @@ def changelog_add_command(args: ChangelogAddArgs, ctx: Ctx) -> ChangelogAddOut:
     entries = load_changelog(path, app.name)
     if entries and entries[0].etag == live["etag"]:
         return ChangelogAddOut("noop", str(path), str(snapshot), None)
-    old = read_baseline(snapshot) if snapshot.is_file() else None
+    old = read_baseline(snapshot)[0] if snapshot.is_file() else None
     today = datetime.now(UTC).date()
     entries, entry = record(entries, diff(old, live), app.version, str(live["etag"]), today)
     effect = "updated" if path.is_file() else "created"

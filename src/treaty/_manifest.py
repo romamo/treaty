@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from importlib.metadata import version
 
 from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
 from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, NO_UPDATE, app_var
@@ -459,14 +460,14 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
 def build_manifest(
     commands: Mapping[CommandPath, Command],
     exits: ExitCodeRegistry,
-    framework_version: str,
     formats: Sequence[Format],
     app_name: str,
     *,
     dependencies: Sequence[Mapping[str, str]] = (),
 ) -> dict[str, object]:
     """The manifest tree with the shared exit-code table hoisted to the root; the app's
-    declared ``dependencies`` too, when it has any (REQ-O-031)"""
+    declared ``dependencies`` too, when it has any (REQ-O-031). ``framework_version`` is
+    treaty's own version; the app's is ``meta.tool_version`` of the response"""
     shared = shared_exit_codes(exits)
     flags = global_flag_entries(formats, app_name)
     entries = {
@@ -486,7 +487,7 @@ def build_manifest(
     etag = Etag(f"sha256:{digest[:32]}")
     manifest: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
-        "framework_version": framework_version,
+        "framework_version": version("treaty"),
         "etag": etag.value,
         "flags": flags,
         "exit_codes": shared,
