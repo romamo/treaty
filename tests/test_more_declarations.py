@@ -378,7 +378,12 @@ def test_doctor_format_json_includes_a_dependencies_array_with_all_declared_depe
     code, env = doctor(deps_app(PYTHON, other))
     assert code == 0
     data = env["data"]
-    assert isinstance(data, dict) and data["checks"] == []
+    assert isinstance(data, dict)
+    # Each dependency is a check too (REQ-O-026)
+    assert [(c["name"], c["ok"], c["commands"]) for c in data["checks"]] == [
+        ("py", True, []),
+        ("python", True, []),
+    ]
     [first, second] = data["dependencies"]
     assert [first["name"], second["name"]] == ["py", "python"]
     assert first == {

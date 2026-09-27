@@ -76,7 +76,10 @@ def register_doctor(app: App) -> CommandPath:
         declared = {d.name: d for d in app.dependencies}
         found = {name: find(d.check_command, d.version_regex, ctx) for name, d in declared.items()}
         dependencies = [dependency_result(declared[n], found[n], ctx) for n in sorted(declared)]
-        needed: dict[str, tuple[Version, list[str]]] = {}
+        # Every dependency is a check too (REQ-O-026), at the highest minimum anything needs
+        needed: dict[str, tuple[Version, list[str]]] = {
+            name: (d.minimum, []) for name, d in declared.items()
+        }
         for path, command in app.commands.items():
             for tool, minimum in command.required_tools.items():
                 current, users = needed.get(tool, (minimum, []))
@@ -91,16 +94,14 @@ def register_doctor(app: App) -> CommandPath:
         checks += [_app_check(check, ctx) for check in app.checks]
         checks.sort(key=lambda c: str(c["name"]))
         report: dict[str, object] = {"checks": checks, "dependencies": dependencies}
-        failed = [e for e in (*checks, *dependencies) if not e["ok"]]
+        failed = [e for e in checks if not e["ok"]]
         if failed:
-            total = len(checks) + len(dependencies)
             raise CliExit(
                 ExitCodeName("PRECONDITION"),
-                f"{len(failed)} of {total} checks failed",
+                f"{len(failed)} of {len(checks)} checks failed",
                 code=DOCTOR_CHECKS_FAILED,
                 context={"failed": sorted(str(e["name"]) for e in failed)},
-                fix_required="Apply the fix listed for each failed check in data.dependencies "
-                "(fix_command) and data.checks (fix)",
+                fix_required="Apply the fix listed for each failed check in data.checks",
                 data=report,
             )
         return report

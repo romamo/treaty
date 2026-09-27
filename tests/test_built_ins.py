@@ -16,7 +16,7 @@ from conftest import needs_posix_permissions, spec_validator
 from test_network_and_fs import Origin, Proxy, serving
 
 from examples.deployctl import app as deployctl
-from treaty import App, Check, Ctx, NoArgs, RegistrationError, SideEffect, endpoint
+from treaty import App, Check, Ctx, Dependency, NoArgs, RegistrationError, SideEffect, endpoint
 from treaty._audit import audit
 from treaty._changelog import diff
 from treaty._deps import CheckFn
@@ -179,6 +179,16 @@ def test_a_missing_required_dependency_appears_as_a_failed_check_with_ok_false()
     (check,) = data_of(envelope)["checks"]  # type: ignore[misc]
     assert check["name"] == "no-such-tool-xyz" and check["ok"] is False
     assert check["version"] is None and check["fix"]
+
+
+def test_a_missing_declared_dependency_is_a_failed_check_too() -> None:
+    gone = Dependency("gone", ("treaty-no-such-tool", "--version"), "1.0", "brew install gone")
+    app = App("deps", version="1.0.0", dependencies=[gone])
+    code, envelope = run(app, ["doctor"])
+    assert code == 4
+    (check,) = data_of(envelope)["checks"]  # type: ignore[misc]
+    assert check["name"] == "gone" and check["ok"] is False
+    assert check["fix"] == "brew install gone" and check["version"] is None
 
 
 def test_tool_doctor_exit_code_is_0_iff_all_checks_pass_otherwise_4_with_the_report(
