@@ -45,6 +45,22 @@
       "kind": "read"
     },
     {
+      "name": "status built-in",
+      "argv": [
+        "status"
+      ],
+      "kind": "read"
+    },
+    {
+      "name": "manifest malformed etag",
+      "argv": [
+        "manifest",
+        "--etag",
+        "x"
+      ],
+      "kind": "invalid"
+    },
+    {
       "name": "unknown flag",
       "argv": [
         "list",
