@@ -252,6 +252,14 @@ def resolve(
         raise ParseError(
             f"settings are invalid: {exc}", code=INVALID, context={"sources": sources}
         ) from None
+    except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
+        # A ValueError there is how a dataclass refuses a value; read before routing, it
+        # must not take help and version down with a traceback (REQ-F-068)
+        raise ParseError(
+            f"settings are invalid: {type(exc).__name__}: {exc}",
+            code=INVALID,
+            context={"sources": sources},
+        ) from None
     effective = {k: to_jsonable(v, scalars, base=cwd) for k, v in values.items()}
     files = tuple(p for p, _ in loaded)
     return Resolved(value, effective, sources, files, candidates, context, opts)

@@ -631,3 +631,29 @@ def test_help_on_a_command_that_would_otherwise_fail_must_succeed_with_exit_0(
         code, envelope = configctl(argv, env)
         assert code == 2 and envelope["error"]["code"] == "CONFIG_INVALID", argv
     assert app.call("show", {}, env=env).error.code == "CONFIG_INVALID"
+
+
+@dataclass(frozen=True, slots=True)
+class Checked:
+    port: int = 80
+
+    def __post_init__(self) -> None:
+        if self.port < 0:
+            raise ValueError("port must be 0 or more")
+
+
+def test_a_settings_post_init_that_refuses_a_value_exits_2_and_spares_help() -> None:
+    app = App("my-tool", version="1.0.0", description="Rows", settings=Checked)
+
+    @app.command("port", description="Show the port", danger_level="safe", exit_codes=())
+    def port(args: NoArgs, ctx: Ctx, settings: Checked) -> dict[str, int]:
+        return {"port": settings.port}
+
+    env = {"MY_TOOL_PORT": "-1"}
+    for argv in (["--help"], ["--version"], []):
+        assert run(argv, env, app=app)[0] == 0, argv
+    code, out, _ = run(["port"], env, app=app)
+    error = json.loads(out)["error"]
+    assert code == 2 and error["code"] == "CONFIG_INVALID"
+    assert "port must be 0 or more" in error["message"]
+    assert app.call("port", {}, env=env).exit_code == 2
