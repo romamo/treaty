@@ -48,7 +48,7 @@ def examples(app_name: str, path: CommandPath, entry: Mapping[str, object]) -> l
     call, and ``--help``: always at least three"""
     base = _invocation(app_name, path)
     found = [str(e["command"]) for e in entry.get("examples", ())]  # type: ignore[attr-defined]
-    positionals = entry.get("positionals", ())
+    positionals = entry.get("positionals", [])  # absent for a command without any
     assert isinstance(positionals, list)
     words = [_placeholder(p["name"], p) for p in positionals if p.get("required")]
     named = {p["name"] for p in positionals}

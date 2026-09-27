@@ -492,17 +492,29 @@ def register_generate_skills(app: App) -> CommandPath:
     )
     def generate_skills(args: GenerateSkillsArgs, ctx: Ctx) -> Skills:
         where = (ctx.cwd / args.output_dir).resolve()
-        where.mkdir(parents=True, exist_ok=True)
         files: list[SkillFile] = []
         changed = existed = 0
         paths = {skill_file(p): p for p in app.commands}
-        for name, text in render(app).items():
+        rendered = render(app)
+        try:
+            where.mkdir(parents=True, exist_ok=True)
+            for name, text in rendered.items():
+                target = where / name
+                old = target.read_text(encoding="utf-8") if target.is_file() else None
+                existed += old is not None
+                if old != text:
+                    write_atomic(target, text, new_mode=0o644)
+                    changed += 1
+        except OSError as exc:
+            raise CliExit(
+                ExitCodeName("PRECONDITION"),
+                f"cannot write the skill files to {where}: {exc.strerror or exc}",
+                code="OUTPUT_DIR_UNWRITABLE",
+                context={"output_dir": str(where)},
+                fix_required="pass --output-dir a directory you can write",
+            ) from None
+        for name in rendered:
             target = where / name
-            old = target.read_text(encoding="utf-8") if target.is_file() else None
-            existed += old is not None
-            if old != text:
-                write_atomic(target, text, new_mode=0o644)
-                changed += 1
             path = paths.get(name)
             kind = "context" if path is None else "skill"
             files.append(SkillFile(str(target), kind, None if path is None else path.value))
@@ -560,7 +572,7 @@ def register_mcp_validate(app: App) -> CommandPath:
         description="Compare a saved MCP tool list with the current command schemas; drift "
         "exits 1 with SCHEMA_DRIFT_DETECTED and the diff in data",
         danger_level="safe",
-        exit_codes=(),
+        exit_codes=("NOT_FOUND",),
         examples=[
             (
                 "Check the committed tool list in CI",

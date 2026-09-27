@@ -183,7 +183,11 @@ class Journal:
             _pruned.add(self.path)
         cutoff = time.time() - self.settings.max_age_days * _DAY
         for old in log_files(self.path):
-            if old.stat().st_mtime < cutoff:
+            try:
+                stale = old.stat().st_mtime < cutoff
+            except FileNotFoundError:
+                continue  # another run rotated or pruned it since the listing
+            if stale:
                 old.unlink(missing_ok=True)
 
 
@@ -228,7 +232,11 @@ def read_entries(path: Path) -> Iterator[dict[str, object] | None]:
     """Every entry, oldest first; None for a line that is not a JSON object, such as one a
     full disk cut short"""
     for file in log_files(path):
-        with open(file, encoding="utf-8", errors="replace") as handle:
+        try:
+            handle = open(file, encoding="utf-8", errors="replace")  # noqa: SIM115 - closed below
+        except FileNotFoundError:
+            continue  # another run rotated it away since the listing
+        with handle:
             for line in handle:
                 if not line.strip():
                     continue

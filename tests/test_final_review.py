@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
@@ -17,6 +18,7 @@ from test_network_and_fs import run as net_run
 
 from treaty import App, Ctx, Flag, NoArgs, RegistrationError, SideEffect
 from treaty._envelope import without_userinfo
+from treaty._journal import AuditLog, Journal, read_entries
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,3 +283,80 @@ def test_a_printed_secret_is_redacted_in_the_warning_and_on_stderr(verbosity: li
     assert code == 0 and envelope["warnings"][0]["code"] == "THIRD_PARTY_STDOUT"
     assert "SUPERSECRET123" not in out.getvalue() + err.getvalue()
     assert "[REDACTED]" in envelope["warnings"][0]["context"]["text"]
+
+
+# The built-ins on edge input
+
+
+def builtin(app: App, argv: list[str], cwd: Path) -> tuple[int, dict[str, Any], str]:
+    out, err = io.StringIO(), io.StringIO()
+    code = app.run(
+        [*argv, "--cwd", str(cwd), "--format", "json"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env={"PATH": os.environ["PATH"]},
+        isatty=False,
+    )
+    return code, json.loads(out.getvalue()), err.getvalue()
+
+
+def no_args_app() -> App:
+    app = App("plain", version="1.0.0")
+
+    @app.command("ping", description="Ping", danger_level="safe", exit_codes=())
+    def ping(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        return {"ok": True}
+
+    return app
+
+
+def test_generate_skills_covers_a_command_without_positionals(tmp_path: Path) -> None:
+    code, envelope, _ = builtin(no_args_app(), ["generate-skills"], tmp_path)
+    assert code == 0, envelope
+    assert (tmp_path / "skills" / "SKILL-ping.md").is_file()
+
+
+def test_generate_skills_into_a_file_exits_4_without_a_traceback(tmp_path: Path) -> None:
+    (tmp_path / "afile").write_text("")
+    code, envelope, err = builtin(
+        no_args_app(), ["generate-skills", "--output-dir", "afile"], tmp_path
+    )
+    assert code == 4 and envelope["error"]["code"] == "OUTPUT_DIR_UNWRITABLE", envelope
+    assert "Traceback" not in err
+
+
+def test_mcp_validate_with_a_missing_file_exits_with_its_declared_not_found(
+    tmp_path: Path,
+) -> None:
+    code, envelope, _ = builtin(
+        no_args_app(), ["mcp-validate", "--mcp-schema-file", "missing.json"], tmp_path
+    )
+    assert envelope["error"]["code"] == "NOT_FOUND", envelope
+    assert code != 1
+
+
+# F-026: the audit log read while other runs rotate it
+
+
+def test_reading_the_audit_log_during_rotation_never_fails(tmp_path: Path) -> None:
+    path = tmp_path / "audit.jsonl"
+    stop = threading.Event()
+
+    def write() -> None:
+        journal = Journal(path, AuditLog(path=path, max_bytes=200, keep=2))
+        while not stop.is_set():
+            journal.append({"x": "y" * 100})
+
+    writers = [threading.Thread(target=write) for _ in range(3)]
+    for writer in writers:
+        writer.start()
+    try:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            for _ in read_entries(path):
+                pass
+    finally:
+        stop.set()
+        for writer in writers:
+            writer.join()
