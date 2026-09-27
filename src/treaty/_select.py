@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from ._cap import Cut, shrink
 from ._envelope import Envelope
-from ._errors import ParseError, RegistrationError
+from ._errors import ParseError, RegistrationError, UserCodeError, user_code
 from ._page import whole_number
 from ._protect import TRUST_TAGS
 
@@ -149,7 +149,16 @@ class TokenBudget:
             )
 
     def measure(self, data: object) -> int:
-        return 0 if data is None else self.tokenizer.count(_text(data))
+        """The tokens of ``data``; what a registered tokenizer raises, or a count that is
+        not a whole number, comes back as ``UserCodeError``"""
+        if data is None:
+            return 0
+        text = _text(data)
+        count = user_code(lambda: self.tokenizer.count(text))
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            wrong = TypeError(f"tokenizer {self.tokenizer.name} counted {count!r}, not tokens")
+            raise UserCodeError(wrong)
+        return count
 
     def apply(self, envelope: Envelope) -> Envelope:
         """``envelope`` with its ``data`` windowed and cut to the budget"""
@@ -176,8 +185,12 @@ class TokenBudget:
                 data = None if shrunk is None else shrunk[0]
                 warnings += (c.warning() for c in cuts)
                 kept = next((c.kept for c in cuts if c.path == path), None)
+                if shrunk is None and path is not None:
+                    kept = 0  # nothing fit, not even the window's first item
                 if kept is not None and first + kept < len(items):
-                    meta["next_token_offset"] = starts[first + kept]
+                    # An item too big for the limit alone is skipped: the next window
+                    # must move, or a caller following it asks for this one forever
+                    meta["next_token_offset"] = starts[first + max(kept, 1)]
         return dataclasses.replace(
             envelope,
             data=data,

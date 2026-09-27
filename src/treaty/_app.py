@@ -103,7 +103,14 @@ from ._envelope import (
     json_safe,
     write_envelope,
 )
-from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
+from ._errors import (
+    ArgsCrashed,
+    CliExit,
+    ParseError,
+    RegistrationError,
+    SchemaError,
+    UserCodeError,
+)
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy, SideEffects
 from ._fix import command_problem, fix_problem
 from ._flags import Arg, Flag
@@ -2188,13 +2195,37 @@ class _Run:
                 context={"text": self._redact_now(text.rstrip("\r\n")), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
-        if settle:
-            envelope = self.settle(envelope)
         if self.budget is not None:
-            envelope = self.budget.apply(envelope)
-        write_envelope(cap_envelope(envelope, self.cap, Rerun(self.argv, self.page)), self.out)
+            envelope = self._budgeted(self.budget, envelope)
+        rerun = Rerun(self.argv, self.page)
+        envelope = cap_envelope(envelope, self.cap, rerun)
+        if settle:
+            # After the budget and the cap: their truncation warnings count (REQ-O-025)
+            envelope = cap_envelope(self.settle(envelope), self.cap, rerun)
+        write_envelope(envelope, self.out)
         self.delivered = True
         return envelope.exit_code
+
+    def _budgeted(self, budget: TokenBudget, envelope: Envelope) -> Envelope:
+        """The token budget applied; a registered tokenizer that raises or miscounts is a
+        bug in user code, answered as ``HANDLER_CRASHED`` like a handler's"""
+        try:
+            return budget.apply(envelope)
+        except UserCodeError as err:
+            self.err.write(self._redact_now(_traceback(err.cause)))
+            entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+            name = budget.tokenizer.name
+            error = ErrorDetail(
+                code="HANDLER_CRASHED",
+                message=self._redact_now(
+                    f"--tokenizer {name} raised {type(err.cause).__name__}: {err.cause}"
+                ),
+                retryable=False,
+                context={"tokenizer": name, "exception": type(err.cause).__qualname__},
+                phase="execution",
+                fix_required="a bug in the tokenizer; stderr has the traceback",
+            )
+            return dataclasses.replace(envelope, exit_code=entry.code.value, data=None, error=error)
 
     def settle(self, envelope: Envelope) -> Envelope:
         """The last step before an invocation's answer is written or returned:
@@ -4328,10 +4359,15 @@ class _Run:
         settle: bool = True,
     ) -> int:
         """Data through the renderer on stdout, errors as prose on stderr"""
+        if self.budget is not None:
+            envelope = self._budgeted(self.budget, envelope)
+            if envelope.extra_meta.get("truncated"):
+                # The text carries no meta: the cut and the way on go to stderr
+                after = envelope.extra_meta.get("next_token_offset")
+                rest = "" if after is None else f"; next: --token-offset {after}"
+                self.err.write(f"cut to --token-limit {self.budget.limit}{rest}\n", Level.WARN)
         if settle:
             envelope = self.settle(envelope)
-        if self.budget is not None:
-            envelope = self.budget.apply(envelope)
         code = envelope.exit_code
         pagination = envelope.extra_meta.get("pagination")
         if mode is Format.ID and isinstance(pagination, dict) and pagination.get("has_more"):

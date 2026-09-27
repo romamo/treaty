@@ -360,3 +360,62 @@ def test_reading_the_audit_log_during_rotation_never_fails(tmp_path: Path) -> No
         stop.set()
         for writer in writers:
             writer.join()
+
+
+# O-025, O-032: --warnings-as-errors and the token budget
+
+
+@dataclass(frozen=True, slots=True)
+class Item:
+    id: str
+    text: str
+
+
+def items_app() -> App:
+    app = App("items", version="1.0.0")
+
+    @app.command("ls", description="List items", danger_level="safe", exit_codes=())
+    def ls(args: NoArgs, ctx: Ctx) -> list[Item]:
+        return [Item(str(i), "word " * (40 if i == 0 else 3)) for i in range(4)]
+
+    @app.command("big", description="One big field", danger_level="safe", exit_codes=())
+    def big(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"text": "a" * 20_000}
+
+    @app.command("wide", description="Numbers no cut shrinks", danger_level="safe", exit_codes=())
+    def wide(args: NoArgs, ctx: Ctx) -> list[int]:
+        return [10**99, 1, 2]
+
+    app.tokenizer("broken", count=lambda text: 1 // 0)
+    return app
+
+
+def items_run(argv: list[str], fmt: str = "json") -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    code = items_app().run([*argv, "--format", fmt], stdout=out, stderr=err, env={}, isatty=False)
+    return code, out.getvalue(), err.getvalue()
+
+
+@pytest.mark.parametrize("argv", [["big", "--max-output", "4096"], ["ls", "--token-limit", "20"]])
+def test_warnings_as_errors_counts_the_truncation_warnings_of_the_cap_and_budget(
+    argv: list[str],
+) -> None:
+    code, out, _ = items_run([*argv, "--warnings-as-errors"])
+    envelope = json.loads(out)
+    assert code == 1 and envelope["error"]["code"] == "WARNINGS_AS_ERRORS", envelope
+
+
+def test_next_token_offset_always_moves_past_an_item_too_big_for_the_limit() -> None:
+    code, out, _ = items_run(["wide", "--token-limit", "20"])
+    meta = json.loads(out)["meta"]
+    assert code == 0 and meta["next_token_offset"] > meta.get("token_offset", 0), meta
+
+
+def test_text_output_cut_by_the_token_limit_says_so_on_stderr() -> None:
+    code, out, err = items_run(["ls", "--token-offset", "1", "--token-limit", "20"], "tsv")
+    assert code == 0 and "--token-offset" in err, err
+
+
+def test_a_tokenizer_that_raises_answers_handler_crashed() -> None:
+    code, out, _ = items_run(["ls", "--tokenizer", "broken", "--token-count"])
+    assert code == 1 and json.loads(out)["error"]["code"] == "HANDLER_CRASHED", out
