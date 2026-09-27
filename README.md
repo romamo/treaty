@@ -970,7 +970,8 @@ with one envelope and a `STREAMING_NOT_SUPPORTED` warning.
 Every command takes these without any code of its own:
 
 - `--fields id,name` keeps those top-level keys of `data` (or of each item of a list);
-  `ok`, `error`, `warnings`, and `meta` are never filtered (REQ-O-002)
+  `ok`, `error`, `warnings`, and `meta` are never filtered, and `meta.fields` lists the
+  names kept (REQ-O-002). `--format id` keeps the id field whatever `--fields` names
 - `--token-limit N` cuts `data` to N tokens on item and field boundaries, with
   `meta.truncated`, `meta.token_limit`, and `meta.next_token_offset`; `--token-offset N`
   starts the window there, and `--token-count` runs the command and returns only

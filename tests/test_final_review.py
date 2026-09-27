@@ -13,12 +13,15 @@ from typing import Any
 import pytest
 from conftest import needs_posix_permissions
 from fixture_session_app import app as session_app
+from jsonschema import Draft7Validator
 from test_network_and_fs import Origin, net_app, serving
 from test_network_and_fs import run as net_run
 
 from treaty import App, Ctx, Flag, NoArgs, RegistrationError, SideEffect
 from treaty._envelope import without_userinfo
 from treaty._journal import AuditLog, Journal, read_entries
+from treaty._mcp import call_tool
+from treaty._tools import tool_entries
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,3 +422,26 @@ def test_text_output_cut_by_the_token_limit_says_so_on_stderr() -> None:
 def test_a_tokenizer_that_raises_answers_handler_crashed() -> None:
     code, out, _ = items_run(["ls", "--tokenizer", "broken", "--token-count"])
     assert code == 1 and json.loads(out)["error"]["code"] == "HANDLER_CRASHED", out
+
+
+# O-002: --fields over MCP and with --format id
+
+
+def test_an_mcp_result_projected_with_fields_passes_the_tools_output_schema() -> None:
+    app = items_app()
+    entries = {e.name: e for e in tool_entries(app)}
+    envelope = call_tool(app, entries, "ls", {"fields": "text"}).to_json()
+    assert envelope["ok"] and envelope["meta"]["fields"] == ["text"]
+    assert list(Draft7Validator(entries["ls"].output_schema).iter_errors(envelope)) == []
+
+
+def test_format_id_keeps_the_id_field_whatever_fields_names() -> None:
+    app = App("ids", version="1.0.0")
+
+    @app.command("ls", description="List", danger_level="safe", exit_codes=(), id_field="id")
+    def ls(args: NoArgs, ctx: Ctx) -> list[Item]:
+        return [Item("a", "x"), Item("b", "y")]
+
+    out = io.StringIO()
+    code = app.run(["ls", "--format", "id", "--fields", "text"], stdout=out, env={})
+    assert code == 0 and out.getvalue() == "a\nb\n"

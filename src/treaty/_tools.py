@@ -69,16 +69,22 @@ def input_schema(command: Command) -> JsonSchema:
 def output_schema(command: Command) -> JsonSchema:
     """The response envelope with the command's output schema as ``data``
 
-    ``data`` is checked against the command's schema only on a successful, uncapped
-    response: a capped one keeps a prefix that may lack required fields, and a failed
-    one carries whatever ``Exit(data=...)`` or a preview put there.
+    ``data`` is checked against the command's schema only on a successful, whole
+    response: a capped one keeps a prefix, and one ``fields`` projected (``meta.fields``)
+    a subset, either of which may lack required fields; a failed one carries whatever
+    ``Exit(data=...)`` or a preview put there.
     """
     data = command.output_schema
     if command.streaming:
         data = {"type": "array", "items": data}
     truncated = {
         "properties": {
-            "meta": {"properties": {"truncated": {"const": True}}, "required": ["truncated"]}
+            "meta": {
+                "anyOf": [
+                    {"properties": {"truncated": {"const": True}}, "required": ["truncated"]},
+                    {"required": ["fields"]},
+                ]
+            }
         }
     }
     return {

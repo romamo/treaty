@@ -2810,7 +2810,14 @@ class _Run:
         if command.path not in self.app.builtins:
             envelope = self._protected(command, envelope)
         if self.fields is not None and envelope.ok and envelope.data is not None:
-            envelope = dataclasses.replace(envelope, data=project(envelope.data, self.fields))
+            kept = self.fields
+            if self.mode is Format.ID and command.id_field is not None:
+                kept = (*kept, command.id_field)  # the ids are the output
+            envelope = dataclasses.replace(
+                envelope,
+                data=project(envelope.data, kept),
+                extra_meta={**envelope.extra_meta, "fields": list(self.fields)},
+            )
         if self.mode is Format.ID and envelope.ok and envelope.data is not None:
             assert command.id_field is not None
             problem = id_problem(envelope.data, command.id_field)
