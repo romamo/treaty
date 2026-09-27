@@ -583,7 +583,7 @@ def echo_app() -> App:
 
 def test_parse_error_context_with_objects_still_writes_an_envelope() -> None:
     code, [env], _ = run(echo_app(), ["echo", "--text", "where"])
-    assert code == 2 and env["error"]["context"] == {"path": str(Path("/srv")), "n": "1.5"}
+    assert code == 1 and env["error"]["context"] == {"path": str(Path("/srv")), "n": "1.5"}
 
 
 def test_exec_keeps_unicode_line_separators_inside_json_strings() -> None:

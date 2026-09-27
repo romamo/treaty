@@ -318,7 +318,7 @@ def test_manifest_advertises_confirm_flag(app: App) -> None:
     assert flags["confirm-destructive"]["type"] == "boolean"
 
 
-def test_handler_raised_parse_error_is_validation_failure() -> None:
+def test_handler_raised_parse_error_is_validation_after_start() -> None:
     from treaty import ParseError
 
     app = App("x", version="1")
@@ -330,5 +330,6 @@ def test_handler_raised_parse_error_is_validation_failure() -> None:
     out = io.StringIO()
     code = app.run(["check"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
     env = json.loads(out.getvalue())
-    assert code == 2 and env["error"]["phase"] == "validation"
+    assert code == 1 and env["error"]["phase"] == "execution"
+    assert env["error"]["code"] == "VALIDATION_AFTER_START"
     assert env["error"]["context"] == {"field": "x"}

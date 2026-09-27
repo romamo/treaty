@@ -11,6 +11,7 @@ import math
 import re
 from collections.abc import Collection, Mapping
 from dataclasses import MISSING, dataclass
+from typing import NoReturn
 
 from ._command import Command, DangerLevel
 from ._dispatch import loads_strict
@@ -190,9 +191,12 @@ class _Collector:
     def add(self, exc: ParseError) -> None:
         self.errors.append(exc)
 
+    def fail(self) -> NoReturn:
+        raise ParseError.combine(self.errors)
+
     def finish(self) -> None:
         if self.errors:
-            raise ParseError.combine(self.errors)
+            self.fail()
 
 
 def parse_command_args(
@@ -476,7 +480,12 @@ def known_flags(command: Command) -> list[str]:
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
-    """Report missing fields alongside everything collected, then build the dataclass"""
+    """Report missing fields alongside everything collected, then build the dataclass
+
+    The args ``__post_init__`` is the cross-field check of phase 1 (REQ-F-015): it runs
+    whenever every field has a value, so its ``ParseError`` (or several, through
+    ``ParseError.combine``) joins the errors of an unknown flag in the same run.
+    """
     failed = {e.field for e in errors.errors}
     missing = [
         f.env_flag if f.secret else f.flag
@@ -491,11 +500,19 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
                 context={"missing": missing, "command": command.path.value},
             )
         )
-    errors.finish()
+    named = {n for f in command.fields for n in (f.name, f.flag, *f.exposed_flags())}
+    if missing or not failed.isdisjoint(named):
+        errors.fail()  # a field without its value would give __post_init__ a false default
     for f in command.fields:
         if f.name not in values:
             values[f.name] = None if f.default is MISSING else f.default
-    return command.args_type(**values)
+    try:
+        args = command.args_type(**values)
+    except ParseError as exc:
+        errors.errors.extend(exc.errors or (exc,))
+        errors.fail()
+    errors.finish()
+    return args
 
 
 def build_from_mapping(
@@ -591,6 +608,8 @@ def _check_field_value(field: FieldInfo, value: object) -> object:
 
 def _check_patterned(field: FieldInfo, target: Classified, value: object) -> object:
     if isinstance(value, str):
+        if target.flag_type is FlagType.STRING:
+            field.check_text(value)
         field.check_pattern(value)
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
         try:

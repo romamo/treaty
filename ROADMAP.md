@@ -18,7 +18,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   CI; the envelope keeps the full report as `data` and advice never fails the run
 - Human mode renders `data` on failed runs too, so `--strict` and a failing
   `conformance --run` print their report instead of raw JSON
-- Handler-raised `ParseError` becomes a validation-phase exit 2 envelope
+- Handler-raised `ParseError` and `Exit.ARG_ERROR` exit 1 with `VALIDATION_AFTER_START`
+  and `phase: execution` (REQ-F-002); cross-field checks in the args `__post_init__` run
+  in phase 1 and join `error.errors` (REQ-F-015)
+- Newlines, carriage returns, and null bytes in `str` arguments are refused in phase 1
+  on every route; `Flag(multiline=True)` opts out; `multiline-flag` audit rule (REQ-F-044)
 - `effect` on every mutating and destructive response (REQ-C-003, REQ-C-004) and a
   framework `--idempotency-key` with a per-app record store (REQ-C-007)
 - `exec` stdin cap (64 KiB, `STDIN_TOO_LARGE`) with an uncapped `--input-file`
@@ -44,7 +48,7 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - Typed resources (cloudfall gap 2): handler parameters after `ctx` name classes with a
   classmethod `acquire(cls, args, ctx, *deps)`; acquired once per run in dependency order
   under the command timeout; `CliExit` and `ParseError` from `acquire` take the normal
-  envelope path; cycles and missing `acquire` fail at registration
+  envelope path (a `ParseError` there is `VALIDATION_AFTER_START`); cycles and missing `acquire` fail at registration
 - Streaming handlers (cloudfall gap 3, REQ-O-004): `streaming=True` with an `Iterator[T]`
   handler; one envelope per yield with `meta.seq`, a terminal envelope with `end` and
   `total`, failures mark `partial`; no timeout by default, else a whole-stream deadline;

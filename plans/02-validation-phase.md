@@ -56,11 +56,30 @@ rule suggests the opt-out for fields named `message`, `body`, `description`, `te
 
 ## Tasks
 
-- [ ] `VALIDATION_AFTER_START` in `_execute` and in the resource acquisition path
-- [ ] `__post_init__` errors collected with field errors; `ParseErrors`
-- [ ] Newline and NUL rejection for `str` fields; `Flag(multiline=True)`; manifest field
-- [ ] Audit rule `multiline-flag`
-- [ ] Update the ROADMAP line "Handler-raised `ParseError` becomes a validation-phase exit 2"
+- [x] `VALIDATION_AFTER_START` in `_execute` and in the resource acquisition path
+- [x] `__post_init__` errors collected with field errors; `ParseErrors`
+- [x] Newline and NUL rejection for `str` fields; `Flag(multiline=True)`; manifest field
+- [x] Audit rule `multiline-flag`
+- [x] Update the ROADMAP line "Handler-raised `ParseError` becomes a validation-phase exit 2"
+
+## Deviations as built
+
+- No `ParseErrors` class: `ParseError.combine([...])` already builds one error carrying
+  several, so `__post_init__` raises that and `_finish` unpacks its entries
+- `__post_init__` runs whenever every field has a value, not only after the field errors
+  pass: errors that name no field (an unknown flag, an extra positional) do not block it,
+  so "one bad flag plus a failing `__post_init__`" reports both. A field that failed or is
+  missing skips it, since the dataclass would see a default instead of the input
+- `Exit.ARG_ERROR` raised by a handler is also `VALIDATION_AFTER_START`: it exited 2 with
+  `phase: execution`, which breaks F-002 the same way. The treaty CLI moved its own
+  argument checks (target shape, `--limit`, the project name, `--treaty-source`) into
+  `__post_init__`
+- `multiline` is not a manifest key: `FlagEntry` in `manifest-response.json` has
+  `additionalProperties: false`, so the description gets "(may contain newlines)"
+- Secrets are exempt from the newline rule: they are never on argv or echoed, and a
+  PEM key read from a file spans lines
+- The exit-2 property test is a parametrized list of every framework exit-2 route with a
+  handler sentinel, not a generated property test
 
 ## Tests
 

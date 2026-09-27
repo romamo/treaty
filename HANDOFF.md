@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 500 passed |
+| `uv run pytest` | 526 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -44,6 +44,16 @@ The two do not share code.
   and can be passed as `--name=value`, because `FlagEntry` has no positional marker
 - **In-house parser.** `argparse` is not used anywhere; every parse failure is a
   `ParseError` with structured context and becomes exit `2`
+- **Exit 2 only before user code (D2).** The args `__post_init__` is phase 1: `_finish`
+  calls it whenever every field has a value and adds its `ParseError` (or the entries of a
+  `ParseError.combine`) to the collected errors. A `ParseError` or `Exit.ARG_ERROR` from a
+  handler or `acquire` is `VALIDATION_AFTER_START`, exit 1, `phase: execution`
+  (`_Run.after_start`). F-015's "execute hook registered before validate hooks" cannot
+  happen: the framework owns the order and there are no hooks to register
+- **Text arguments are single-line.** `FieldInfo.check_text` refuses `\n`, `\r`, and NUL
+  in `str` values on both parse routes (REQ-F-044), except secrets; `Flag(multiline=True)`
+  allows line breaks. `FlagEntry` admits no extra keys, so the manifest states the opt-out
+  in the flag's description instead of a `multiline` field
 - **Unconfirmed destructive commands exit 2**, running the handler in dry-run mode and
   returning the preview as `data` with error code `CONFIRMATION_REQUIRED` (REQ-O-021)
 - **Timeouts use a daemon thread**, not `SIGALRM`, so they work on Windows, off the main
@@ -177,7 +187,7 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
-F-011, F-012, F-013, F-015, F-016, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002,
+F-011, F-012, F-013, F-015, F-016, F-034, F-044 (newlines), F-045 (paths), F-048, F-051, F-069, C-001, C-002,
 C-003, C-004, C-007, C-012, C-013, C-015, C-016, C-020 (all presets), O-021, O-022, O-032,
 O-039, O-041, O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
 

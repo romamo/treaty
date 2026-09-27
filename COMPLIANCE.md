@@ -3,7 +3,7 @@
 Status of treaty against the 159 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
-hygiene).
+hygiene; 02, validation phase).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -15,34 +15,32 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Level 1: agent-safe basics | 12 | 9 | 2 | 1 | **83%** |
-| Level 2: every P0 (includes Level 1) | 51 | 19 | 17 | 15 | **54%** |
-| Level 3: full spec | 159 | 28 | 46 | 85 | **32%** |
+| Level 1: agent-safe basics | 12 | 10 | 1 | 1 | **88%** |
+| Level 2: every P0 (includes Level 1) | 51 | 21 | 16 | 14 | **57%** |
+| Level 3: full spec | 159 | 30 | 45 | 84 | **33%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 21 | 23 | 35 | **41%** |
+| Framework-automatic (F) | 79 | 23 | 22 | 34 | **43%** |
 | Command contract (C) | 30 | 5 | 11 | 14 | **35%** |
 | Opt-in (O) | 50 | 2 | 12 | 36 | **16%** |
 
 ## Open mandatory requirements
 
-Level 2 (every P0) is the level the spec calls agent-reliable. These 32 requirements
+Level 2 (every P0) is the level the spec calls agent-reliable. These 30 requirements
 stand between treaty and a Level 2 claim; the Level 1 ones come first.
 
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
-| [REQ-F-002](../cli-agent-ergonomics/requirements/f-002-exit-code-2-reserved-for-validation-failures.md) | Exit Code 2 Reserved for Validation Failures | P0 | 1 | Partial | Handler-raised ParseError and CONFIRMATION_REQUIRED exit 2 after user code has run |
 | [REQ-F-009](../cli-agent-ergonomics/requirements/f-009-non-interactive-mode-auto-detection.md) | Non-Interactive Mode Auto-Detection | P0 | 1 | Not started | No prompt API, exit 4, or INPUT_REQUIRED; `input()` crashes the handler (exit 1) |
 | [REQ-C-004](../cli-agent-ergonomics/requirements/c-004-destructive-commands-must-support-dry-run.md) | Destructive Commands Must Support --dry-run | P0 | 1 | Partial | Destructive commands require `dry_run` and preview `would_*`; no `would_affect` object |
 | [REQ-F-011](../cli-agent-ergonomics/requirements/f-011-default-timeout-per-command.md) | Default Timeout Per Command | P0 | 2 | Partial | 60 s default deadline; streaming commands default to no timeout |
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Partial | Exits 141 (OUTPUT_CLOSED); spec requires 0 |
-| [REQ-F-015](../cli-agent-ergonomics/requirements/f-015-validate-before-execute-phase-order.md) | Validate-Before-Execute Phase Order | P0 | 2 | Partial | All field errors collected before the handler; handler-raised ParseError still reports validation after execution started |
 | [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Not started | No `meta.pagination`, `--cursor`, or `next_cursor` (ROADMAP 0.2.0) |
 | [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Not started | No default item limit or `--limit`; only the 1 MiB byte cap |
-| [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Not started | No subprocess API; newlines in `str` args are accepted |
+| [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Partial | Newlines, CR, and NUL in `str` args refused in phase 1 (`Flag(multiline=True)` opts out); no subprocess API |
 | [REQ-F-046](../cli-agent-ergonomics/requirements/f-046-pager-environment-variable-suppression.md) | Pager Environment Variable Suppression | P0 | 2 | Not started | No `PAGER`/`GIT_PAGER` injection for children |
 | [REQ-F-047](../cli-agent-ergonomics/requirements/f-047-repl-mode-prohibition-in-non-tty-context.md) | REPL Mode Prohibition in Non-TTY Context | P0 | 2 | Partial | No-args run shows help; `exec` refuses a TTY stdin; `input()` is not intercepted |
 | [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Partial | 1 MiB cap, `--max-output`, `meta.truncated`; hint is prose, not a runnable command |
@@ -72,7 +70,7 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
 | [REQ-F-001](../cli-agent-ergonomics/requirements/f-001-standard-exit-code-table.md) | Standard Exit Code Table | P0 | 1 | Done | FrameworkCode table 0-13 plus signal codes; undeclared exits become UNDECLARED_EXIT_CODE |
-| [REQ-F-002](../cli-agent-ergonomics/requirements/f-002-exit-code-2-reserved-for-validation-failures.md) | Exit Code 2 Reserved for Validation Failures | P0 | 1 | Partial | Handler-raised ParseError and CONFIRMATION_REQUIRED exit 2 after user code has run |
+| [REQ-F-002](../cli-agent-ergonomics/requirements/f-002-exit-code-2-reserved-for-validation-failures.md) | Exit Code 2 Reserved for Validation Failures | P0 | 1 | Done | Exit 2 only from phase 1; a handler's `ParseError` or `Exit.ARG_ERROR` is `VALIDATION_AFTER_START` (exit 1); the confirmation preview runs the handler in dry-run mode only |
 | [REQ-F-003](../cli-agent-ergonomics/requirements/f-003-json-output-mode-auto-activation.md) | JSON Output Mode Auto-Activation | P0 | 1 | Done | Non-TTY stdout or `CI` selects JSON |
 | [REQ-F-004](../cli-agent-ergonomics/requirements/f-004-consistent-json-response-envelope.md) | Consistent JSON Response Envelope | P0 | 1 | Done | Envelope with ok, data, error, warnings, meta on every exit |
 | [REQ-F-005](../cli-agent-ergonomics/requirements/f-005-locale-invariant-serialization.md) | Locale-Invariant Serialization | P0 | 2 | Done | ISO 8601 `datetime`/`date`/`time` (`Z` for UTC), `Decimal` as text; naive datetimes refused; byte-identical across locales |
@@ -85,7 +83,7 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-012](../cli-agent-ergonomics/requirements/f-012-timeout-exit-code-and-json-error.md) | Timeout Exit Code and JSON Error | P0 | 2 | Done | TIMEOUT, exit 10, `duration_ms` |
 | [REQ-F-013](../cli-agent-ergonomics/requirements/f-013-sigterm-handler-installation.md) | SIGTERM Handler Installation | P0 | 2 | Done | SIGTERM gives a CANCELLED envelope, exit 143, cleanup runs |
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Partial | Exits 141 (OUTPUT_CLOSED); spec requires 0 |
-| [REQ-F-015](../cli-agent-ergonomics/requirements/f-015-validate-before-execute-phase-order.md) | Validate-Before-Execute Phase Order | P0 | 2 | Partial | All field errors collected before the handler; handler-raised ParseError still reports validation after execution started |
+| [REQ-F-015](../cli-agent-ergonomics/requirements/f-015-validate-before-execute-phase-order.md) | Validate-Before-Execute Phase Order | P0 | 2 | Done | Field errors and the args `__post_init__` (cross-field) errors collected in one run before the handler; no hooks to misorder |
 | [REQ-F-016](../cli-agent-ergonomics/requirements/f-016-utf-8-sanitization-before-serialization.md) | UTF-8 Sanitization Before Serialization | P1 | 3 | Done | JSON strings: null bytes and lone surrogates become U+FFFD; bytes output is refused as INVALID_OUTPUT |
 | [REQ-F-017](../cli-agent-ergonomics/requirements/f-017-binary-field-base64-encoding.md) | Binary Field Base64 Encoding | P1 | 3 | Not started | Returning `bytes` gives INVALID_OUTPUT; no base64 wrapper with `size_bytes` |
 | [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Not started | No `meta.pagination`, `--cursor`, or `next_cursor` (ROADMAP 0.2.0) |
@@ -114,7 +112,7 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-041](../cli-agent-ergonomics/requirements/f-041-process-cwd-immutability.md) | Process CWD Immutability | P2 | 3 | Not started | Handler `os.chdir` is neither restored nor flagged |
 | [REQ-F-042](../cli-agent-ergonomics/requirements/f-042-log-rotation-in-framework-logger.md) | Log Rotation in Framework Logger | P3 | 3 | Not started | No framework logger |
 | [REQ-F-043](../cli-agent-ergonomics/requirements/f-043-temp-file-session-scoped-auto-cleanup.md) | Temp File Session-Scoped Auto-Cleanup | P2 | 3 | Not started | No session temp cleanup |
-| [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Not started | No subprocess API; newlines in `str` args are accepted |
+| [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Partial | Newlines, CR, and NUL in `str` args refused in phase 1 (`Flag(multiline=True)` opts out); no subprocess API |
 | [REQ-F-045](../cli-agent-ergonomics/requirements/f-045-agent-hallucination-input-pattern-rejection.md) | Agent Hallucination Input Pattern Rejection | P0 | 2 | Done | `Path` and pattern-typed scalars reject `..`, `%XX`, and NUL on every input route; plain `str` is unchecked |
 | [REQ-F-046](../cli-agent-ergonomics/requirements/f-046-pager-environment-variable-suppression.md) | Pager Environment Variable Suppression | P0 | 2 | Not started | No `PAGER`/`GIT_PAGER` injection for children |
 | [REQ-F-047](../cli-agent-ergonomics/requirements/f-047-repl-mode-prohibition-in-non-tty-context.md) | REPL Mode Prohibition in Non-TTY Context | P0 | 2 | Partial | No-args run shows help; `exec` refuses a TTY stdin; `input()` is not intercepted |

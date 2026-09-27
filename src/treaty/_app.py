@@ -837,6 +837,26 @@ class _Run:
             **kw,
         )
 
+    def after_start(self, exc: ParseError, **kw: Any) -> Envelope:
+        """A ``ParseError`` from a handler or a resource's ``acquire``: user code already
+        ran, so exit 2 would promise an agent a side-effect-free failure it cannot have
+        (REQ-F-002). Phase 1 checks belong in the args ``__post_init__``."""
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="VALIDATION_AFTER_START",
+                message=exc.message,
+                retryable=False,
+                context=exc.context,
+                suggestion=exc.suggestion,
+                phase="execution",
+                fix_required="correct the arguments; the command author should move this "
+                "check into the args dataclass's __post_init__ so it runs before any side effect",
+            ),
+            **kw,
+        )
+
     def execute(
         self,
         command: Command,
@@ -1049,8 +1069,7 @@ class _Run:
         except CliExit as exc:
             return self._exit_envelope(command, args, exc, started, full_meta)
         except ParseError as exc:
-            # A handler validating its own input before any side effect
-            return self.arg_error(exc, started=started, meta=full_meta)
+            return self.after_start(exc, started=started, meta=full_meta)
         except TimeoutExpired as exc:
             self.abandoned = exc.pending
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
@@ -1202,7 +1221,7 @@ class _Run:
             yield self._exit_envelope(command, args, exc, started, partial())
             return
         except ParseError as exc:
-            yield self.arg_error(exc, started=started, meta=partial())
+            yield self.after_start(exc, started=started, meta=partial())
             return
         except TimeoutExpired:
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
@@ -1292,6 +1311,10 @@ class _Run:
         started: float,
         meta: Mapping[str, object],
     ) -> Envelope:
+        if exc.name.value == FrameworkCode.ARG_ERROR.name:
+            # Exit 2 promises nothing ran; from a handler, something did (REQ-F-002)
+            rejected = ParseError(exc.message, context=exc.context, suggestion=exc.suggestion)
+            return self.after_start(rejected, started=started, meta=meta)
         # The codes the manifest lists for this command without a declaration; any other
         # framework code (NOT_FOUND, RATE_LIMITED, ...) must be declared like a custom one
         implicit = {FrameworkCode.SUCCESS, FrameworkCode.GENERAL_ERROR, FrameworkCode.ARG_ERROR}

@@ -140,10 +140,10 @@ def test_cli_exit_mid_stream_keeps_delivered_events_and_marks_partial() -> None:
     assert CLOSED == ["tail"]
 
 
-def test_parse_error_mid_stream_is_an_argument_error() -> None:
+def test_parse_error_mid_stream_is_validation_after_start() -> None:
     code, lines, _ = run(["tail", "5", "--bad-at", "2"])
-    assert code == 2
-    assert lines[-1]["error"]["code"] == "ARG_ERROR"
+    assert code == 1
+    assert lines[-1]["error"]["code"] == "VALIDATION_AFTER_START"
     assert lines[-1]["meta"]["seq"] == 1
 
 

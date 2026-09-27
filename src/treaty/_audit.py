@@ -234,6 +234,28 @@ def _path_typed(app: App) -> Iterator[Finding]:
                 )
 
 
+_MULTILINE_NAMES = re.compile(r"(^|_)(message|body|description|text)($|_)")
+
+
+def _multiline_flag(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        for f in c.fields:
+            if (
+                f.flag_type is FlagType.STRING
+                and not f.path
+                and not f.secret
+                and not f.spec.multiline
+                and _MULTILINE_NAMES.search(f.name)
+            ):
+                yield Finding(
+                    "multiline-flag",
+                    Severity.ADVICE,
+                    c.path.value,
+                    f"{f.name} looks like free text, but newlines in it are refused (heuristic)",
+                    f"{f.name}: str = Flag(..., multiline=True) if it may span lines",
+                )
+
+
 def _raw_payload(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.danger_level is DangerLevel.SAFE or c.supports_raw_payload:
@@ -303,6 +325,12 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule("network-io", "Network commands declare has_network_io", Severity.WARNING, _network_io),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
+    Rule(
+        "multiline-flag",
+        "Free-text fields that may span lines declare multiline",
+        Severity.ADVICE,
+        _multiline_flag,
+    ),
     Rule(
         "raw-payload", "Wide mutating commands accept --raw-payload", Severity.ADVICE, _raw_payload
     ),

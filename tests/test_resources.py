@@ -135,11 +135,12 @@ def test_cli_exit_inside_acquire_becomes_the_declared_exit() -> None:
     assert ACQUIRED == ["project"]
 
 
-def test_parse_error_inside_acquire_is_an_argument_error() -> None:
+def test_parse_error_inside_acquire_is_validation_after_start() -> None:
     code, env = run(["deploy", "--component", "api", "--project", "/srv/malformed"])
-    assert code == 2
-    assert env["error"]["code"] == "ARG_ERROR"
-    assert env["error"]["errors"][0]["field"] == "project"
+    assert code == 1
+    assert env["error"]["code"] == "VALIDATION_AFTER_START"
+    assert env["error"]["phase"] == "execution"
+    assert env["error"]["context"]["flag"] == "project"
 
 
 def test_acquisition_runs_under_the_command_timeout() -> None:

@@ -50,6 +50,37 @@ plus `GENERAL_ERROR`, `ARG_ERROR`, and `TIMEOUT` everywhere and `CONFLICT` and
 `PRECONDITION` on mutating commands. Anything else, including framework names such as
 `Exit.NOT_FOUND`, must be declared, or the run exits `1` with `UNDECLARED_EXIT_CODE`.
 
+## Validation
+
+Exit `2` means nothing ran: every exit-2 envelope has `phase: validation` and the handler
+was never called, so an agent fixes the input and reissues. Checks that span several
+fields go in the args dataclass's `__post_init__`, which runs in phase 1; its `ParseError`
+joins the other field errors in `error.errors`, and `raise ParseError.combine([...])`
+reports several at once:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Window:
+    start: int = Flag(description="First hour")
+    end: int = Flag(description="Last hour")
+
+    def __post_init__(self) -> None:
+        if self.end < self.start:
+            raise ParseError("end is before start", context={"field": "end"})
+```
+
+A `ParseError` or `Exit.ARG_ERROR` raised by a handler or a resource's `acquire` comes
+after user code ran, so it exits `1` with `VALIDATION_AFTER_START` and `phase: execution`,
+keeping its message, context, and suggestion. Move the check into `__post_init__` to get
+exit `2`.
+
+A `str` value containing a newline, carriage return, or null byte is refused in phase 1
+on every route (argv, `exec`, `--raw-payload`, MCP) with `rejected_pattern` in the
+context, because it can end a command line or log record wherever the value goes next.
+`Flag(multiline=True)` accepts line breaks for message bodies, and the manifest adds
+"(may contain newlines)" to its description; the `multiline-flag` audit rule suggests it
+for fields named like `message`, `body`, `description`, or `text`. Secrets are exempt.
+
 ## Install
 
 Every command here is non-interactive and safe to repeat:
@@ -294,8 +325,8 @@ def deploy(args: DeployArgs, ctx: Ctx, config: Config, project: Project) -> Rece
 `acquire` takes the same `(args, ctx)` as a handler plus, optionally, other resources by
 annotation, so resources compose. Each class is acquired at most once per run and shared,
 in dependency order, and acquisition runs under the command's timeout. A `CliExit` raised
-inside `acquire` becomes that exit's envelope and a `ParseError` becomes `ARG_ERROR`, so a
-missing project fails before any handler runs. A class without a classmethod `acquire`, a
+inside `acquire` becomes that exit's envelope and a `ParseError` becomes
+`VALIDATION_AFTER_START` (exit `1`), so a missing project fails before any handler runs. A class without a classmethod `acquire`, a
 missing `Ctx` annotation, or a dependency cycle is a registration error. Resources are not
 part of the manifest: the flags they read, such as `--project`, live on the args dataclass,
 typically a `kw_only=True` base class shared by every command. Resources must not change
