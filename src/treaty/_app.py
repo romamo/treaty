@@ -142,6 +142,7 @@ from ._plain import render_event, render_plain
 from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._protect import (
     MASKED_CODE,
+    MASKED_PATHS_SHOWN,
     UNPROTECTED_CODE,
     UNTRUSTED_CODE,
     protect,
@@ -2031,7 +2032,10 @@ class _Run:
                     WarningDetail(
                         MASKED_CODE,
                         "High-entropy values were masked; rerun with --unmask for the raw values",
-                        context={"paths": list(protected.masked)},
+                        context={
+                            "paths": list(protected.masked[:MASKED_PATHS_SHOWN]),
+                            "count": len(protected.masked),
+                        },
                     )
                 )
             external = envelope.ok and (command.external or protected.external)

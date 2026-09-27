@@ -4,6 +4,7 @@ import base64
 import datetime as dt
 import io
 import json
+import os
 import random
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -249,6 +250,7 @@ def test_masking_warns_with_every_masked_path(app: App) -> None:
         "data.blob",
         "data.fingerprint",
     ]
+    assert warning["context"]["count"] == 4
     assert "--unmask" in warning["message"]
     spec_validator("response-envelope").validate(env)
 
@@ -409,3 +411,24 @@ def test_external_data_audit_flags_network_commands_without_a_declaration() -> N
     report = audit(app, "x:app", limit=100)
     found = next(r.findings for r in report.rules if r.id == "external-data")
     assert [f.command for f in found] == ["get"] and "external=True" in found[0].fix
+
+
+def test_masking_many_values_keeps_the_response_under_the_byte_cap() -> None:
+    app = App("maskctl", version="1.0.0", description="Masking")
+    blobs = tuple(base64.b64encode(os.urandom(40)).decode() for _ in range(5000))
+
+    @dataclass(frozen=True, slots=True)
+    class Blobs:
+        items: tuple[str, ...]
+
+    @app.command("dump", description="Dump blobs", danger_level="safe", exit_codes=())
+    def dump(args: NoArgs, ctx: Ctx) -> Blobs:
+        return Blobs(blobs)
+
+    out = io.StringIO()
+    code = app.run(["dump", "--max-output", "8192"], stdout=out, stderr=io.StringIO(), env={})
+    assert code == 0 and len(out.getvalue().encode()) <= 8192
+    warning = next(
+        w for w in json.loads(out.getvalue())["warnings"] if w["code"] == "HIGH_ENTROPY_MASKED"
+    )
+    assert warning["context"]["count"] == 5000 and len(warning["context"]["paths"]) == 20

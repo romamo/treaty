@@ -42,6 +42,8 @@ _HEX = re.compile(r"[0-9a-fA-F]+")
 # Bits per character: random base64 of 30 bytes or more is above it, prose and paths below
 _MIN_ENTROPY = 4.3
 _MAX_SUB = 64
+MASKED_PATHS_SHOWN = 20
+"""Paths a masking warning lists: it is not cut to the byte cap like ``data``"""
 
 
 @dataclass(frozen=True, slots=True)
