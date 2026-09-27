@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -38,6 +39,40 @@ def json_safe(value: object, depth: int = 0) -> object:
     return str(value)
 
 
+# REQ-F-007: CSI (colors, cursor movement), OSC (titles, links), other two-byte escapes,
+# a stray ESC, and carriage returns
+_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?|\r")
+# REQ-F-016: a null byte or a lone surrogate is not valid UTF-8 text
+_INVALID = re.compile(r"[\x00\ud800-\udfff]")
+
+
+def clean(value: object) -> object:
+    """Every string of a JSON value without terminal escapes, and valid UTF-8 once encoded:
+    whatever a handler or a library returned, the envelope stays plain text"""
+    if isinstance(value, str):
+        return _INVALID.sub("\ufffd", _ESCAPES.sub("", value))
+    if isinstance(value, dict):
+        return {clean(k): clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [clean(v) for v in value]
+    return value
+
+
+def sentence(text: str) -> str:
+    """An error message as a complete sentence (REQ-C-013): a lowercase first letter is
+    capitalized and closing punctuation is added when missing. Escapes go first, so a
+    colored message is judged by its text."""
+    text = _ESCAPES.sub("", text).strip()
+    if text[:1].islower():
+        text = text[0].upper() + text[1:]
+    if text and text[-1] not in ".!?":
+        text += "."
+    return text
+
+
+_RETRY = "retry the same command; it had no side effects"
+
+
 @dataclass(frozen=True, slots=True)
 class ErrorDetail:
     code: str
@@ -53,6 +88,19 @@ class ErrorDetail:
     phase: str | None = None
     errors: Sequence[Mapping[str, object]] | None = None
     """Every validation failure of the run (REQ-F-015); present on validation errors only"""
+
+    def __post_init__(self) -> None:
+        # One place, so framework and author messages alike read as sentences (REQ-C-013)
+        object.__setattr__(self, "message", sentence(self.message))
+        if self.errors is not None:
+            items = [
+                {**e, "message": sentence(str(e["message"]))} if "message" in e else e
+                for e in self.errors
+            ]
+            object.__setattr__(self, "errors", tuple(items))
+        if self.suggestion is None and (self.retryable or self.fix_required is not None):
+            # A recoverable error always names its next step
+            object.__setattr__(self, "suggestion", self.fix_required or _RETRY)
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -123,10 +171,10 @@ class Envelope:
         meta.update(self.extra_meta)
         return {
             "ok": self.ok,
-            "data": self.data,
-            "error": None if self.error is None else self.error.to_json(),
-            "warnings": [w.to_json() for w in self.warnings],
-            "meta": meta,
+            "data": clean(self.data),
+            "error": None if self.error is None else clean(self.error.to_json()),
+            "warnings": clean([w.to_json() for w in self.warnings]),
+            "meta": clean(meta),
         }
 
 

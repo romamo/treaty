@@ -120,7 +120,7 @@ def test_flag_before_command_path_names_the_command(app: App, argv: list[str]) -
     code, env = run_json(app, argv)
     flag = argv[0] if argv[0].startswith("-") else argv[1]
     assert code == 2 and env["error"]["code"] == "ARG_ERROR"
-    assert env["error"]["message"] == f"flag {flag!r} must come after the command path"
+    assert env["error"]["message"] == f"Flag {flag!r} must come after the command path."
     assert env["error"]["context"]["command"] == "deployctl deploy rollback"
     assert env["error"]["suggestion"] == (
         f"flags go after the command: deployctl deploy rollback [arguments] {flag}"

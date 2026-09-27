@@ -163,6 +163,35 @@ A handler that raises anything else exits `1` with `HANDLER_CRASHED`, naming the
 the traceback goes to stderr with secret values redacted. A result or `Exit` payload the
 framework cannot serialize exits `1` with `INVALID_OUTPUT` or `INVALID_EXIT`.
 
+## Stdout hygiene
+
+Stdout carries only envelopes (REQ-F-006). While a command runs, `sys.stdout` points at
+stderr, so a stray `print()` from the handler or a library lands there and the envelope
+gets a `THIRD_PARTY_STDOUT` warning with the byte count; writes straight to file
+descriptor 1 (C extensions, child processes) are not caught. Handlers log with
+`ctx.log("connecting", host=host)`: one line on stderr, a JSON object with `level`,
+`message`, and `fields` in JSON mode and `message key=value` otherwise. Declared secrets
+and fields named like credentials (`token`, `password`, `API_KEY`, `DB_PASS`,
+`Authorization`, `Cookie`, at any depth) print as `[REDACTED]` (REQ-F-051).
+
+In JSON mode every string is cleaned before it is written: ANSI escape sequences and
+carriage returns are removed, and null bytes and lone surrogates become U+FFFD (REQ-F-007,
+REQ-F-016). Plain mode prints text as returned. `ctx.color` tells a renderer whether it may
+color: never in JSON mode, under `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`,
+`JENKINS_URL`, or `TERM=dumb`, or when stdout is not a terminal (REQ-F-008). `App.main()`
+sets `PAGER=cat` and `GIT_PAGER=cat` for every child process, and `NO_COLOR=1` whenever
+color is off (REQ-F-010); `App.run()` leaves the process environment alone.
+
+`datetime`, `date`, and `time` results are ISO 8601 strings (`2026-09-27T10:00:00Z` for
+UTC), and `Decimal` is fixed-point text; the output schema says `format: date-time` and so
+on (REQ-F-005). A naive `datetime` is `INVALID_OUTPUT`: give it a `tzinfo`.
+
+Every `error.message` is written as a sentence, with a capital first letter and closing
+punctuation, author messages included (REQ-C-013). A recoverable error (`retryable`, or one
+with `fix_required`) always has a `suggestion`: the one given to `Exit`, else the exit
+code's `app.exit_code(..., suggestion=...)`, else the `fix_required` text or a generic
+retry step. The audit rule `exit-code-suggestion` flags retryable codes without one.
+
 ## Output size
 
 JSON output is capped at 1 MiB per envelope: `App(max_output_bytes=...)` app-wide,

@@ -162,6 +162,25 @@ def _retryable(app: App) -> Iterator[Finding]:
                 )
 
 
+def _exit_code_suggestion(app: App) -> Iterator[Finding]:
+    seen: set[str] = set()
+    for c in user_commands(app):
+        for name in c.exit_codes:
+            entry = app.exits.by_name(name)
+            if name.value in seen or not entry.retryable or entry.suggestion is not None:
+                continue
+            seen.add(name.value)
+            yield Finding(
+                "exit-code-suggestion",
+                Severity.ADVICE,
+                c.path.value,
+                f"{name} is retryable but names no next step; "
+                "agents get only the generic retry suggestion",
+                f'app.exit_code("{name}", {entry.code.value}, ..., '
+                'suggestion="wait for the upstream to recover, then retry")',
+            )
+
+
 def _typed_output(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         schema = c.output_schema
@@ -270,6 +289,12 @@ RULES: tuple[Rule, ...] = (
         _exit_codes,
     ),
     Rule("retryable", "Retryable codes only on idempotent commands", Severity.WARNING, _retryable),
+    Rule(
+        "exit-code-suggestion",
+        "Retryable exit codes name a next step",
+        Severity.ADVICE,
+        _exit_code_suggestion,
+    ),
     Rule(
         "typed-output",
         "Outputs are typed so output_schema is informative",

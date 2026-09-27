@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, NoReturn
+from typing import IO, Any, NoReturn, TextIO, cast
 
 from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, StdinCap, cap_envelope
 from ._command import (
@@ -30,17 +30,17 @@ from ._command import (
     Renderer,
     build_command,
 )
-from ._context import Ctx
+from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import effect_problem
-from ._envelope import Envelope, ErrorDetail, WarningDetail, write_envelope
+from ._envelope import Envelope, ErrorDetail, WarningDetail, clean, json_safe, write_envelope
 from ._errors import CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Flag
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._manifest import build_manifest, command_schema
-from ._mode import Format, resolve_mode
+from ._mode import Format, color_allowed, quiet_children, resolve_mode
 from ._parse import (
     Invocation,
     Route,
@@ -144,7 +144,10 @@ class App:
         description: str,
         retryable: bool,
         side_effects: str,
+        suggestion: str | None = None,
     ) -> ExitCodeEntry:
+        """Declare a command-specific exit code; ``suggestion`` is the next step an agent
+        takes after it, used when the ``Exit`` raised gives none"""
         return self.exits.register(
             ExitCodeEntry(
                 name=ExitCodeName(name),
@@ -152,6 +155,7 @@ class App:
                 description=description,
                 retryable=retryable,
                 side_effects=SideEffects(side_effects),
+                suggestion=suggestion,
             )
         )
 
@@ -432,6 +436,9 @@ class App:
         return run.execute(command, invocation, Format.JSON, meta=meta)
 
     def main(self) -> NoReturn:
+        # Only the console entry point changes os.environ, which every child inherits;
+        # run() callers such as tests and embedders pass their own env
+        quiet_children(os.environ, sys.stdout.isatty())
         sys.exit(self.run(sys.argv[1:]))
 
     def run(
@@ -448,9 +455,10 @@ class App:
         err = stderr if stderr is not None else sys.stderr
         inp = stdin if stdin is not None else sys.stdin
         environ = env if env is not None else os.environ
-        run = _Run(self, out, err, environ)
+        run = _Run(self, out, err, environ, tty=out.isatty() if isatty is None else isatty)
         try:
-            return self._route(run, list(argv), inp, environ, isatty)
+            with run.guard_stdout():
+                return self._route(run, list(argv), inp, environ)
         except OSError as exc:
             if not _closed_pipe(exc):
                 raise
@@ -463,18 +471,11 @@ class App:
         argv: list[str],
         inp: IO[str],
         environ: Mapping[str, str],
-        isatty: bool | None,
     ) -> int:
         out = run.out
         try:
             globals_, rest = split_globals(argv)
-            mode = resolve_mode(
-                globals_.format,
-                environ,
-                out.isatty() if isatty is None else isatty,
-                self.formats,
-                self.name,
-            )
+            mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
@@ -538,6 +539,52 @@ _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 
 # Shorter values would redact every digit or letter they share with a traceback
 MIN_REDACTED = 4
+
+# REQ-F-051: ctx.log field names whose values are credentials: API_KEY, *_TOKEN, DB_PASS,
+# Authorization, Cookie, X-Api-Key, AUTH_URL, ...
+_SECRET_KEY = re.compile(
+    r"token|secret|password|key|credential|auth|cookie|(^|[_-])pass($|[_-])|^api([_-]|$)",
+    re.IGNORECASE,
+)
+
+
+def _scrub(key: str, value: object, redact: Callable[[str], str]) -> object:
+    """A ``ctx.log`` field as JSON values, with credentials replaced at any depth"""
+    if _SECRET_KEY.search(key):
+        return REDACTED
+    if isinstance(value, dict):
+        return {k: _scrub(k, v, redact) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub("", v, redact) for v in value]
+    if isinstance(value, str):
+        return redact(value)
+    return value
+
+
+class _StrayStdout(io.TextIOBase):
+    """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
+    to stderr, and the next envelope reports how much (REQ-F-006)"""
+
+    def __init__(self, err: _Stderr) -> None:
+        super().__init__()
+        self._err = err
+        self._bytes = 0
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str, /) -> int:
+        self._err.write(text)
+        self._bytes += len(text.encode("utf-8", "surrogatepass"))
+        return len(text)
+
+    def flush(self) -> None:
+        self._err.flush()
+
+    def take(self) -> int:
+        """Bytes written since the last call"""
+        written, self._bytes = self._bytes, 0
+        return written
 
 
 def _text(exc: BaseException) -> str:
@@ -664,11 +711,16 @@ def buffer_stream(envelopes: Generator[Envelope]) -> Envelope:
 class _Run:
     """One process invocation: builds envelopes, writes them, tracks timing"""
 
-    def __init__(self, app: App, out: IO[str], err: IO[str], env: Mapping[str, str]) -> None:
+    def __init__(
+        self, app: App, out: IO[str], err: IO[str], env: Mapping[str, str], *, tty: bool = False
+    ) -> None:
         self.app = app
         self.out = out
         self.err = _Stderr(err)
         self.env = env
+        self.tty = tty
+        """Whether stdout is a terminal"""
+        self.stray: _StrayStdout | None = None
         self.started = time.perf_counter()
         self.request_id = uuid.uuid4().hex[:12]
         self.cap = app.max_output
@@ -677,6 +729,75 @@ class _Run:
         """A streaming command whose events are still being written"""
         self.abandoned: Pending | None = None
         """Set by ``_execute`` when the handler outlived its timeout and still runs"""
+
+    @contextlib.contextmanager
+    def guard_stdout(self) -> Iterator[None]:
+        """Point ``sys.stdout`` at stderr for the run. Process-wide, not a context-local
+        redirect, because handlers run on worker threads; one run owns the process."""
+        saved = sys.stdout
+        self.stray = _StrayStdout(self.err)
+        sys.stdout = cast(TextIO, self.stray)
+        try:
+            yield
+        finally:
+            sys.stdout = saved
+
+    def _write(self, envelope: Envelope) -> None:
+        """One JSON envelope on stdout, warning when text was printed there since the last"""
+        written = 0 if self.stray is None else self.stray.take()
+        if written:
+            warning = WarningDetail(
+                "THIRD_PARTY_STDOUT",
+                "Third-party code wrote to stdout; the text went to stderr",
+                context={"bytes": written},
+            )
+            envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        write_envelope(cap_envelope(envelope, self.cap), self.out)
+
+    def _ctx(
+        self,
+        command: Command,
+        args: object,
+        mode: Format,
+        timeout: Timeout,
+        idempotency_key: str | None = None,
+    ) -> Ctx:
+        return Ctx(
+            app_name=self.app.name,
+            version=self.app.version,
+            mode=mode,
+            request_id=self.request_id,
+            env=self.env,
+            state=self.app._state,
+            timeout=timeout,
+            color=mode is not Format.JSON and color_allowed(self.env, self.tty),
+            log_sink=self._log_sink(command, args, mode),
+            idempotency_key=idempotency_key,
+        )
+
+    def _log_sink(self, command: Command, args: object, mode: Format) -> LogSink:
+        """``ctx.log``: one line on stderr, secrets redacted, escapes stripped unless the
+        run may color (REQ-F-006, REQ-F-051)"""
+        keep_escapes = mode is not Format.JSON and color_allowed(self.env, self.tty)
+
+        def write(message: str, fields: Mapping[str, object]) -> None:
+            # Built per call, inside the handler: a secret scalar's serialize= is user code
+            redact = self._redactor(command, args)
+            safe = {k: _scrub(k, json_safe(v), redact) for k, v in fields.items()}
+            if mode is Format.JSON:
+                record = {"level": "info", "message": redact(message), "fields": safe}
+                line = json.dumps(clean(record), separators=(",", ":"), sort_keys=True)
+            else:
+                pairs = (
+                    f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in safe.items()
+                )
+                line = " ".join((redact(message), *pairs))
+                if not keep_escapes:
+                    line = str(clean(line))
+            self.err.write(line + "\n")
+            self.err.flush()
+
+        return write
 
     # Envelope construction
 
@@ -749,7 +870,7 @@ class _Run:
         try:
             call = fingerprint(command.path, invocation.args, self.app.scalars)
         except SchemaError as exc:
-            message = f"{command.path}: its arguments cannot be fingerprinted for the key: {exc}"
+            message = f"Command {command.path} has arguments the key cannot fingerprint: {exc}"
             return self._broken(command, "INVALID_ARGS", message, started, full_meta)
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
             return self._crashed(command, invocation.args, exc, started, full_meta)
@@ -909,18 +1030,8 @@ class _Run:
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
-        ctx = Ctx(
-            app_name=self.app.name,
-            version=self.app.version,
-            mode=mode,
-            request_id=self.request_id,
-            env=self.env,
-            state=self.app._state,
-            timeout=timeout,
-            idempotency_key=None
-            if invocation.idempotency_key is None
-            else invocation.idempotency_key.value,
-        )
+        key = invocation.idempotency_key
+        ctx = self._ctx(command, invocation.args, mode, timeout, None if key is None else key.value)
         args = invocation.args
         preview_only = _previewing(command, invocation)
         if preview_only:
@@ -947,7 +1058,7 @@ class _Run:
                 entry.code.value,
                 error=ErrorDetail(
                     code="TIMEOUT",
-                    message=f"{command.path} exceeded {timeout.seconds}s",
+                    message=f"Command {command.path} exceeded its {timeout.seconds}s timeout",
                     retryable=entry.retryable,
                     context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
                     phase="execution",
@@ -972,7 +1083,11 @@ class _Run:
             data = self._payload(result)
         except SchemaError as exc:
             return self._broken(
-                command, "INVALID_OUTPUT", f"{command.path} returned {exc}", started, full_meta
+                command,
+                "INVALID_OUTPUT",
+                f"Command {command.path} returned {exc}",
+                started,
+                full_meta,
             )
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, exc, started, full_meta)
@@ -984,7 +1099,7 @@ class _Run:
                     entry.code.value,
                     error=ErrorDetail(
                         code="INVALID_EFFECT",
-                        message=f"{command.path} broke the effect contract: {problem}",
+                        message=f"Command {command.path} broke the effect contract: {problem}",
                         retryable=False,
                         context={"command": command.path.value},
                         phase="execution",
@@ -999,7 +1114,7 @@ class _Run:
                 data=data,
                 error=ErrorDetail(
                     code="CONFIRMATION_REQUIRED",
-                    message=f"{command.path} is destructive; nothing was applied",
+                    message=f"Command {command.path} is destructive; nothing was applied",
                     retryable=False,
                     context={"command": command.path.value, "flag": "confirm-destructive"},
                     phase="validation",
@@ -1027,15 +1142,7 @@ class _Run:
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
-        ctx = Ctx(
-            app_name=self.app.name,
-            version=self.app.version,
-            mode=mode,
-            request_id=self.request_id,
-            env=self.env,
-            state=self.app._state,
-            timeout=timeout,
-        )
+        ctx = self._ctx(command, invocation.args, mode, timeout)
         args = invocation.args
         seq = 0
         events: Iterator[object] | None = None
@@ -1103,7 +1210,7 @@ class _Run:
                 entry.code.value,
                 error=ErrorDetail(
                     code="TIMEOUT",
-                    message=f"{command.path} exceeded {timeout.seconds}s",
+                    message=f"Command {command.path} exceeded its {timeout.seconds}s timeout",
                     retryable=entry.retryable,
                     context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
                     phase="execution",
@@ -1122,7 +1229,7 @@ class _Run:
             yield self._cancelled(command, sig, started, {**full_meta, "seq": seq})
             return
         except SchemaError as exc:
-            message = f"{command.path} yielded {exc}"
+            message = f"Command {command.path} yielded {exc}"
             yield self._broken(command, "INVALID_OUTPUT", message, started, partial())
             return
         except GeneratorExit:
@@ -1168,7 +1275,7 @@ class _Run:
             sig.exit_code,
             error=ErrorDetail(
                 code="CANCELLED",
-                message=f"{command.path} cancelled by {sig.name}",
+                message=f"Command {command.path} was cancelled by {sig.name}",
                 retryable=entry.retryable,
                 context=context,
                 phase="execution",
@@ -1198,7 +1305,7 @@ class _Run:
                 entry.code.value,
                 error=ErrorDetail(
                     code="UNDECLARED_EXIT_CODE",
-                    message=f"{command.path} raised {exc.name}, which it does not declare",
+                    message=f"Command {command.path} raised {exc.name}, which it does not declare",
                     retryable=False,
                     context={
                         "declared": [n.value for n in command.exit_codes],
@@ -1212,18 +1319,22 @@ class _Run:
             )
         entry = self.app.exits.by_name(exc.name)
         if entry.code.value == 0:
-            message = f"{command.path} raised {exc.name}; return the result instead of raising"
+            message = (
+                f"Command {command.path} raised {exc.name}; return the result instead of raising"
+            )
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         if not _ERROR_CODE.fullmatch(exc.code) or not isinstance(exc.message, str):
             message = (
-                f"{command.path} raised {exc.name} with code {exc.code!r}; error codes are "
+                f"Command {command.path} raised {exc.name} with code {exc.code!r}; error codes are "
                 "UPPER_SNAKE_CASE and messages are text"
             )
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         retry_after = exc.retry_after_ms
         if retry_after is not None:
             if isinstance(retry_after, bool) or not isinstance(retry_after, (int, float)):
-                message = f"{command.path} raised {exc.name} with a non-numeric retry_after_ms"
+                message = (
+                    f"Command {command.path} raised {exc.name} with a non-numeric retry_after_ms"
+                )
                 return self._broken(command, "INVALID_EXIT", message, started, meta)
             # A reset time already past (negative) means retry now; fractions round up
             retry_after = max(0, math.ceil(retry_after))
@@ -1231,7 +1342,7 @@ class _Run:
             data = self._payload(exc.data)
             context = to_jsonable(exc.context, self.app.scalars)
         except SchemaError as err:
-            message = f"{command.path} raised {exc.name} with {err}"
+            message = f"Command {command.path} raised {exc.name} with {err}"
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         except Exception as err:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, err, started, meta)
@@ -1245,7 +1356,7 @@ class _Run:
                 retryable=entry.retryable,
                 detail=exc.detail,
                 context=context,
-                suggestion=exc.suggestion,
+                suggestion=exc.suggestion if exc.suggestion is not None else entry.suggestion,
                 fix_command=exc.fix_command,
                 fix_required=exc.fix_required,
                 retry_after_ms=retry_after if entry.retryable else None,
@@ -1358,7 +1469,7 @@ class _Run:
             entry.code.value,
             error=ErrorDetail(
                 code="HANDLER_CRASHED",
-                message=redact(f"{command.path} raised {type(exc).__name__}: {_text(exc)}"),
+                message=redact(f"Command {command.path} raised {type(exc).__name__}: {_text(exc)}"),
                 retryable=False,
                 context={"command": command.path.value, "exception": type(exc).__qualname__},
                 phase="execution",
@@ -1372,7 +1483,7 @@ class _Run:
 
     def emit(self, mode: Format, envelope: Envelope, *, render: Renderer | None = None) -> int:
         if mode is Format.JSON:
-            write_envelope(cap_envelope(envelope, self.cap), self.out)
+            self._write(envelope)
             return envelope.exit_code
         return self._emit_text(mode, envelope, render)
 
@@ -1417,7 +1528,7 @@ class _Run:
         render_failed = False
         for envelope in drain(envelopes):
             if mode is Format.JSON:
-                write_envelope(cap_envelope(envelope, self.cap), self.out)
+                self._write(envelope)
                 code = envelope.exit_code
                 continue
             code = self._emit_text(mode, envelope, render, fallback=render_event)
@@ -1521,7 +1632,7 @@ class _Run:
         with contextlib.closing(self._exec_lines(args, plan)) as lines:
             for line_no, envelope in lines:
                 lines_seen, last = line_no, envelope
-                write_envelope(cap_envelope(envelope, self.cap), self.out)
+                self._write(envelope)
                 if envelope.error is None or envelope.error.code != "DISPATCH_PARSE_ERROR":
                     parsed_any = True
                 if not envelope.ok:
@@ -1532,7 +1643,7 @@ class _Run:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
             # between lines left no CANCELLED line, so the plan says where it stopped.
             if last is None or last.error is None or last.error.code != "CANCELLED":
-                write_envelope(self._plan_cancelled(received, lines_seen), self.out)
+                self._write(self._plan_cancelled(received, lines_seen))
             return received.exit_code
         if not lines_seen:
             return self.emit(

@@ -65,7 +65,7 @@ def test_raw_payload_cannot_combine_with_flags() -> None:
     code, env = run_json(["create", "foo", "--raw-payload", '{"name": "foo"}'])
     assert (
         code == 2
-        and env["error"]["message"] == "Cannot combine --raw-payload with individual flags"
+        and env["error"]["message"] == "Cannot combine --raw-payload with individual flags."
     )
     assert env["error"]["context"]["also_given"] == ["name"]
 

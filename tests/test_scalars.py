@@ -128,7 +128,7 @@ def test_pattern_violation_is_a_field_error_with_the_pattern() -> None:
     code, env = run(["deploy", "Bad_Name"])
     assert code == 2
     error = errors_of(env)["service"]
-    assert error["message"] == "value for 'service' does not match pattern"
+    assert error["message"] == "Value for 'service' does not match pattern."
     assert error["context"]["pattern"] == _ID.pattern
     assert error["context"]["scalar"] == "ResourceId"
     assert error["context"]["value"] == "Bad_Name"
@@ -139,7 +139,7 @@ def test_parser_value_error_is_a_field_error_with_its_cause() -> None:
     assert code == 2
     error = errors_of(env)["port"]
     assert (
-        error["message"] == "value for 'port' is not a valid TcpPort: only even ports in this test"
+        error["message"] == "Value for 'port' is not a valid TcpPort: only even ports in this test."
     )
     assert error["context"]["cause"] == "only even ports in this test"
 
@@ -148,7 +148,7 @@ def test_bounds_are_checked_before_the_parser() -> None:
     code, env = run(["deploy", "api", "--port", "0"])
     assert code == 2
     error = errors_of(env)["port"]
-    assert error["message"] == "value for 'port' must be at least 1"
+    assert error["message"] == "Value for 'port' must be at least 1."
     assert error["context"]["minimum"] == 1
     code, env = run(["deploy", "api", "--port", "70000"])
     assert errors_of(env)["port"]["context"]["maximum"] == 65535
@@ -157,13 +157,13 @@ def test_bounds_are_checked_before_the_parser() -> None:
 def test_base_type_failure_is_reported_as_the_base_type() -> None:
     code, env = run(["deploy", "api", "--port", "http"])
     assert code == 2
-    assert errors_of(env)["port"]["message"] == "'port' expects an integer"
+    assert errors_of(env)["port"]["message"] == "'port' expects an integer."
 
 
 def test_all_scalar_errors_are_reported_in_one_run() -> None:
     code, env = run(["deploy", "Bad", "--port", "0", "--peers", "ok", "--peers", "NO"])
     assert code == 2
-    assert env["error"]["message"] == "Validation failed: 3 errors"
+    assert env["error"]["message"] == "Validation failed: 3 errors."
     assert set(errors_of(env)) == {"service", "port", "peers"}
 
 
@@ -181,7 +181,7 @@ def test_raw_payload_route_applies_the_same_checks() -> None:
 def test_raw_payload_base_type_mismatch_is_reported_as_the_base_type() -> None:
     code, env = run(["deploy", "--raw-payload", json.dumps({"service": 7})])
     assert code == 2
-    assert errors_of(env)["service"]["message"] == "'service' expects a string"
+    assert errors_of(env)["service"]["message"] == "'service' expects a string."
 
 
 def test_exec_route_parses_scalars() -> None:

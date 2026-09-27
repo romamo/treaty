@@ -52,14 +52,14 @@ def test_two_bad_flags_are_reported_together() -> None:
     assert code == 2
     error = error_of(env)
     assert error["code"] == "ARG_ERROR" and error["phase"] == "validation"
-    assert error["message"] == "Validation failed: 2 errors"
+    assert error["message"] == "Validation failed: 2 errors."
     assert error["context"] == {"error_count": 2, "fields": ["env", "replicas"]}
     errors = error["errors"]
     assert isinstance(errors, list)
     assert [e["field"] for e in errors] == ["env", "replicas"]
-    assert errors[0]["message"] == "'env' must be one of staging, prod"
+    assert errors[0]["message"] == "'env' must be one of staging, prod."
     assert errors[0]["context"]["allowed"] == ["staging", "prod"]
-    assert errors[1]["message"] == "'replicas' expects an integer"
+    assert errors[1]["message"] == "'replicas' expects an integer."
     spec_validator("response-envelope").validate(env)
 
 
@@ -68,21 +68,21 @@ def test_unknown_flag_missing_positional_and_bad_value_in_one_run() -> None:
     errors = error_of(env)["errors"]
     assert isinstance(errors, list)
     assert [e["message"] for e in errors] == [
-        "unknown flag '--regoin'",
-        "'replicas' expects an integer",
-        "missing required: service",
+        "Unknown flag '--regoin'.",
+        "'replicas' expects an integer.",
+        "Missing required: service.",
     ]
 
 
 def test_a_single_error_keeps_its_own_shape_and_lists_itself() -> None:
     code, env, _ = run(["deploy", "api", "--replicas", "x"])
     error = error_of(env)
-    assert error["message"] == "'replicas' expects an integer"
+    assert error["message"] == "'replicas' expects an integer."
     assert error["context"] == {"flag": "replicas", "value": "x"}
     assert error["errors"] == [
         {
             "field": "replicas",
-            "message": "'replicas' expects an integer",
+            "message": "'replicas' expects an integer.",
             "context": {"flag": "replicas", "value": "x"},
         }
     ]
@@ -102,7 +102,7 @@ def test_a_field_that_failed_is_not_also_reported_missing() -> None:
     out = io.StringIO()
     app.run(["go", "--count", "x"], stdin=io.StringIO(), stdout=out, stderr=io.StringIO(), env={})
     error = error_of(json.loads(out.getvalue()))
-    assert [e["message"] for e in error["errors"]] == ["'count' expects an integer"]  # type: ignore[union-attr]
+    assert [e["message"] for e in error["errors"]] == ["'count' expects an integer."]  # type: ignore[union-attr]
 
 
 def test_secret_errors_are_collected_with_the_rest() -> None:
@@ -120,7 +120,7 @@ def test_a_flag_without_a_value_at_the_end_is_collected_with_the_rest() -> None:
     assert code == 2 and "env" in fields and "replicas" in fields
     assert {
         "field": "replicas",
-        "message": "'--replicas' needs a value",
+        "message": "'--replicas' needs a value.",
         "context": {"flag": "replicas"},
     } in error["errors"]
 

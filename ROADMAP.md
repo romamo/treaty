@@ -5,7 +5,7 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 
 ## Done since the skeleton
 
-- `treaty audit module:app` console script: ten ordered static rules over the registry,
+- `treaty audit module:app` console script: eleven ordered static rules over the registry,
   each with a generated fix, human and JSON output, `--all` and `--limit`; `treaty rules`
   lists the rule order
 - `human=` renderer hook on `@app.command` for commands whose human output should not be
@@ -57,6 +57,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - `--format plain` replaces `--format human` (REQ-O-001), with no alias; `plain=` replaces
   `human=`; commands without a renderer print flat `key: value` lines instead of indented
   JSON; `manifest` and `--schema` stay JSON
+- Output hygiene (REQ-F-005 to F-008, F-010, F-016, F-051, C-013): stray `print()` goes to
+  stderr with a `THIRD_PARTY_STDOUT` warning, `ctx.log` with redaction, escape and UTF-8
+  cleaning in JSON, `ctx.color`, `PAGER=cat` and `NO_COLOR=1` for children under
+  `App.main()`, ISO 8601 dates and `Decimal` text, sentence-form error messages, and
+  `suggestion=` on exit codes with the `exit-code-suggestion` audit rule
 
 ## 0.1.0: first release
 
@@ -100,8 +105,6 @@ matching audit rule so adoption never requires reading the spec.
   (REQ-F-018)
 - `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028) and a
   `would_affect` object on dry runs (REQ-C-004)
-- Pager suppression and locale-invariant serialization audit (REQ-F-010, REQ-F-005);
-  both likely already hold and need tests, not code
 - `REDIRECTED` exit `13` with `error.redirect` for renamed commands and `aliases` in the
   manifest
 

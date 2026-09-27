@@ -2,7 +2,8 @@
 
 Status of treaty against the 159 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
-commit `458bab5` (0.0.6).
+commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
+hygiene).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -14,34 +15,28 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Level 1: agent-safe basics | 12 | 4 | 7 | 1 | **62%** |
-| Level 2: every P0 (includes Level 1) | 51 | 12 | 24 | 15 | **47%** |
-| Level 3: full spec | 159 | 20 | 53 | 86 | **29%** |
+| Level 1: agent-safe basics | 12 | 9 | 2 | 1 | **83%** |
+| Level 2: every P0 (includes Level 1) | 51 | 19 | 17 | 15 | **54%** |
+| Level 3: full spec | 159 | 28 | 46 | 85 | **32%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 14 | 29 | 36 | **36%** |
-| Command contract (C) | 30 | 4 | 12 | 14 | **33%** |
+| Framework-automatic (F) | 79 | 21 | 23 | 35 | **41%** |
+| Command contract (C) | 30 | 5 | 11 | 14 | **35%** |
 | Opt-in (O) | 50 | 2 | 12 | 36 | **16%** |
 
 ## Open mandatory requirements
 
-Level 2 (every P0) is the level the spec calls agent-reliable. These 39 requirements
+Level 2 (every P0) is the level the spec calls agent-reliable. These 32 requirements
 stand between treaty and a Level 2 claim; the Level 1 ones come first.
 
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
 | [REQ-F-002](../cli-agent-ergonomics/requirements/f-002-exit-code-2-reserved-for-validation-failures.md) | Exit Code 2 Reserved for Validation Failures | P0 | 1 | Partial | Handler-raised ParseError and CONFIRMATION_REQUIRED exit 2 after user code has run |
-| [REQ-F-006](../cli-agent-ergonomics/requirements/f-006-stdout-stderr-stream-enforcement.md) | Stdout/Stderr Stream Enforcement | P0 | 1 | Partial | Handler `print()` lands on stdout ahead of the envelope |
-| [REQ-F-007](../cli-agent-ergonomics/requirements/f-007-ansi-color-code-suppression.md) | ANSI/Color Code Suppression | P0 | 1 | Partial | Framework emits no color; ANSI sequences inside data strings are not stripped |
-| [REQ-F-008](../cli-agent-ergonomics/requirements/f-008-no-color-and-ci-environment-detection.md) | NO_COLOR and CI Environment Detection | P0 | 1 | Partial | Holds only because treaty never colors; `NO_COLOR` and `TERM` are not read or passed to children |
 | [REQ-F-009](../cli-agent-ergonomics/requirements/f-009-non-interactive-mode-auto-detection.md) | Non-Interactive Mode Auto-Detection | P0 | 1 | Not started | No prompt API, exit 4, or INPUT_REQUIRED; `input()` crashes the handler (exit 1) |
-| [REQ-F-010](../cli-agent-ergonomics/requirements/f-010-pager-suppression.md) | Pager Suppression | P0 | 1 | Partial | No pager in treaty; `PAGER`/`GIT_PAGER` not set to `cat` for children |
 | [REQ-C-004](../cli-agent-ergonomics/requirements/c-004-destructive-commands-must-support-dry-run.md) | Destructive Commands Must Support --dry-run | P0 | 1 | Partial | Destructive commands require `dry_run` and preview `would_*`; no `would_affect` object |
-| [REQ-C-013](../cli-agent-ergonomics/requirements/c-013-error-responses-include-code-and-message.md) | Error Responses Include Code and Message | P0 | 1 | Partial | Every failure has a code; message form and suggestion are not enforced |
-| [REQ-F-005](../cli-agent-ergonomics/requirements/f-005-locale-invariant-serialization.md) | Locale-Invariant Serialization | P0 | 2 | Partial | `json.dumps` is locale-invariant; no built-in ISO 8601 datetime serialization |
 | [REQ-F-011](../cli-agent-ergonomics/requirements/f-011-default-timeout-per-command.md) | Default Timeout Per Command | P0 | 2 | Partial | 60 s default deadline; streaming commands default to no timeout |
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Partial | Exits 141 (OUTPUT_CLOSED); spec requires 0 |
 | [REQ-F-015](../cli-agent-ergonomics/requirements/f-015-validate-before-execute-phase-order.md) | Validate-Before-Execute Phase Order | P0 | 2 | Partial | All field errors collected before the handler; handler-raised ParseError still reports validation after execution started |
@@ -50,7 +45,6 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Not started | No subprocess API; newlines in `str` args are accepted |
 | [REQ-F-046](../cli-agent-ergonomics/requirements/f-046-pager-environment-variable-suppression.md) | Pager Environment Variable Suppression | P0 | 2 | Not started | No `PAGER`/`GIT_PAGER` injection for children |
 | [REQ-F-047](../cli-agent-ergonomics/requirements/f-047-repl-mode-prohibition-in-non-tty-context.md) | REPL Mode Prohibition in Non-TTY Context | P0 | 2 | Partial | No-args run shows help; `exec` refuses a TTY stdin; `input()` is not intercepted |
-| [REQ-F-051](../cli-agent-ergonomics/requirements/f-051-debug-and-trace-mode-secret-redaction.md) | Debug and Trace Mode Secret Redaction | P0 | 2 | Partial | Secrets redacted in errors and tracebacks; no header or env-dump redaction |
 | [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Partial | 1 MiB cap, `--max-output`, `meta.truncated`; hint is prose, not a runnable command |
 | [REQ-F-053](../cli-agent-ergonomics/requirements/f-053-stdout-unbuffering-in-non-tty-mode.md) | Stdout Unbuffering in Non-TTY Mode | P0 | 2 | Partial | Each envelope flushed; no heartbeat, no `PYTHONUNBUFFERED` |
 | [REQ-F-054](../cli-agent-ergonomics/requirements/f-054-stdin-payload-size-cap-with-input-file-fallback.md) | Stdin Payload Size Cap with --input-file Fallback | P0 | 2 | Partial | 64 KiB cap and `--input-file` exist on `exec` only |
@@ -81,18 +75,18 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-002](../cli-agent-ergonomics/requirements/f-002-exit-code-2-reserved-for-validation-failures.md) | Exit Code 2 Reserved for Validation Failures | P0 | 1 | Partial | Handler-raised ParseError and CONFIRMATION_REQUIRED exit 2 after user code has run |
 | [REQ-F-003](../cli-agent-ergonomics/requirements/f-003-json-output-mode-auto-activation.md) | JSON Output Mode Auto-Activation | P0 | 1 | Done | Non-TTY stdout or `CI` selects JSON |
 | [REQ-F-004](../cli-agent-ergonomics/requirements/f-004-consistent-json-response-envelope.md) | Consistent JSON Response Envelope | P0 | 1 | Done | Envelope with ok, data, error, warnings, meta on every exit |
-| [REQ-F-005](../cli-agent-ergonomics/requirements/f-005-locale-invariant-serialization.md) | Locale-Invariant Serialization | P0 | 2 | Partial | `json.dumps` is locale-invariant; no built-in ISO 8601 datetime serialization |
-| [REQ-F-006](../cli-agent-ergonomics/requirements/f-006-stdout-stderr-stream-enforcement.md) | Stdout/Stderr Stream Enforcement | P0 | 1 | Partial | Handler `print()` lands on stdout ahead of the envelope |
-| [REQ-F-007](../cli-agent-ergonomics/requirements/f-007-ansi-color-code-suppression.md) | ANSI/Color Code Suppression | P0 | 1 | Partial | Framework emits no color; ANSI sequences inside data strings are not stripped |
-| [REQ-F-008](../cli-agent-ergonomics/requirements/f-008-no-color-and-ci-environment-detection.md) | NO_COLOR and CI Environment Detection | P0 | 1 | Partial | Holds only because treaty never colors; `NO_COLOR` and `TERM` are not read or passed to children |
+| [REQ-F-005](../cli-agent-ergonomics/requirements/f-005-locale-invariant-serialization.md) | Locale-Invariant Serialization | P0 | 2 | Done | ISO 8601 `datetime`/`date`/`time` (`Z` for UTC), `Decimal` as text; naive datetimes refused; byte-identical across locales |
+| [REQ-F-006](../cli-agent-ergonomics/requirements/f-006-stdout-stderr-stream-enforcement.md) | Stdout/Stderr Stream Enforcement | P0 | 1 | Done | Stray `print()` goes to stderr with a `THIRD_PARTY_STDOUT` warning; `ctx.log` writes stderr; tracebacks only on stderr |
+| [REQ-F-007](../cli-agent-ergonomics/requirements/f-007-ansi-color-code-suppression.md) | ANSI/Color Code Suppression | P0 | 1 | Done | Every JSON string loses ANSI escapes and carriage returns, error messages included |
+| [REQ-F-008](../cli-agent-ergonomics/requirements/f-008-no-color-and-ci-environment-detection.md) | NO_COLOR and CI Environment Detection | P0 | 1 | Done | `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`, `JENKINS_URL`, `TERM=dumb` turn `ctx.color` off; `App.main()` sets `NO_COLOR=1` for children |
 | [REQ-F-009](../cli-agent-ergonomics/requirements/f-009-non-interactive-mode-auto-detection.md) | Non-Interactive Mode Auto-Detection | P0 | 1 | Not started | No prompt API, exit 4, or INPUT_REQUIRED; `input()` crashes the handler (exit 1) |
-| [REQ-F-010](../cli-agent-ergonomics/requirements/f-010-pager-suppression.md) | Pager Suppression | P0 | 1 | Partial | No pager in treaty; `PAGER`/`GIT_PAGER` not set to `cat` for children |
+| [REQ-F-010](../cli-agent-ergonomics/requirements/f-010-pager-suppression.md) | Pager Suppression | P0 | 1 | Done | `App.main()` sets `PAGER=cat` and `GIT_PAGER=cat` for every child; treaty never pages |
 | [REQ-F-011](../cli-agent-ergonomics/requirements/f-011-default-timeout-per-command.md) | Default Timeout Per Command | P0 | 2 | Partial | 60 s default deadline; streaming commands default to no timeout |
 | [REQ-F-012](../cli-agent-ergonomics/requirements/f-012-timeout-exit-code-and-json-error.md) | Timeout Exit Code and JSON Error | P0 | 2 | Done | TIMEOUT, exit 10, `duration_ms` |
 | [REQ-F-013](../cli-agent-ergonomics/requirements/f-013-sigterm-handler-installation.md) | SIGTERM Handler Installation | P0 | 2 | Done | SIGTERM gives a CANCELLED envelope, exit 143, cleanup runs |
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Partial | Exits 141 (OUTPUT_CLOSED); spec requires 0 |
 | [REQ-F-015](../cli-agent-ergonomics/requirements/f-015-validate-before-execute-phase-order.md) | Validate-Before-Execute Phase Order | P0 | 2 | Partial | All field errors collected before the handler; handler-raised ParseError still reports validation after execution started |
-| [REQ-F-016](../cli-agent-ergonomics/requirements/f-016-utf-8-sanitization-before-serialization.md) | UTF-8 Sanitization Before Serialization | P1 | 3 | Partial | Sanitizer exists only in the MCP adapter; lone surrogates pass through the CLI envelope |
+| [REQ-F-016](../cli-agent-ergonomics/requirements/f-016-utf-8-sanitization-before-serialization.md) | UTF-8 Sanitization Before Serialization | P1 | 3 | Done | JSON strings: null bytes and lone surrogates become U+FFFD; bytes output is refused as INVALID_OUTPUT |
 | [REQ-F-017](../cli-agent-ergonomics/requirements/f-017-binary-field-base64-encoding.md) | Binary Field Base64 Encoding | P1 | 3 | Not started | Returning `bytes` gives INVALID_OUTPUT; no base64 wrapper with `size_bytes` |
 | [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Not started | No `meta.pagination`, `--cursor`, or `next_cursor` (ROADMAP 0.2.0) |
 | [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Not started | No default item limit or `--limit`; only the 1 MiB byte cap |
@@ -127,7 +121,7 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-048](../cli-agent-ergonomics/requirements/f-048-help-output-routing-to-stderr-in-non-tty-mode.md) | Help Output Routing to Stderr in Non-TTY Mode | P0 | 1 | Done | Help text to stderr, JSON envelope with `meta.help` on stdout |
 | [REQ-F-049](../cli-agent-ergonomics/requirements/f-049-async-command-handler-enforcement.md) | Async Command Handler Enforcement | P1 | 3 | Partial | `async def` handlers register and fail only at run time |
 | [REQ-F-050](../cli-agent-ergonomics/requirements/f-050-update-notifier-side-channel-suppression.md) | Update Notifier Side-Channel Suppression | P1 | 3 | Not started | No `CI=1`/`NO_UPDATE_NOTIFIER` for children |
-| [REQ-F-051](../cli-agent-ergonomics/requirements/f-051-debug-and-trace-mode-secret-redaction.md) | Debug and Trace Mode Secret Redaction | P0 | 2 | Partial | Secrets redacted in errors and tracebacks; no header or env-dump redaction |
+| [REQ-F-051](../cli-agent-ergonomics/requirements/f-051-debug-and-trace-mode-secret-redaction.md) | Debug and Trace Mode Secret Redaction | P0 | 2 | Done | Secrets redacted in errors, tracebacks, and `ctx.log`, including credential-named fields, env dumps, and headers; no audit log exists yet |
 | [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Partial | 1 MiB cap, `--max-output`, `meta.truncated`; hint is prose, not a runnable command |
 | [REQ-F-053](../cli-agent-ergonomics/requirements/f-053-stdout-unbuffering-in-non-tty-mode.md) | Stdout Unbuffering in Non-TTY Mode | P0 | 2 | Partial | Each envelope flushed; no heartbeat, no `PYTHONUNBUFFERED` |
 | [REQ-F-054](../cli-agent-ergonomics/requirements/f-054-stdin-payload-size-cap-with-input-file-fallback.md) | Stdin Payload Size Cap with --input-file Fallback | P0 | 2 | Partial | 64 KiB cap and `--input-file` exist on `exec` only |
@@ -136,7 +130,7 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-057](../cli-agent-ergonomics/requirements/f-057-headless-environment-detection-and-gui-suppression.md) | Headless Environment Detection and GUI Suppression | P0 | 2 | Not started | No `DISPLAY`/headless detection |
 | [REQ-F-058](../cli-agent-ergonomics/requirements/f-058-high-entropy-field-masking.md) | High-Entropy Field Masking | P1 | 3 | Not started | No high-entropy masking or `--unmask` |
 | [REQ-F-059](../cli-agent-ergonomics/requirements/f-059-json5-input-normalization.md) | JSON5 Input Normalization | P1 | 3 | Not started | Strict JSON only; no JSON5 normalization |
-| [REQ-F-060](../cli-agent-ergonomics/requirements/f-060-third-party-stdout-interception.md) | Third-Party Stdout Interception | P1 | 3 | Not started | Third-party stdout is not intercepted |
+| [REQ-F-060](../cli-agent-ergonomics/requirements/f-060-third-party-stdout-interception.md) | Third-Party Stdout Interception | P1 | 3 | Partial | `sys.stdout` is swapped to stderr during a run with a warning; writes to fd 1 and import-time prints are not caught |
 | [REQ-F-061](../cli-agent-ergonomics/requirements/f-061-symlink-loop-detection-in-traversal-utilities.md) | Symlink Loop Detection in Traversal Utilities | P1 | 3 | Not started | No traversal utilities |
 | [REQ-F-062](../cli-agent-ergonomics/requirements/f-062-glob-expansion-and-word-splitting-prevention.md) | Glob Expansion and Word-Splitting Prevention | P0 | 2 | Not started | No argv-only subprocess API |
 | [REQ-F-063](../cli-agent-ergonomics/requirements/f-063-credential-expiry-structured-error.md) | Credential Expiry Structured Error | P1 | 3 | Partial | PERMISSION_DENIED and AUTH_REQUIRED codes exist; no `refresh_command`/`required_permission` |
@@ -173,7 +167,7 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-C-010](../cli-agent-ergonomics/requirements/c-010-background-process-commands-declare-metadata.md) | Background-Process Commands Declare Metadata | P2 | 3 | Not started | No background-process metadata |
 | [REQ-C-011](../cli-agent-ergonomics/requirements/c-011-commands-declare-filesystem-side-effects.md) | Commands Declare Filesystem Side Effects | P3 | 3 | Not started | No filesystem side-effect declaration |
 | [REQ-C-012](../cli-agent-ergonomics/requirements/c-012-commands-with-network-i-o-support-timeout.md) | Commands with Network I/O Support --timeout | P0 | 2 | Partial | `has_network_io` adds `--timeout`; no check for network calls without a timeout |
-| [REQ-C-013](../cli-agent-ergonomics/requirements/c-013-error-responses-include-code-and-message.md) | Error Responses Include Code and Message | P0 | 1 | Partial | Every failure has a code; message form and suggestion are not enforced |
+| [REQ-C-013](../cli-agent-ergonomics/requirements/c-013-error-responses-include-code-and-message.md) | Error Responses Include Code and Message | P0 | 1 | Done | Every `error.message` is normalized to a sentence; recoverable errors always carry `suggestion`; `exit-code-suggestion` audit rule |
 | [REQ-C-014](../cli-agent-ergonomics/requirements/c-014-error-responses-include-retryable-and-retry-after-.md) | Error Responses Include retryable and retry_after_ms | P1 | 3 | Partial | `retryable` always present; RATE_LIMITED allowed without `retry_after_ms` |
 | [REQ-C-015](../cli-agent-ergonomics/requirements/c-015-commands-declare-input-and-output-schema.md) | Commands Declare Input and Output Schema | P1 | 3 | Done | `--schema` has parameters and output schema, derived from the dataclass |
 | [REQ-C-016](../cli-agent-ergonomics/requirements/c-016-secrets-accepted-only-via-env-var-or-file.md) | Secrets Accepted Only via Env Var or File | P1 | 3 | Done | Secrets only via `--x-from-env`, `--x-from-file`, or `<APP>_<X>` |

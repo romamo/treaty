@@ -74,7 +74,7 @@ def test_json_ignores_the_renderers() -> None:
 def test_error_in_a_registered_format_is_prose_on_stderr() -> None:
     code, out, err = run(formats_app(), ["fail", "--format", "csv"])
     assert code == 5 and out == ""
-    assert err.startswith("showctl: NOT_FOUND: no such release\n")
+    assert err.startswith("showctl: NOT_FOUND: No such release.\n")
 
 
 def test_failing_renderer_names_its_format() -> None:
@@ -115,7 +115,7 @@ def test_a_known_format_without_a_renderer_is_not_offered(
     code = formats_app().run(argv, stdout=out, stderr=io.StringIO(), env=env, isatty=False)
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and error["code"] == "ARG_ERROR"
-    assert error["message"] == "showctl does not offer --format 'yaml'"
+    assert error["message"] == "--format 'yaml' is not offered by showctl."
     assert error["context"]["allowed"] == ["plain", "json", "csv"]
 
 
@@ -123,7 +123,7 @@ def test_a_value_outside_format_is_unknown() -> None:
     out = io.StringIO()
     code = formats_app().run(["show", "--format", "xml"], stdout=out, stderr=io.StringIO(), env={})
     error = json.loads(out.getvalue())["error"]
-    assert code == 2 and error["message"] == "unknown --format 'xml'"
+    assert code == 2 and error["message"] == "Unknown --format 'xml'."
     assert error["context"]["allowed"] == ["plain", "json", "csv"]
 
 

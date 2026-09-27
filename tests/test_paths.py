@@ -74,7 +74,9 @@ def test_hallucination_patterns_are_rejected_before_the_handler(raw: str, patter
         assert code == 2 and error["code"] == "ARG_ERROR" and error["phase"] == "validation"
         context = error["context"]
         assert isinstance(context, dict)
-        assert context["rejected_pattern"] == pattern and context["value"] == raw
+        # A null byte is echoed as U+FFFD: the envelope is valid UTF-8 text (REQ-F-016)
+        echoed = raw.replace("\x00", "\ufffd")
+        assert context["rejected_pattern"] == pattern and context["value"] == echoed
 
 
 def test_suggestions_give_the_decoded_or_absolute_form() -> None:

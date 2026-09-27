@@ -118,7 +118,7 @@ def test_no_stream_buffers_events_into_one_envelope() -> None:
 def test_no_stream_takes_no_value() -> None:
     code, lines, _ = run(["tail", "2", "--no-stream=true"])
     assert code == 2
-    assert lines[0]["error"]["errors"][0]["message"] == "'no-stream' takes no value"
+    assert lines[0]["error"]["errors"][0]["message"] == "'no-stream' takes no value."
 
 
 def test_plain_mode_renders_each_event_and_nothing_for_the_end() -> None:
@@ -160,7 +160,7 @@ def test_plain_mode_failure_goes_to_stderr_after_rendered_events() -> None:
     code, _, text = run(["tail", "5", "--fail-at", "2"], plain=True)
     assert code == 80
     assert text.startswith("[1] line 1\n")
-    assert "logctl: NO_SPACE: disk full" in text
+    assert "logctl: NO_SPACE: Disk full." in text
 
 
 # Timeouts

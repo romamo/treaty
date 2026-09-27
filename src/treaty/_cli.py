@@ -101,10 +101,12 @@ def load_app(target: str) -> App:
         ) from None
     obj = getattr(module, attr, None)
     if obj is None:
-        raise Exit.NOT_FOUND(f"{module_name} has no attribute {attr}", context={"target": target})
+        raise Exit.NOT_FOUND(
+            f"Module {module_name} has no attribute {attr}", context={"target": target}
+        )
     if not isinstance(obj, App):
         raise Exit.PRECONDITION(
-            f"{target} is {type(obj).__name__}, not a treaty App", context={"target": target}
+            f"Target {target} is {type(obj).__name__}, not a treaty App", context={"target": target}
         )
     return obj
 
@@ -226,7 +228,7 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     target = args.directory if args.directory is not None else Path(name.value)
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise Exit.CONFLICT(
-            f"{target} exists and is not an empty directory",
+            f"Directory {target} exists and is not empty",
             context={"directory": str(target)},
             fix_required="choose an empty directory with --directory",
         )
@@ -329,7 +331,7 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
         )
     if not has_kit(named):
         raise Exit.PRECONDITION(
-            f"{source} has no conformance/run.py",
+            f"Spec checkout {source} has no conformance/run.py",
             context={"source": source, "spec_dir": str(named)},
             fix_required=f"point {source} at a spec checkout containing conformance/run.py",
         )

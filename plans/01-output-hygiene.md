@@ -84,12 +84,32 @@ date-time`, `date`, `time`, and `pattern` for decimals.
 
 ## Tasks
 
-- [ ] `_StrayStdout` and the swap in `App.run`; `THIRD_PARTY_STDOUT` warning
-- [ ] `Ctx.log` with redaction; document it in README next to `ctx.timeout`
-- [ ] Sanitizer in `to_jsonable` for JSON mode; `OUTPUT_SANITIZED` warning
-- [ ] `Ctx.color`; environment defaults in `App.main()`
-- [ ] Sentence-form framework messages; `suggestion=` on `ExitCodeEntry`; audit rule
-- [ ] `datetime`, `date`, `time`, `Decimal` in `to_jsonable` and `schema_for`
+- [x] `_StrayStdout` and the swap in `App.run`; `THIRD_PARTY_STDOUT` warning
+- [x] `Ctx.log` with redaction; document it in README next to `ctx.timeout`
+- [x] Sanitizer in `to_jsonable` for JSON mode; `OUTPUT_SANITIZED` warning
+- [x] `Ctx.color`; environment defaults in `App.main()`
+- [x] Sentence-form framework messages; `suggestion=` on `ExitCodeEntry`; audit rule
+- [x] `datetime`, `date`, `time`, `Decimal` in `to_jsonable` and `schema_for`
+
+## Deviations as built
+
+- Messages: `ErrorDetail.__post_init__` normalizes every `message` (and `errors[].message`)
+  to a sentence instead of rewriting each framework string; messages that began with a
+  command path now begin with `Command <path>`, and a few `_cli.py` and `_mode.py` ones were
+  reworded so capitalizing never changes an identifier. The test asserts `^[^a-z].*[.!?]$`,
+  because many messages open with a quoted flag name (`'replicas' expects an integer.`)
+- `suggestion`: `ErrorDetail` fills it from `fix_required`, else a generic retry step, so
+  every recoverable error has one; no per-code defaults in the framework table. The
+  `exit-code-suggestion` rule is advice, since the fallback already meets the spec
+- No `OUTPUT_SANITIZED` warning: the spec asks only for stripping. Cleaning happens in
+  `Envelope.to_json`, not `to_jsonable`, so error messages, context, and meta are covered
+  too, and it also removes carriage returns and null bytes (REQ-F-007, REQ-F-016)
+- `ctx.log` redaction also matches `pass`, `cookie`, and `API_*` names (REQ-F-051 lists
+  them) and walks nested mappings, so header and env dicts are covered
+- `App.main()` overrides `PAGER` and `GIT_PAGER` always, as REQ-F-010 says, and sets
+  `NO_COLOR=1` when color is off; it does not set `TERM=dumb`, which no criterion needs
+- `App.call` (MCP) gets no stdout swap: MCP calls run concurrently on threads, and a
+  process-wide swap is not safe there
 
 ## Tests
 

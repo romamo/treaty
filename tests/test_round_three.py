@@ -271,7 +271,8 @@ def test_crash_redaction_skips_defaults_and_short_values() -> None:
 
     code, [env], _ = run(app, ["gen"])
     assert (
-        env["error"]["message"] == "gen raised RuntimeError: upstream returned 413 after 10 retries"
+        env["error"]["message"]
+        == "Command gen raised RuntimeError: upstream returned 413 after 10 retries."
     )
 
 
@@ -392,7 +393,7 @@ def test_scalar_parser_parse_error_keeps_its_message_and_suggestion() -> None:
         return {"region": args.region.value}
 
     code, [env], _ = run(app, ["go", "--region", "xx"])
-    assert code == 2 and env["error"]["message"] == "unknown region xx"
+    assert code == 2 and env["error"]["message"] == "Unknown region xx."
     assert env["error"]["suggestion"] == "use eu or us"
 
 

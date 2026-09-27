@@ -114,5 +114,5 @@ def test_handler_exception_becomes_crash_envelope_with_traceback() -> None:
     code = app.run(["crash"], stdout=out, stderr=err, env={}, isatty=False)
     env = json.loads(out.getvalue())
     assert code == 1 and env["error"]["code"] == "HANDLER_CRASHED"
-    assert env["error"]["message"] == "crash raised ValueError: handler bug"
+    assert env["error"]["message"] == "Command crash raised ValueError: handler bug."
     assert "Traceback" in err.getvalue() and "handler bug" in err.getvalue()

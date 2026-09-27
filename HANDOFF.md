@@ -1,6 +1,6 @@
 # Handoff
 
-Status as of 2026-09-26. Read this before touching the code.
+Status as of 2026-09-27. Read this before touching the code.
 
 ## What this is
 
@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 413 passed |
+| `uv run pytest` | 500 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -99,6 +99,20 @@ The two do not share code.
 - **Exit codes must be declared.** A handler raises only what its manifest entry lists:
   `exit_codes=`, plus `GENERAL_ERROR`, `ARG_ERROR`, `TIMEOUT`, and on mutating commands
   `CONFLICT` and `PRECONDITION`. Anything else is `UNDECLARED_EXIT_CODE`
+- **Stdout hygiene is a process-wide swap, not an fd redirect.** `App.run` points
+  `sys.stdout` at stderr for the whole run (handlers run on worker threads, so a
+  context-local redirect would miss them) and restores it after; `_Run._write` adds a
+  `THIRD_PARTY_STDOUT` warning to the next envelope. Fd-level writes are not caught.
+  `App.call` (MCP) has no swap, because MCP calls run concurrently on threads.
+  `App.main()`, not `App.run()`, writes `PAGER`, `GIT_PAGER`, and `NO_COLOR` into
+  `os.environ` so children inherit them
+- **`Envelope.to_json` cleans every string** (ANSI escapes and `\r` removed, null bytes
+  and lone surrogates to U+FFFD), so JSON stdout and MCP structured content agree; plain
+  mode never passes through it. `ErrorDetail.__post_init__` turns `message` into a
+  sentence and fills `suggestion` for recoverable errors, which covers author messages and
+  every framework path at once instead of a style rule on each message; framework messages
+  that began with a command path now begin with `Command <path>` so capitalizing keeps
+  the path intact
 - **Signals interrupt only a running handler.** `Cancellation.armed()` windows cover the
   handler, the wait for its worker, the idempotency-key wait, and the exec stdin read; a
   signal elsewhere is held and raised at the next window, so a finished result is still
@@ -119,7 +133,7 @@ src/treaty/
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _command.py    Command record, build_command(), handler signature inspection
-  _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, idempotency_key)
+  _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, color, log)
   _dispatch.py   DispatchRequest line parser for exec
   _effect.py     effect contract: registration check and per-run validation
   _envelope.py   Envelope, ErrorDetail, WarningDetail, write_envelope()
@@ -162,9 +176,10 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 ## Spec coverage
 
-Implemented: REQ-F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-011, F-012,
-F-013, F-015, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002, C-003, C-004, C-007, C-012,
-C-015, C-016, C-020 (all presets), O-021, O-022, O-032, O-039, O-041, O-050.
+Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
+F-011, F-012, F-013, F-015, F-016, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002,
+C-003, C-004, C-007, C-012, C-013, C-015, C-016, C-020 (all presets), O-021, O-022, O-032,
+O-039, O-041, O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
@@ -180,7 +195,7 @@ command `--timeout` (network and streaming), `--confirm-destructive` (destructiv
 - `ruff --fix` once rewrote a deliberate `getattr` into attribute access and broke mypy;
   check the diff after autofix
 - `tests/fixture_audit_app.py` is a deliberately flawed app; the audit tests count its
-  findings exactly, so adding a rule means updating `failed == 8` there
+  findings exactly, so adding a rule means updating `failed == 9` there
 - The kit resolves a `command` path containing a slash against the profile's directory;
   `_profile.build_profile` makes a relative `--command` absolute (with `absolute()`, so a
   venv's `bin/python` symlink survives) and keeps the scaffold's `./<name>` launcher,
