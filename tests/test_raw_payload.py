@@ -57,7 +57,7 @@ def test_raw_payload_equivalent_to_flags() -> None:
 
 def test_raw_payload_invalid_json_is_field_level_error() -> None:
     code, env = run_json(["create", "--raw-payload", "{not json"])
-    assert code == 2 and env["error"]["code"] == "ARG_ERROR"
+    assert code == 2 and env["error"]["code"] == "INVALID_JSON"
     assert (
         env["error"]["context"]["flag"] == "raw-payload" and "position" in env["error"]["context"]
     )

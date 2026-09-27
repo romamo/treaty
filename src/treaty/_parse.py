@@ -6,7 +6,6 @@ context instead of a formatted message and a hard exit.
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from collections.abc import Collection, Mapping
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from ._command import Command
-from ._dispatch import loads_strict
+from ._dispatch import invalid_json
 from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
 from ._framework import (
@@ -32,6 +31,7 @@ from ._framework import (
     switch_value,
 )
 from ._idempotency import IdempotencyKey
+from ._json5 import Unreadable, loads_forgiving
 from ._page import Limit, Position
 from ._paths import check_path
 from ._secrets import (
@@ -482,13 +482,11 @@ def _apply_secrets(
 
 
 def _decode_raw_payload(raw: str) -> Mapping[str, object]:
+    """Strict JSON, or the JSON5 forms agents write (REQ-F-059)"""
     try:
-        decoded = loads_strict(raw)
-    except json.JSONDecodeError as exc:
-        raise ParseError(
-            "--raw-payload is not valid JSON",
-            context={"flag": RAW_PAYLOAD_FLAG, "cause": exc.msg, "position": exc.pos},
-        ) from None
+        decoded = loads_forgiving(raw)
+    except Unreadable as exc:
+        raise invalid_json("--raw-payload", exc, {"flag": RAW_PAYLOAD_FLAG}) from None
     except ValueError as exc:
         raise ParseError(
             "--raw-payload is not valid JSON", context={"flag": RAW_PAYLOAD_FLAG, "cause": str(exc)}

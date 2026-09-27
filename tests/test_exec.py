@@ -69,7 +69,7 @@ def test_exec_ignore_errors_continues_and_still_exits_1(app: App) -> None:
         "--ignore-errors",
     )
     assert code == 1 and len(out) == 4
-    assert out[1]["error"]["code"] == "DISPATCH_PARSE_ERROR"
+    assert out[1]["error"]["code"] == "INVALID_JSON"
     assert out[1]["error"]["phase"] == "validation" and out[1]["meta"]["exit_code"] == 2
     assert "_cmd" not in out[1]["meta"]
     assert out[2]["error"]["code"] == "UNKNOWN_COMMAND"
@@ -78,7 +78,10 @@ def test_exec_ignore_errors_continues_and_still_exits_1(app: App) -> None:
 
 def test_exec_fully_malformed_stream_exits_2(app: App) -> None:
     code, out = run_exec(app, ["{", "[]"], "--ignore-errors")
-    assert code == 2 and all(e["error"]["code"] == "DISPATCH_PARSE_ERROR" for e in out)
+    assert code == 2 and [e["error"]["code"] for e in out] == [
+        "INVALID_JSON",
+        "DISPATCH_PARSE_ERROR",
+    ]
 
 
 def test_exec_dry_run_forwarded_only_to_non_safe(app: App) -> None:

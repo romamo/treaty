@@ -182,6 +182,8 @@ class ErrorDetail:
     """How a failed network call went out; set only by the framework (REQ-F-037)"""
     redirect: Redirect | None = None
     """The replacement invocation of exit 13 (REDIRECTED)"""
+    corrected_input: str | None = None
+    """Strict JSON the malformed input was repaired to, for ``INVALID_JSON`` (REQ-F-059)"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
@@ -224,6 +226,8 @@ class ErrorDetail:
             out["network_context"] = self.network_context.to_json()
         if self.redirect is not None:
             out["redirect"] = self.redirect.to_json()
+        if self.corrected_input is not None:
+            out["corrected_input"] = self.corrected_input
         if self.fix_required is not None:
             out["fix_required"] = self.fix_required
         if self.retries_exhausted is not None:

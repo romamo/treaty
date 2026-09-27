@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from ._errors import ParseError
+from ._json5 import Unreadable, loads_forgiving
 from ._values import CommandPath, InvalidValue
 
 Scalar = bool | str | int | float
@@ -19,23 +19,27 @@ class DispatchRequest:
     payload: Mapping[str, object] = field(default_factory=dict)
 
 
-def _no_constant(name: str) -> object:
-    raise ValueError(f"{name} is not valid JSON")
-
-
-def loads_strict(text: str) -> object:
-    """``json.loads`` without the NaN and Infinity extensions; also raises ``ValueError``
-    for an integer longer than the interpreter's digit limit"""
-    try:
-        return json.loads(text, parse_constant=_no_constant)
-    except RecursionError:
-        raise ValueError("JSON nested too deeply") from None
+def invalid_json(what: str, exc: Unreadable, context: Mapping[str, object]) -> ParseError:
+    """``INVALID_JSON`` (REQ-F-059), with ``corrected_input`` when a repair reads it"""
+    ctx = {**context, "cause": str(exc)}
+    if exc.position is not None:
+        ctx["position"] = exc.position
+    if exc.corrected is None:
+        return ParseError(f"{what} is not valid JSON", code="INVALID_JSON", context=ctx)
+    return ParseError(
+        f"{what} could not be normalized to valid JSON",
+        code="INVALID_JSON",
+        context={**ctx, "corrected_input": exc.corrected},
+        suggestion="reissue with the corrected_input value, if it says what you meant",
+    )
 
 
 def parse_dispatch_line(line: str, line_no: int) -> DispatchRequest:
     ctx: dict[str, object] = {"line": line_no}
     try:
-        raw = loads_strict(line)
+        raw = loads_forgiving(line)
+    except Unreadable as exc:
+        raise invalid_json(f"line {line_no}", exc, ctx) from None
     except ValueError as exc:
         raise ParseError(
             f"line {line_no}: invalid JSON", context={**ctx, "cause": str(exc)}

@@ -214,3 +214,82 @@ def test_a_command_that_performs_io_completes_all_writes_before_exiting(tmp_path
 
     code, envelope = run(app, ["go"])
     assert code == 0 and len(target.read_text().splitlines()) == envelope["data"]["lines"]
+
+
+# REQ-F-059: treaty's JSON inputs are --raw-payload and exec lines; --config is a file path
+
+
+@dataclass(frozen=True, slots=True)
+class PayloadArgs:
+    env: str = Flag(description="Environment")
+    tags: tuple[str, ...] = Flag(default=(), description="Tags")
+    replicas: int = Flag(default=1, description="Replicas")
+
+
+def payload_app() -> App:
+    app = App("pl", version="1.0.0")
+
+    @app.command(
+        "deploy",
+        description="Deploy",
+        danger_level="safe",
+        exit_codes=(),
+        supports_raw_payload=True,
+    )
+    def deploy(args: PayloadArgs, ctx: Ctx) -> dict[str, object]:
+        return {"env": args.env, "tags": list(args.tags), "replicas": args.replicas}
+
+    return app
+
+
+def payload(text: str) -> tuple[int, dict[str, Any]]:
+    return run(payload_app(), ["deploy", "--raw-payload", text, "--stable-output"])
+
+
+def test_a_trailing_comma_is_accepted_and_parsed_correctly() -> None:
+    code, envelope = payload('{"env": "prod", "tags": ["a", "b",],}')
+    assert code == 0 and envelope["data"] == {"env": "prod", "tags": ["a", "b"], "replicas": 1}
+
+
+def test_a_block_comment_is_accepted_and_parsed_correctly() -> None:
+    code, envelope = payload('{"env": /* staging */ "prod" /* comment */}')
+    assert code == 0 and envelope["data"]["env"] == "prod"
+    code, envelope = payload("{env: 'it\\'s', // line comment\n replicas: 3}")
+    assert code == 0 and envelope["data"]["env"] == "it's" and envelope["data"]["replicas"] == 3
+
+
+def test_a_malformed_input_that_cannot_be_normalized_has_corrected_input() -> None:
+    code, envelope = payload("{env prod}")
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "INVALID_JSON" and error["phase"] == "validation"
+    assert json.loads(error["corrected_input"]) == {"env": "prod"}
+    code, envelope = payload(error["corrected_input"])
+    assert code == 0
+    code, envelope = payload("{not json at all")
+    assert code == 2 and envelope["error"]["code"] == "INVALID_JSON"
+
+
+def test_normalized_inputs_pass_schema_validation_identically_to_strict_json() -> None:
+    for strict, loose in (
+        ('{"env": "prod", "replicas": 2}', "{env: 'prod', replicas: 2,}"),
+        ('{"env": "prod", "replicas": "two"}', "{env: 'prod', replicas: 'two'}"),
+        ('{"env": "prod", "bogus": 1}', "{env: 'prod', /* x */ bogus: 1}"),
+    ):
+        assert payload(strict) == payload(loose)
+
+
+def test_an_exec_line_is_normalized_too() -> None:
+    app = payload_app()
+    out = io.StringIO()
+    plan = "{_cmd: 'deploy', env: 'prod',}\n{_cmd: 'deploy' env: 'prod'}\n"
+    code = app.run(
+        ["exec", "--ignore-errors"],
+        stdin=io.StringIO(plan),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    first, second = (json.loads(line) for line in out.getvalue().splitlines())
+    assert code == 1 and first["ok"] is True and second["error"]["code"] == "INVALID_JSON"
+    assert json.loads(second["error"]["corrected_input"])["_cmd"] == "deploy"

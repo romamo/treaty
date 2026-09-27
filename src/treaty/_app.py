@@ -1281,6 +1281,9 @@ def _invoke(
     return result
 
 
+# A plan line that never became a command: a plan of only these exits 2
+_UNREAD_LINE = frozenset({"DISPATCH_PARSE_ERROR", "INVALID_JSON"})
+
 # ErrorDetail.code in response-envelope.json
 _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 
@@ -1787,6 +1790,7 @@ class _Run:
 
     def arg_error(self, exc: ParseError, *, code: str | None = None, **kw: Any) -> Envelope:
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
+        corrected = exc.context.get("corrected_input")
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
@@ -1798,6 +1802,7 @@ class _Run:
                 phase="validation",
                 fix_required="correct the arguments and reissue",
                 errors=exc.items(),
+                corrected_input=corrected if isinstance(corrected, str) else None,
             ),
             **kw,
         )
@@ -3158,7 +3163,7 @@ class _Run:
             for line_no, envelope in lines:
                 lines_seen, last = line_no, envelope
                 self._write(envelope)
-                if envelope.error is None or envelope.error.code != "DISPATCH_PARSE_ERROR":
+                if envelope.error is None or envelope.error.code not in _UNREAD_LINE:
                     parsed_any = True
                 if not envelope.ok:
                     any_failed = True
@@ -3312,7 +3317,9 @@ class _Run:
             except ParseError as exc:
                 yield (
                     line_no,
-                    self.arg_error(exc, code="DISPATCH_PARSE_ERROR", started=started, meta=meta),
+                    self.arg_error(
+                        exc, code=exc.code or "DISPATCH_PARSE_ERROR", started=started, meta=meta
+                    ),
                 )
                 continue
             meta["_cmd"] = request.path.value
