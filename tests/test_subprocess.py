@@ -530,10 +530,7 @@ def test_an_abandoned_handler_starts_no_child(tmp_path: Path) -> None:
 
     @app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
-        try:
-            ctx.run(["sleep", "30"])
-        except CliExit:
-            pass  # stopped by the command timeout
+        time.sleep(1)  # outlive the 0.3 s deadline, so the run abandons this handler
         try:
             ctx.run(["sh", "-c", f'touch "{tmp_path / "ran"}"; exec sleep 30'])
         except CliExit as exc:

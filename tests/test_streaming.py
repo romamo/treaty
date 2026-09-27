@@ -168,9 +168,10 @@ def test_plain_mode_failure_goes_to_stderr_after_rendered_events() -> None:
 
 
 def test_f011_streams_inherit_the_default_as_an_idle_limit() -> None:
-    """0.3 s between events, four events: longer than the limit in all, never idle past it"""
+    """0.1 s between events, four events: longer than the 0.3 s limit in all, never idle
+    past it, with room for a slow runner"""
     app = stream_app()
-    code, lines, _ = run(["tail", "4", "--sleep", "0.2"], app=app)
+    code, lines, _ = run(["tail", "4", "--sleep", "0.1"], app=app)
     assert code == 0 and len(lines) == 5
     assert lines[0]["meta"]["timeout_ms"] == 300
     assert app.manifest()["commands"]["tail"]["streaming_default"] is True

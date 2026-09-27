@@ -67,7 +67,8 @@ def write_atomic(path: Path, text: str, *, new_mode: int = 0o600) -> None:
     tmp = Path(name)
     replaced = False
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        # newline="": the text lands byte for byte, with no \r\n translation on Windows
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())

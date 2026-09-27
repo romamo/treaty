@@ -152,7 +152,7 @@ def purge(args: Purge, ctx: Ctx, store: Store) -> Purged:
     if args.dry_run:
         affects = Affects(
             f"Deletes {len(completed)} completed items",
-            [f"item/{i.id}" for i in completed],
+            tuple(f"item/{i.id}" for i in completed),
             len(completed),
         )
         return Purged(effect="would_delete", deleted=completed, would_affect=affects)

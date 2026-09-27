@@ -95,8 +95,8 @@ def test_stderr_discarded_still_yields_the_envelope() -> None:
 
 
 def test_stdout_discarded_loses_no_log_line() -> None:
-    """1>/dev/null"""
-    proc = tool(["chatty"], {}, stdout=subprocess.DEVNULL)
+    """1>/dev/null; JSON forced, because Windows reports NUL as a terminal"""
+    proc = tool(["chatty", "--format", "json"], {}, stdout=subprocess.DEVNULL)
     lines = proc.stderr.splitlines()
     assert proc.returncode == 0 and "initialized" in lines
     logged = json.loads(lines[-1])

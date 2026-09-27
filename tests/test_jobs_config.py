@@ -274,6 +274,7 @@ def test_an_interrupted_global_write_leaves_the_old_config(tmp_path: Path) -> No
     assert sorted(p.name for p in folder.iterdir()) == ["config.toml", "config.toml.lock"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no permission bits to keep")
 def test_write_atomic_keeps_the_mode_of_an_existing_file(tmp_path: Path) -> None:
     path = tmp_path / "c.toml"
     path.write_text("a")
