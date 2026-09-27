@@ -245,6 +245,7 @@ def build_command(
     retry: Retry | None = None,
     sort_key: str | None = None,
     ordered: bool = False,
+    provided: Sequence[type] = (),
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -391,7 +392,7 @@ def build_command(
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
         streaming=streaming,
         resources=resources,
-        resource_graph=resource_graph(resources, str(path), args_type),
+        resource_graph=resource_graph(resources, str(path), args_type, provided),
         safe_default=safe_default,
         gui_operations=tuple(gui_operations),
         interactive=interactive,

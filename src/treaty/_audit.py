@@ -874,6 +874,35 @@ def _env_prefix(app: App) -> Iterator[Finding]:
             )
 
 
+_CONFIG_READS = frozenset(
+    {"tomllib.load", "tomllib.loads", "tomli.load", "tomli.loads", "configparser.ConfigParser"}
+)
+
+
+def reads_config_by_hand(fn: Callable[..., object]) -> str | None:
+    """The call ``fn`` parses a config file with, when it does so itself"""
+    tree = _handler_tree(fn)
+    if tree is None:
+        return None
+    calls = (_dotted(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call))
+    return next((c for c in calls if c in _CONFIG_READS), None)
+
+
+def _settings_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        call = reads_config_by_hand(c.handler)
+        if call is not None:
+            yield Finding(
+                "settings-declared",
+                Severity.WARNING,
+                c.path.value,
+                f"handler parses a config file with {call}, so meta.config_sources, "
+                "--show-config, --no-config, and --config cannot see it (REQ-F-028)",
+                "declare the keys as a frozen dataclass with defaults, pass "
+                "App(settings=Settings), and take settings: Settings in the handler",
+            )
+
+
 _SLEEPS = frozenset({"time.sleep", "sleep"})
 
 
@@ -1021,6 +1050,12 @@ RULES: tuple[Rule, ...] = (
         "Retries go through ctx.retry",
         Severity.WARNING,
         _retry_declared,
+    ),
+    Rule(
+        "settings-declared",
+        "Config files are read through App(settings=)",
+        Severity.WARNING,
+        _settings_declared,
     ),
     Rule(
         "env-prefix",

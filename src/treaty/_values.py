@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 _PATH_RE = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$")
 _EXIT_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
+_INSTANCE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class InvalidValue(ValueError):
@@ -48,6 +49,20 @@ class CommandPath:
 
     def __str__(self) -> str:
         return self.value
+
+
+@dataclass(frozen=True, slots=True)
+class InstanceId:
+    """``--instance-id``: one agent's namespace for the user config file and state"""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _INSTANCE_ID_RE.fullmatch(self.value):
+            raise InvalidValue(
+                "an instance id is 1 to 64 letters, digits, '.', '_', or '-', "
+                "starting with a letter or digit"
+            )
 
 
 @dataclass(frozen=True, slots=True)

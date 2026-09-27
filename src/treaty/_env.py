@@ -66,5 +66,8 @@ KNOWN: tuple[EnvVar, ...] = (
     MAX_OUTPUT_BYTES,
     MAX_STDIN_BYTES,
     STATE_DIR,
+    CONFIG,
+    CONTEXT,
+    INSTANCE_ID,
 )
 """Every variable treaty itself reads for an app; settings fields add their own"""

@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 
 from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
-from ._env import FORMAT, MAX_OUTPUT_BYTES, app_var
+from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, app_var
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import NO_STREAM_FLAG, STABLE_OUTPUT_KEY, framework_flags
 from ._mode import Format
@@ -56,6 +56,39 @@ def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, o
             f"default ${app_var(app_name, MAX_OUTPUT_BYTES.key)}",
         },
         **_FIXED_GLOBAL_FLAGS,
+        "config": {
+            "type": "string",
+            "required": False,
+            "pattern_type": "filepath",
+            "description": "Read settings only from this TOML (or .json) file, and write config "
+            f"to it; default ${app_var(app_name, CONFIG.key)}",
+        },
+        "context": {
+            "type": "string",
+            "required": False,
+            "description": "Apply the [contexts.<name>] table of the config files; default "
+            f"${app_var(app_name, CONTEXT.key)}, else the files' current_context",
+        },
+        "no-config": {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Read no config file; environment variables still apply",
+        },
+        "show-config": {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Print the effective settings, the source of each, and the "
+            "precedence order instead of running a command",
+        },
+        "instance-id": {
+            "type": "string",
+            "required": False,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "description": "Keep the user config file and state apart for this agent instance; "
+            f"default ${app_var(app_name, INSTANCE_ID.key)}",
+        },
     }
 
 

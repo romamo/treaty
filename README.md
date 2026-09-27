@@ -485,9 +485,50 @@ directory, or with `--global` the user file `$XDG_CONFIG_HOME/<app>/config.toml`
 (`~/.config/<app>/config.toml`); `"global"` writes only the user file and exits `2` without
 `--global`. `ctx.config_path` names the file. Every write goes to a temporary file in the
 same directory and is renamed over the target, so an interrupted write leaves the old
-file; a global write also takes an advisory lock and adds a `GLOBAL_CONFIG_MODIFIED`
-warning. The `config-write-scope` audit rule flags `config` and `set` commands without the
-declaration.
+file; every write takes an advisory lock, so concurrent writers go one after another, and a
+global write adds a `GLOBAL_CONFIG_MODIFIED` warning. Under `--config PATH` the command
+writes that file instead, and under `--instance-id ID` the user file is
+`<config home>/<app>/instances/<ID>/config.toml`. The `config-write-scope` audit rule flags
+`config` and `set` commands without the declaration.
+
+## Settings
+
+An app reads its config through one frozen dataclass whose fields all have defaults; a
+handler asks for it by annotating a parameter with the class, as with a resource:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Settings:
+    region: str = "us-east-1"
+    retries: int = 3
+
+app = App("deployctl", version="1.0.0", settings=Settings)
+
+@app.command("deploy", description="Deploy", danger_level="mutating", exit_codes=())
+def deploy(args: DeployArgs, ctx: Ctx, settings: Settings) -> Deployed: ...
+```
+
+Each field takes the first value found: `DEPLOYCTL_REGION` in the environment, then the
+config files, then its default. The files are `--config PATH` alone (TOML, or JSON by the
+`.json` suffix; a file not written yet reads as empty), or else the project file
+`./.deployctl.toml` over the user file. A file may hold `[contexts.<name>]` tables over its
+top level, chosen by `--context NAME` or its `current_context` key. `--no-config` reads no
+file, and env vars still apply. An unknown key, a wrong type, or bad TOML exits `2` with
+`CONFIG_INVALID` naming `context.path` and `context.key`; an unknown context exits `2` with
+`CONTEXT_UNKNOWN` and `context.available`. `DEPLOYCTL_CONFIG`, `DEPLOYCTL_CONTEXT`, and
+`DEPLOYCTL_INSTANCE_ID` stand in for the flags, as they must for `App.call` and MCP.
+
+Every response carries `meta.config_sources` (the files read, highest first; `[]` when
+none) and `meta.effective_config_hash` (12 hex of the merged settings), plus
+`meta.context` and `meta.instance_id` when set. `tool --show-config` answers with
+`effective_config` (secret-named fields `[REDACTED]`), per-key `sources` (`env:VAR`,
+`file:/abs/path`, or `default`), and `precedence_order`. The `settings-declared` audit rule
+flags handlers that parse a config file with `tomllib` themselves.
+
+Every variable treaty reads carries the app's prefix (`DEPLOYCTL_FORMAT`,
+`DEPLOYCTL_MAX_OUTPUT_BYTES`, `DEPLOYCTL_STATE_DIR`, ...), and `--help` lists them under
+Environment. The `env-prefix` audit rule flags handlers that read an unprefixed variable
+such as `DEBUG`.
 
 ## Validation errors
 

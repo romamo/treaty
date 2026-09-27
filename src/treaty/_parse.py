@@ -101,6 +101,12 @@ class GlobalOptions:
     output_schema: bool = False
     schema_version: str | None = None
     stable_output: bool = False
+    config: str | None = None
+    """``--config PATH``: read only this config file, and write it (REQ-O-024)"""
+    context: str | None = None
+    no_config: bool = False
+    show_config: bool = False
+    instance_id: str | None = None
 
 
 def without_value(token: str) -> str:
@@ -130,7 +136,10 @@ def _repeated(flag: str) -> ParseError:
     )
 
 
-VALUED_GLOBALS = frozenset({"format", "max-output", "schema-version"})
+VALUED_GLOBALS = frozenset(
+    {"format", "max-output", "schema-version", "config", "context", "instance-id"}
+)
+SWITCH_GLOBALS = frozenset({"output-schema", STABLE_OUTPUT_FLAG, "no-config", "show-config"})
 FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
 
 
@@ -145,10 +154,9 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
     """Global options in any position; a valued one repeated with a different value is
     an error rather than last-wins (REQ-F-067, REQ-F-079)"""
     valued: dict[str, str] = {}
+    switches: set[str] = set()
     help_ = False
     schema = False
-    output_schema = False
-    stable_output = False
     rest: list[str] = []
     i = 0
     while i < len(argv):
@@ -161,10 +169,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             help_ = True
         elif tok in ("--schema", "--print-schema"):
             schema = True  # REQ-O-013: --print-schema is an alias
-        elif tok == "--output-schema":
-            output_schema = True
-        elif tok == f"--{STABLE_OUTPUT_FLAG}":
-            stable_output = True
+        elif not eq and name in SWITCH_GLOBALS:
+            switches.add(name)
         elif name in RESERVED_GLOBAL and name in UNIMPLEMENTED:
             raise reserved_flag(name)
         elif name in VALUED_GLOBALS:
@@ -186,9 +192,14 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             help=help_,
             schema=schema,
             max_output=valued.get("max-output"),
-            output_schema=output_schema,
+            output_schema="output-schema" in switches,
             schema_version=valued.get("schema-version"),
-            stable_output=stable_output,
+            stable_output=STABLE_OUTPUT_FLAG in switches,
+            config=valued.get("config"),
+            context=valued.get("context"),
+            no_config="no-config" in switches,
+            show_config="show-config" in switches,
+            instance_id=valued.get("instance-id"),
         ),
         rest,
     )
@@ -621,13 +632,13 @@ def _check_patterned(field: FieldInfo, target: Classified, value: object) -> obj
                 context={"field": field.flag, "value": describe_number(value)},
             ) from None
         field.check_pattern(token)
-    base = _check_base(target, value, field.flag)
+    base = check_json_base(target, value, field.flag)
     if target.scalar is None:
         return base
     return apply_scalar(target.scalar, base, field.flag, secret=field.secret)
 
 
-def _check_base(target: Classified, value: object, flag: str) -> object:
+def check_json_base(target: Classified, value: object, flag: str) -> object:
     ctx = {"field": flag, "value": value}
     match target.flag_type:
         case FlagType.BOOLEAN:

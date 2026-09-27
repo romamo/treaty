@@ -69,10 +69,14 @@ def resource_spec(cls: type) -> ResourceSpec:
 
 
 def resource_graph(
-    roots: Sequence[type], where: str, args_type: type | None = None
+    roots: Sequence[type],
+    where: str,
+    args_type: type | None = None,
+    provided: Sequence[type] = (),
 ) -> dict[type, ResourceSpec]:
     """Every resource reachable from ``roots``; fails on a cycle, a class without acquire,
-    or an ``acquire`` that reads an args class the command's args do not extend"""
+    or an ``acquire`` that reads an args class the command's args do not extend.
+    ``provided`` classes, such as ``App(settings=)``, are values the run supplies."""
     specs: dict[type, ResourceSpec] = {}
     visiting: list[type] = []
 
@@ -80,7 +84,7 @@ def resource_graph(
         if cls in visiting:
             chain = " -> ".join(c.__qualname__ for c in [*visiting, cls])
             raise RegistrationError(f"{where}: resource cycle {chain}")
-        if cls in specs:
+        if cls in specs or cls in provided:
             return
         visiting.append(cls)
         spec = resource_spec(cls)
@@ -112,11 +116,17 @@ def resource_graph(
 class Resolver:
     """Acquires resources for one run, each at most once, in dependency order"""
 
-    def __init__(self, graph: Mapping[type, ResourceSpec], args: object, ctx: Ctx) -> None:
+    def __init__(
+        self,
+        graph: Mapping[type, ResourceSpec],
+        args: object,
+        ctx: Ctx,
+        provided: Mapping[type, object],
+    ) -> None:
         self._graph = graph
         self._args = args
         self._ctx = ctx
-        self._cache: dict[type, object] = {}
+        self._cache: dict[type, object] = dict(provided)
 
     def get(self, cls: type) -> object:
         if cls in self._cache:

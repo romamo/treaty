@@ -21,7 +21,7 @@ from ._types import Classified, FlagType, classify
 _META = "treaty"
 REDACTED = "[REDACTED]"
 # REQ-F-034: names containing these are treated as secrets unless declared otherwise
-_SECRET_NAME_PARTS = ("token", "secret", "password", "key", "credential", "auth")
+SECRET_NAME_PARTS = ("token", "secret", "password", "key", "credential", "auth")
 # REQ-F-044: characters refused in text values, by their rejected_pattern name
 _CONTROL_CHARS = {"\n": "newline", "\r": "carriage_return", "\x00": "null_byte"}
 
@@ -126,7 +126,7 @@ class FieldInfo:
         if self.flag_type is FlagType.BOOLEAN:
             return False
         lowered = self.name.lower()
-        return any(part in lowered for part in _SECRET_NAME_PARTS)
+        return any(part in lowered for part in SECRET_NAME_PARTS)
 
     @property
     def env_flag(self) -> str:
@@ -158,7 +158,7 @@ class FieldInfo:
             if target.flag_type is FlagType.STRING:
                 self.check_text(raw)
             self.check_pattern(raw)
-            return _coerce(target, raw, self.flag, secret=self.secret)
+            return coerce_text(target, raw, self.flag, secret=self.secret)
         except ParseError as exc:
             raise self.scrub(exc) from None
 
@@ -323,7 +323,7 @@ def apply_scalar(
         ) from None
 
 
-def _coerce(target: Classified, raw: str, flag: str, *, secret: bool) -> object:
+def coerce_text(target: Classified, raw: str, flag: str, *, secret: bool) -> object:
     base = _coerce_base(target, raw, flag)
     if target.scalar is None:
         return base

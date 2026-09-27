@@ -36,7 +36,7 @@ from ._atomic import write_atomic
 from ._env import STATE_DIR, app_var
 from ._errors import ParseError, SchemaError
 from ._scalars import ScalarRegistry
-from ._values import CommandPath
+from ._values import CommandPath, InstanceId
 
 TTL_SECONDS = 24 * 60 * 60
 
@@ -122,14 +122,17 @@ def _canonical(value: object, scalars: ScalarRegistry, depth: int) -> object:
 
 
 def state_dir(
-    app_name: str, explicit: Path | None, env: Mapping[str, str], instance: str | None = None
+    app_name: str,
+    explicit: Path | None,
+    env: Mapping[str, str],
+    instance: InstanceId | None = None,
 ) -> Path | None:
     """``App(state_dir=)``, then ``$<APP>_STATE_DIR``, then the XDG state home; under
     ``instances/<id>`` of it for an ``--instance-id`` (REQ-O-036)"""
     base = _state_base(app_name, explicit, env)
     if base is None or instance is None:
         return base
-    return base / "instances" / instance
+    return base / "instances" / instance.value
 
 
 def _state_base(app_name: str, explicit: Path | None, env: Mapping[str, str]) -> Path | None:

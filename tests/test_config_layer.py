@@ -1,17 +1,24 @@
 """Config layer and env namespace: REQ-F-073, O-042, F-028, O-015, O-016, O-024, O-036, F-076"""
 
+import hashlib
 import io
 import json
 import os
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import fixture_config_app
+import pytest
 from conftest import WINDOWS
 
-from treaty import App, Ctx, NoArgs
+from treaty import App, Ctx, NoArgs, RegistrationError
 from treaty._audit import audit
+from treaty._idempotency import state_dir
+from treaty._values import InstanceId
 
 CONFIGCTL = Path(__file__).resolve().parent / "fixture_config_app.py"
 
@@ -128,3 +135,361 @@ def test_bogus_tool_format_fails_like_a_bogus_format_flag() -> None:
 def test_help_names_the_exact_env_var_the_tool_honors() -> None:
     _, _, err = run(["list", "--help"])
     assert "$MY_TOOL_FORMAT" in err
+
+
+# Settings: one fixture app, fresh files per test
+
+
+def configctl(argv: list[str], env: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
+    out = io.StringIO()
+    code = fixture_config_app.app.run(
+        argv, stdout=out, stderr=io.StringIO(), env=env or {}, isatty=False
+    )
+    return code, json.loads(out.getvalue())
+
+
+def spawn(argv: list[str], cwd: Path, **env: str) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        [sys.executable, str(CONFIGCTL), *argv],
+        cwd=cwd,
+        env=process_env(**env),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def configctl_in(cwd: Path, argv: list[str], **env: str) -> tuple[int, dict[str, Any]]:
+    """A real process in ``cwd``, which decides the project file"""
+    proc = spawn(argv, cwd, **env)
+    out, err = proc.communicate(timeout=60)
+    assert out, err
+    return proc.returncode, json.loads(out)
+
+
+def user_file(home: Path, text: str) -> Path:
+    path = home / "configctl" / "config.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+# REQ-F-028
+
+
+def test_every_response_includes_config_sources_as_an_array_of_absolute_paths(
+    tmp_path: Path,
+) -> None:
+    path = user_file(tmp_path, 'region = "eu-west-1"\n')
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    for argv in (["show"], ["nope"], ["show", "--help"], ["--schema"], ["version"]):
+        _, envelope = configctl(argv, env)
+        assert envelope["meta"]["config_sources"] == [str(path)], argv
+        assert Path(envelope["meta"]["config_sources"][0]).is_absolute()
+    assert configctl(["show"], env)[1]["data"]["region"] == "eu-west-1"
+
+
+def test_effective_config_hash_changes_when_any_config_file_is_modified(tmp_path: Path) -> None:
+    path = user_file(tmp_path, 'region = "eu-west-1"\n')
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    before = configctl(["show"], env)[1]["meta"]["effective_config_hash"]
+    path.write_text('region = "eu-west-2"\n')
+    after = configctl(["show"], env)[1]["meta"]["effective_config_hash"]
+    assert before != after and len(after) == 12
+
+
+def test_effective_config_hash_is_stable_when_no_config_has_changed(tmp_path: Path) -> None:
+    user_file(tmp_path, "retries = 5\n")
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    hashes = {configctl(["show"], env)[1]["meta"]["effective_config_hash"] for _ in range(3)}
+    assert len(hashes) == 1
+
+
+def test_config_sources_is_empty_not_absent_when_no_config_file_was_loaded() -> None:
+    _, envelope = configctl(["show"])
+    assert envelope["meta"]["config_sources"] == []
+    # Without App(settings=) no file is read: the hash is that of {}
+    code, out, _ = run(["list"])
+    meta = json.loads(out)["meta"]
+    empty = hashlib.sha256(b"{}").hexdigest()[:12]
+    assert code == 0 and meta["config_sources"] == [] and meta["effective_config_hash"] == empty
+
+
+def test_env_beats_the_project_file_which_beats_the_user_file(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".configctl.toml").write_text('region = "project"\n')
+    user = user_file(tmp_path, 'region = "user"\nretries = 9\n')
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    code, envelope = configctl_in(project, ["show"], **env)
+    assert code == 0 and envelope["data"] == {"region": "project", "retries": 9, "tags": []}
+    local = project.resolve() / ".configctl.toml"
+    assert envelope["meta"]["config_sources"] == [str(local), str(user)]
+    _, envelope = configctl_in(project, ["show"], CONFIGCTL_REGION="env", **env)
+    assert envelope["data"]["region"] == "env"
+
+
+@pytest.mark.parametrize(
+    ("text", "key"),
+    [("colour = 1\n", "colour"), ('retries = "many"\n', "retries"), ("region = [", None)],
+)
+def test_an_invalid_config_file_exits_2_with_config_invalid(
+    tmp_path: Path, text: str, key: str | None
+) -> None:
+    path = user_file(tmp_path, text)
+    code, envelope = configctl(["show"], {"XDG_CONFIG_HOME": str(tmp_path)})
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "CONFIG_INVALID" and error["phase"] == "validation"
+    assert error["context"]["path"] == str(path) and error["context"].get("key") == key
+
+
+def test_an_invalid_env_setting_exits_2_naming_the_variable() -> None:
+    code, envelope = configctl(["show"], {"CONFIGCTL_RETRIES": "many"})
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "CONFIG_INVALID"
+    assert error["context"] == {"source": "CONFIGCTL_RETRIES", "key": "retries"}
+
+
+def test_settings_must_be_a_frozen_dataclass_with_defaults_and_no_framework_names() -> None:
+    @dataclass
+    class Loose:
+        region: str = "x"
+
+    @dataclass(frozen=True)
+    class NoDefault:
+        region: str
+
+    @dataclass(frozen=True)
+    class Framework:
+        format: str = "json"
+
+    for bad in (Loose, NoDefault, Framework, dict):
+        with pytest.raises(RegistrationError):
+            App("x", version="1.0.0", settings=bad)
+
+
+def test_audit_flags_a_handler_that_parses_a_config_file_by_hand() -> None:
+    app = make_app()
+
+    @app.command("region", description="Region", danger_level="safe", exit_codes=())
+    def region(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return tomllib.loads(Path(".my-tool.toml").read_text())
+
+    report = audit(app, "my-tool", limit=3)
+    [rule] = [r for r in report.rules if r.id == "settings-declared"]
+    assert [f.command for f in rule.findings] == ["region"]
+    assert "App(settings=Settings)" in rule.findings[0].fix
+
+
+# REQ-O-015
+
+
+def test_show_config_format_json_parses_as_json(tmp_path: Path) -> None:
+    proc = spawn(["--show-config", "--format", "json"], tmp_path)
+    out, _ = proc.communicate(timeout=60)
+    assert proc.returncode == 0 and json.loads(out)["ok"] is True
+
+
+def test_each_key_in_sources_maps_to_the_file_or_env_var_that_provided_it(tmp_path: Path) -> None:
+    path = user_file(tmp_path, 'retries = 5\napi_token = "s3cret"\n')
+    env = {"XDG_CONFIG_HOME": str(tmp_path), "CONFIGCTL_TAGS": "a,b"}
+    code, envelope = configctl(["--show-config"], env)
+    data = envelope["data"]
+    assert code == 0 and data["sources"] == {
+        "region": "default",
+        "retries": f"file:{path}",
+        "api_token": f"file:{path}",
+        "tags": "env:CONFIGCTL_TAGS",
+    }
+    assert data["effective_config"] == {
+        "region": "us-east-1",
+        "retries": 5,
+        "api_token": "[REDACTED]",
+        "tags": ["a", "b"],
+    }
+
+
+def test_precedence_order_is_present_and_lists_all_config_layers_in_order(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    _, envelope = configctl_in(project, ["--show-config"], **env)
+    local = project.resolve() / ".configctl.toml"
+    user = tmp_path / "configctl" / "config.toml"
+    assert envelope["data"]["precedence_order"] == ["env-vars", str(local), str(user), "defaults"]
+
+
+def test_show_config_reflects_the_actual_resolved_state_including_env_overrides(
+    tmp_path: Path,
+) -> None:
+    user_file(tmp_path, 'region = "file"\n')
+    env = {"XDG_CONFIG_HOME": str(tmp_path), "CONFIGCTL_REGION": "env"}
+    _, shown = configctl(["--show-config"], env)
+    _, ran = configctl(["show"], env)
+    assert shown["data"]["effective_config"]["region"] == ran["data"]["region"] == "env"
+    assert shown["data"]["sources"]["region"] == "env:CONFIGCTL_REGION"
+    assert shown["meta"]["effective_config_hash"] == ran["meta"]["effective_config_hash"]
+
+
+# REQ-O-016
+
+
+def test_no_config_causes_no_config_file_to_be_read_regardless_of_what_exists(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".configctl.toml").write_text("not toml [\n")
+    user_file(tmp_path, 'region = "user"\n')
+    code, envelope = configctl_in(project, ["show", "--no-config"], XDG_CONFIG_HOME=str(tmp_path))
+    assert code == 0 and envelope["data"]["region"] == "us-east-1"
+
+
+def test_environment_variables_still_take_effect_with_no_config() -> None:
+    code, envelope = configctl(["show", "--no-config"], {"CONFIGCTL_RETRIES": "7"})
+    assert code == 0 and envelope["data"]["retries"] == 7
+
+
+def test_meta_config_sources_is_an_empty_array_when_no_config_is_passed(tmp_path: Path) -> None:
+    user_file(tmp_path, 'region = "user"\n')
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    _, envelope = configctl(["show", "--no-config"], env)
+    assert envelope["meta"]["config_sources"] == []
+    _, shown = configctl(["--show-config", "--no-config"], env)
+    assert shown["data"]["precedence_order"] == ["env-vars", "defaults"]
+
+
+def test_no_config_is_present_in_every_commands_help() -> None:
+    app = fixture_config_app.app
+    for path in app.commands:
+        err = io.StringIO()
+        app.run([*path.parts, "--help"], stdout=io.StringIO(), stderr=err, env={}, isatty=False)
+        assert "--no-config" in err.getvalue(), path
+
+
+# REQ-O-024
+
+
+def test_config_path_causes_the_command_to_load_config_only_from_that_file(
+    tmp_path: Path,
+) -> None:
+    user_file(tmp_path, 'region = "user"\nretries = 9\n')
+    isolated = tmp_path / "isolated.json"
+    isolated.write_text('{"region": "isolated"}')
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    code, envelope = configctl(["show", "--config", str(isolated)], env)
+    assert code == 0 and envelope["data"] == {"region": "isolated", "retries": 3, "tags": []}
+    code, envelope = configctl(["show"], {**env, "CONFIGCTL_CONFIG": str(isolated)})
+    assert code == 0 and envelope["data"]["region"] == "isolated"
+
+
+def test_a_config_path_not_yet_written_reads_as_empty(tmp_path: Path) -> None:
+    fresh = tmp_path / "session" / "config.toml"
+    code, envelope = configctl(["show", "--config", str(fresh)])
+    assert code == 0 and envelope["meta"]["config_sources"] == []
+    code, envelope = configctl(["show", "--config", str(tmp_path)])  # a directory
+    assert code == 2 and envelope["error"]["code"] == "CONFIG_INVALID"
+
+
+def test_context_staging_uses_the_staging_context_from_the_loaded_config(tmp_path: Path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'region = "base"\ncurrent_context = "prod"\n'
+        '[contexts.prod]\nregion = "prod-1"\n[contexts.staging]\nregion = "staging-1"\n'
+    )
+    base = ["show", "--config", str(config)]
+    _, envelope = configctl([*base, "--context", "staging"])
+    assert envelope["data"]["region"] == "staging-1" and envelope["meta"]["context"] == "staging"
+    _, envelope = configctl(base)
+    assert envelope["data"]["region"] == "prod-1" and envelope["meta"]["context"] == "prod"
+    _, envelope = configctl(base, {"CONFIGCTL_CONTEXT": "staging"})
+    assert envelope["data"]["region"] == "staging-1"
+    code, envelope = configctl([*base, "--context", "qa"])
+    assert code == 2 and envelope["error"]["code"] == "CONTEXT_UNKNOWN"
+    assert envelope["error"]["context"]["available"] == ["prod", "staging"]
+
+
+def test_two_concurrent_invocations_with_different_config_paths_share_no_mutable_state(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    sessions = [tmp_path / f"session-{n}" for n in (1, 2)]
+    for session in sessions:
+        session.mkdir()
+    procs = [
+        spawn(["config", "set", f"r{n}", "--config", str(s / "config.toml")], s, HOME=str(home))
+        for n, s in enumerate(sessions)
+    ]
+    assert [p.wait(timeout=60) for p in procs] == [0, 0]
+    for n, session in enumerate(sessions):
+        code, envelope = configctl(["show", "--config", str(session / "config.toml")])
+        assert envelope["data"]["region"] == f"r{n}"
+    assert not home.exists()  # nothing shared was written
+
+
+def test_meta_config_sources_reflects_the_config_path_when_passed(tmp_path: Path) -> None:
+    config = tmp_path / "agent.toml"
+    config.write_text("")
+    _, envelope = configctl(["show", "--config", str(config)])
+    assert envelope["meta"]["config_sources"] == [str(config)]
+
+
+# REQ-O-036
+
+
+def set_region(region: str, home: Path, *flags: str, **env: str) -> dict[str, Any]:
+    code, envelope = configctl(
+        ["config", "set", region, "--global", *flags], {"XDG_CONFIG_HOME": str(home), **env}
+    )
+    assert code == 0, envelope
+    return envelope
+
+
+def test_instance_id_agent_1_config_set_writes_to_its_instance_path(tmp_path: Path) -> None:
+    envelope = set_region("us-east-1", tmp_path, "--instance-id", "agent-1")
+    expected = tmp_path / "configctl" / "instances" / "agent-1" / "config.toml"
+    assert (
+        envelope["data"]["path"] == str(expected) and envelope["meta"]["instance_id"] == "agent-1"
+    )
+    assert expected.read_text() == 'region = "us-east-1"\n'
+
+
+def test_instance_id_agent_2_writes_a_different_path_and_does_not_affect_agent_1(
+    tmp_path: Path,
+) -> None:
+    set_region("us-east-1", tmp_path, "--instance-id", "agent-1")
+    set_region("eu-west-1", tmp_path, "--instance-id", "agent-2")
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    for agent, region in (("agent-1", "us-east-1"), ("agent-2", "eu-west-1")):
+        _, envelope = configctl(["show", "--instance-id", agent], env)
+        assert envelope["data"]["region"] == region
+
+
+def test_without_instance_id_concurrent_config_writes_use_file_locking_and_succeed(
+    tmp_path: Path,
+) -> None:
+    procs = [
+        spawn(["config", "set", f"r{n}", "--global"], tmp_path, XDG_CONFIG_HOME=str(tmp_path))
+        for n in range(6)
+    ]
+    assert [p.wait(timeout=60) for p in procs] == [0] * 6
+    written = (tmp_path / "configctl" / "config.toml").read_text()
+    assert written in {f'region = "r{n}"\n' for n in range(6)}
+
+
+def test_tool_instance_id_env_is_equivalent_to_the_instance_id_flag(tmp_path: Path) -> None:
+    by_env = set_region("x", tmp_path, CONFIGCTL_INSTANCE_ID="agent-3")
+    by_flag = set_region("x", tmp_path, "--instance-id", "agent-3")
+    assert by_env["data"] == by_flag["data"]
+    assert by_env["meta"]["instance_id"] == by_flag["meta"]["instance_id"] == "agent-3"
+
+
+def test_instance_id_namespaces_the_state_dir(tmp_path: Path) -> None:
+    base = state_dir("configctl", tmp_path, {})
+    assert state_dir("configctl", tmp_path, {}, InstanceId("a.1")) == tmp_path / "instances" / "a.1"
+    assert base == tmp_path
+
+
+def test_a_malformed_instance_id_exits_2() -> None:
+    code, envelope = configctl(["show", "--instance-id", "../up"])
+    assert code == 2 and envelope["error"]["context"]["flag"] == "instance-id"

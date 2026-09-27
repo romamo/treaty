@@ -72,6 +72,11 @@ def test_manifest_lists_global_options_at_the_root(app: App) -> None:
         "schema-version",
         "stable-output",
         "help",
+        "config",
+        "context",
+        "no-config",
+        "show-config",
+        "instance-id",
     }
     assert manifest["flags"]["format"]["enum_values"] == ["plain", "json", "jsonl", "tsv"]
     for entry in manifest["commands"].values():

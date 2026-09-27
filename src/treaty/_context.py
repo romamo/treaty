@@ -49,7 +49,8 @@ class Ctx:
     token: str | None = field(default=None, repr=False)
     """A login command's pre-acquired token (``auth=``): from ``--token-env-var`` or the
     first set variable of ``token_env_vars``; redacted from logs and tracebacks"""
-    config: ConfigFile | None = field(default=None, repr=False, compare=False)
+    _config_file: ConfigFile | None = field(default=None, repr=False, compare=False)
+    """What ``write_config`` writes; read the app's settings through ``App(settings=)``"""
     trace_id: str | None = None
     """``TOOL_TRACE_ID`` of the run, when set; children inherit it (REQ-F-025)"""
     project_root: Path | None = None
@@ -68,16 +69,16 @@ class Ctx:
     @property
     def config_path(self) -> Path | None:
         """The file ``write_config`` writes (``config_write_scope=``), else None: the
-        project's ``./.<app>.toml``, or the user's with ``--global``"""
-        return None if self.config is None else self.config.path
+        project's ``./.<app>.toml``, the user's with ``--global``, or ``--config PATH``"""
+        return None if self._config_file is None else self._config_file.path
 
     def write_config(self, text: str) -> Path:
         """Replace the config file with ``text`` through a temporary file and a rename, so
-        an interrupted write leaves the old file; a global write is locked and adds a
-        ``GLOBAL_CONFIG_MODIFIED`` warning (REQ-C-025)"""
-        if self.config is None:
+        an interrupted write leaves the old file; writes are locked, one at a time, and a
+        global write adds a ``GLOBAL_CONFIG_MODIFIED`` warning (REQ-C-025, REQ-O-036)"""
+        if self._config_file is None:
             raise RegistrationError("ctx.write_config needs config_write_scope= on the command")
-        return self.config.write(text)
+        return self._config_file.write(text)
 
     def log(self, message: str, **fields: object) -> None:
         """Write one diagnostic line to stderr, never stdout (REQ-F-006)

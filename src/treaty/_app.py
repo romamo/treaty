@@ -118,6 +118,10 @@ from ._resources import Resolver
 from ._retry import Retrier, RetriesExhausted, Retry
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
+from ._settings import EMPTY as EMPTY_SETTINGS
+from ._settings import ConfigOptions, Resolved, SettingsSpec
+from ._settings import options as config_options
+from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
 from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, Processes
 from ._table import table
@@ -210,11 +214,14 @@ class App:
         enable_exec: bool = True,
         credentials: Credentials | None = None,
         jobs: JobStore | None = None,
+        settings: type | None = None,
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
         ``jobs`` looks up the jobs ``async_job=True`` commands start, for the ``job status``
-        and ``job cancel`` built-ins."""
+        and ``job cancel`` built-ins. ``settings`` is a frozen dataclass read from the
+        config files and ``<APP>_<FIELD>`` variables; a handler gets it by annotating a
+        parameter with the class (REQ-F-028)."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -237,6 +244,7 @@ class App:
         self._renderers: dict[Format, Renderer] = {}
         self.credentials = credentials
         self.jobs = jobs
+        self.settings = None if settings is None else SettingsSpec.inspect(settings, self.scalars)
         self._register_builtins(enable_exec)
 
     # Registration
@@ -496,6 +504,7 @@ class App:
                     retry=retry,
                     sort_key=sort_key,
                     ordered=ordered,
+                    provided=() if self.settings is None else (self.settings.cls,),
                 )
             )
             return fn
@@ -765,8 +774,13 @@ class App:
 
     def environment(self) -> list[tuple[str, str]]:
         """Every variable the app reads, by its prefixed name, with what it sets
-        (REQ-F-073): the framework's own, then the default of each secret flag"""
+        (REQ-F-073): the framework's own, the settings, then each secret flag's default"""
         rows = [(app_var(self.name, v.key), v.description) for v in KNOWN]
+        if self.settings is not None:
+            rows += [
+                (app_var(self.name, f.name), f"Setting {f.name}, over the config files")
+                for f in self.settings.fields
+            ]
         secrets = {
             var: f"Default of --{field.replace('_', '-')} of {path}"
             for path, c in sorted(self._commands.items(), key=lambda kv: kv[0].value)
@@ -804,6 +818,8 @@ class App:
         run = _Run(self, io.StringIO(), sys.stderr, environ)
         try:
             cap = OutputCap.resolve(None, environ, self.max_output, self.name)
+            # No argv here: <APP>_CONFIG, <APP>_CONTEXT, and <APP>_INSTANCE_ID stand in
+            run.load_settings(config_options(self.name, environ))
         except ParseError as exc:
             return run.arg_error(exc, meta={"_cmd": path})
         envelope = self._call(run, path, arguments, environ)
@@ -943,6 +959,21 @@ class App:
         run.stable = run.stable_all = globals_.stable_output
         if run.trace_error is not None:
             return run.emit(mode, run.arg_error(run.trace_error))
+        try:
+            run.load_settings(
+                config_options(
+                    self.name,
+                    environ,
+                    config=globals_.config,
+                    context=globals_.context,
+                    no_config=globals_.no_config,
+                    instance_id=globals_.instance_id,
+                )
+            )
+        except ParseError as exc:
+            return run.emit(mode, run.arg_error(exc))
+        if globals_.show_config:
+            return run.show_config(mode)
         route = resolve_path(rest, self._commands)
         if route.path is None and not route.prefix and route.tokens == ("--version",):
             # Root-only alias so a command's own --version flag is never shadowed
@@ -1019,12 +1050,15 @@ _guarded = 0
 _unguarded: tuple[TextIO, TextIO] = (sys.stdout, sys.stdin)
 
 
-def _invoke(app: App, command: Command, args: object, ctx: Ctx) -> object:
+def _invoke(
+    app: App, command: Command, args: object, ctx: Ctx, provided: Mapping[type, object]
+) -> object:
     """Check the credential, acquire the handler's resources, each once and in dependency
-    order, then run it; ``active_scopes`` is app code, so it runs where the handler does"""
+    order, then run it; ``active_scopes`` is app code, so it runs where the handler does.
+    ``provided`` holds what the run already has, such as the settings."""
     if command.requires_auth:
         app._gate(command, ctx)
-    resolver = Resolver(command.resource_graph, args, ctx)
+    resolver = Resolver(command.resource_graph, args, ctx, provided)
     return command.handler(args, ctx, *resolver.all(command.resources))
 
 
@@ -1283,8 +1317,10 @@ class _Run:
         """``ctx.warn`` entries of the command that runs now, added to its envelopes"""
         self.token: str | None = None
         """A login command's token, redacted wherever a secret argument is"""
-        self.config: ConfigFile | None = None
+        self.config_file: ConfigFile | None = None
         """The config file the command that runs now may write"""
+        self.settings: Resolved = EMPTY_SETTINGS
+        """The run's settings and their sources, read once before routing (REQ-F-028)"""
         self.timestamp = utc_timestamp()
         self.cwd = logical_cwd(env)
         self.trace_id: str | None = None
@@ -1411,11 +1447,23 @@ class _Run:
             stdin_text=invocation.stdin_text,
             page=page,
             token=invocation.token,
-            config=self.config if command.config_write_scope is not None else None,
+            _config_file=self.config_file if command.config_write_scope is not None else None,
             trace_id=self.trace_id,
             project_root=self.project_root(command),
             retrier=self.retrier,
         )
+
+    def load_settings(self, options: ConfigOptions) -> None:
+        """Read the settings layers once for the run; ``CONFIG_INVALID`` stops it"""
+        app = self.app
+        self.settings = resolve_settings(
+            app.settings, app.name, options, self.env, self.cwd, app.scalars
+        )
+
+    def provided(self) -> dict[type, object]:
+        """What a handler may ask for by type without a resource: the settings"""
+        spec = self.app.settings
+        return {} if spec is None else {spec.cls: self.settings.value}
 
     def project_root(self, command: Command) -> Path | None:
         """The directory holding one of the command's ``project_root`` markers, found once
@@ -1480,6 +1528,7 @@ class _Run:
         extra: dict[str, object] = {"headless": True} if self.headless else {}
         if any(w.code == TRUNCATED_CODE for w in self.warnings):
             extra["truncated"] = True  # ctx.truncated reported a backend's cut (REQ-F-064)
+        extra |= self.settings.meta()
         command = self.current
         if command is None:
             name, version, root = self.app.name, ENVELOPE_SCHEMA_VERSION, None
@@ -1583,7 +1632,7 @@ class _Run:
             config = self._config_file(command, invocation, meta)
             if isinstance(config, Envelope):
                 return config
-            self.config = config
+            self.config_file = config
         if command.stdin_input:
             try:
                 payload = self._read_input(invocation.input_file, meta=meta)
@@ -1678,9 +1727,13 @@ class _Run:
                 ),
                 meta=meta,
             )
+        chosen = self.settings.options
+        if chosen.config is not None:
+            # REQ-O-024: --config is the one file this run reads and writes
+            return ConfigFile(self.cwd / chosen.config, False, self._warn)
         if not invocation.global_config:
-            return ConfigFile(local_config(self.app.name), False, self._warn)
-        path = user_config(self.app.name, self.env)
+            return ConfigFile(local_config(self.app.name, self.cwd), False, self._warn)
+        path = user_config(self.app.name, self.env, chosen.instance_id)
         if path is None:
             return self._state_error(
                 "CONFIG_DIR_UNKNOWN",
@@ -1744,7 +1797,9 @@ class _Run:
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
-        directory = state_dir(self.app.name, self.app.state_dir, self.env)
+        directory = state_dir(
+            self.app.name, self.app.state_dir, self.env, self.settings.options.instance_id
+        )
         if directory is None:
             entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
             return self._envelope(
@@ -1960,7 +2015,7 @@ class _Run:
             result = call_with_timeout(
                 (lambda: self.app._gate(command, ctx))
                 if replay is not None
-                else (lambda: _invoke(self.app, command, args, ctx)),
+                else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
                 timeout,
                 running.append,
                 self.cancellation.armed,
@@ -2114,7 +2169,7 @@ class _Run:
         try:
             self.cancellation.check()
             produced = call_with_timeout(
-                lambda: _invoke(self.app, command, args, ctx),
+                lambda: _invoke(self.app, command, args, ctx, self.provided()),
                 remaining(),
                 running.append,
                 self.cancellation.armed,
@@ -2711,6 +2766,12 @@ class _Run:
             )
         return self.emit(mode, self._envelope(0, data=data), render=_json_text)
 
+    def show_config(self, mode: Format) -> int:
+        """``--show-config``: the effective settings, where each came from, and the layers
+        in precedence order, as JSON in every mode (REQ-O-015)"""
+        data = self.settings.show(self.app.settings)
+        return self.emit(mode, self._envelope(0, data=data), render=_json_text)
+
     def output_schema(
         self, mode: Format, command: Command | None, pinned: SchemaVersion | None
     ) -> int:
@@ -2929,7 +2990,7 @@ class _Run:
             if not line:
                 continue
             # One command per line
-            self.warnings, self.token, self.config = [], None, None
+            self.warnings, self.token, self.config_file = [], None, None
             self.current, self.pinned, self.retrier = None, None, None
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}

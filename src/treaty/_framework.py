@@ -165,6 +165,11 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "print-schema",
         "schema-version",
         "stable-output",
+        "config",
+        "context",
+        "no-config",
+        "show-config",
+        "instance-id",
         "retries",
         "retry-delay",
     }
