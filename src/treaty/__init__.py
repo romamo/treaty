@@ -10,6 +10,7 @@ from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
 from ._flags import Arg, Flag
 from ._mode import Format
 from ._scalars import ScalarSpec
+from ._subprocess import Completed
 from ._timeout import Timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, Scope
 
@@ -19,6 +20,7 @@ __all__ = [
     "Arg",
     "CliExit",
     "CommandPath",
+    "Completed",
     "Ctx",
     "DangerLevel",
     "Envelope",

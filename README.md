@@ -228,7 +228,8 @@ REQ-F-016). Plain mode prints text as returned. `ctx.color` tells a renderer whe
 color: never in JSON mode, under `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`,
 `JENKINS_URL`, or `TERM=dumb`, or when stdout is not a terminal (REQ-F-008). `App.main()`
 sets `PAGER=cat` and `GIT_PAGER=cat` for every child process, and `NO_COLOR=1` whenever
-color is off (REQ-F-010); `App.run()` leaves the process environment alone.
+color is off (REQ-F-010); `App.run()` leaves the process environment alone. See
+[Running programs](#running-programs) for what `ctx.run` children get.
 
 `datetime`, `date`, and `time` results are ISO 8601 strings (`2026-09-27T10:00:00Z` for
 UTC), and `Decimal` is fixed-point text; the output schema says `format: date-time` and so
@@ -239,6 +240,46 @@ punctuation, author messages included (REQ-C-013). A recoverable error (`retryab
 with `fix_required`) always has a `suggestion`: the one given to `Exit`, else the exit
 code's `app.exit_code(..., suggestion=...)`, else the `fix_required` text or a generic
 retry step. The audit rule `exit-code-suggestion` flags retryable codes without one.
+
+## Running programs
+
+Handlers start other programs with `ctx.run` and `ctx.pipeline`, which take argument
+lists and never a shell:
+
+```python
+done = ctx.run(["git", "log", "-1", "--format=%H"])
+head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
+```
+
+- Arguments reach the program as literal text: `"hello world"`, `"*.json"`, and
+  `"; rm -rf /"` are one argument each, never split, expanded, or executed, so treaty does
+  not need to reject shell metacharacters (REQ-F-044, REQ-F-062). A string where the list
+  belongs is `SHELL_STRING_PROHIBITED`: a `RegistrationError` when the handler's source
+  shows it (`ctx.run("git log")`, an f-string, `shell=`), exit `1` when it happens at run
+  time. The `no-shell` audit rule flags `os.system`, `os.popen`, and `shell=True`
+- Children read `/dev/null` unless given `input=`, and get `NO_COLOR=1`, `PAGER=cat`,
+  `GIT_PAGER=cat`, `MANPAGER=cat`, `LESS=-F -X -R`, and an empty `MORE`; off a terminal
+  also `EDITOR`, `VISUAL`, and `GIT_EDITOR` set to `true`, so an editor exits at once
+  (REQ-F-046, REQ-F-055). Grandchildren inherit them; `env=` overrides single variables
+- A non-zero exit raises `SUBPROCESS_FAILED` (exit `1`) with `argv`, `returncode`,
+  `stage`, and the last 4 KiB of stderr in `context`; `check=False` returns a `Completed`
+  instead. In a pipeline any failing stage fails the whole, the first one named
+  (REQ-F-065). `ctx.pipeline` checks each stage like `set -o pipefail`, so a stage killed
+  by SIGPIPE (`yes | head -1`) fails too
+- `timeout=` defaults to what is left of the command's timeout; running out stops the
+  child and raises `TIMEOUT`. Each child starts in its own session, so it cannot open the
+  terminal, and a signal or timeout sends SIGTERM to its process group, then SIGKILL
+  after 2 seconds, before the `CANCELLED` or `TIMEOUT` envelope is written (REQ-F-031)
+
+`App.main()` writes the same pager and, off a terminal, editor settings into
+`os.environ`, so programs started without `ctx.run` inherit them too.
+
+A command that opens a browser declares `gui_operations=["browser_open"]` and returns an
+`open_url: str | None` field. `ctx.open_url(url)` opens it and returns `True`, except in a
+headless run (no terminal on stdin and stdout, `CI`, or no `DISPLAY` or `WAYLAND_DISPLAY`
+on Linux or over SSH): then nothing opens, the URL lands in `data.open_url`, and every
+envelope of the run has `meta.headless: true` (REQ-F-057). `ctx.headless` tells the
+handler.
 
 ## Output size
 

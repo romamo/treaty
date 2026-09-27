@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 547 passed |
+| `uv run pytest` | 585 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -141,6 +141,23 @@ The two do not share code.
   signal elsewhere is held and raised at the next window, so a finished result is still
   written. An exec plan stops at the first signal whatever `--ignore-errors` says
 
+- **Children run from argument lists, in their own session.** `_subprocess.Processes` is
+  built per handler run in `_Run._ctx` with the hardened env (`_mode.child_settings`), the
+  command's deadline, and the headless flag; `_Run.processes` points at the current one so
+  `_cancelled` and both `TimeoutExpired` paths call `terminate()` (SIGTERM to each process
+  group, SIGKILL after 2 s) before the envelope is built. A failing child is a `CliExit`
+  on `GENERAL_ERROR` with code `SUBPROCESS_FAILED`, so no new exit code and no
+  declaration; its deadline expiry is a `CliExit` on the implicit `TIMEOUT`. Stage stderr
+  goes to anonymous temp files, so a pipeline needs no reader threads
+- **Registration scans handler source.** `_scan.ctx_calls` parses the handler and lists
+  calls on its second parameter; `build_command` refuses a shell string or `shell=` in
+  `ctx.run`/`ctx.pipeline` (REQ-F-062 asks for registration time) and an undeclared
+  `ctx.open_url`. Handlers without source are skipped; the same checks run at call time
+- **Headless is decided once per run** (`_mode.is_headless`) and adds `meta.headless:
+  true` in `_Run._envelope`, so every envelope of the run carries it. A headless
+  `ctx.open_url` records the URL and `_execute` fills `data.open_url` when the handler
+  left it `None`
+
 ## Layout
 
 ```
@@ -156,7 +173,7 @@ src/treaty/
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _command.py    Command record, build_command(), handler signature inspection
-  _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, color, log)
+  _context.py    Ctx handed to handlers (mode, env, timeout, color, headless, log, run, ...)
   _dispatch.py   DispatchRequest line parser for exec
   _effect.py     effect contract: registration check and per-run validation
   _envelope.py   Envelope, ErrorDetail, WarningDetail, write_envelope()
@@ -172,6 +189,8 @@ src/treaty/
   _schema.py     annotation to draft-07 schema, to_jsonable()
   _paths.py      check_path(): null bytes, percent-encoding, and .. in Path flags
   _secrets.py    secret sources (--x-from-env, --x-from-file) and their resolution
+  _scan.py       registration-time scan of a handler's ctx.<method>() calls
+  _subprocess.py Processes (ctx.run, ctx.pipeline, ctx.open_url), Completed, group kill
   _signals.py    SIGINT/SIGTERM handlers, Cancellation (armed windows, held signals)
   _timeout.py    Timeout VO, call_with_timeout()
   _types.py      annotation classification shared by _flags and _schema
@@ -202,7 +221,8 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
 F-011, F-012, F-013, F-015, F-016, F-034, F-044 (newlines), F-045 (paths), F-048, F-051,
 F-069, C-001, C-002, C-003, C-004, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
-O-021, O-022, O-032, O-039, O-041, O-048, O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
+O-021, O-022, O-032, O-039, O-041, O-048, O-050, and from the subprocess API F-044, F-046,
+F-055 (child half), F-057, F-062, F-065. See `COMPLIANCE.md` for the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),

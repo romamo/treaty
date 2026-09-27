@@ -164,6 +164,10 @@ def command_entry(
         out["streaming_default"] = True
     if command.safe_default:
         out["safe_default"] = True
+    if command.gui_operations:
+        out["gui_operations"] = list(command.gui_operations)
+        # The only behavior treaty has: the URL goes to data.open_url (REQ-C-024)
+        out["headless_behavior"] = "emit_in_output"
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret

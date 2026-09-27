@@ -40,7 +40,14 @@ from ._flags import REDACTED, Flag
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._manifest import build_manifest, command_schema
-from ._mode import Format, color_allowed, quiet_children, resolve_mode
+from ._mode import (
+    Format,
+    child_settings,
+    color_allowed,
+    is_headless,
+    quiet_children,
+    resolve_mode,
+)
 from ._parse import (
     Invocation,
     Route,
@@ -57,6 +64,7 @@ from ._resources import Resolver
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
+from ._subprocess import BROWSER_OPEN, Processes
 from ._timeout import Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
 
@@ -249,6 +257,7 @@ class App:
         renderers: Mapping[Format, Renderer] | None = None,
         streaming: bool = False,
         safe_default: bool = False,
+        gui_operations: Sequence[str] = (),
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes"""
@@ -297,6 +306,7 @@ class App:
                     scalars=self.scalars,
                     streaming=streaming,
                     safe_default=safe_default,
+                    gui_operations=gui_operations,
                 )
             )
             return fn
@@ -472,7 +482,9 @@ class App:
     def main(self) -> NoReturn:
         # Only the console entry point changes os.environ, which every child inherits;
         # run() callers such as tests and embedders pass their own env
-        quiet_children(os.environ, sys.stdout.isatty())
+        quiet_children(
+            os.environ, stdout_isatty=sys.stdout.isatty(), stdin_isatty=sys.stdin.isatty()
+        )
         sys.exit(self.run(sys.argv[1:]))
 
     def run(
@@ -489,7 +501,8 @@ class App:
         err = stderr if stderr is not None else sys.stderr
         inp = stdin if stdin is not None else sys.stdin
         environ = env if env is not None else os.environ
-        run = _Run(self, out, err, environ, tty=out.isatty() if isatty is None else isatty)
+        tty = out.isatty() if isatty is None else isatty
+        run = _Run(self, out, err, environ, tty=tty, stdin_tty=inp.isatty())
         try:
             with run.guard_stdout():
                 return self._route(run, list(argv), inp, environ)
@@ -751,7 +764,14 @@ class _Run:
     """One process invocation: builds envelopes, writes them, tracks timing"""
 
     def __init__(
-        self, app: App, out: IO[str], err: IO[str], env: Mapping[str, str], *, tty: bool = False
+        self,
+        app: App,
+        out: IO[str],
+        err: IO[str],
+        env: Mapping[str, str],
+        *,
+        tty: bool = False,
+        stdin_tty: bool = False,
     ) -> None:
         self.app = app
         self.out = out
@@ -759,6 +779,11 @@ class _Run:
         self.env = env
         self.tty = tty
         """Whether stdout is a terminal"""
+        self.interactive = tty and stdin_tty
+        """Whether a person can answer: stdin and stdout are both terminals"""
+        self.headless = is_headless(env, interactive=self.interactive, platform=sys.platform)
+        self.processes: Processes | None = None
+        """The children of the handler that runs now, stopped on a signal or timeout"""
         self.stray: _StrayStdout | None = None
         self.started = time.perf_counter()
         self.request_id = uuid.uuid4().hex[:12]
@@ -801,6 +826,15 @@ class _Run:
         timeout: Timeout,
         idempotency_key: str | None = None,
     ) -> Ctx:
+        deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
+        # Output is captured, so a child never colors; editors only for a person
+        settings = child_settings(color=False, interactive=self.interactive)
+        self.processes = Processes(
+            {**self.env, **settings},
+            deadline=deadline,
+            headless=self.headless,
+            browser_open=BROWSER_OPEN in command.gui_operations,
+        )
         return Ctx(
             app_name=self.app.name,
             version=self.app.version,
@@ -810,7 +844,9 @@ class _Run:
             state=self.app._state,
             timeout=timeout,
             color=mode is not Format.JSON and color_allowed(self.env, self.tty),
+            headless=self.headless,
             log_sink=self._log_sink(command, args, mode),
+            processes=self.processes,
             idempotency_key=idempotency_key,
         )
 
@@ -850,13 +886,15 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         origin = self.started if started is None else started
+        # REQ-F-057: every response says when no window could have been opened
+        extra = {"headless": True} if self.headless else {}
         return Envelope(
             exit_code=code,
             data=data,
             error=error,
             duration_ms=int((time.perf_counter() - origin) * 1000),
             request_id=self.request_id,
-            extra_meta=dict(meta or {}),
+            extra_meta={**extra, **(meta or {})},
         )
 
     def arg_error(self, exc: ParseError, *, code: str = "ARG_ERROR", **kw: Any) -> Envelope:
@@ -1137,6 +1175,7 @@ class _Run:
             return self.after_start(exc, started=started, meta=full_meta)
         except TimeoutExpired as exc:
             self.abandoned = exc.pending
+            self._stop_children()
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
             return self._envelope(
                 entry.code.value,
@@ -1175,6 +1214,7 @@ class _Run:
             )
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, exc, started, full_meta)
+        data = self._with_open_url(data)
         if command.danger_level is not DangerLevel.SAFE:
             problem = effect_problem(
                 data,
@@ -1294,6 +1334,7 @@ class _Run:
             yield self.after_start(exc, started=started, meta=partial())
             return
         except TimeoutExpired:
+            self._stop_children()
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
             yield self._envelope(
                 entry.code.value,
@@ -1339,6 +1380,18 @@ class _Run:
             0, started=started, meta={**full_meta, "seq": seq, "end": True, "total": seq}
         )
 
+    def _stop_children(self) -> None:
+        """Terminate what the interrupted or abandoned handler still runs (REQ-F-030)"""
+        if self.processes is not None:
+            self.processes.terminate()
+
+    def _with_open_url(self, data: object) -> object:
+        """A headless ``ctx.open_url`` leaves its URL in ``data.open_url`` (REQ-F-057)"""
+        url = None if self.processes is None else self.processes.suppressed_url
+        if url is None or not isinstance(data, dict) or data.get("open_url") is not None:
+            return data
+        return {**data, "open_url": url}
+
     def _cancelled(
         self,
         command: Command,
@@ -1353,6 +1406,8 @@ class _Run:
         Before the handler started there is nothing to clean up and nothing partial.
         """
         context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
+        # Children first, so the envelope is written after they were signaled (REQ-F-031)
+        self._stop_children()
         if handler_started and command.cleanup is not None:
             try:
                 command.cleanup()

@@ -17,8 +17,10 @@ from ._flags import FieldInfo, inspect_fields
 from ._mode import Format
 from ._resources import ResourceSpec, dependency_params, resource_graph
 from ._scalars import ScalarRegistry
+from ._scan import ctx_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
+from ._subprocess import BROWSER_OPEN
 from ._timeout import Timeout
 from ._types import FlagType, is_dataclass_type, resolve_alias
 from ._values import CommandPath, ExitCodeName, Scope
@@ -84,6 +86,8 @@ class Command:
     """Every resource reachable from ``resources``, validated at registration"""
     safe_default: bool = False
     """A destructive command that runs as a dry run unless ``--live`` (REQ-O-048)"""
+    gui_operations: tuple[str, ...] = ()
+    """Display operations the handler may start; only ``browser_open`` (REQ-C-024)"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -126,10 +130,13 @@ def build_command(
     scalars: ScalarRegistry,
     streaming: bool = False,
     safe_default: bool = False,
+    gui_operations: Sequence[str] = (),
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
     args_type, output_type, resources = _inspect_handler(fn, path, streaming)
+    _check_gui(path, output_type, gui_operations)
+    _check_ctx_calls(fn, path, gui_operations)
     fields = inspect_fields(args_type, scalars)
     if streaming and danger_level is not DangerLevel.SAFE:
         raise RegistrationError(
@@ -228,7 +235,37 @@ def build_command(
         resources=resources,
         resource_graph=resource_graph(resources, str(path), args_type),
         safe_default=safe_default,
+        gui_operations=tuple(gui_operations),
     )
+
+
+def _check_gui(path: CommandPath, output_type: object, gui_operations: Sequence[str]) -> None:
+    unknown = sorted(set(gui_operations) - {BROWSER_OPEN})
+    if unknown:
+        raise RegistrationError(
+            f"{path}: gui_operations {unknown} are not supported; {BROWSER_OPEN!r} is"
+        )
+    if gui_operations and not can_carry(output_type, "open_url"):
+        raise RegistrationError(
+            f"{path}: a command that opens a browser must return an object with an "
+            "'open_url' field, where a headless run puts the URL (REQ-F-057), such as "
+            "open_url: str | None = None"
+        )
+
+
+def _check_ctx_calls(fn: Handler, path: CommandPath, gui_operations: Sequence[str]) -> None:
+    """Refuse at registration what the handler's source shows would fail at run time"""
+    for call in ctx_calls(fn):
+        where = f"{path}: ctx.{call.method}() on line {call.line} of the handler"
+        if call.shell:
+            raise RegistrationError(
+                f"{where} gets a shell string or shell= (SHELL_STRING_PROHIBITED); treaty never "
+                "runs a shell, so pass an argument list such as ['git', 'log', '-1'] (REQ-F-062)"
+            )
+        if call.method == "open_url" and BROWSER_OPEN not in gui_operations:
+            raise RegistrationError(
+                f"{where} opens a browser; declare gui_operations=[{BROWSER_OPEN!r}] (REQ-C-024)"
+            )
 
 
 def _inspect_handler(

@@ -3,7 +3,7 @@
 Status of treaty against the 159 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
-hygiene; 02, validation phase; 05, declarations).
+hygiene; 02, validation phase; 04, subprocess API; 05, declarations).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -16,20 +16,20 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 11 | 0 | 1 | **92%** |
-| Level 2: every P0 (includes Level 1) | 51 | 27 | 10 | 14 | **63%** |
-| Level 3: full spec | 159 | 36 | 39 | 84 | **35%** |
+| Level 2: every P0 (includes Level 1) | 51 | 32 | 10 | 9 | **73%** |
+| Level 3: full spec | 159 | 42 | 41 | 76 | **39%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 23 | 22 | 34 | **43%** |
-| Command contract (C) | 30 | 9 | 7 | 14 | **42%** |
+| Framework-automatic (F) | 79 | 29 | 23 | 27 | **51%** |
+| Command contract (C) | 30 | 9 | 8 | 13 | **43%** |
 | Opt-in (O) | 50 | 4 | 10 | 36 | **18%** |
 
 ## Open mandatory requirements
 
-Level 2 (every P0) is the level the spec calls agent-reliable. These 24 requirements
+Level 2 (every P0) is the level the spec calls agent-reliable. These 19 requirements
 stand between treaty and a Level 2 claim; the Level 1 ones come first.
 
 | ID | Title | Priority | Level | Status | Notes |
@@ -39,16 +39,11 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Partial | Exits 141 (OUTPUT_CLOSED); spec requires 0 |
 | [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Not started | No `meta.pagination`, `--cursor`, or `next_cursor` (ROADMAP 0.2.0) |
 | [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Not started | No default item limit or `--limit`; only the 1 MiB byte cap |
-| [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Partial | Newlines, CR, and NUL in `str` args refused in phase 1 (`Flag(multiline=True)` opts out); no subprocess API |
-| [REQ-F-046](../cli-agent-ergonomics/requirements/f-046-pager-environment-variable-suppression.md) | Pager Environment Variable Suppression | P0 | 2 | Not started | No `PAGER`/`GIT_PAGER` injection for children |
 | [REQ-F-047](../cli-agent-ergonomics/requirements/f-047-repl-mode-prohibition-in-non-tty-context.md) | REPL Mode Prohibition in Non-TTY Context | P0 | 2 | Partial | No-args run shows help; `exec` refuses a TTY stdin; `input()` is not intercepted |
 | [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Partial | 1 MiB cap, `--max-output`, `meta.truncated`; hint is prose, not a runnable command |
 | [REQ-F-053](../cli-agent-ergonomics/requirements/f-053-stdout-unbuffering-in-non-tty-mode.md) | Stdout Unbuffering in Non-TTY Mode | P0 | 2 | Partial | Each envelope flushed; no heartbeat, no `PYTHONUNBUFFERED` |
 | [REQ-F-054](../cli-agent-ergonomics/requirements/f-054-stdin-payload-size-cap-with-input-file-fallback.md) | Stdin Payload Size Cap with --input-file Fallback | P0 | 2 | Partial | 64 KiB cap and `--input-file` exist on `exec` only |
-| [REQ-F-055](../cli-agent-ergonomics/requirements/f-055-editor-and-visual-no-op-in-non-tty-mode.md) | $EDITOR and $VISUAL No-Op in Non-TTY Mode | P0 | 2 | Not started | No `EDITOR`/`VISUAL` handling |
-| [REQ-F-057](../cli-agent-ergonomics/requirements/f-057-headless-environment-detection-and-gui-suppression.md) | Headless Environment Detection and GUI Suppression | P0 | 2 | Not started | No `DISPLAY`/headless detection |
-| [REQ-F-062](../cli-agent-ergonomics/requirements/f-062-glob-expansion-and-word-splitting-prevention.md) | Glob Expansion and Word-Splitting Prevention | P0 | 2 | Not started | No argv-only subprocess API |
-| [REQ-F-065](../cli-agent-ergonomics/requirements/f-065-pipeline-exit-code-propagation.md) | Pipeline Exit Code Propagation | P0 | 2 | Not started | No pipeline API |
+| [REQ-F-055](../cli-agent-ergonomics/requirements/f-055-editor-and-visual-no-op-in-non-tty-mode.md) | $EDITOR and $VISUAL No-Op in Non-TTY Mode | P0 | 2 | Partial | Off a terminal, children get `EDITOR`, `VISUAL`, `GIT_EDITOR`=`true`; no in-process editor interception with exit 4 yet |
 | [REQ-C-005](../cli-agent-ergonomics/requirements/c-005-interactive-commands-must-support-yes-non-interact.md) | Interactive Commands Must Support --yes / --non-interactive | P0 | 2 | Not started | No `interactive=`, `--yes`, or `--non-interactive` (ROADMAP 0.2.0) |
 | [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Not started | No headless auth declaration |
 | [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Not started | No async job descriptor |
@@ -92,8 +87,8 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-027](../cli-agent-ergonomics/requirements/f-027-cwd-in-response-meta.md) | CWD in Response Meta | P2 | 3 | Not started | No `meta.cwd` or `project_root` |
 | [REQ-F-028](../cli-agent-ergonomics/requirements/f-028-config-source-tracking-in-response-meta.md) | Config Source Tracking in Response Meta | P1 | 3 | Not started | No config layer, so no `meta.config_sources` |
 | [REQ-F-029](../cli-agent-ergonomics/requirements/f-029-auto-update-suppression-in-non-interactive-mode.md) | Auto-Update Suppression in Non-Interactive Mode | P1 | 3 | Partial | Holds only because treaty never checks for updates; no suppression hook for app authors |
-| [REQ-F-030](../cli-agent-ergonomics/requirements/f-030-child-process-session-tracking.md) | Child Process Session Tracking | P2 | 3 | Not started | No subprocess API |
-| [REQ-F-031](../cli-agent-ergonomics/requirements/f-031-sigterm-forwarding-to-tracked-children.md) | SIGTERM Forwarding to Tracked Children | P2 | 3 | Not started | No signal forwarding to children |
+| [REQ-F-030](../cli-agent-ergonomics/requirements/f-030-child-process-session-tracking.md) | Child Process Session Tracking | P2 | 3 | Partial | `ctx.run` children are tracked and stopped on signal or timeout; no session tracking file |
+| [REQ-F-031](../cli-agent-ergonomics/requirements/f-031-sigterm-forwarding-to-tracked-children.md) | SIGTERM Forwarding to Tracked Children | P2 | 3 | Done | SIGTERM or SIGINT sends SIGTERM to each tracked child's process group, SIGKILL after 2 s, before the `CANCELLED` envelope |
 | [REQ-F-032](../cli-agent-ergonomics/requirements/f-032-session-scoped-temp-directory.md) | Session-Scoped Temp Directory | P2 | 3 | Not started | No session-scoped temp directory |
 | [REQ-F-033](../cli-agent-ergonomics/requirements/f-033-lock-acquisition-with-timeout-and-retry-after-ms.md) | Lock Acquisition with Timeout and retry_after_ms | P2 | 3 | Not started | No public lock API with `retry_after_ms` (ROADMAP 0.3.0) |
 | [REQ-F-034](../cli-agent-ergonomics/requirements/f-034-secret-field-auto-redaction-in-logs.md) | Secret Field Auto-Redaction in Logs | P1 | 3 | Partial | Secret args redacted in errors and tracebacks; response fields are not redacted by name |
@@ -106,9 +101,9 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-041](../cli-agent-ergonomics/requirements/f-041-process-cwd-immutability.md) | Process CWD Immutability | P2 | 3 | Not started | Handler `os.chdir` is neither restored nor flagged |
 | [REQ-F-042](../cli-agent-ergonomics/requirements/f-042-log-rotation-in-framework-logger.md) | Log Rotation in Framework Logger | P3 | 3 | Not started | No framework logger |
 | [REQ-F-043](../cli-agent-ergonomics/requirements/f-043-temp-file-session-scoped-auto-cleanup.md) | Temp File Session-Scoped Auto-Cleanup | P2 | 3 | Not started | No session temp cleanup |
-| [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Partial | Newlines, CR, and NUL in `str` args refused in phase 1 (`Flag(multiline=True)` opts out); no subprocess API |
+| [REQ-F-044](../cli-agent-ergonomics/requirements/f-044-shell-argument-escaping-enforcement.md) | Shell Argument Escaping Enforcement | P0 | 2 | Done | Newlines, CR, and NUL in `str` args refused in phase 1; `ctx.run`/`ctx.pipeline` take argument lists only, so metacharacters arrive literally; a shell string or `shell=` in handler source is a `RegistrationError` |
 | [REQ-F-045](../cli-agent-ergonomics/requirements/f-045-agent-hallucination-input-pattern-rejection.md) | Agent Hallucination Input Pattern Rejection | P0 | 2 | Done | `Path` and pattern-typed scalars reject `..`, `%XX`, and NUL on every input route; plain `str` is unchecked |
-| [REQ-F-046](../cli-agent-ergonomics/requirements/f-046-pager-environment-variable-suppression.md) | Pager Environment Variable Suppression | P0 | 2 | Not started | No `PAGER`/`GIT_PAGER` injection for children |
+| [REQ-F-046](../cli-agent-ergonomics/requirements/f-046-pager-environment-variable-suppression.md) | Pager Environment Variable Suppression | P0 | 2 | Done | `ctx.run` children get `PAGER`, `GIT_PAGER`, `MANPAGER`=`cat`, `LESS=-F -X -R`, empty `MORE`, inherited by grandchildren; `App.main()` sets them process-wide |
 | [REQ-F-047](../cli-agent-ergonomics/requirements/f-047-repl-mode-prohibition-in-non-tty-context.md) | REPL Mode Prohibition in Non-TTY Context | P0 | 2 | Partial | No-args run shows help; `exec` refuses a TTY stdin; `input()` is not intercepted |
 | [REQ-F-048](../cli-agent-ergonomics/requirements/f-048-help-output-routing-to-stderr-in-non-tty-mode.md) | Help Output Routing to Stderr in Non-TTY Mode | P0 | 1 | Done | Help text to stderr, JSON envelope with `meta.help` on stdout |
 | [REQ-F-049](../cli-agent-ergonomics/requirements/f-049-async-command-handler-enforcement.md) | Async Command Handler Enforcement | P1 | 3 | Partial | `async def` handlers register and fail only at run time |
@@ -117,17 +112,17 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Partial | 1 MiB cap, `--max-output`, `meta.truncated`; hint is prose, not a runnable command |
 | [REQ-F-053](../cli-agent-ergonomics/requirements/f-053-stdout-unbuffering-in-non-tty-mode.md) | Stdout Unbuffering in Non-TTY Mode | P0 | 2 | Partial | Each envelope flushed; no heartbeat, no `PYTHONUNBUFFERED` |
 | [REQ-F-054](../cli-agent-ergonomics/requirements/f-054-stdin-payload-size-cap-with-input-file-fallback.md) | Stdin Payload Size Cap with --input-file Fallback | P0 | 2 | Partial | 64 KiB cap and `--input-file` exist on `exec` only |
-| [REQ-F-055](../cli-agent-ergonomics/requirements/f-055-editor-and-visual-no-op-in-non-tty-mode.md) | $EDITOR and $VISUAL No-Op in Non-TTY Mode | P0 | 2 | Not started | No `EDITOR`/`VISUAL` handling |
+| [REQ-F-055](../cli-agent-ergonomics/requirements/f-055-editor-and-visual-no-op-in-non-tty-mode.md) | $EDITOR and $VISUAL No-Op in Non-TTY Mode | P0 | 2 | Partial | Off a terminal, children get `EDITOR`, `VISUAL`, `GIT_EDITOR`=`true`; no in-process editor interception with exit 4 yet |
 | [REQ-F-056](../cli-agent-ergonomics/requirements/f-056-terminal-width-wrapping-disabled-in-json-mode.md) | Terminal Width Wrapping Disabled in JSON Mode | P0 | 2 | Done | Compact JSON; never wraps to terminal width |
-| [REQ-F-057](../cli-agent-ergonomics/requirements/f-057-headless-environment-detection-and-gui-suppression.md) | Headless Environment Detection and GUI Suppression | P0 | 2 | Not started | No `DISPLAY`/headless detection |
+| [REQ-F-057](../cli-agent-ergonomics/requirements/f-057-headless-environment-detection-and-gui-suppression.md) | Headless Environment Detection and GUI Suppression | P0 | 2 | Done | Headless when stdin or stdout is not a TTY, `CI`, or no `DISPLAY`/`WAYLAND_DISPLAY` on Linux or over SSH; `meta.headless` on every envelope; `ctx.open_url` needs `gui_operations` and fills `data.open_url` |
 | [REQ-F-058](../cli-agent-ergonomics/requirements/f-058-high-entropy-field-masking.md) | High-Entropy Field Masking | P1 | 3 | Not started | No high-entropy masking or `--unmask` |
 | [REQ-F-059](../cli-agent-ergonomics/requirements/f-059-json5-input-normalization.md) | JSON5 Input Normalization | P1 | 3 | Not started | Strict JSON only; no JSON5 normalization |
 | [REQ-F-060](../cli-agent-ergonomics/requirements/f-060-third-party-stdout-interception.md) | Third-Party Stdout Interception | P1 | 3 | Partial | `sys.stdout` is swapped to stderr during a run with a warning; writes to fd 1 and import-time prints are not caught |
 | [REQ-F-061](../cli-agent-ergonomics/requirements/f-061-symlink-loop-detection-in-traversal-utilities.md) | Symlink Loop Detection in Traversal Utilities | P1 | 3 | Not started | No traversal utilities |
-| [REQ-F-062](../cli-agent-ergonomics/requirements/f-062-glob-expansion-and-word-splitting-prevention.md) | Glob Expansion and Word-Splitting Prevention | P0 | 2 | Not started | No argv-only subprocess API |
+| [REQ-F-062](../cli-agent-ergonomics/requirements/f-062-glob-expansion-and-word-splitting-prevention.md) | Glob Expansion and Word-Splitting Prevention | P0 | 2 | Done | Argument lists only; string argv is `SHELL_STRING_PROHIBITED` at registration (source scan) or run time. Debug-mode argv logging not applicable: treaty has no debug mode; argv is a JSON array in error context |
 | [REQ-F-063](../cli-agent-ergonomics/requirements/f-063-credential-expiry-structured-error.md) | Credential Expiry Structured Error | P1 | 3 | Partial | PERMISSION_DENIED and AUTH_REQUIRED codes exist; no `refresh_command`/`required_permission` |
 | [REQ-F-064](../cli-agent-ergonomics/requirements/f-064-output-truncation-detection-and-warning.md) | Output Truncation Detection and Warning | P1 | 3 | Partial | FIELD_TRUNCATED warnings on cap; no `max_bytes` field declaration |
-| [REQ-F-065](../cli-agent-ergonomics/requirements/f-065-pipeline-exit-code-propagation.md) | Pipeline Exit Code Propagation | P0 | 2 | Not started | No pipeline API |
+| [REQ-F-065](../cli-agent-ergonomics/requirements/f-065-pipeline-exit-code-propagation.md) | Pipeline Exit Code Propagation | P0 | 2 | Done | `ctx.pipeline` checks every stage; the first failing stage raises `SUBPROCESS_FAILED` with `stage`. The parent-shell `pipefail` warning is not applicable: a child cannot observe its parent shell's options |
 | [REQ-F-066](../cli-agent-ergonomics/requirements/f-066-subprocess-locale-normalization.md) | Subprocess Locale Normalization | P1 | 3 | Not started | No `LC_ALL` injection |
 | [REQ-F-067](../cli-agent-ergonomics/requirements/f-067-interspersed-option-parsing.md) | Interspersed Option Parsing | P1 | 3 | Partial | Globals accepted anywhere before `--`; no `option_placement: strict` |
 | [REQ-F-068](../cli-agent-ergonomics/requirements/f-068-help-and-version-flag-purity.md) | Help and Version Flag Purity | P0 | 2 | Done | Help, schema, and version resolve before parsing and resources |
@@ -170,7 +165,7 @@ stand between treaty and a Level 2 claim; the Level 1 ones come first.
 | [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Not started | No headless auth declaration |
 | [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Not started | No async job descriptor |
 | [REQ-C-023](../cli-agent-ergonomics/requirements/c-023-editor-requiring-commands-declare-non-interactive-.md) | Editor-Requiring Commands Declare Non-Interactive Alternative | P1 | 3 | Not started | No `requires_editor` |
-| [REQ-C-024](../cli-agent-ergonomics/requirements/c-024-gui-launching-commands-declare-headless-behavior.md) | GUI-Launching Commands Declare Headless Behavior | P1 | 3 | Not started | No GUI or headless declaration |
+| [REQ-C-024](../cli-agent-ergonomics/requirements/c-024-gui-launching-commands-declare-headless-behavior.md) | GUI-Launching Commands Declare Headless Behavior | P1 | 3 | Partial | `gui_operations=["browser_open"]` with `headless_behavior: emit_in_output` in the manifest; `skip` and `error` behaviors not offered |
 | [REQ-C-025](../cli-agent-ergonomics/requirements/c-025-config-writing-commands-declare-write-scope.md) | Config-Writing Commands Declare Write Scope | P0 | 2 | Not started | No config write scope |
 | [REQ-C-026](../cli-agent-ergonomics/requirements/c-026-commands-declare-conditional-argument-dependencies.md) | Commands Declare Conditional Argument Dependencies | P1 | 3 | Not started | No conditional argument rules (ROADMAP 0.3.0) |
 | [REQ-C-027](../cli-agent-ergonomics/requirements/c-027-commands-declare-option-placement.md) | Commands Declare Option Placement Convention | P1 | 3 | Not started | No `option_placement`; tokens after `--` are rejected, not forwarded |

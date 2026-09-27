@@ -75,6 +75,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `--confirm-destructive` to apply, `meta.dry_run` on every response (REQ-O-048)
 - `network-timeout` audit rule: network calls without `timeout=` in network commands
   (REQ-C-012)
+- Subprocess API (REQ-F-044, F-046, F-055, F-057, F-062, F-065): `ctx.run` and
+  `ctx.pipeline` take argument lists only, give children a pager-, color-, and
+  editor-free environment and `/dev/null` stdin, raise `SUBPROCESS_FAILED` for any failing
+  stage, and stop tracked children on a signal or timeout; `ctx.open_url` with
+  `gui_operations=` and `meta.headless`; `no-shell` audit rule
 
 ## 0.1.0: first release
 
