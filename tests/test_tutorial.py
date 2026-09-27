@@ -268,7 +268,7 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
         command=sys.executable,
         args=["-m", "treaty._mcp", "examples.tutorial.todo_exit_codes:app"],
         cwd=str(tmp_path),
-        env={"PYTHONPATH": str(ROOT), "TREATY_STATE_DIR": str(tmp_path / "state")},
+        env={"PYTHONPATH": str(ROOT), "TODO_STATE_DIR": str(tmp_path / "state")},
     )
 
     async def session() -> dict[str, Any]:

@@ -23,14 +23,13 @@ import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from ._env import MAX_OUTPUT_BYTES, MAX_STDIN_BYTES, app_var
 from ._envelope import Envelope, WarningDetail, serialize
 from ._errors import ParseError
 from ._out import is_binary
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Position
-from ._secrets import default_env_var
 from ._values import CommandPath, InvalidValue
 
-ENV_VAR = "TREATY_MAX_OUTPUT_BYTES"
 MAX_OUTPUT_FLAG = "max-output"
 MARKER = "[truncated]"
 TRUNCATED_CODE = "FIELD_TRUNCATED"
@@ -58,15 +57,13 @@ class OutputCap:
     def resolve(
         cls, explicit: str | None, env: Mapping[str, str], default: OutputCap, app_name: str
     ) -> OutputCap:
-        """``--max-output``, then ``<APP>_MAX_OUTPUT_BYTES``, then ``TREATY_MAX_OUTPUT_BYTES``,
-        then the App default (REQ-F-052)"""
-        app_var = env_var(app_name)
+        """``--max-output``, then ``<APP>_MAX_OUTPUT_BYTES``, then the App default
+        (REQ-F-052)"""
+        var = env_var(app_name)
         if explicit is not None:
             source, raw = "--max-output", explicit
-        elif app_var in env:
-            source, raw = app_var, env[app_var]
-        elif ENV_VAR in env:
-            source, raw = ENV_VAR, env[ENV_VAR]
+        elif var in env:
+            source, raw = var, env[var]
         else:
             return default
         try:
@@ -83,7 +80,7 @@ DEFAULT_CAP = OutputCap(1_048_576)
 
 def env_var(app_name: str) -> str:
     """The tool's own cap variable, such as ``DEPLOYCTL_MAX_OUTPUT_BYTES``"""
-    return default_env_var(app_name, "max_output_bytes")
+    return app_var(app_name, MAX_OUTPUT_BYTES.key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,9 +115,6 @@ def with_flags(argv: Sequence[str], flags: Mapping[str, str]) -> list[str]:
     return out + rest
 
 
-STDIN_ENV_VAR = "TREATY_MAX_STDIN_BYTES"
-
-
 @dataclass(frozen=True, slots=True)
 class StdinCap:
     """Most bytes read from a piped stdin by ``exec`` and ``stdin_input`` commands
@@ -134,12 +128,9 @@ class StdinCap:
 
     @classmethod
     def resolve(cls, env: Mapping[str, str], default: StdinCap, app_name: str) -> StdinCap:
-        """``<APP>_MAX_STDIN_BYTES``, then ``TREATY_MAX_STDIN_BYTES``, then the App default"""
-        source = next(
-            (v for v in (default_env_var(app_name, "max_stdin_bytes"), STDIN_ENV_VAR) if v in env),
-            None,
-        )
-        if source is None:
+        """``<APP>_MAX_STDIN_BYTES``, then the App default"""
+        source = app_var(app_name, MAX_STDIN_BYTES.key)
+        if source not in env:
             return default
         raw = env[source]
         try:
@@ -249,7 +240,7 @@ def _truncated(
         # An exec line or an MCP call has no argv of its own to repeat
         meta["truncation_hint"] = (
             f"ask for less data (a filter or a smaller page); the full response is {total} "
-            f"bytes, over the cap that --max-output or {ENV_VAR} sets"
+            "bytes, over the cap that --max-output or <APP>_MAX_OUTPUT_BYTES sets"
         )
     return dataclasses.replace(
         envelope,

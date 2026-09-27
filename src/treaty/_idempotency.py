@@ -33,11 +33,11 @@ from ._atomic import lock as _lock
 from ._atomic import try_lock as _try_lock
 from ._atomic import unlock as _unlock
 from ._atomic import write_atomic
+from ._env import STATE_DIR, app_var
 from ._errors import ParseError, SchemaError
 from ._scalars import ScalarRegistry
 from ._values import CommandPath
 
-STATE_ENV = "TREATY_STATE_DIR"
 TTL_SECONDS = 24 * 60 * 60
 
 
@@ -121,12 +121,22 @@ def _canonical(value: object, scalars: ScalarRegistry, depth: int) -> object:
     raise SchemaError(f"a {type(value).__qualname__} argument has no stable form to fingerprint")
 
 
-def state_dir(app_name: str, explicit: Path | None, env: Mapping[str, str]) -> Path | None:
-    """``App(state_dir=)``, then ``$TREATY_STATE_DIR/<app>``, then the XDG state home"""
+def state_dir(
+    app_name: str, explicit: Path | None, env: Mapping[str, str], instance: str | None = None
+) -> Path | None:
+    """``App(state_dir=)``, then ``$<APP>_STATE_DIR``, then the XDG state home; under
+    ``instances/<id>`` of it for an ``--instance-id`` (REQ-O-036)"""
+    base = _state_base(app_name, explicit, env)
+    if base is None or instance is None:
+        return base
+    return base / "instances" / instance
+
+
+def _state_base(app_name: str, explicit: Path | None, env: Mapping[str, str]) -> Path | None:
     if explicit is not None:
         return explicit
-    if root := env.get(STATE_ENV):
-        return Path(root) / app_name
+    if root := env.get(app_var(app_name, STATE_DIR.key)):
+        return Path(root)
     xdg = env.get("XDG_STATE_HOME")
     if xdg and Path(xdg).is_absolute():  # a relative one is ignored, as the XDG spec says
         return Path(xdg) / "treaty" / app_name

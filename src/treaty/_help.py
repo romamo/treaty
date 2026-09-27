@@ -6,8 +6,28 @@ from collections.abc import Mapping, Sequence
 
 from ._command import Command
 from ._framework import framework_flags
-from ._mode import Format
 from ._values import CommandPath
+
+Row = tuple[str, str]
+
+
+def global_rows(entries: Mapping[str, object]) -> list[Row]:
+    """The manifest's root ``flags`` as help rows: every command takes them"""
+    rows: list[Row] = []
+    for flag, entry in entries.items():
+        assert isinstance(entry, dict)
+        label = f"--{flag}" + (f", -{entry['short']}" if "short" in entry else "")
+        if entry["type"] != "boolean":
+            label += " " + ("|".join(entry["enum_values"]) if "enum_values" in entry else "VALUE")
+        rows.append((label, str(entry["description"])))
+    return rows
+
+
+def _section(title: str, rows: Sequence[Row]) -> list[str]:
+    if not rows:
+        return []
+    width = max(len(label) for label, _ in rows)
+    return [title, *(f"  {label:<{width}}  {text}" for label, text in rows), ""]
 
 
 def render_root(
@@ -15,7 +35,8 @@ def render_root(
     description: str,
     commands: Mapping[CommandPath, Command],
     groups: Mapping[CommandPath, str],
-    formats: Sequence[Format],
+    globals_: Sequence[Row],
+    environment: Sequence[Row],
     prefix: tuple[str, ...] = (),
 ) -> str:
     lines = [f"{name}: {description}" if description else name, ""]
@@ -48,12 +69,8 @@ def render_root(
         (parts[-1], declared.get(parts, f"{len(_under(commands, parts))} commands"))
         for parts in implied
     ]
-    global_labels = ["--format", "--help", "--max-output", "--schema", "--version"]
-    width = max(
-        [len(p.parts[-1]) for p, _ in listed]
-        + [len(label) for label, _ in group_rows]
-        + [len(label) for label in global_labels]
-    )
+    labels = [p.parts[-1] for p, _ in listed] + [label for label, _ in group_rows]
+    width = max(map(len, labels), default=0)
     if group_rows:
         lines.append("Command groups")
         for label, d in group_rows:
@@ -64,15 +81,13 @@ def render_root(
         for p, c in listed:
             lines.append(f"  {p.parts[-1]:<{width}}  {c.description}")
         lines.append("")
-    lines.append("Global flags")
-    modes = ", ".join(m.value for m in formats)
-    lines.append(f"  {'--format':<{width}}  Output mode: {modes} (default: json when piped)")
-    lines.append(f"  {'--help':<{width}}  Show help for a command")
-    lines.append(f"  {'--max-output':<{width}}  Byte cap on JSON output (default: 1 MiB)")
-    lines.append(f"  {'--schema':<{width}}  Print parameters and output schema as JSON")
+    rows = list(globals_)
     if not prefix:
-        lines.append(f"  {'--version':<{width}}  Print the tool name and version")
-    return "\n".join(lines) + "\n"
+        rows.append(("--version", "Print the tool name and version"))
+    lines += _section("Global flags", rows)
+    # REQ-F-073, REQ-O-042: every variable read, by its exact prefixed name
+    lines += _section("Environment", environment)
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def _under(commands: Mapping[CommandPath, Command], parts: tuple[str, ...]) -> list[CommandPath]:
@@ -88,7 +103,7 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
     return rows
 
 
-def render_command(name: str, command: Command) -> str:
+def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
     positionals = [f for f in command.fields if f.positional]
     flags = [f for f in command.fields if not f.positional]
     usage = [name, *command.path.parts]
@@ -114,12 +129,8 @@ def render_command(name: str, command: Command) -> str:
         label = f"--{f.flag}" + (f", -{f.spec.short}" if f.spec.short else "")
         rows.append((label, f.spec.description + (" (required)" if f.required else "")))
     rows.extend(_framework_rows(command))
-    if rows:
-        lines.append("Flags")
-        width = max(len(label) for label, _ in rows)
-        for label, text in rows:
-            lines.append(f"  {label:<{width}}  {text}")
-        lines.append("")
+    lines += _section("Flags", rows)
+    lines += _section("Global flags", globals_)
     lines.append(f"Danger level: {command.danger_level.value}")
     if command.streaming:
         lines.append("Streams one JSONL envelope per event; --no-stream returns a single envelope")

@@ -1,10 +1,11 @@
-"""Output mode resolution: explicit flag, then environment, then tty detection."""
+"""Output mode resolution: explicit flag, then ``<APP>_FORMAT``, then tty detection."""
 
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, MutableMapping
 from enum import StrEnum
 
+from ._env import FORMAT, app_var
 from ._errors import ParseError
 
 
@@ -43,9 +44,15 @@ def resolve_mode(
             # A real format with no renderer registered, not a typo
             raise ParseError(f"--format {explicit!r} is not offered by {app_name}", context=context)
         return mode
-    forced = env.get("TREATY_FORMAT")
-    if forced is not None:
-        return resolve_mode(forced, {}, stdout_isatty, offered, app_name)
+    # REQ-O-042: the tool's own variable, failing as the same --format value would
+    var = app_var(app_name, FORMAT.key)
+    forced = env.get(var)
+    if forced:
+        try:
+            return resolve_mode(forced, {}, stdout_isatty, offered, app_name)
+        except ParseError as exc:
+            exc.context["source"] = var
+            raise
     if not stdout_isatty or env.get("CI"):
         return Format.JSON
     return Format.PLAIN

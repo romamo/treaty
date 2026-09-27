@@ -192,7 +192,7 @@ LINE = '{"_cmd": "deploy.status", "service": "api"}\n'
 
 def test_stdin_over_the_cap_is_rejected_before_dispatch(app: App) -> None:
     exact = LINE * 2
-    env = {"TREATY_MAX_STDIN_BYTES": str(len(exact))}
+    env = {"DEPLOYCTL_MAX_STDIN_BYTES": str(len(exact))}
     code, _ = run_exec_raw(app, ["exec"], exact, env)
     assert code == 0
     code, envelope = run_exec_raw(app, ["exec"], exact + "\n", env)
@@ -223,8 +223,8 @@ def test_unreadable_input_file_is_arg_error(app: App, tmp_path: Path) -> None:
 
 
 def test_invalid_stdin_cap_env_is_arg_error(app: App) -> None:
-    code, envelope = run_exec_raw(app, ["exec"], LINE, {"TREATY_MAX_STDIN_BYTES": "lots"})
-    assert code == 2 and envelope["error"]["context"]["source"] == "TREATY_MAX_STDIN_BYTES"
+    code, envelope = run_exec_raw(app, ["exec"], LINE, {"DEPLOYCTL_MAX_STDIN_BYTES": "lots"})
+    assert code == 2 and envelope["error"]["context"]["source"] == "DEPLOYCTL_MAX_STDIN_BYTES"
 
 
 def test_oversized_pipe_fails_fast_for_a_write_everything_caller() -> None:

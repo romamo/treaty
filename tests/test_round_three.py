@@ -367,7 +367,7 @@ def test_confirm_given_on_argv_conflicts_with_false_in_the_payload() -> None:
     code, [env], _ = run(app, ["rm", "--confirm-destructive", "--raw-payload", payload])
     assert code == 2 and env["error"]["context"]["flag"] == "confirm-destructive"
     help_text = render_command(
-        "cf", app.commands[next(iter(p for p in app.commands if p.value == "rm"))]
+        "cf", app.commands[next(iter(p for p in app.commands if p.value == "rm"))], []
     )
     assert "--confirm-destructive" in help_text and "--raw-payload JSON" in help_text
 

@@ -54,8 +54,8 @@ def test_app_renderer_writes_every_command_in_its_format() -> None:
     assert run(formats_app(), ["show", "--format", "csv"]) == (0, "service,api\ntag,1.3.9\n", "")
 
 
-def test_treaty_format_env_selects_a_registered_format() -> None:
-    code, out, _ = run(formats_app(), ["show"], env={"TREATY_FORMAT": "csv"})
+def test_app_format_env_selects_a_registered_format() -> None:
+    code, out, _ = run(formats_app(), ["show"], env={"SHOWCTL_FORMAT": "csv"})
     assert code == 0 and out == "service,api\ntag,1.3.9\n"
 
 
@@ -108,7 +108,7 @@ def test_manifest_stays_json_in_a_registered_format() -> None:
 
 @pytest.mark.parametrize(
     ("argv", "env"),
-    [(["show", "--format", "yaml"], {}), (["show"], {"TREATY_FORMAT": "yaml"})],
+    [(["show", "--format", "yaml"], {}), (["show"], {"SHOWCTL_FORMAT": "yaml"})],
 )
 def test_a_known_format_without_a_renderer_is_not_offered(
     argv: list[str], env: dict[str, str]
@@ -135,7 +135,7 @@ def test_manifest_and_help_list_the_offered_formats() -> None:
     offered = app.manifest()["flags"]["format"]["enum_values"]  # type: ignore[index]
     assert offered == ["plain", "json", "jsonl", "csv", "tsv"]
     _, out, _ = run(app, ["--help"])
-    assert "Output mode: plain, json, jsonl, csv, tsv (default: json when piped)" in out
+    assert "--format plain|json|jsonl|csv|tsv" in out and "$SHOWCTL_FORMAT" in out
 
 
 # Registration

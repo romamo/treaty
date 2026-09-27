@@ -127,7 +127,7 @@ def test_wide_object_loses_trailing_keys() -> None:
 
 
 def test_env_var_raises_the_cap_and_flag_overrides_it() -> None:
-    raised = {"TREATY_MAX_OUTPUT_BYTES": "10000000"}
+    raised = {"BIGCTL_MAX_OUTPUT_BYTES": "10000000"}
     _, out = run(big_app(), ["items"], env=raised)
     assert "truncated" not in envelope(out)["meta"]
     _, out = run(big_app(), ["items", f"--max-output={MIN_BYTES}"], env=raised)
@@ -139,7 +139,7 @@ def test_env_var_raises_the_cap_and_flag_overrides_it() -> None:
     [
         (["small", "--max-output", "lots"], {}, "--max-output"),
         (["small", "--max-output", "100"], {}, "--max-output"),
-        (["small"], {"TREATY_MAX_OUTPUT_BYTES": "-1"}, "TREATY_MAX_OUTPUT_BYTES"),
+        (["small"], {"BIGCTL_MAX_OUTPUT_BYTES": "-1"}, "BIGCTL_MAX_OUTPUT_BYTES"),
     ],
 )
 def test_invalid_cap_is_arg_error(argv: list[str], env: dict[str, str], source: str) -> None:

@@ -99,7 +99,7 @@ def test_explicit_plain_on_a_pipe_matches_the_terminal_default() -> None:
 
 @pytest.mark.parametrize(
     ("argv", "env"),
-    [(["show", "--format", "human"], {}), (["show"], {"TREATY_FORMAT": "human"})],
+    [(["show", "--format", "human"], {}), (["show"], {"SHOWCTL_FORMAT": "human"})],
 )
 def test_human_is_an_unknown_format(argv: list[str], env: dict[str, str]) -> None:
     out = io.StringIO()

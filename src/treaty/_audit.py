@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._command import Command, DangerLevel
+from ._env import UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
@@ -834,6 +835,45 @@ def _project_root(app: App) -> Iterator[Finding]:
             )
 
 
+_ENV_MAPS = frozenset({"ctx.env", "os.environ", "environ"})
+_ENV_GETS = frozenset({"ctx.env.get", "os.environ.get", "environ.get", "os.getenv", "getenv"})
+
+
+def env_reads(fn: Callable[..., object]) -> list[str]:
+    """Literal variable names ``fn`` reads from ``ctx.env`` or ``os.environ``"""
+    tree = _handler_tree(fn)
+    if tree is None:
+        return []
+    names: list[str] = []
+    for node in ast.walk(tree):
+        key: ast.expr | None = None
+        if isinstance(node, ast.Subscript) and _dotted(node.value) in _ENV_MAPS:
+            key = node.slice
+        elif isinstance(node, ast.Call) and _dotted(node.func) in _ENV_GETS and node.args:
+            key = node.args[0]
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            names.append(key.value)
+    return names
+
+
+def _env_prefix(app: App) -> Iterator[Finding]:
+    prefix = app_var(app.name, "") + "_"
+    for c in user_commands(app):
+        code = [c.handler, *(spec.acquire for spec in c.resource_graph.values())]
+        seen = {n for fn in code for n in env_reads(fn)}
+        for name in sorted(seen):
+            if name.startswith(prefix) or name in UNPREFIXED or name in c.token_env_vars:
+                continue
+            yield Finding(
+                "env-prefix",
+                Severity.WARNING,
+                c.path.value,
+                f"reads the unprefixed variable {name}, which an agent may set for another "
+                "tool in the same session (REQ-F-073)",
+                f"read {app_var(app.name, name)} instead of {name}",
+            )
+
+
 _SLEEPS = frozenset({"time.sleep", "sleep"})
 
 
@@ -981,6 +1021,12 @@ RULES: tuple[Rule, ...] = (
         "Retries go through ctx.retry",
         Severity.WARNING,
         _retry_declared,
+    ),
+    Rule(
+        "env-prefix",
+        "Handlers read only the tool's own environment variables",
+        Severity.WARNING,
+        _env_prefix,
     ),
     Rule("profile", "A conformance profile exists for the spec kit", Severity.ADVICE, _profile),
 )

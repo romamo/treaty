@@ -220,5 +220,5 @@ def test_every_framework_flag_surface_agrees() -> None:
     assert known_flags(command)[-4:] == names
     json_keys = {n.replace("-", "_") for n in known_flags(command, argv=False)}
     assert json_keys == set(payload_schema(command)["properties"])  # type: ignore[arg-type]
-    help_text = render_command("r8", command)
+    help_text = render_command("r8", command, [])
     assert all(f"--{n}" in help_text for n in names)

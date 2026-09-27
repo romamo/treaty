@@ -58,6 +58,7 @@ from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
+from ._env import KNOWN, STATE_DIR, app_var
 from ._envelope import (
     ENVELOPE_SCHEMA_VERSION,
     Envelope,
@@ -72,10 +73,15 @@ from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, Schema
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Arg, Flag
 from ._framework import framework_collisions
-from ._help import render_command, render_root
+from ._help import global_rows, render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._jobs import Job, JobStore, with_links
-from ._manifest import build_manifest, command_schema, implicit_exit_codes
+from ._manifest import (
+    build_manifest,
+    command_schema,
+    global_flag_entries,
+    implicit_exit_codes,
+)
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
     Format,
@@ -755,7 +761,18 @@ class App:
         return self._commands
 
     def manifest(self) -> dict[str, object]:
-        return build_manifest(self._commands, self.exits, self.version, self.formats)
+        return build_manifest(self._commands, self.exits, self.version, self.formats, self.name)
+
+    def environment(self) -> list[tuple[str, str]]:
+        """Every variable the app reads, by its prefixed name, with what it sets
+        (REQ-F-073): the framework's own, then the default of each secret flag"""
+        rows = [(app_var(self.name, v.key), v.description) for v in KNOWN]
+        secrets = {
+            var: f"Default of --{field.replace('_', '-')} of {path}"
+            for path, c in sorted(self._commands.items(), key=lambda kv: kv[0].value)
+            for field, var in c.secret_env_vars.items()
+        }
+        return rows + sorted(secrets.items())
 
     def effective_timeout(self, command: Command, override: Timeout | None) -> Timeout:
         if override is not None:
@@ -1737,7 +1754,7 @@ class _Run:
                     message="no directory to keep idempotency records in",
                     retryable=False,
                     phase="validation",
-                    fix_required="set TREATY_STATE_DIR, XDG_STATE_HOME, or HOME",
+                    fix_required=f"set {self.state_var}, XDG_STATE_HOME, or HOME",
                 ),
                 started=started,
                 meta=full_meta,
@@ -1797,7 +1814,7 @@ class _Run:
                 return self._state_error(
                     "STATE_DIR_UNWRITABLE",
                     f"cannot use the idempotency state directory {directory}: {exc.strerror}",
-                    "make it writable, or point TREATY_STATE_DIR at a writable directory",
+                    f"make it writable, or point {self.state_var} at a writable directory",
                     started,
                     full_meta,
                 )
@@ -1811,6 +1828,10 @@ class _Run:
                 started=started,
                 full_meta=full_meta,
             )
+
+    @property
+    def state_var(self) -> str:
+        return app_var(self.app.name, STATE_DIR.key)
 
     def _state_error(
         self, code: str, message: str, fix: str, started: float, meta: Mapping[str, object]
@@ -2685,7 +2706,9 @@ class _Run:
             subtree = {
                 p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
             }
-            data = build_manifest(subtree, self.app.exits, self.app.version, self.app.formats)
+            data = build_manifest(
+                subtree, self.app.exits, self.app.version, self.app.formats, self.app.name
+            )
         return self.emit(mode, self._envelope(0, data=data), render=_json_text)
 
     def output_schema(
@@ -2715,13 +2738,18 @@ class _Run:
             self.app.description,
             self.app.commands,
             self.app._groups,
-            self.app.formats,
+            self._global_rows(),
+            self.app.environment(),
             prefix,
         )
         return self._help(mode, prefix, text)
 
     def help_command(self, mode: Format, command: Command) -> int:
-        return self._help(mode, command.path.parts, render_command(self.app.name, command))
+        text = render_command(self.app.name, command, self._global_rows())
+        return self._help(mode, command.path.parts, text)
+
+    def _global_rows(self) -> list[tuple[str, str]]:
+        return global_rows(global_flag_entries(self.app.formats, self.app.name))
 
     def _help(self, mode: Format, parts: tuple[str, ...], text: str) -> int:
         """Help text on stdout for a person; in JSON mode it goes to stderr and stdout gets

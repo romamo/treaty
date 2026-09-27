@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 
 from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
+from ._env import FORMAT, MAX_OUTPUT_BYTES, app_var
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import NO_STREAM_FLAG, STABLE_OUTPUT_KEY, framework_flags
 from ._mode import Format
@@ -37,26 +38,28 @@ def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
     return tuple(codes)
 
 
-def global_flag_entries(formats: Sequence[Format]) -> dict[str, object]:
-    """REQ-F-079: split_globals accepts these anywhere on every command path"""
+def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, object]:
+    """REQ-F-079: split_globals accepts these anywhere on every command path; a flag with
+    an environment variable default names it (REQ-O-042)"""
     return {
         "format": {
             "type": "enum",
             "required": False,
             "enum_values": [m.value for m in formats],
-            "description": "Output representation; json when stdout is not a terminal, "
-            "plain otherwise",
+            "description": f"Output representation; default ${app_var(app_name, FORMAT.key)}, "
+            "else json when stdout is not a terminal, plain otherwise",
+        },
+        "max-output": {
+            "type": "integer",
+            "required": False,
+            "description": "Largest stdout envelope in bytes (at least 4096) before truncation; "
+            f"default ${app_var(app_name, MAX_OUTPUT_BYTES.key)}",
         },
         **_FIXED_GLOBAL_FLAGS,
     }
 
 
 _FIXED_GLOBAL_FLAGS: dict[str, object] = {
-    "max-output": {
-        "type": "integer",
-        "required": False,
-        "description": "Largest stdout envelope in bytes (at least 4096) before truncation",
-    },
     "schema": {
         "type": "boolean",
         "required": False,
@@ -263,10 +266,11 @@ def build_manifest(
     exits: ExitCodeRegistry,
     framework_version: str,
     formats: Sequence[Format],
+    app_name: str,
 ) -> dict[str, object]:
     """The manifest tree with the shared exit-code table hoisted to the root"""
     shared = shared_exit_codes(exits)
-    flags = global_flag_entries(formats)
+    flags = global_flag_entries(formats, app_name)
     entries = {
         path.value: command_entry(cmd, exits, commands, shared=shared)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)

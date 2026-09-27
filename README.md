@@ -119,7 +119,7 @@ flag is never shadowed.
 `exec` reads one `DispatchRequest` per stdin line and dispatches in-process, writing one
 envelope per line with `_cmd` and `_line` in `meta`. A stream with no lines exits `2` with a
 single `EMPTY_STREAM` envelope, a piped plan over 64 KiB (`App(max_stdin_bytes=...)` or
-`TREATY_MAX_STDIN_BYTES`) exits `2` with `STDIN_TOO_LARGE` before anything runs, and
+`<APP>_MAX_STDIN_BYTES`) exits `2` with `STDIN_TOO_LARGE` before anything runs, and
 `--input-file PATH` reads a plan of any size from a file (`-` is stdin, capped). A terminal on
 stdin exits `2` with `STDIN_IS_TTY` instead of waiting for input:
 
@@ -162,7 +162,8 @@ mode prints every error's suggestion as a final `hint:` line on stderr.
 ## Output formats
 
 `--format` takes `json`, `jsonl`, `plain`, `tsv`, and any format the app registers. With no flag,
-`TREATY_FORMAT` decides; without that, the format is `json` when stdout is not a terminal
+`<APP>_FORMAT` decides (`DEPLOYCTL_FORMAT` for `deployctl`, failing as the same `--format`
+value would); without that, the format is `json` when stdout is not a terminal
 or `CI` is set, and `plain` otherwise.
 
 `json` writes the full response envelope, one compact line per envelope; it is the contract
@@ -357,8 +358,7 @@ every command's map. Running with no arguments prints help and exits `0`; treaty
 ## Output size
 
 JSON output is capped at 1 MiB per envelope: `App(max_output_bytes=...)` app-wide,
-`TREATY_MAX_OUTPUT_BYTES` or `<APP>_MAX_OUTPUT_BYTES` in the environment (the tool's own
-variable wins), or the global `--max-output` flag, in increasing precedence. Past the cap
+`<APP>_MAX_OUTPUT_BYTES` in the environment, or the global `--max-output` flag, in increasing precedence. Past the cap
 the framework follows whichever child holds most of the bytes and cuts the list, object, or
 string where no child dominates to the longest prefix that fits. `meta` gets `truncated`,
 `total_bytes`, and a `truncation_hint` that is a command to run as given (plus
@@ -636,7 +636,7 @@ call returns the stored `data` with `effect: "noop"` and `meta.idempotency_hit: 
 without running the handler, and reusing the key with different arguments exits `6` with
 `IDEMPOTENCY_KEY_REUSED`. Failures and dry runs are never stored, a concurrent retry waits
 for the first call, and records expire after 24 hours. Records live in
-`App(state_dir=...)`, else `$TREATY_STATE_DIR/<app>`, else `$XDG_STATE_HOME/treaty/<app>`,
+`App(state_dir=...)`, else `$<APP>_STATE_DIR`, else `$XDG_STATE_HOME/treaty/<app>`,
 else `~/.local/state/treaty/<app>`. Handlers read the key as `ctx.idempotency_key` to pass
 it on to an upstream API.
 
