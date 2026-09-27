@@ -4378,7 +4378,7 @@ class _Run:
     def show_config(self, mode: Format) -> int:
         """``--show-config``: the effective settings, where each came from, and the layers
         in precedence order, as JSON in every mode (REQ-O-015)"""
-        data = self.settings.show(self.app.settings)
+        data = self.settings.show()
         return self.emit(mode, self._envelope(0, data=data), render=_json_text, settle=False)
 
     def output_schema(

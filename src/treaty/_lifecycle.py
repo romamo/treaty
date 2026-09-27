@@ -12,6 +12,8 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
+from ._errors import UserCodeError, user_code
+
 Hook = Callable[[], None]
 Failed = Callable[[str, Exception], None]
 """Told the hook's name and what it raised; the next hooks still run"""
@@ -70,9 +72,9 @@ class Teardown:
         try:
             for name, hook in hooks:
                 try:
-                    hook()
-                except Exception as exc:  # noqa: BLE001 - release and cleanup= are user code
-                    self.failures.append((name, exc))
-                    self._failed(name, exc)
+                    user_code(hook)
+                except UserCodeError as err:
+                    self.failures.append((name, err.cause))
+                    self._failed(name, err.cause)
         finally:
             self._finished.set()

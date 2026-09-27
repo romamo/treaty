@@ -28,7 +28,7 @@ from pathlib import Path
 
 from ._config import local_config, user_config
 from ._env import CONFIG, CONTEXT, INSTANCE_ID, KNOWN, app_var
-from ._errors import ParseError, RegistrationError, SchemaError
+from ._errors import ParseError, RegistrationError, SchemaError, UserCodeError, user_code
 from ._flags import coerce_text
 from ._parse import check_json_base
 from ._paths import check_path
@@ -113,7 +113,7 @@ class Resolved:
     value: object | None
     """The settings instance; None without ``App(settings=)``"""
     effective: Mapping[str, object]
-    """Every field as JSON, secrets included: what the hash covers"""
+    """Every field as JSON, secrets included"""
     sources: Mapping[str, str]
     """Per field: ``env:<VAR>``, ``file:<abs path>``, or ``default``"""
     files: tuple[Path, ...]
@@ -122,11 +122,17 @@ class Resolved:
     """Every file this run would read, present or not, highest first"""
     context: str | None
     options: ConfigOptions
+    secrets: frozenset[str] = frozenset()
+    """The fields whose values are secret: never shown, never hashed"""
+
+    def _public(self) -> dict[str, object]:
+        return {k: REDACTED if k in self.secrets else v for k, v in self.effective.items()}
 
     @property
     def hash(self) -> str:
-        """``meta.effective_config_hash``: 12 hex of sha256 over the merged settings"""
-        text = json.dumps(self.effective, sort_keys=True, separators=(",", ":"))
+        """``meta.effective_config_hash``: 12 hex of sha256 over the merged settings, secret
+        values left out: a short secret would be recoverable from its hash"""
+        text = json.dumps(self._public(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(text.encode()).hexdigest()[:12]
 
     def meta(self) -> dict[str, object]:
@@ -140,13 +146,10 @@ class Resolved:
             extra["instance_id"] = self.options.instance_id.value
         return extra
 
-    def show(self, spec: SettingsSpec | None) -> dict[str, object]:
+    def show(self) -> dict[str, object]:
         """``--show-config``: the values, secrets redacted, with their sources (REQ-O-015)"""
-        secret = {s.name for s in spec.fields if s.secret} if spec is not None else set()
         return {
-            "effective_config": {
-                k: REDACTED if k in secret else v for k, v in self.effective.items()
-            },
+            "effective_config": self._public(),
             "sources": dict(self.sources),
             "precedence_order": ["env-vars", *(str(p) for p in self.candidates), "defaults"],
             "context": self.context,
@@ -246,23 +249,33 @@ def resolve(
         path, raw = found
         values[s.name] = _from_file(s, raw, path)
         sources[s.name] = f"file:{path}"
+    secrets = frozenset(s.name for s in spec.fields if s.secret)
     try:
-        value = spec.cls(**values)
-    except (ParseError, InvalidValue) as exc:
-        raise ParseError(
-            f"settings are invalid: {exc}", code=INVALID, context={"sources": sources}
-        ) from None
-    except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
-        # A ValueError there is how a dataclass refuses a value; read before routing, it
-        # must not take help and version down with a traceback (REQ-F-068)
-        raise ParseError(
-            f"settings are invalid: {type(exc).__name__}: {exc}",
-            code=INVALID,
-            context={"sources": sources},
-        ) from None
-    effective = {k: to_jsonable(v, scalars, base=cwd) for k, v in values.items()}
-    files = tuple(p for p, _ in loaded)
-    return Resolved(value, effective, sources, files, candidates, context, opts)
+        value = user_code(lambda: spec.cls(**values))
+    except UserCodeError as err:
+        # A ValueError in __post_init__ is how a dataclass refuses a value; read before
+        # routing, it must not take help and version down with a traceback (REQ-F-068)
+        exc = err.cause
+        why = (
+            str(exc)
+            if isinstance(exc, (ParseError, InvalidValue))
+            else f"{type(exc).__name__}: {exc}"
+        )
+    else:
+        effective = {k: to_jsonable(v, scalars, base=cwd) for k, v in values.items()}
+        files = tuple(p for p, _ in loaded)
+        return Resolved(value, effective, sources, files, candidates, context, opts, secrets)
+    for name in secrets:
+        why = _without(why, values[name])
+    raise ParseError(f"settings are invalid: {why}", code=INVALID, context={"sources": sources})
+
+
+def _without(text: str, value: object) -> str:
+    """``text`` with a secret setting's value, or each item of a tuple, redacted"""
+    for item in value if isinstance(value, tuple) else (value,):
+        if item is not None and str(item):
+            text = text.replace(str(item), REDACTED)
+    return text
 
 
 def _invalid(path: Path, key: str | None, why: str, **extra: object) -> ParseError:

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ._errors import UserCodeError, user_code
 from ._values import InvalidValue
 
 if TYPE_CHECKING:
@@ -151,11 +152,12 @@ class StepTracker:
         completed = self.snapshot().completed
         if self._rollback is None or not completed:
             return
+        rollback = self._rollback
         try:
-            self._rollback(args, ctx, completed[::-1])
-        except Exception as exc:  # noqa: BLE001 - rollback= is user code
+            user_code(lambda: rollback(args, ctx, completed[::-1]))
+        except UserCodeError as err:
             self.rollback_status = RollbackStatus.FAILED
-            self.rollback_failure = exc
+            self.rollback_failure = err.cause
             return
         self.rollback_status = RollbackStatus.COMPLETED
 

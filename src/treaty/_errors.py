@@ -87,6 +87,24 @@ class ParseError(Exception):
         return out
 
 
+class UserCodeError(Exception):
+    """User code the framework calls outside the handler raised: a ``cleanup=`` or
+    ``release`` hook, ``rollback=``, or a settings ``__post_init__``"""
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def user_code[T](call: Callable[[], T]) -> T:
+    """Call user code; whatever it raises comes back as ``UserCodeError``. The one
+    ``except Exception`` for user code besides the handler boundary in ``_app``."""
+    try:
+        return call()
+    except Exception as exc:  # noqa: BLE001 - the user-code boundary
+        raise UserCodeError(exc) from exc
+
+
 class ArgsCrashed(Exception):
     """The args ``__post_init__`` raised something other than ``ParseError`` or
     ``InvalidValue``: a bug in user code, reported as ``HANDLER_CRASHED`` (exit 1)"""
