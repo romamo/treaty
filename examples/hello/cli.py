@@ -25,7 +25,7 @@ def render_csv(data: Mapping[str, object]) -> str:
     return out.getvalue()
 
 
-app = App("hello", version="0.1", description="Greet people")
+app = App("hello", version="0.1.0", description="Greet people")
 app.scalar(Name, parse=Name)
 app.format(Format.CSV, render=render_csv)
 

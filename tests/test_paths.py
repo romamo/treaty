@@ -26,7 +26,7 @@ class CopyOut:
 
 
 def path_app() -> App:
-    app = App("cpctl", version="1")
+    app = App("cpctl", version="1.0.0")
 
     @app.command("copy", description="Copy a file", danger_level="safe", exit_codes=())
     def copy(args: CopyArgs, ctx: Ctx) -> CopyOut:
@@ -121,7 +121,7 @@ def test_pattern_is_refused_on_path_fields() -> None:
     class Bad:
         target: Path = Flag(default=Path("."), pattern=r"[a-z]+", description="Nope")
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="filepath preset"):
 
         @app.command("go", description="Go", danger_level="safe", exit_codes=())

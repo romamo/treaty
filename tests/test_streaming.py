@@ -34,7 +34,7 @@ class Event:
 
 
 def stream_app(*, timeout: float | None | str = "inherit") -> App:
-    app = App("logctl", version="1", default_timeout=0.3)
+    app = App("logctl", version="1.0.0", default_timeout=0.3)
     app.exit_code("NO_SPACE", 80, description="Disk full", retryable=False, side_effects="none")
     extra = {} if timeout == "inherit" else {"timeout": timeout}
 
@@ -279,7 +279,7 @@ def test_sigint_during_a_stream_ends_it_with_cancelled_after_the_events() -> Non
 
 
 def register(match: str, **meta: object) -> None:
-    app = App("logctl", version="1")
+    app = App("logctl", version="1.0.0")
     with pytest.raises(RegistrationError, match=match):
 
         @app.command("x", description="x", streaming=True, exit_codes=(), **meta)  # type: ignore[arg-type]
@@ -288,7 +288,7 @@ def register(match: str, **meta: object) -> None:
 
 
 def test_streaming_requires_an_iterator_annotation() -> None:
-    app = App("logctl", version="1")
+    app = App("logctl", version="1.0.0")
     with pytest.raises(RegistrationError, match=r"annotated Iterator\[T\]"):
 
         @app.command("x", description="x", streaming=True, danger_level="safe", exit_codes=())
@@ -297,7 +297,7 @@ def test_streaming_requires_an_iterator_annotation() -> None:
 
 
 def test_streaming_events_must_be_payloads() -> None:
-    app = App("logctl", version="1")
+    app = App("logctl", version="1.0.0")
     with pytest.raises(RegistrationError, match="each yielded event must serialize"):
 
         @app.command("x", description="x", streaming=True, danger_level="safe", exit_codes=())
@@ -310,7 +310,7 @@ def test_streaming_commands_must_be_safe() -> None:
 
 
 def test_iterator_annotation_without_streaming_is_refused() -> None:
-    app = App("logctl", version="1")
+    app = App("logctl", version="1.0.0")
     with pytest.raises(RegistrationError, match="return type must serialize"):
 
         @app.command("x", description="x", danger_level="safe", exit_codes=())

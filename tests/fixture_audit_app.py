@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from treaty import App, Arg, Ctx, Flag
 
-app = App("shopctl", version="0.1")
+app = App("shopctl", version="0.1.0")
 app.exit_code("FLAKY", 79, description="Upstream hiccup", retryable=True, side_effects="none")
 
 

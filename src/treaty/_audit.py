@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import re
 import textwrap
 from collections.abc import Callable, Iterator
@@ -17,8 +18,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ._command import Command, DangerLevel
+from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._types import FlagType
+from ._values import InvalidValue, SchemaVersion
 
 if TYPE_CHECKING:
     from ._app import App
@@ -462,6 +465,240 @@ def _config_write_scope(app: App) -> Iterator[Finding]:
             )
 
 
+def _handler_tree(handler: Callable[..., object]) -> ast.AST | None:
+    try:
+        return ast.parse(textwrap.dedent(inspect.getsource(handler)))
+    except OSError, TypeError:
+        return None  # no source to scan (REPL, exec, C extension)
+
+
+# REQ-F-021: names of values that differ on every call; created_at is a fact of the record
+_VOLATILE_NAMES = re.compile(
+    r"^((fetched|generated|retrieved|requested|queried|rendered)_at|timestamp|now|"
+    r"request_id|trace_id|duration(_ms|_s)?|elapsed(_ms|_s)?)$"
+)
+
+
+def _volatile_fields(schema: object, where: str = "") -> Iterator[tuple[str, bool]]:
+    """Every output field that looks volatile, with whether its name says so"""
+    if not isinstance(schema, dict):
+        return
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for name, prop in properties.items():
+            path = f"{where}.{name}" if where else name
+            if _VOLATILE_NAMES.match(name):
+                yield path, True
+            elif isinstance(prop, dict) and prop.get("format") == "date-time":
+                yield path, False
+            yield from _volatile_fields(prop, path)
+    for key in ("items", "anyOf", "oneOf"):
+        nested = schema.get(key)
+        for part in nested if isinstance(nested, list) else [nested]:
+            yield from _volatile_fields(part, f"{where}[]" if key == "items" else where)
+
+
+def _volatile_data(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        for field_path, named in _volatile_fields(c.output_schema):
+            if named:
+                yield Finding(
+                    "volatile-data",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"output field {field_path} changes on every call, so two identical calls "
+                    "no longer return identical data (REQ-F-021)",
+                    f"drop {field_path}: meta carries timestamp, request_id, and duration_ms",
+                )
+            else:
+                yield Finding(
+                    "volatile-data",
+                    Severity.ADVICE,
+                    c.path.value,
+                    f"output field {field_path} is a datetime; if it is when the response was "
+                    "made rather than a fact of the record, it breaks caching (heuristic)",
+                    f"drop {field_path} if it is the time of the call; meta.timestamp has it",
+                )
+
+
+LOCK_FILE = Path("treaty-schema.lock")
+"""The output contracts ``treaty schema-lock`` recorded, which ``schema-version`` diffs"""
+
+
+def schema_lock(app: App) -> dict[str, object]:
+    """Each command's schema version and output schema, as ``treaty schema-lock`` writes them"""
+    return {
+        "commands": {
+            c.path.value: {
+                "schema_version": c.schema_version.value,
+                "output_schema": c.output_schema,
+            }
+            for c in user_commands(app)
+        }
+    }
+
+
+class Change(StrEnum):
+    NONE = "none"
+    ADDITIVE = "additive"
+    BREAKING = "breaking"
+
+
+_NOTES = ("description", "title", "examples")
+
+
+def schema_change(old: object, new: object) -> Change:
+    """How an output schema changed for a reader: a removed or retyped field breaks it,
+    an added field does not; a field that became optional breaks it too"""
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return Change.NONE if old == new else Change.BREAKING
+    shape_keys = ("properties", "required", "items", *_NOTES)
+    if {k: v for k, v in old.items() if k not in shape_keys} != {
+        k: v for k, v in new.items() if k not in shape_keys
+    }:
+        return Change.BREAKING
+    changes: list[Change] = []
+    if "items" in old or "items" in new:
+        changes.append(schema_change(old.get("items"), new.get("items")))
+    old_props, new_props = old.get("properties", {}), new.get("properties", {})
+    if not isinstance(old_props, dict) or not isinstance(new_props, dict):
+        return Change.BREAKING
+    if set(old_props) - set(new_props):
+        return Change.BREAKING
+    old_required, new_required = set(old.get("required", ())), set(new.get("required", ()))
+    if old_required - new_required:
+        return Change.BREAKING
+    changes += [schema_change(old_props[k], new_props[k]) for k in old_props]
+    if set(new_props) - set(old_props) or new_required - old_required:
+        changes.append(Change.ADDITIVE)
+    if Change.BREAKING in changes:
+        return Change.BREAKING
+    return Change.ADDITIVE if Change.ADDITIVE in changes else Change.NONE
+
+
+def _read_lock() -> dict[str, dict[str, object]] | None:
+    if not LOCK_FILE.is_file():
+        return None
+    try:
+        commands = json.loads(LOCK_FILE.read_text(encoding="utf-8"))["commands"]
+        if not isinstance(commands, dict):
+            raise TypeError("commands is not an object")
+        return commands
+    except (ValueError, KeyError, TypeError) as exc:
+        raise Exit.PRECONDITION(
+            f"{LOCK_FILE} is not a schema lock: {exc}",
+            context={"lock": str(LOCK_FILE)},
+            fix_required="delete it and run treaty schema-lock module:app again",
+        ) from None
+
+
+def _schema_version(app: App) -> Iterator[Finding]:
+    locked = _read_lock()
+    if locked is None:
+        return
+    for c in user_commands(app):
+        entry = locked.get(c.path.value)
+        if entry is None:
+            continue
+        try:
+            was = SchemaVersion(str(entry["schema_version"]))
+        except (KeyError, InvalidValue) as exc:
+            raise Exit.PRECONDITION(
+                f"{LOCK_FILE} has no valid schema_version for {c.path}: {exc}",
+                context={"lock": str(LOCK_FILE), "command": c.path.value},
+                fix_required="run treaty schema-lock module:app again",
+            ) from None
+        change = schema_change(entry.get("output_schema"), c.output_schema)
+        now = c.schema_version
+        if change is Change.BREAKING and now.major <= was.major:
+            yield Finding(
+                "schema-version",
+                Severity.ERROR,
+                c.path.value,
+                f"output schema changed in a breaking way since {LOCK_FILE}, but schema_version "
+                f"is {now}, not a new major (REQ-F-022)",
+                f'schema_version="{was.major + 1}.0", then treaty schema-lock to record it',
+            )
+        elif change is Change.ADDITIVE and now.key <= was.key:
+            yield Finding(
+                "schema-version",
+                Severity.WARNING,
+                c.path.value,
+                f"output schema gained fields since {LOCK_FILE}, but schema_version is still "
+                f"{now} (REQ-F-022)",
+                f'schema_version="{was.major}.{was.minor + 1}", '
+                "then treaty schema-lock to record it",
+            )
+
+
+_CWD_CALLS = frozenset({"Path.cwd", "pathlib.Path.cwd", "os.getcwd", "getcwd"})
+_ROOT_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml", "go.mod", ".hg")
+
+
+def walks_up_from_cwd(handler: Callable[..., object]) -> str | None:
+    """The marker a handler looks for walking up from the cwd itself, ``.git`` when it
+    names none; None when it does not walk up"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return None
+    nodes = list(ast.walk(tree))
+    cwd = any(isinstance(n, ast.Call) and _dotted(n.func) in _CWD_CALLS for n in nodes)
+    up = any(isinstance(n, ast.Attribute) and n.attr in ("parent", "parents") for n in nodes)
+    if not (cwd and up):
+        return None
+    named = {n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    return next((m for m in _ROOT_MARKERS if m in named), ".git")
+
+
+def _project_root(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.project_root:
+            continue
+        marker = walks_up_from_cwd(c.handler)
+        if marker is not None:
+            yield Finding(
+                "project-root",
+                Severity.WARNING,
+                c.path.value,
+                "handler walks up from the working directory itself, so meta.project_root "
+                "does not say which root it found (REQ-F-027, heuristic)",
+                f'project_root=("{marker}",), then read ctx.project_root',
+            )
+
+
+_SLEEPS = frozenset({"time.sleep", "sleep"})
+
+
+def retries_by_hand(handler: Callable[..., object]) -> bool:
+    """A loop holding a ``try`` and a ``time.sleep``: a retry the framework cannot count"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return False
+    for loop in ast.walk(tree):
+        if not isinstance(loop, (ast.For, ast.While)):
+            continue
+        inner = list(ast.walk(loop))
+        tried = any(isinstance(n, ast.Try) for n in inner)
+        slept = any(isinstance(n, ast.Call) and _dotted(n.func) in _SLEEPS for n in inner)
+        if tried and slept:
+            return True
+    return False
+
+
+def _retry_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.retry is None and retries_by_hand(c.handler):
+            yield Finding(
+                "retry-declared",
+                Severity.WARNING,
+                c.path.value,
+                "handler retries in a loop with time.sleep, so meta.retries cannot report it "
+                "and --retries cannot turn it off (REQ-F-078, heuristic)",
+                "retry=treaty.Retry(on=(ConnectionError,)), then ctx.retry(lambda: call(...)) "
+                "in place of the loop",
+            )
+
+
 def _profile(app: App) -> Iterator[Finding]:
     if not any(Path("conformance").glob("*.json")):
         yield Finding(
@@ -534,6 +771,30 @@ RULES: tuple[Rule, ...] = (
         "Config writes declare their scope",
         Severity.WARNING,
         _config_write_scope,
+    ),
+    Rule(
+        "volatile-data",
+        "Output data carries no per-call values",
+        Severity.WARNING,
+        _volatile_data,
+    ),
+    Rule(
+        "schema-version",
+        "Output schema changes bump schema_version",
+        Severity.ERROR,
+        _schema_version,
+    ),
+    Rule(
+        "project-root",
+        "Commands that find a project root declare project_root",
+        Severity.WARNING,
+        _project_root,
+    ),
+    Rule(
+        "retry-declared",
+        "Retries go through ctx.retry",
+        Severity.WARNING,
+        _retry_declared,
     ),
     Rule("profile", "A conformance profile exists for the spec kit", Severity.ADVICE, _profile),
 )

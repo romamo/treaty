@@ -24,7 +24,7 @@ class Item:
 
 
 def make_app(max_output_bytes: int = 1_048_576) -> App:
-    app = App("listctl", version="1", max_output_bytes=max_output_bytes)
+    app = App("listctl", version="1.0.0", max_output_bytes=max_output_bytes)
 
     @app.command(
         "items", description="Every item", danger_level="safe", exit_codes=(), paginated=True
@@ -231,7 +231,7 @@ def test_f052_tool_env_var_sets_the_cap() -> None:
 
 
 def test_registration_checks() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="paginated=False"):
 
         @app.command("a", description="a", danger_level="safe", exit_codes=(), paginated=False)
@@ -269,7 +269,7 @@ def test_registration_checks() -> None:
 
 
 def test_wrong_runtime_output_is_invalid_output() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("a", description="a", danger_level="safe", exit_codes=(), paginated=True)
     def a(args: NoArgs, ctx: Ctx) -> list[Item]:
@@ -280,7 +280,7 @@ def test_wrong_runtime_output_is_invalid_output() -> None:
 
 
 def test_f018_every_list_output_is_paginated_by_default() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("ls", description="ls", danger_level="safe", exit_codes=())
     def ls(args: NoArgs, ctx: Ctx) -> list[Item]:
@@ -302,7 +302,7 @@ def test_f018_every_list_output_is_paginated_by_default() -> None:
 
 
 def test_audit_advises_on_a_list_command_that_opts_out() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("ls", description="ls", danger_level="safe", exit_codes=(), paginated=False)
     def ls(args: NoArgs, ctx: Ctx) -> list[Item]:

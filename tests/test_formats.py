@@ -13,7 +13,7 @@ def csv_rows(data: Any) -> str:
 
 
 def formats_app(*, plain: Renderer | None = None) -> App:
-    app = App("showctl", version="1")
+    app = App("showctl", version="1.0.0")
     app.format(Format.CSV, render=csv_rows)
     if plain is not None:
         app.format(Format.PLAIN, render=plain)
@@ -80,7 +80,7 @@ def test_error_in_a_registered_format_is_prose_on_stderr() -> None:
 
 
 def test_failing_renderer_names_its_format() -> None:
-    app = App("showctl", version="1")
+    app = App("showctl", version="1.0.0")
     app.format(Format.YAML, render=lambda d: d["missing"])
 
     @app.command("show", description="Show", danger_level="safe", exit_codes=())
@@ -143,11 +143,11 @@ def test_manifest_and_help_list_the_offered_formats() -> None:
 
 def test_a_string_is_not_a_format() -> None:
     with pytest.raises(RegistrationError, match="not a Format member"):
-        App("t", version="1").format("csv", render=csv_rows)  # type: ignore[arg-type]
+        App("t", version="1.0.0").format("csv", render=csv_rows)  # type: ignore[arg-type]
 
 
 def test_a_command_renderer_key_must_be_a_format() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match="not a Format member"):
         app.command(
             "show",
@@ -159,7 +159,7 @@ def test_a_command_renderer_key_must_be_a_format() -> None:
 
 
 def test_json_takes_no_renderer() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match="json is the response envelope"):
         app.format(Format.JSON, render=csv_rows)
     with pytest.raises(RegistrationError, match="json is the response envelope"):
@@ -173,7 +173,7 @@ def test_json_takes_no_renderer() -> None:
 
 
 def test_a_command_renderer_needs_the_format_registered_first() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match=r"app\.format\(Format\.CSV"):
         app.command(
             "show",
@@ -185,7 +185,7 @@ def test_a_command_renderer_needs_the_format_registered_first() -> None:
 
 
 def test_a_format_is_registered_once() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     app.format(Format.CSV, render=csv_rows)
     with pytest.raises(RegistrationError, match="already has a renderer"):
         app.format(Format.CSV, render=csv_rows)
@@ -193,4 +193,4 @@ def test_a_format_is_registered_once() -> None:
 
 def test_a_renderer_must_be_callable() -> None:
     with pytest.raises(RegistrationError, match="not callable"):
-        App("t", version="1").format(Format.CSV, render="csv")  # type: ignore[arg-type]
+        App("t", version="1.0.0").format(Format.CSV, render="csv")  # type: ignore[arg-type]

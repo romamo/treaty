@@ -70,7 +70,7 @@ def test_manifest_lists_global_options_at_the_root(app: App) -> None:
 
 
 def test_short_alias_of_a_global_option_is_rejected() -> None:
-    app = App("t", version="1.0", description="t")
+    app = App("t", version="1.0.0", description="t")
 
     @dataclass(frozen=True, slots=True)
     class Host:

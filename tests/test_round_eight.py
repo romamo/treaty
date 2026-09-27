@@ -28,7 +28,7 @@ class Query:
 
 
 def make_app() -> App:
-    app = App("r8", version="1", max_output_bytes=4096)
+    app = App("r8", version="1.0.0", max_output_bytes=4096)
 
     @app.command(
         "go", description="Go", danger_level="safe", exit_codes=(), supports_raw_payload=True
@@ -167,7 +167,7 @@ def test_cursor_check_refuses_a_forged_handler_cursor_before_the_handler() -> No
 
 
 def test_cursor_check_needs_a_paginated_command() -> None:
-    app = App("r8", version="1")
+    app = App("r8", version="1.0.0")
     with pytest.raises(RegistrationError, match="cursor_check"):
 
         @app.command(
@@ -190,7 +190,7 @@ def test_cursor_check_needs_a_paginated_command() -> None:
     ],
 )
 def test_malformed_declarations_are_registration_errors(kw: dict[str, object], fix: str) -> None:
-    app = App("r8", version="1")
+    app = App("r8", version="1.0.0")
     with pytest.raises(RegistrationError) as info:
 
         @app.command("x", description="X", **kw)  # type: ignore[arg-type]

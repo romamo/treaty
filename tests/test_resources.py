@@ -69,7 +69,7 @@ class Out:
 
 
 def resource_app() -> App:
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
     app.exit_code("NO_PROJECT", 80, description="Missing", retryable=False, side_effects="none")
 
     @app.command(
@@ -212,7 +212,7 @@ class Right:
 
 
 def register(fn: object, match: str) -> None:
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
     with pytest.raises(RegistrationError, match=match):
         app.command("x", description="x", danger_level="safe", exit_codes=())(fn)  # type: ignore[arg-type]
 

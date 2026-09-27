@@ -217,19 +217,19 @@ def test_ci_env_forces_json(app: App) -> None:
 
 
 def test_retryable_requires_no_side_effects() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="side_effects"):
         app.exit_code("BOOM", 90, description="Boom", retryable=True, side_effects="partial")
 
 
 def test_command_specific_codes_must_be_in_range() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="79..125"):
         app.exit_code("BOOM", 3, description="Boom", retryable=False, side_effects="none")
 
 
 def test_destructive_requires_dry_run() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Args:
@@ -243,7 +243,7 @@ def test_destructive_requires_dry_run() -> None:
 
 
 def test_undeclared_exit_code_name_rejected_at_registration() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="not registered"):
 
         @app.command("go", description="Go", exit_codes=["NOPE"], danger_level="safe")
@@ -252,7 +252,7 @@ def test_undeclared_exit_code_name_rejected_at_registration() -> None:
 
 
 def test_handler_signature_checked() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="return annotation"):
 
         @app.command("go", description="Go", danger_level="safe", exit_codes=())
@@ -267,7 +267,7 @@ def test_handler_signature_checked() -> None:
 
 
 def test_duplicate_path_and_builtin_collision() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="already registered"):
 
         @app.command("version", description="Mine", danger_level="safe", exit_codes=())
@@ -276,7 +276,7 @@ def test_duplicate_path_and_builtin_collision() -> None:
 
 
 def test_field_without_marker_rejected() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Args:
@@ -322,7 +322,7 @@ def test_manifest_advertises_confirm_flag(app: App) -> None:
 def test_handler_raised_parse_error_is_validation_after_start() -> None:
     from treaty import ParseError
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("check", description="Validates its own input", danger_level="safe", exit_codes=())
     def check(args: NoArgs, ctx: Ctx) -> dict[str, str]:

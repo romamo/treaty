@@ -42,7 +42,7 @@ class Money:
 
 
 def test_fingerprint_is_stable_for_plain_objects_and_sets() -> None:
-    app = App("fp", version="1")
+    app = App("fp", version="1.0.0")
     app.scalar(
         Money, base=float, parse=lambda v: Money(Decimal(str(v))), serialize=lambda m: m.amount
     )
@@ -101,7 +101,7 @@ def test_protocol_typed_resources_register_and_check_members() -> None:
     class Nowhere:
         name: str = Flag(default="n", description="Name")
 
-    app = App("proto", version="1")
+    app = App("proto", version="1.0.0")
 
     @app.command("where", description="Where", danger_level="safe", exit_codes=())
     def where(args: Where, ctx: Ctx, client: Client) -> dict[str, str]:
@@ -128,7 +128,7 @@ def test_closed_reader_on_builtins_and_errors_exits_141(argv: list[str]) -> None
 
 
 def plain_app(events: list[str]) -> App:
-    app = App("hum", version="1")
+    app = App("hum", version="1.0.0")
 
     @app.command(
         "show",
@@ -175,7 +175,7 @@ def test_closed_stdout_during_exec_closes_and_cleans_up_the_step() -> None:
 
 
 def test_closed_stderr_keeps_the_crash_envelope() -> None:
-    app = App("err", version="1")
+    app = App("err", version="1.0.0")
 
     @app.command("boom", description="Crashes", danger_level="safe", exit_codes=())
     def boom(args: NoArgs, ctx: Ctx) -> dict[str, str]:
@@ -187,7 +187,7 @@ def test_closed_stderr_keeps_the_crash_envelope() -> None:
 
 
 def test_oversized_error_still_bounds_data() -> None:
-    app = App("cap", version="1", max_output_bytes=4096)
+    app = App("cap", version="1.0.0", max_output_bytes=4096)
     app.exit_code("PART", 80, description="Part", retryable=False, side_effects="none")
 
     @app.command("batch", description="Batch", exit_codes=["PART"], danger_level="safe")
@@ -208,7 +208,7 @@ def test_oversized_error_still_bounds_data() -> None:
     ],
 )
 def test_exit_fields_are_checked_or_normalized(kwargs: dict, expected: object) -> None:
-    app = App("q", version="1")
+    app = App("q", version="1.0.0")
     app.exit_code("QUOTA", 80, description="Quota", retryable=True, side_effects="none")
 
     @app.command("q", description="Q", exit_codes=["QUOTA"], danger_level="safe")
@@ -223,7 +223,7 @@ def test_exit_fields_are_checked_or_normalized(kwargs: dict, expected: object) -
 
 
 def test_buffered_stream_refuses_timeout_zero_in_process() -> None:
-    app = App("st", version="1")
+    app = App("st", version="1.0.0")
 
     @app.command("ev", description="Events", streaming=True, danger_level="safe", exit_codes=())
     def ev(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
@@ -243,7 +243,7 @@ type Vec[T] = list[T]
 
 
 def test_stream_return_type_may_be_an_alias() -> None:
-    app = App("al", version="1")
+    app = App("al", version="1.0.0")
 
     @app.command("rows", description="Rows", streaming=True, danger_level="safe", exit_codes=())
     def rows(args: NoArgs, ctx: Ctx) -> Events:
@@ -255,7 +255,7 @@ def test_stream_return_type_may_be_an_alias() -> None:
 
 
 def test_a_command_cannot_also_be_a_group() -> None:
-    app = App("nest", version="1")
+    app = App("nest", version="1.0.0")
 
     @app.command("db", description="DB", danger_level="safe", exit_codes=())
     def db(args: NoArgs, ctx: Ctx) -> dict[str, str]:
@@ -269,7 +269,7 @@ def test_a_command_cannot_also_be_a_group() -> None:
 
 
 def test_empty_declared_group_is_not_listed() -> None:
-    app = App("grp", version="1", description="G")
+    app = App("grp", version="1.0.0", description="G")
     app.group("empty", description="Nothing yet")
     out = io.StringIO()
     app.run(["--help"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
@@ -277,7 +277,7 @@ def test_empty_declared_group_is_not_listed() -> None:
 
 
 def test_generic_alias_resolves_for_a_positional() -> None:
-    app = App("gv", version="1")
+    app = App("gv", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Many:

@@ -41,7 +41,7 @@ def test_audit_passes_a_clean_app(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     from treaty import App, Ctx, NoArgs
 
-    app = App("clean", version="1")
+    app = App("clean", version="1.0.0")
 
     @app.command(
         "ping",
@@ -135,7 +135,7 @@ def test_heuristics_skip_words_that_only_start_like_a_verb_or_end_like_a_path() 
         profile: str = Flag(default="default", description="Profile name")
         outfile: str = Flag(default="-", description="Where to write")
 
-    app = App("prefs", version="1")
+    app = App("prefs", version="1.0.0")
 
     @app.command(
         "settings",

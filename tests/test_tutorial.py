@@ -205,13 +205,13 @@ def test_every_store_code_is_declared_where_it_can_be_raised() -> None:
 
 def test_a_retryable_code_must_leave_nothing_behind() -> None:
     with pytest.raises(RegistrationError, match="retryable exit codes must declare side_effects"):
-        App("p", version="1").exit_code(
+        App("p", version="1.0.0").exit_code(
             "STORE_BUSY", 81, description="d", retryable=True, side_effects="partial"
         )
 
 
 def test_an_undeclared_code_names_itself() -> None:
-    probe = App("p", version="1")
+    probe = App("p", version="1.0.0")
     probe.exit_code("STORE_CORRUPT", 79, description="d", retryable=False, side_effects="none")
 
     @probe.command("go", description="go", danger_level="safe", exit_codes=[])

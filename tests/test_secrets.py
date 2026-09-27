@@ -29,7 +29,7 @@ class PushArgs:
 
 
 def secret_app() -> App:
-    app = App("vaultctl", version="1")
+    app = App("vaultctl", version="1.0.0")
 
     @app.command("login", description="Log in", danger_level="safe", exit_codes=())
     def login(args: LoginArgs, ctx: Ctx) -> dict[str, object]:
@@ -209,7 +209,7 @@ def test_secret_positional_is_a_registration_error() -> None:
     class Positional:
         token: str = Arg(description="Token")
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="cannot be positional"):
 
         @app.command("go", description="Go", danger_level="safe", exit_codes=())
@@ -231,7 +231,7 @@ def test_secret_bool_array_or_short_is_a_registration_error() -> None:
         token: str = Flag(default="", short="t", description="No")
 
     for args_type, match in ((Flagged, "boolean"), (Many, "array"), (Short, "short flag")):
-        app = App("x", version="1")
+        app = App("x", version="1.0.0")
         with pytest.raises(RegistrationError, match=match):
             app.command("go", description="Go", danger_level="safe", exit_codes=())(
                 _handler_for(args_type)

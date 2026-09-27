@@ -161,14 +161,14 @@ def stage_string(args: NoArgs, ctx: Ctx) -> dict[str, object]:
 
 @pytest.mark.parametrize("handler", [literal, formatted, concatenated, stage_string])
 def test_a_shell_string_in_the_source_fails_registration(handler: object) -> None:
-    app = App("shells", version="1")
+    app = App("shells", version="1.0.0")
     register = app.command("x", description="x", danger_level="safe", exit_codes=())
     with pytest.raises(RegistrationError, match="SHELL_STRING_PROHIBITED"):
         register(handler)  # type: ignore[arg-type]
 
 
 def test_a_shell_keyword_elsewhere_registers() -> None:
-    app = App("shells", version="1")
+    app = App("shells", version="1.0.0")
 
     @app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
@@ -191,7 +191,7 @@ def test_children_and_grandchildren_never_page_or_color() -> None:
 
 
 def test_env_overrides_single_variables(tmp_path: Path) -> None:
-    app = App("envs", version="1")
+    app = App("envs", version="1.0.0")
 
     @app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
@@ -290,7 +290,7 @@ def test_a_child_past_its_timeout_is_stopped(tmp_path: Path) -> None:
 
 
 def test_the_command_deadline_limits_its_children(tmp_path: Path) -> None:
-    app = App("deadline", version="1", default_timeout=0.5)
+    app = App("deadline", version="1.0.0", default_timeout=0.5)
 
     @app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
@@ -375,7 +375,7 @@ class Login:
 
 
 def browser_app() -> App:
-    app = App("gui", version="1")
+    app = App("gui", version="1.0.0")
 
     @app.command(
         "login",
@@ -414,7 +414,7 @@ def test_the_manifest_declares_gui_operations() -> None:
 
 
 def test_open_url_without_gui_operations_fails_registration() -> None:
-    app = App("gui", version="1")
+    app = App("gui", version="1.0.0")
     with pytest.raises(RegistrationError, match="gui_operations"):
 
         @app.command("x", description="x", danger_level="safe", exit_codes=())
@@ -424,7 +424,7 @@ def test_open_url_without_gui_operations_fails_registration() -> None:
 
 
 def test_gui_operations_need_an_open_url_field() -> None:
-    app = App("gui", version="1")
+    app = App("gui", version="1.0.0")
     with pytest.raises(RegistrationError, match="open_url"):
 
         @app.command(
@@ -460,7 +460,7 @@ def test_headless_detection(
 
 
 def test_audit_flags_shells_in_handlers(tmp_path: Path) -> None:
-    app = App("shelly", version="1")
+    app = App("shelly", version="1.0.0")
 
     @app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
@@ -485,7 +485,7 @@ class SecretArg:
 
 
 def test_a_failed_child_never_echoes_a_secret_to_stdout() -> None:
-    app = App("leaky", version="1")
+    app = App("leaky", version="1.0.0")
 
     @app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: SecretArg, ctx: Ctx) -> dict[str, object]:
@@ -524,7 +524,7 @@ def test_no_child_starts_after_terminate(tmp_path: Path) -> None:
 
 
 def test_an_abandoned_handler_starts_no_child(tmp_path: Path) -> None:
-    app = App("late", version="1", default_timeout=0.3)
+    app = App("late", version="1.0.0", default_timeout=0.3)
     refused: list[BaseException] = []
     done = threading.Event()
 

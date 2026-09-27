@@ -33,7 +33,7 @@ class Row:
 
 
 def make_app() -> App:
-    app = App("ioctl", version="1", default_timeout=0.3)
+    app = App("ioctl", version="1.0.0", default_timeout=0.3)
     app.format(Format.CSV, render=table(","))
 
     @app.command("once", description="One event, then silence", danger_level="safe",
@@ -381,7 +381,7 @@ class Dead(io.StringIO):
 
 def test_a_finished_stream_skips_cleanup_when_its_last_line_is_lost() -> None:
     cleaned: list[bool] = []
-    app = App("streamy", version="1")
+    app = App("streamy", version="1.0.0")
 
     @app.command(
         "two",

@@ -26,7 +26,7 @@ def run(app: App, argv: list[str], *, isatty: bool = False) -> tuple[int, list[d
 
 
 def test_asyncio_cancelled_error_in_a_handler_still_writes_an_envelope() -> None:
-    app = App("aio", version="1")
+    app = App("aio", version="1.0.0")
 
     async def cancelled() -> None:
         task = asyncio.current_task()
@@ -59,7 +59,7 @@ def test_closed_stdout_after_an_event_exits_0_without_a_traceback() -> None:
 
 
 def test_handler_and_stream_see_the_callers_contextvars() -> None:
-    app = App("ctx", version="1", default_timeout=5)
+    app = App("ctx", version="1.0.0", default_timeout=5)
 
     @app.command(
         "who", description="Reads a contextvar on the worker", danger_level="safe", exit_codes=()
@@ -90,7 +90,7 @@ def test_handler_and_stream_see_the_callers_contextvars() -> None:
 
 
 def test_failure_before_any_event_is_not_partial() -> None:
-    app = App("early", version="1")
+    app = App("early", version="1.0.0")
     app.exit_code("NOPE", 80, description="No", retryable=False, side_effects="none")
 
     @app.command(
@@ -107,7 +107,7 @@ def test_failure_before_any_event_is_not_partial() -> None:
 
 
 def test_in_process_streams_are_bounded_by_the_default_timeout() -> None:
-    app = App("inf", version="1", default_timeout=0.3)
+    app = App("inf", version="1.0.0", default_timeout=0.3)
 
     @app.command(
         "forever", description="Never ends", streaming=True, danger_level="safe", exit_codes=()
@@ -125,7 +125,7 @@ def test_in_process_streams_are_bounded_by_the_default_timeout() -> None:
 
 
 def test_integer_fields_accept_integral_floats_from_json() -> None:
-    app = App("n", version="1")
+    app = App("n", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class N:
@@ -142,7 +142,7 @@ def test_integer_fields_accept_integral_floats_from_json() -> None:
 def test_cap_leaves_an_envelope_whose_error_alone_is_too_big() -> None:
     from treaty import Exit
 
-    app = App("cap", version="1", max_output_bytes=4096)
+    app = App("cap", version="1.0.0", max_output_bytes=4096)
     app.exit_code("BIG", 80, description="Big", retryable=False, side_effects="none")
 
     @app.command("big", description="Big error", exit_codes=["BIG"], danger_level="safe")
@@ -154,7 +154,7 @@ def test_cap_leaves_an_envelope_whose_error_alone_is_too_big() -> None:
 
 
 def test_plain_help_lists_groups_implied_by_dotted_paths() -> None:
-    app = App("a1", version="1", description="A1")
+    app = App("a1", version="1.0.0", description="A1")
 
     @app.command(
         "db.migrate.up", description="Apply migrations", danger_level="safe", exit_codes=()
@@ -168,7 +168,7 @@ def test_plain_help_lists_groups_implied_by_dotted_paths() -> None:
 
 
 def test_framework_flag_errors_are_collected_with_the_rest() -> None:
-    app = App("cp", version="1")
+    app = App("cp", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Copy:
@@ -200,7 +200,7 @@ def test_resource_reading_foreign_args_is_rejected_at_registration() -> None:
         def acquire(cls, args: ProjectArgs, ctx: Ctx) -> Project:
             return cls()
 
-    app = App("res", version="1")
+    app = App("res", version="1.0.0")
     with pytest.raises(RegistrationError, match=r"reads .*ProjectArgs, but .*OtherArgs"):
 
         @app.command("x", description="X", danger_level="safe", exit_codes=())
@@ -213,7 +213,7 @@ type Names = tuple[str, ...]
 
 
 def test_pep_695_aliases_are_accepted() -> None:
-    app = App("alias", version="1")
+    app = App("alias", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Serve:
@@ -243,7 +243,7 @@ def test_defaults_must_match_the_field_type() -> None:
     class Paint:
         color: Color = Flag(default="red", description="Color")
 
-    app = App("def", version="1")
+    app = App("def", version="1.0.0")
     with pytest.raises(RegistrationError, match="does not match"):
 
         @app.command("bad", description="Bad", danger_level="safe", exit_codes=())

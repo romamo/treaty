@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from treaty import App, Ctx, Flag
 
-app = App("slowctl", version="0.1", default_timeout=2)
+app = App("slowctl", version="0.1.0", default_timeout=2)
 
 
 @dataclass(frozen=True, slots=True)

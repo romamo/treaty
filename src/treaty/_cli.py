@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import stat
 import subprocess
 import sys
@@ -13,7 +14,8 @@ from typing import Any
 
 from . import __version__
 from ._app import App, NoArgs
-from ._audit import RULES, AuditReport, Severity, audit
+from ._atomic import write_atomic
+from ._audit import LOCK_FILE, RULES, AuditReport, Severity, audit, schema_lock
 from ._context import Ctx
 from ._errors import Exit, ParseError
 from ._flags import Arg, Flag
@@ -207,9 +209,49 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     description="List the audit rules in the order they are checked",
     danger_level="safe",
     exit_codes=(),
+    default_limit=0,  # a short, fixed list
 )
 def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
     return [{"id": r.id, "title": r.title, "severity": r.severity.value} for r in RULES]
+
+
+# schema-lock
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaLockArgs:
+    target: str = Arg(description="Import path of the App object, as module:attribute")
+
+    def __post_init__(self) -> None:
+        check_target(self.target)
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaLockOut:
+    effect: str
+    lock: str
+    commands: int
+
+
+@cli.command(
+    "schema-lock",
+    description="Record each command's schema version and output schema for the audit to diff",
+    danger_level="mutating",
+    exit_codes=["NOT_FOUND", "PRECONDITION"],
+    examples=[("Record the contracts", "treaty schema-lock myapp.cli:app")],
+)
+def schema_lock_command(args: SchemaLockArgs, ctx: Ctx) -> SchemaLockOut:
+    """The schema-version audit rule compares the registry against this file (REQ-F-022)"""
+    app = load_app(args.target)
+    lock = schema_lock(app)
+    text = json.dumps(lock, indent=2, sort_keys=True) + "\n"
+    old = LOCK_FILE.read_text(encoding="utf-8") if LOCK_FILE.is_file() else None
+    effect = "noop" if old == text else "created" if old is None else "updated"
+    if effect != "noop":
+        write_atomic(LOCK_FILE, text, new_mode=0o644)
+    commands = lock["commands"]
+    assert isinstance(commands, dict)
+    return SchemaLockOut(effect, str(LOCK_FILE), len(commands))
 
 
 # init

@@ -20,7 +20,7 @@ class ExportArgs:
 
 
 def hint_app() -> App:
-    app = App("listctl", version="1")
+    app = App("listctl", version="1.0.0")
 
     @app.command("list", description="List items", danger_level="safe", exit_codes=())
     def list_(args: ListArgs, ctx: Ctx) -> dict[str, int]:

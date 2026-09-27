@@ -23,7 +23,7 @@ class Login:
 
 
 def crash_app(*, default_timeout: float | None = 60.0) -> App:
-    app = App("crashctl", version="1", default_timeout=default_timeout)
+    app = App("crashctl", version="1.0.0", default_timeout=default_timeout)
 
     @app.command("boom", description="Raises a bug", danger_level="safe", exit_codes=())
     def boom(args: NoArgs, ctx: Ctx) -> dict[str, str]:
@@ -167,7 +167,7 @@ def test_signal_outside_a_handler_waits_for_the_next_one() -> None:
 
 @pytest.mark.parametrize("value", ["inf", "1e12", "nan"])
 def test_out_of_range_timeout_is_arg_error(value: str) -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Host:
@@ -191,7 +191,7 @@ def test_exec_rejects_stdin_that_is_not_utf8() -> None:
 
 
 def test_example_that_is_not_a_shell_command_is_rejected() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match="not a valid shell command"):
 
         @app.command(
@@ -226,7 +226,7 @@ class ApiKey:
 
 
 def test_crash_redacts_value_object_and_escaped_secrets() -> None:
-    app = App("vo", version="1")
+    app = App("vo", version="1.0.0")
     app.scalar(ApiKey, parse=ApiKey, serialize=lambda k: k.value)
 
     @dataclass(frozen=True, slots=True)
@@ -252,7 +252,7 @@ def test_signal_held_before_a_handler_keeps_it_from_starting() -> None:
 
 
 def test_scalar_parser_error_does_not_echo_a_secret() -> None:
-    app = App("sp", version="1")
+    app = App("sp", version="1.0.0")
 
     def strict(raw: str) -> ApiKey:
         raise ValueError(f"expected sk- prefix, got {raw!r}")

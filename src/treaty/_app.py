@@ -42,13 +42,23 @@ from ._command import (
     Example,
     Handler,
     Renderer,
+    Shim,
     build_command,
 )
 from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
-from ._envelope import Envelope, ErrorDetail, WarningDetail, clean, json_safe, write_envelope
+from ._envelope import (
+    ENVELOPE_SCHEMA_VERSION,
+    Envelope,
+    ErrorDetail,
+    Meta,
+    WarningDetail,
+    clean,
+    json_safe,
+    write_envelope,
+)
 from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Arg, Flag
@@ -57,6 +67,7 @@ from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._jobs import Job, JobStore, with_links
 from ._manifest import build_manifest, command_schema, implicit_exit_codes
+from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
     Format,
     child_settings,
@@ -88,13 +99,22 @@ from ._parse import (
 from ._plain import render_event, render_plain
 from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._resources import Resolver
+from ._retry import Retrier, RetriesExhausted, Retry
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
 from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, Processes
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
-from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
+from ._values import (
+    CommandPath,
+    ExitCode,
+    ExitCodeName,
+    InvalidValue,
+    SchemaVersion,
+    Scope,
+    ToolVersion,
+)
 
 EXEC_PATH = CommandPath("exec")
 CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
@@ -181,6 +201,11 @@ class App:
         and ``job cancel`` built-ins."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
+        try:
+            ToolVersion(version)
+        except InvalidValue as exc:
+            # meta.tool_version is semver in every response (REQ-F-023)
+            raise RegistrationError(f"App {name}: {exc}, such as 1.0.0") from None
         self.name = name
         self.version = version
         self.description = description
@@ -321,6 +346,10 @@ class App:
         token_env_vars: Sequence[str] = (),
         async_job: bool = False,
         config_write_scope: str | None = None,
+        schema_version: str = "1.0",
+        compat: Mapping[str, Shim] | None = None,
+        project_root: Sequence[str] = (),
+        retry: Retry | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -341,6 +370,13 @@ class App:
         ``<APP>_TOKEN`` or the ``token_env_vars`` after it. ``async_job=True`` returns a
         ``treaty.Job`` polled with ``job status``. ``config_write_scope="local"`` or
         ``"global"`` lets ``ctx.write_config`` change the project or user config file.
+        ``schema_version`` is the ``MAJOR.MINOR`` of the output contract, in every
+        response's ``meta``: a breaking change bumps the major, an additive one the minor.
+        ``compat={"1.4": to_v1}`` keeps an older major selectable with ``--schema-version
+        1``; the shim takes the command's output and returns the old shape.
+        ``project_root=(".git",)`` finds the nearest directory from the cwd up holding a
+        marker, as ``ctx.project_root`` and ``meta.project_root``. ``retry=Retry(...)``
+        enables ``ctx.retry`` with ``--retries`` and ``--retry-delay``.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -391,6 +427,10 @@ class App:
                     f"{cmd_path}: --format {mode} is not offered; "
                     f"register it first with app.format(Format.{mode.name}, render=...)"
                 )
+        try:
+            contract = SchemaVersion(schema_version)
+        except InvalidValue as exc:
+            raise RegistrationError(f"{cmd_path}: {exc}") from None
         # A stream's timeout is an idle limit: the wait for each event (REQ-F-011)
         command_timeout = None if isinstance(timeout, _Inherit) else Timeout(timeout)
 
@@ -429,6 +469,10 @@ class App:
                     config_write_scope=None
                     if config_write_scope is None
                     else ConfigScope(config_write_scope),
+                    schema_version=contract,
+                    compat=compat,
+                    project_root=project_root,
+                    retry=retry,
                 )
             )
             return fn
@@ -451,6 +495,14 @@ class App:
         for name in command.exit_codes:
             if name not in self.exits:
                 raise RegistrationError(f"{path}: exit code {name} is not registered")
+        if command.retry is not None:
+            exhausted = ExitCodeName(command.retry.exhausted)
+            implicit = {ExitCodeName(c.name) for c in implicit_exit_codes(command)}
+            if exhausted not in command.exit_codes and exhausted not in implicit:
+                raise RegistrationError(
+                    f"{path}: Retry(exhausted={exhausted.value!r}) is not an exit code of the "
+                    f"command; add {exhausted.value!r} to exit_codes"
+                )
         self._commands[path] = command
 
     def _check_nesting(self, path: CommandPath) -> None:
@@ -726,6 +778,8 @@ class App:
         self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
     ) -> Envelope:
         meta: dict[str, object] = {"_cmd": path}
+        if run.trace_error is not None:
+            return run.arg_error(run.trace_error, meta=meta)
         try:
             command_path = CommandPath(path)
         except InvalidValue as exc:
@@ -741,6 +795,7 @@ class App:
                 code="UNKNOWN_COMMAND",
                 meta=meta,
             )
+        run.current = command
         try:
             invocation = build_from_mapping(command, arguments, environ)
         except ParseError as exc:
@@ -844,6 +899,8 @@ class App:
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
+        if run.trace_error is not None:
+            return run.emit(mode, run.arg_error(run.trace_error))
         route = resolve_path(rest, self._commands)
         if route.path is None and not route.prefix and route.tokens == ("--version",):
             # Root-only alias so a command's own --version flag is never shadowed
@@ -867,11 +924,20 @@ class App:
                     )
                 ),
             )
+        command = None if route.path is None else self._commands[route.path]
+        run.current = command
+        pinned: SchemaVersion | None = None
+        if command is not None and globals_.schema_version is not None:
+            try:
+                pinned = command.pin(globals_.schema_version)
+            except ParseError as exc:
+                return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
+        if globals_.output_schema:
+            return run.output_schema(mode, command, pinned)
         if globals_.schema:
             return run.schema(mode, route.path, route.prefix)
-        if route.path is None:
+        if command is None:
             return run.help_root(mode, route.prefix)
-        command = self._commands[route.path]
         if globals_.help:
             return run.help_command(mode, command)
         try:
@@ -880,6 +946,8 @@ class App:
             return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
         except ArgsCrashed as exc:
             return run.emit(mode, run.args_crashed(command, exc))
+        if pinned is not None:
+            invocation = dataclasses.replace(invocation, schema_version=pinned)
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
             if command.path == EXEC_PATH:
@@ -1175,6 +1243,22 @@ class _Run:
         """A login command's token, redacted wherever a secret argument is"""
         self.config: ConfigFile | None = None
         """The config file the command that runs now may write"""
+        self.timestamp = utc_timestamp()
+        self.cwd = logical_cwd(env)
+        self.trace_id: str | None = None
+        self.trace_error: ParseError | None = None
+        """An unusable ``TOOL_TRACE_ID``, answered with exit 2 before anything runs"""
+        try:
+            self.trace_id = read_trace_id(env)
+        except ParseError as exc:
+            self.trace_error = exc
+        self.current: Command | None = None
+        """The command being answered, for ``meta.command`` and ``meta.schema_version``"""
+        self.pinned: SchemaVersion | None = None
+        """The older schema version ``--schema-version`` selected for the current command"""
+        self.retrier: Retrier | None = None
+        """``ctx.retry`` of the current command, whose count is ``meta.retries``"""
+        self._roots: dict[tuple[str, ...], Path | None] = {}
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -1234,11 +1318,25 @@ class _Run:
         settings = child_settings(color=False, interactive=self.interactive)
         # REQ-O-033: --headless opens no browser even where one could be shown
         headless = self.headless or invocation.headless
+        # The run's env holds TOOL_TRACE_ID, so every child inherits it (REQ-F-025)
         self.processes = Processes(
             {**self.env, **settings},
             deadline=deadline,
             headless=headless,
             browser_open=BROWSER_OPEN in command.gui_operations,
+        )
+        policy = command.retry
+        self.retrier = (
+            None
+            if policy is None
+            else Retrier(
+                policy,
+                retries=policy.retries if invocation.retries is None else invocation.retries,
+                delay_ms=policy.delay_ms
+                if invocation.retry_delay_ms is None
+                else invocation.retry_delay_ms,
+                deadline=deadline,
+            )
         )
         return Ctx(
             app_name=self.app.name,
@@ -1268,7 +1366,24 @@ class _Run:
             page=page,
             token=invocation.token,
             config=self.config if command.config_write_scope is not None else None,
+            trace_id=self.trace_id,
+            project_root=self.project_root(command),
+            retrier=self.retrier,
         )
+
+    def project_root(self, command: Command) -> Path | None:
+        """The directory holding one of the command's ``project_root`` markers, found once
+        per run walking up from ``meta.cwd`` (REQ-F-027)"""
+        markers = command.project_root
+        if not markers:
+            return None
+        if markers not in self._roots:
+            self._roots[markers] = find_project_root(self.cwd, markers)
+        return self._roots[markers]
+
+    def _trace_suffix(self) -> str:
+        """`` trace=<id>`` for a framework line on stderr, when a trace is set"""
+        return "" if self.trace_id is None else f" trace={self.trace_id}"
 
     def _warn(self, code: str, message: str, context: Mapping[str, object]) -> None:
         if not _ERROR_CODE.fullmatch(code):
@@ -1288,12 +1403,14 @@ class _Run:
             safe = {k: _scrub(k, json_safe(v), redact) for k, v in fields.items()}
             if mode is Format.JSON:
                 record = {"level": "info", "message": redact(message), "fields": safe}
+                if self.trace_id is not None:
+                    record["trace_id"] = self.trace_id
                 line = json.dumps(clean(record), separators=(",", ":"), sort_keys=True)
             else:
                 pairs = (
                     f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in safe.items()
                 )
-                line = " ".join((redact(message), *pairs))
+                line = " ".join((redact(message), *pairs)) + self._trace_suffix()
                 if not keep_escapes:
                     line = str(clean(line))
             self.err.write(line + "\n")
@@ -1315,12 +1432,29 @@ class _Run:
         origin = self.started if started is None else started
         # REQ-F-057: every response says when no window could have been opened
         extra = {"headless": True} if self.headless else {}
+        command = self.current
+        if command is None:
+            name, version, root = self.app.name, ENVELOPE_SCHEMA_VERSION, None
+        else:
+            name = command.path.value
+            version = (self.pinned or command.schema_version).value
+            root = self.project_root(command)
         return Envelope(
             exit_code=code,
             data=data,
             error=error,
-            duration_ms=int((time.perf_counter() - origin) * 1000),
-            request_id=self.request_id,
+            meta=Meta(
+                duration_ms=int((time.perf_counter() - origin) * 1000),
+                request_id=self.request_id,
+                command=name,
+                timestamp=self.timestamp,
+                schema_version=version,
+                tool_version=self.app.version,
+                cwd=str(self.cwd),
+                trace_id=self.trace_id,
+                project_root=None if root is None else str(root),
+                retries=0 if self.retrier is None else self.retrier.count,
+            ),
             warnings=tuple(self.warnings),
             extra_meta={**extra, **(meta or {})},
         )
@@ -1383,6 +1517,7 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen"""
+        self._pin(command, invocation)
         if command.paginated:
             position = self._position(command, invocation, meta)
             if isinstance(position, Envelope):
@@ -1426,6 +1561,26 @@ class _Run:
         if not dry_run:
             extra["confirmed"] = True
         return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+
+    def _pin(self, command: Command, invocation: Invocation) -> None:
+        """Answer in the schema version ``--schema-version`` selected; an older one is
+        deprecated, which a warning says (REQ-O-014)"""
+        self.pinned = invocation.schema_version
+        if self.pinned is not None:
+            self._warn(
+                "SCHEMA_DEPRECATED",
+                f"Schema version {self.pinned} is deprecated; current is {command.schema_version}",
+                {
+                    "current_version": command.schema_version.value,
+                    "requested_version": self.pinned.value,
+                },
+            )
+
+    def _shimmed(self, command: Command, result: object) -> object:
+        """The handler's result in the pinned schema's shape"""
+        if self.pinned is None:
+            return result
+        return command.compat_for(self.pinned).shim(result)
 
     def _position(
         self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
@@ -1801,7 +1956,7 @@ class _Run:
                 result, pagination = take(result, position, limit, command.path)
                 page_meta["pagination"] = pagination.to_json()
                 self.page = (command.path, position)
-            data = self._payload(result)
+            data = self._payload(self._shimmed(command, result))
         except SchemaError as exc:
             return self._broken(
                 command,
@@ -1869,6 +2024,7 @@ class _Run:
         caller that sees nothing until the stream ends. A failure after some events keeps
         their count in ``meta.seq`` and marks the response ``partial``.
         """
+        self._pin(command, invocation)
         started = time.perf_counter()
         waiting_since = started
         timeout = self.app.effective_timeout(command, invocation.timeout)
@@ -1929,7 +2085,7 @@ class _Run:
                     self.in_flight = None  # the handler finished; nothing is left to clean up
                     break
                 seq += 1
-                data = self._payload(event)
+                data = self._payload(self._shimmed(command, event))
                 yield self._envelope(0, data=data, started=started, meta={**full_meta, "seq": seq})
         except CliExit as exc:
             yield self._exit_envelope(command, args, exc, started, partial())
@@ -2169,19 +2325,22 @@ class _Run:
         except Exception as err:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, err, started, meta)
         assert isinstance(context, dict)
+        # REQ-F-078: after the tool's own retries, an agent retrying on top would double them
+        retried = exc.retried if isinstance(exc, RetriesExhausted) else None
         return self._envelope(
             entry.code.value,
             data=data,
             error=ErrorDetail(
                 code=exc.code,
                 message=message,
-                retryable=entry.retryable,
+                retryable=entry.retryable and not retried,
+                retries_exhausted=retried or None,
                 detail=exc.detail,
                 context=context,
                 suggestion=exc.suggestion if exc.suggestion is not None else entry.suggestion,
                 fix_command=exc.fix_command,
                 fix_required=exc.fix_required,
-                retry_after_ms=retry_after if entry.retryable else None,
+                retry_after_ms=retry_after if entry.retryable and not retried else None,
                 phase="execution",
             ),
             started=started,
@@ -2289,6 +2448,8 @@ class _Run:
         so every exit still carries an envelope. Secret argument values are redacted.
         ``sys.exit()`` counts: a handler ends a run by returning or raising ``Exit``."""
         redact = self._redactor(command, args)
+        if self.trace_id is not None:
+            self.err.write(f"{self.app.name}: {command.path} crashed{self._trace_suffix()}\n")
         self.err.write(redact(_traceback(exc)))
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
         return self._envelope(
@@ -2437,7 +2598,10 @@ class _Run:
         elif envelope.data is not None:
             self.out.write(fallback(envelope.data))
         if envelope.error is not None:
-            self.err.write(f"{self.app.name}: {envelope.error.code}: {envelope.error.message}\n")
+            error = envelope.error
+            self.err.write(
+                f"{self.app.name}: {error.code}: {error.message}{self._trace_suffix()}\n"
+            )
             errors = envelope.error.errors or ()
             if len(errors) > 1:
                 for item in errors:
@@ -2463,6 +2627,27 @@ class _Run:
             }
             data = build_manifest(subtree, self.app.exits, self.app.version, self.app.formats)
         return self.emit(mode, self._envelope(0, data=data), render=_json_text)
+
+    def output_schema(
+        self, mode: Format, command: Command | None, pinned: SchemaVersion | None
+    ) -> int:
+        """``<cmd> --output-schema``: the JSON Schema of the command's ``data``, in the
+        pinned schema version's shape when ``--schema-version`` selected an older one"""
+        if command is None:
+            return self.emit(
+                mode,
+                self.arg_error(
+                    ParseError(
+                        "--output-schema describes one command's data; name the command",
+                        context={"flag": "output-schema"},
+                        suggestion=f"{self.app.name} <command> --output-schema, or "
+                        f"{self.app.name} --schema for every command",
+                    )
+                ),
+            )
+        self.pinned = pinned
+        data = command.output_schema if pinned is None else command.compat_for(pinned).output_schema
+        return self.emit(mode, self._envelope(0, data=dict(data)), render=_json_text)
 
     def help_root(self, mode: Format, prefix: tuple[str, ...]) -> int:
         text = render_root(
@@ -2494,6 +2679,7 @@ class _Run:
 
     def exec(self, args: ExecArgs) -> int:
         """Dispatch each plan line in-process; JSONL envelopes out; 0, 1, or 2"""
+        plan_command = self.current
         text = self._read_plan(args)
         self.payload_stdin = None  # the plan is stdin; a line's payload needs input_file
         if isinstance(text, Envelope):
@@ -2516,6 +2702,8 @@ class _Run:
                     any_failed = True
                     if not args.ignore_errors:
                         break
+        # What follows answers the plan, not its last line
+        self.current, self.pinned, self.retrier, self.warnings = plan_command, None, None, []
         if (received := self.cancellation.received) is not None:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
             # between lines left no CANCELLED line, so the plan says where it stopped.
@@ -2651,7 +2839,9 @@ class _Run:
             line = raw.strip()
             if not line:
                 continue
-            self.warnings, self.token, self.config = [], None, None  # one command per line
+            # One command per line
+            self.warnings, self.token, self.config = [], None, None
+            self.current, self.pinned, self.retrier = None, None, None
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:
@@ -2678,6 +2868,7 @@ class _Run:
                     ),
                 )
                 continue
+            self.current = command
             try:
                 invocation = self._exec_invocation(command, request, args.dry_run, line_no)
             except ParseError as exc:

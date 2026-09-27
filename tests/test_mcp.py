@@ -36,7 +36,7 @@ class TailArgs:
 
 
 def adapter_app() -> App:
-    app = App("regctl", version="2", description="Registry control")
+    app = App("regctl", version="2.0.0", description="Registry control")
 
     @app.command(
         "push",
@@ -242,7 +242,7 @@ def test_stdio_server_turns_a_stray_input_into_exit_4() -> None:
 
 
 def test_unknown_field_lists_only_flags_a_mapping_accepts() -> None:
-    app = App("files", version="1")
+    app = App("files", version="1.0.0")
 
     @app.command(
         "dump",
@@ -280,7 +280,7 @@ def test_capped_and_tuple_outputs_validate_like_an_mcp_client() -> None:
         pair: tuple[int, str]
         fields: dict[str, str]
 
-    app = App("wide", version="1", max_output_bytes=4096)
+    app = App("wide", version="1.0.0", max_output_bytes=4096)
 
     @app.command("wide", description="Big output", danger_level="safe", exit_codes=())
     def wide(args: NoArgs, ctx: Ctx) -> Wide:
@@ -305,7 +305,7 @@ def test_replayed_noop_matches_a_closed_effect_enum() -> None:
         effect: Literal["created"]
         name: str
 
-    app = App("mk", version="1", state_dir=None)
+    app = App("mk", version="1.0.0", state_dir=None)
 
     @app.command("mk", description="Make", danger_level="mutating", exit_codes=())
     def mk(args: NoArgs, ctx: Ctx) -> Made:

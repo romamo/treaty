@@ -96,6 +96,8 @@ class ErrorDetail:
     """The flag that avoids this failure, such as ``--input-file`` (REQ-F-054)"""
     auth_methods: Sequence[Mapping[str, str]] | None = None
     """Ways to log in without a browser, such as a token variable (REQ-O-033)"""
+    retries_exhausted: int | None = None
+    """Retries ``ctx.retry`` made before giving up (REQ-F-078)"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
@@ -130,6 +132,8 @@ class ErrorDetail:
             out["retry_after_ms"] = self.retry_after_ms
         if self.fix_required is not None:
             out["fix_required"] = self.fix_required
+        if self.retries_exhausted is not None:
+            out["retries_exhausted"] = self.retries_exhausted
         if self.hint is not None:
             out["hint"] = self.hint
         if self.phase is not None:
@@ -156,15 +160,61 @@ class WarningDetail:
         return out
 
 
+ENVELOPE_SCHEMA_VERSION = "1.0"
+"""``meta.schema_version`` of a response no command answered, such as an unknown command"""
+
+
+@dataclass(frozen=True, slots=True)
+class Meta:
+    """The framework's ``meta`` keys: volatile by definition, so ``data`` stays safe to
+    cache and diff (REQ-F-021). Optional keys are absent, never null."""
+
+    duration_ms: int
+    request_id: str
+    command: str
+    """The command's path as the manifest keys it, or the app name when none resolved"""
+    timestamp: str
+    """ISO 8601 UTC time the invocation started"""
+    schema_version: str
+    """``MAJOR.MINOR`` of the command's output contract, or of the one pinned"""
+    tool_version: str
+    cwd: str
+    """The working directory, as ``pwd`` prints it"""
+    trace_id: str | None = None
+    """``TOOL_TRACE_ID``, when set"""
+    project_root: str | None = None
+    """The directory holding a ``project_root=`` marker, when one was found"""
+    retries: int = 0
+    """Retries ``ctx.retry`` made; 0 is left out"""
+
+    def to_json(self) -> dict[str, object]:
+        out: dict[str, object] = {
+            "duration_ms": self.duration_ms,
+            "request_id": self.request_id,
+            "command": self.command,
+            "timestamp": self.timestamp,
+            "schema_version": self.schema_version,
+            "tool_version": self.tool_version,
+            "cwd": self.cwd,
+        }
+        if self.trace_id is not None:
+            out["trace_id"] = self.trace_id
+        if self.project_root is not None:
+            out["project_root"] = self.project_root
+        if self.retries:
+            out["retries"] = self.retries
+        return out
+
+
 @dataclass(frozen=True, slots=True)
 class Envelope:
     exit_code: int
     data: object
     error: ErrorDetail | None
-    duration_ms: int
-    request_id: str
+    meta: Meta
     warnings: Sequence[WarningDetail] = ()
     extra_meta: Mapping[str, object] = field(default_factory=dict)
+    """Keys a response adds besides the framework's, such as ``pagination``"""
 
     def __post_init__(self) -> None:
         if (self.exit_code == 0) != (self.error is None):
@@ -181,11 +231,7 @@ class Envelope:
         return dataclasses.replace(self, data=clean(self.data))
 
     def to_json(self) -> dict[str, object]:
-        meta: dict[str, object] = {
-            "exit_code": self.exit_code,
-            "duration_ms": self.duration_ms,
-            "request_id": self.request_id,
-        }
+        meta: dict[str, object] = {"exit_code": self.exit_code, **self.meta.to_json()}
         meta.update(self.extra_meta)
         return {
             "ok": self.ok,

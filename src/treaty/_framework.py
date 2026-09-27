@@ -27,9 +27,11 @@ from ._errors import ParseError
 from ._idempotency import IdempotencyKey
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path
+from ._retry import RETRIES_FLAG, RETRY_DELAY_FLAG, parse_delay, parse_retries
 from ._timeout import Timeout
 from ._types import FlagType
 
+SCHEMA_VERSION_FLAG = "schema-version"
 TIMEOUT_FLAG = "timeout"
 CONFIRM_FLAG = "confirm-destructive"
 RAW_PAYLOAD_FLAG = "raw-payload"
@@ -142,8 +144,8 @@ RESERVED_GLOBAL: frozenset[str] = frozenset(
 """Reserved on every command"""
 
 RESERVED_OPT_IN: Mapping[str, Callable[[Command], bool]] = {
-    "retries": _never,  # retry= (01)
-    "retry-delay": _never,  # retry= (01)
+    "retries": lambda c: c.retry is not None,
+    "retry-delay": lambda c: c.retry is not None,
     "resume-from": _never,  # resumable= (06)
     "rollback-on-failure": _never,  # rollback= (06)
     "proxy": lambda c: c.has_network_io,
@@ -153,7 +155,10 @@ RESERVED_OPT_IN: Mapping[str, Callable[[Command], bool]] = {
 }
 """Reserved on the commands that opt in to the feature"""
 
-UNIMPLEMENTED: frozenset[str] = RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)
+IMPLEMENTED: frozenset[str] = frozenset(
+    {"output-schema", "print-schema", "schema-version", "retries", "retry-delay"}
+)
+UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED
 """Reserved names whose feature has not landed yet"""
 
 
@@ -417,5 +422,44 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         parse=lambda v, c: env_var(str(v)),
         from_json=_text(env_var, "token_env_var"),
         metavar="NAME",
+    ),
+    FrameworkFlag(
+        RETRIES_FLAG,
+        "retries",
+        lambda c: c.retry is not None,
+        "integer",
+        "Most times to retry a transient failure inside the command; 0 fails on the first",
+        parse=lambda v, c: parse_retries(v),
+        from_json=lambda v, c: parse_retries(v),
+        metavar="N",
+        entry=lambda c: {"default": c.retry.retries if c.retry else None},
+        json_extra={"minimum": 0},
+    ),
+    FrameworkFlag(
+        RETRY_DELAY_FLAG,
+        "retry_delay_ms",
+        lambda c: c.retry is not None,
+        "string",
+        "Wait between retries, such as 500ms or 2s; the timeout bounds every attempt",
+        parse=lambda v, c: parse_delay(v),
+        from_json=lambda v, c: parse_delay(v),
+        metavar="DURATION",
+        entry=lambda c: {"default": f"{c.retry.delay_ms}ms" if c.retry else None},
+        json_extra={"type": ["string", "integer"]},
+    ),
+    FrameworkFlag(
+        SCHEMA_VERSION_FLAG,
+        "schema_version",
+        lambda c: bool(c.compat),
+        "string",
+        lambda c: (
+            "Answer in an older output schema, major "
+            f"{', '.join(str(v.version.major) for v in c.compat)}; "
+            f"the current is {c.schema_version}"
+        ),
+        parse=lambda v, c: c.pin(v),
+        from_json=lambda v, c: c.pin(v),
+        metavar="MAJOR",
+        json_extra={"type": ["string", "integer"]},
     ),
 )

@@ -30,7 +30,7 @@ class Created:
 
 def counting_app(state: Path) -> tuple[App, list[str]]:
     calls: list[str] = []
-    app = App("itemctl", version="1", state_dir=state)
+    app = App("itemctl", version="1.0.0", state_dir=state)
     app.exit_code("FLAKY", 79, description="Upstream hiccup", retryable=False, side_effects="none")
 
     @app.command(
@@ -149,7 +149,7 @@ def test_effect_contract_is_checked_at_run_time(tmp_path: Path) -> None:
 
 
 def test_registration_requires_an_effect_field_and_reserves_the_key() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="'effect' field"):
 
         @app.command("make", description="Make", danger_level="mutating", exit_codes=())
@@ -199,7 +199,7 @@ def test_invalid_key_is_arg_error(tmp_path: Path) -> None:
 def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> None:
     started: list[float] = []
     release = threading.Event()
-    app = App("slowctl", version="1", state_dir=tmp_path, default_timeout=0.2)
+    app = App("slowctl", version="1.0.0", state_dir=tmp_path, default_timeout=0.2)
 
     @app.command("create", description="Slow create", danger_level="mutating", exit_codes=())
     def create(args: CreateArgs, ctx: Ctx) -> Created:

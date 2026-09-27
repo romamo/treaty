@@ -14,12 +14,13 @@ from typing import Any
 from ._auth import AuthKind, check_declaration
 from ._config import ConfigScope
 from ._effect import can_carry, with_replay_effect
-from ._errors import RegistrationError
+from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._mode import Format
 from ._page import DEFAULT_LIMIT, Limit, Page
 from ._resources import ResourceSpec, dependency_params, resource_graph
+from ._retry import Retry
 from ._scalars import ScalarRegistry
 from ._scan import ctx_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
@@ -27,13 +28,16 @@ from ._secrets import default_env_var
 from ._subprocess import BROWSER_OPEN
 from ._timeout import Timeout
 from ._types import FlagType, is_dataclass_type, resolve_alias
-from ._values import CommandPath, ExitCodeName, Scope
+from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope
 
 Handler = Callable[..., Any]
 """``(args, ctx, *resources)``: extra parameters are annotated with resource classes"""
 Cleanup = Callable[[], None]
 Renderer = Callable[[Any], str]
 """Text for one result, or one stream event, from its JSON-ready ``data``"""
+Shim = Callable[[Any], Any]
+"""The command's output in the shape of an older schema version (REQ-O-014)"""
+DEFAULT_SCHEMA_VERSION = SchemaVersion("1.0")
 
 
 class DangerLevel(StrEnum):
@@ -57,6 +61,15 @@ class Example:
 
     def to_json(self) -> dict[str, str]:
         return {"description": self.description, "command": self.command}
+
+
+@dataclass(frozen=True, slots=True)
+class Compat:
+    """One older major of a command's output that ``--schema-version`` can still select"""
+
+    version: SchemaVersion
+    shim: Shim
+    output_schema: JsonSchema
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +131,49 @@ class Command:
     """Returns a ``treaty.Job`` for work that goes on after the process exits (REQ-C-022)"""
     config_write_scope: ConfigScope | None = None
     """The config file ``ctx.write_config`` may change (REQ-C-025)"""
+    schema_version: SchemaVersion = DEFAULT_SCHEMA_VERSION
+    """``MAJOR.MINOR`` of the output contract, in ``meta.schema_version`` (REQ-F-022)"""
+    compat: tuple[Compat, ...] = ()
+    """Older majors still served, oldest first (REQ-O-014)"""
+    project_root: tuple[str, ...] = ()
+    """Marker files whose directory, found walking up from the cwd, is the project root"""
+    retry: Retry | None = None
+    """How ``ctx.retry`` retries (REQ-F-078); adds ``--retries`` and ``--retry-delay``"""
+
+    @property
+    def min_schema_version(self) -> SchemaVersion:
+        """The oldest version ``--schema-version`` can select"""
+        return self.compat[0].version if self.compat else self.schema_version
+
+    def compat_for(self, version: SchemaVersion) -> Compat:
+        return next(c for c in self.compat if c.version == version)
+
+    def pin(self, raw: object) -> SchemaVersion | None:
+        """``--schema-version MAJOR``: the older version it selects, None for the current;
+        a major the command does not serve is ``SCHEMA_VERSION_UNSUPPORTED`` (exit 2)"""
+        text = str(raw) if isinstance(raw, int) and not isinstance(raw, bool) else raw
+        major_text = text.partition(".")[0] if isinstance(text, str) else ""
+        context: dict[str, object] = {
+            "flag": "schema-version",
+            "schema_version": self.schema_version.value,
+            "min_schema_version": self.min_schema_version.value,
+        }
+        if not (major_text.isascii() and major_text.isdigit() and len(major_text) <= 6):
+            raise ParseError("--schema-version takes a major version, such as 1", context=context)
+        major = int(major_text)
+        if major == self.schema_version.major:
+            return None
+        served = next((c.version for c in self.compat if c.version.major == major), None)
+        if served is None:
+            majors = [str(c.version.major) for c in self.compat] + [str(self.schema_version.major)]
+            raise ParseError(
+                f"Command {self.path} does not serve schema version {major}",
+                code="SCHEMA_VERSION_UNSUPPORTED",
+                context={**context, "requested_version": text},
+                suggestion=f"pass --schema-version {' or '.join(majors)}, or drop it for "
+                f"the current {self.schema_version}",
+            )
+        return served
 
     @property
     def accepts_timeout(self) -> bool:
@@ -179,6 +235,10 @@ def build_command(
     token_env_vars: Sequence[str] = (),
     async_job: bool = False,
     config_write_scope: ConfigScope | None = None,
+    schema_version: SchemaVersion = DEFAULT_SCHEMA_VERSION,
+    compat: Mapping[str, Shim] | None = None,
+    project_root: Sequence[str] = (),
+    retry: Retry | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -211,7 +271,15 @@ def build_command(
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
     _check_gui(path, output_type, gui_operations)
-    _check_ctx_calls(fn, path, gui_operations, interactive, editor_alternatives, config_write_scope)
+    _check_ctx_calls(
+        fn, path, gui_operations, interactive, editor_alternatives, config_write_scope, retry
+    )
+    if isinstance(project_root, str) or not all(isinstance(m, str) and m for m in project_root):
+        raise RegistrationError(
+            f"{path}: project_root names marker files, such as project_root=('.git',)"
+        )
+    if retry is not None and not isinstance(retry, Retry):
+        raise RegistrationError(f"{path}: retry takes treaty.Retry(...), not {retry!r}")
     returns_job = isinstance(output_type, type) and issubclass(output_type, Job)
     if async_job and not returns_job:
         raise RegistrationError(
@@ -283,6 +351,7 @@ def build_command(
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
     output_schema = schema_for(output_type, scalars)
+    shims = _compat(path, compat or {}, schema_version, output_type, scalars)
     if returns_job:
         output_schema = descriptor_schema(output_schema)
     if danger_level is not DangerLevel.SAFE:
@@ -326,7 +395,50 @@ def build_command(
         ),
         async_job=async_job,
         config_write_scope=config_write_scope,
+        schema_version=schema_version,
+        compat=shims,
+        project_root=tuple(project_root),
+        retry=retry,
     )
+
+
+def _compat(
+    path: CommandPath,
+    compat: Mapping[str, Shim],
+    current: SchemaVersion,
+    output_type: object,
+    scalars: ScalarRegistry,
+) -> tuple[Compat, ...]:
+    """``compat={"1.4": to_v1}``: each shim takes the command's output and returns the
+    older shape, whose schema ``--output-schema`` shows when that major is pinned"""
+    out: list[Compat] = []
+    for key, shim in compat.items():
+        try:
+            version = SchemaVersion(key)
+        except InvalidValue as exc:
+            raise RegistrationError(f"{path}: compat key: {exc}") from None
+        if version.major >= current.major:
+            raise RegistrationError(
+                f"{path}: compat key {key} is not an older major than schema_version="
+                f"{current}; a shim serves a major the command has moved past"
+            )
+        if any(c.version.major == version.major for c in out):
+            raise RegistrationError(f"{path}: compat names major {version.major} twice")
+        params = list(inspect.signature(shim).parameters) if callable(shim) else []
+        hints = typing.get_type_hints(shim) if params else {}
+        if len(params) != 1 or hints.get(params[0]) != output_type:
+            raise RegistrationError(
+                f"{path}: compat[{key!r}] is a function of one parameter annotated "
+                f"{output_type!r}, the command's output"
+            )
+        returned = hints.get("return")
+        if returned is None or not is_payload_type(returned):
+            raise RegistrationError(
+                f"{path}: compat[{key!r}] needs a return annotation that serializes to a JSON "
+                "object, array, or null, for its output schema"
+            )
+        out.append(Compat(version, shim, schema_for(returned, scalars)))
+    return tuple(sorted(out, key=lambda c: c.version.key))
 
 
 def _page_output(
@@ -378,6 +490,7 @@ def _check_ctx_calls(
     interactive: bool,
     editor_alternatives: Sequence[str],
     config_write_scope: ConfigScope | None,
+    retry: Retry | None,
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
     for call in ctx_calls(fn):
@@ -400,6 +513,11 @@ def _check_ctx_calls(
             raise RegistrationError(
                 f'{where} writes config; declare config_write_scope="local" (or "global") '
                 "(REQ-C-025)"
+            )
+        if call.method == "retry" and retry is None:
+            raise RegistrationError(
+                f"{where} retries; declare retry=treaty.Retry(...), which adds --retries and "
+                "--retry-delay (REQ-F-078)"
             )
         if call.method == "edit" and not editor_alternatives:
             raise RegistrationError(

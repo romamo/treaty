@@ -253,7 +253,7 @@ def test_output_is_byte_identical_across_locales() -> None:
         assert proc.returncode == 0, proc.stderr
         env = json.loads(proc.stdout)
         meta = env["meta"]
-        del meta["request_id"], meta["duration_ms"]
+        del meta["request_id"], meta["duration_ms"], meta["timestamp"]
         return env
 
     german, c = stripped("de_DE.UTF-8"), stripped("C")
@@ -335,7 +335,7 @@ def test_a_retryable_error_without_a_declared_suggestion_gets_a_retry_step() -> 
 
 
 def test_keys_are_never_rewritten_so_none_collide() -> None:
-    app = App("keys", version="1")
+    app = App("keys", version="1.0.0")
 
     @app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: NoArgs, ctx: Ctx) -> dict[str, int]:
@@ -356,7 +356,7 @@ def quiet_run(app: App, argv: list[str]) -> int:
 def test_overlapping_runs_on_threads_restore_the_original_streams() -> None:
     first_in, second_in = threading.Event(), threading.Event()
     release_first, release_second = threading.Event(), threading.Event()
-    app = App("overlap", version="1")
+    app = App("overlap", version="1.0.0")
 
     @app.command("a", description="a", danger_level="safe", exit_codes=())
     def a(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
@@ -383,7 +383,7 @@ def test_overlapping_runs_on_threads_restore_the_original_streams() -> None:
 
 
 def test_a_run_nested_in_a_handler_gives_back_the_outer_swap() -> None:
-    app = App("nested", version="1")
+    app = App("nested", version="1.0.0")
 
     @app.command("inner", description="inner", danger_level="safe", exit_codes=())
     def inner(args: NoArgs, ctx: Ctx) -> dict[str, bool]:

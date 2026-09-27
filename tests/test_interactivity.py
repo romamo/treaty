@@ -163,7 +163,7 @@ def test_input_never_reads_a_terminal_it_cannot_prompt_on() -> None:
 
 
 def test_piped_lines_read_through_every_api() -> None:
-    lines_app = App("lines", version="1")
+    lines_app = App("lines", version="1.0.0")
 
     @lines_app.command("x", description="x", danger_level="safe", exit_codes=())
     def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
@@ -251,7 +251,7 @@ class Named:
 
 
 def test_prompting_without_interactive_fails_registration() -> None:
-    other = App("x", version="1")
+    other = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="interactive=True"):
 
         @other.command("x", description="x", danger_level="safe", exit_codes=())
@@ -260,7 +260,7 @@ def test_prompting_without_interactive_fails_registration() -> None:
 
 
 def test_an_editor_without_alternatives_fails_registration() -> None:
-    other = App("x", version="1")
+    other = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="editor_alternatives"):
 
         @other.command("x", description="x", danger_level="safe", exit_codes=())
@@ -269,7 +269,7 @@ def test_an_editor_without_alternatives_fails_registration() -> None:
 
 
 def test_editor_alternatives_must_be_flags() -> None:
-    other = App("x", version="1")
+    other = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="not flags"):
 
         @other.command(
@@ -284,7 +284,7 @@ def test_a_yes_field_collides_on_an_interactive_command() -> None:
     class Yes:
         yes: bool = Flag(default=False, description="Yes")
 
-    other = App("x", version="1")
+    other = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="supplied by the framework"):
 
         @other.command("x", description="x", danger_level="safe", exit_codes=(), interactive=True)

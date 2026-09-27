@@ -75,7 +75,7 @@ class Build:
 
 
 def job_app() -> App:
-    app = App("tool", version="1", jobs=Store())
+    app = App("tool", version="1.0.0", jobs=Store())
 
     @app.command(
         "build",
@@ -142,7 +142,7 @@ def test_job_cancel_returns_the_job() -> None:
 
 
 def test_async_job_without_a_job_output_fails_registration() -> None:
-    app = App("tool", version="1", jobs=Store())
+    app = App("tool", version="1.0.0", jobs=Store())
     with pytest.raises(RegistrationError, match="treaty.Job"):
 
         @app.command(
@@ -153,7 +153,7 @@ def test_async_job_without_a_job_output_fails_registration() -> None:
 
 
 def test_async_job_without_a_job_store_fails_registration() -> None:
-    app = App("tool", version="1")
+    app = App("tool", version="1.0.0")
     with pytest.raises(RegistrationError, match="jobs="):
 
         @app.command(
@@ -227,7 +227,7 @@ class Wrote:
 
 
 def config_app(scope: str) -> App:
-    app = App("tool", version="1")
+    app = App("tool", version="1.0.0")
 
     @app.command(
         "config.put",
@@ -312,7 +312,7 @@ def test_schema_declares_the_write_scope_and_global_flag() -> None:
 
 
 def test_write_config_without_a_scope_fails_registration() -> None:
-    app = App("tool", version="1")
+    app = App("tool", version="1.0.0")
     with pytest.raises(RegistrationError, match="config_write_scope"):
 
         @app.command("config.put", description="Put", danger_level="mutating", exit_codes=())
@@ -326,7 +326,7 @@ def test_write_config_without_a_scope_fails_registration() -> None:
     [("safe", "local", "mutating"), ("mutating", "session", "not one of")],
 )
 def test_bad_config_declarations_fail_registration(danger: str, scope: str, match: str) -> None:
-    app = App("tool", version="1")
+    app = App("tool", version="1.0.0")
     with pytest.raises(RegistrationError, match=match):
 
         @app.command(
@@ -344,7 +344,7 @@ def test_bad_config_declarations_fail_registration(danger: str, scope: str, matc
 
 
 def test_audit_flags_undeclared_config_writes_and_jobs() -> None:
-    app = App("tool", version="1")
+    app = App("tool", version="1.0.0")
 
     @app.command("config.put", description="Put", danger_level="mutating", exit_codes=())
     def put(args: NoArgs, ctx: Ctx) -> Wrote:

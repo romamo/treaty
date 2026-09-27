@@ -5,17 +5,20 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeVar
 
 from ._config import ConfigFile
 from ._errors import RegistrationError
 from ._mode import Format
 from ._page import PageRequest
 from ._prompt import Prompter
+from ._retry import Retrier
 from ._subprocess import Argv, Completed, Processes
 from ._timeout import Timeout
 
 LogSink = Callable[[str, Mapping[str, object]], None]
 WarnSink = Callable[[str, str, Mapping[str, object]], None]
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,20 @@ class Ctx:
     """A login command's pre-acquired token (``auth=``): from ``--token-env-var`` or the
     first set variable of ``token_env_vars``; redacted from logs and tracebacks"""
     config: ConfigFile | None = field(default=None, repr=False, compare=False)
+    trace_id: str | None = None
+    """``TOOL_TRACE_ID`` of the run, when set; children inherit it (REQ-F-025)"""
+    project_root: Path | None = None
+    """The nearest directory, from the cwd up, holding a ``project_root=`` marker"""
+    retrier: Retrier | None = field(default=None, repr=False, compare=False)
+
+    def retry(self, fn: Callable[[], T]) -> T:
+        """Call ``fn``, and again after ``--retry-delay`` while it raises one of the
+        command's ``Retry.on`` exceptions, up to ``--retries`` times and never past the
+        timeout; then the run exits with ``Retry.exhausted``. Needs ``retry=`` on the
+        command; the retries made are ``meta.retries`` (REQ-F-078)."""
+        if self.retrier is None:
+            raise RegistrationError("ctx.retry needs retry=treaty.Retry(...) on the command")
+        return self.retrier.call(fn)
 
     @property
     def config_path(self) -> Path | None:

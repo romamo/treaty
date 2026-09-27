@@ -15,7 +15,7 @@ class CreateArgs:
 
 
 def make_app() -> App:
-    app = App("tool", version="1")
+    app = App("tool", version="1.0.0")
 
     @app.command(
         "create",

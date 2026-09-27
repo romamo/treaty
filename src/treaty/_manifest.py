@@ -162,6 +162,9 @@ def command_schema(
     """``--schema`` output for one command (REQ-C-015, REQ-O-032)"""
     entry = command_entry(command, exits, all_paths)
     entry["parameters"] = entry["flags"]
+    # REQ-O-014; not ManifestResponse keys
+    entry["schema_version"] = command.schema_version.value
+    entry["min_schema_version"] = command.min_schema_version.value
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
     if command.supports_raw_payload:

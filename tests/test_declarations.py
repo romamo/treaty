@@ -30,7 +30,7 @@ class Purged:
 
 
 def make_app(*, safe_default: bool = False, affects: bool = True) -> App:
-    app = App("store", version="1")
+    app = App("store", version="1.0.0")
 
     @app.command(
         "purge",
@@ -73,7 +73,7 @@ def meta_of(envelope: dict[str, object]) -> dict[str, object]:
 
 
 def test_command_without_exit_codes_and_danger_level_fails_registration() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError) as info:
 
         @app.command("x", description="x")
@@ -85,7 +85,7 @@ def test_command_without_exit_codes_and_danger_level_fails_registration() -> Non
 
 
 def test_each_missing_declaration_is_named() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match=r'add danger_level="safe"'):
         app.command("x", description="x", exit_codes=())
     with pytest.raises(RegistrationError, match=r"add exit_codes=\(\), or"):
@@ -107,7 +107,7 @@ def test_destructive_output_without_would_affect_fails_registration() -> None:
     class Bare:
         effect: str
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="would_affect"):
 
         @app.command("rm", description="rm", danger_level="destructive", exit_codes=())
@@ -217,7 +217,7 @@ def test_live_is_unknown_on_other_commands() -> None:
 
 
 def test_safe_default_on_a_non_destructive_command_fails_registration() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="safe_default"):
 
         @app.command(
@@ -274,7 +274,7 @@ def test_audit_network_timeout_matches_request_verbs_only() -> None:
 def test_audit_rule_only_applies_to_network_commands() -> None:
     from treaty._audit import audit
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("get", description="Get", danger_level="safe", exit_codes=(), has_network_io=True)
     def get(args: NoArgs, ctx: Ctx) -> None:

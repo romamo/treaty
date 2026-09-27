@@ -171,7 +171,7 @@ returns the text. Formats are `Format` members, never strings:
 ```python
 from treaty import App, Format
 
-app = App("hello", version="0.1")
+app = App("hello", version="0.1.0")
 app.format(Format.CSV, render=render_csv)  # offers --format csv to every command
 
 

@@ -39,7 +39,7 @@ from ._secrets import (
 )
 from ._timeout import Timeout
 from ._types import Classified, FlagType
-from ._values import CommandPath, InvalidValue
+from ._values import CommandPath, InvalidValue, SchemaVersion
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +78,12 @@ class Invocation:
     """The pre-acquired token of a login command, read before the handler runs"""
     global_config: bool = False
     """``--global`` of a config-writing command: write the user file, not the project's"""
+    retries: int | None = None
+    """``--retries`` of a ``retry=`` command; None takes the declared budget"""
+    retry_delay_ms: int | None = None
+    """``--retry-delay`` of a ``retry=`` command, in milliseconds"""
+    schema_version: SchemaVersion | None = None
+    """The older output schema ``--schema-version`` pinned; None is the current"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +92,8 @@ class GlobalOptions:
     help: bool
     schema: bool
     max_output: str | None = None
+    output_schema: bool = False
+    schema_version: str | None = None
 
 
 def without_value(token: str) -> str:
@@ -115,7 +123,7 @@ def _repeated(flag: str) -> ParseError:
     )
 
 
-VALUED_GLOBALS = frozenset({"format", "max-output"})
+VALUED_GLOBALS = frozenset({"format", "max-output", "schema-version"})
 FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
 
 
@@ -132,6 +140,7 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
     valued: dict[str, str] = {}
     help_ = False
     schema = False
+    output_schema = False
     rest: list[str] = []
     i = 0
     while i < len(argv):
@@ -142,8 +151,10 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
         name, eq, inline = tok[2:].partition("=") if tok.startswith("--") else ("", "", "")
         if tok in ("--help", "-h"):
             help_ = True
-        elif tok == "--schema":
-            schema = True
+        elif tok in ("--schema", "--print-schema"):
+            schema = True  # REQ-O-013: --print-schema is an alias
+        elif tok == "--output-schema":
+            output_schema = True
         elif name in RESERVED_GLOBAL and name in UNIMPLEMENTED:
             raise reserved_flag(name)
         elif name in VALUED_GLOBALS:
@@ -165,6 +176,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             help=help_,
             schema=schema,
             max_output=valued.get("max-output"),
+            output_schema=output_schema,
+            schema_version=valued.get("schema-version"),
         ),
         rest,
     )

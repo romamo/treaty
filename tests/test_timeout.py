@@ -16,7 +16,7 @@ class SleepArgs:
 
 
 def make_app(default_timeout: float | None = 0.05) -> App:
-    app = App("slowctl", version="1", default_timeout=default_timeout)
+    app = App("slowctl", version="1.0.0", default_timeout=default_timeout)
 
     @app.command(
         "fetch",
@@ -112,7 +112,7 @@ def test_call_with_timeout_reraises_handler_exception() -> None:
 
 
 def test_handler_exception_becomes_crash_envelope_with_traceback() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("crash", description="Raises", danger_level="safe", exit_codes=())
     def crash(args: NoArgs, ctx: Ctx) -> dict[str, str]:

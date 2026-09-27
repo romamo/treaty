@@ -20,7 +20,7 @@ class DeployArgs:
 
 
 def make_app() -> App:
-    app = App("deployctl", version="1")
+    app = App("deployctl", version="1.0.0")
 
     @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
     def deploy(args: DeployArgs, ctx: Ctx) -> dict[str, object]:
@@ -93,7 +93,7 @@ def test_a_field_that_failed_is_not_also_reported_missing() -> None:
     class Strict:
         count: int = Flag(description="Required integer")
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("go", description="Go", danger_level="safe", exit_codes=())
     def go(args: Strict, ctx: Ctx) -> None:

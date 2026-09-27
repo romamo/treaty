@@ -61,7 +61,7 @@ def weird_parse(raw: str) -> Weird:
 
 
 def limits_app() -> App:
-    app = App("lim", version="1")
+    app = App("lim", version="1.0.0")
     app.scalar(Weird, parse=weird_parse)
 
     @app.command(
@@ -121,7 +121,7 @@ class Version:
 
 
 def test_scalar_pattern_type_is_enforced() -> None:
-    app = App("pt", version="1")
+    app = App("pt", version="1.0.0")
     app.scalar(RunId, parse=RunId, pattern_type="uuid")
     app.scalar(Version, parse=Version, pattern_type="semver")
 
@@ -141,7 +141,7 @@ def test_scalar_pattern_type_is_enforced() -> None:
 
 
 def test_secret_path_is_not_rebuilt_in_the_suggestion() -> None:
-    app = App("sp", version="1")
+    app = App("sp", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class KeyFile:
@@ -158,7 +158,7 @@ def test_secret_path_is_not_rebuilt_in_the_suggestion() -> None:
 
 
 def hooks_app(cleanup_fails: bool = False) -> App:
-    app = App("hooks", version="1", default_timeout=None)
+    app = App("hooks", version="1.0.0", default_timeout=None)
 
     def cleanup() -> None:
         if cleanup_fails:
@@ -235,7 +235,7 @@ def test_unprintable_exception_still_crashes_into_an_envelope() -> None:
 
 
 def test_signal_between_exec_lines_writes_a_cancelled_line() -> None:
-    app = App("sig", version="1")
+    app = App("sig", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Loud:
@@ -270,7 +270,7 @@ def test_signal_interrupts_exec_waiting_on_stdin() -> None:
     timer = threading.Timer(0.2, os.kill, args=(os.getpid(), signal.SIGTERM))
     timer.start()
     try:
-        code, [env], _ = run(App("wait", version="1"), ["exec"], stdin=stdin)  # type: ignore[arg-type]
+        code, [env], _ = run(App("wait", version="1.0.0"), ["exec"], stdin=stdin)  # type: ignore[arg-type]
     finally:
         os.close(write_fd)
         stdin.close()
@@ -278,7 +278,7 @@ def test_signal_interrupts_exec_waiting_on_stdin() -> None:
 
 
 def test_crash_redaction_skips_defaults_and_short_values() -> None:
-    app = App("red", version="1")
+    app = App("red", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Gen:
@@ -331,7 +331,7 @@ def test_registration_rejects_what_would_break_later() -> None:
         token: str = Flag(description="Token")
         token_from_env: str = Flag(default="", secret=False, description="Shadow")
 
-    app = App("reg", version="1")
+    app = App("reg", version="1.0.0")
     app.scalar(
         Money, parse=lambda raw: Money(Decimal(raw)), base=float, serialize=lambda m: m.amount
     )
@@ -346,7 +346,7 @@ def test_registration_rejects_what_would_break_later() -> None:
 
 
 def test_confirm_given_on_argv_conflicts_with_false_in_the_payload() -> None:
-    app = App("cf", version="1")
+    app = App("cf", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Rm:
@@ -373,7 +373,7 @@ def test_confirm_given_on_argv_conflicts_with_false_in_the_payload() -> None:
 
 
 def test_probes_drop_global_options_from_examples() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Show:
@@ -412,7 +412,7 @@ class Region:
 
 
 def test_scalar_parser_parse_error_keeps_its_message_and_suggestion() -> None:
-    app = App("rg", version="1")
+    app = App("rg", version="1.0.0")
     app.scalar(Region, parse=Region)
 
     @dataclass(frozen=True, slots=True)
@@ -429,7 +429,7 @@ def test_scalar_parser_parse_error_keeps_its_message_and_suggestion() -> None:
 
 
 def test_failing_plain_renderer_on_a_stream_exits_1_with_one_traceback() -> None:
-    app = App("hr", version="1")
+    app = App("hr", version="1.0.0")
 
     def broken(event: object) -> str:
         raise KeyError("renderer bug")
@@ -452,7 +452,7 @@ def test_failing_plain_renderer_on_a_stream_exits_1_with_one_traceback() -> None
 
 def test_signal_held_before_the_handler_skips_cleanup() -> None:
     ran: list[str] = []
-    app = App("held", version="1", default_timeout=None)
+    app = App("held", version="1.0.0", default_timeout=None)
 
     @dataclass(frozen=True, slots=True)
     class Loud:
@@ -495,7 +495,7 @@ class Url:
 
 
 def test_malformed_url_preset_input_is_an_arg_error() -> None:
-    app = App("u", version="1")
+    app = App("u", version="1.0.0")
     app.scalar(Url, parse=Url, pattern_type="url")
 
     @dataclass(frozen=True, slots=True)
@@ -513,7 +513,7 @@ def test_malformed_url_preset_input_is_an_arg_error() -> None:
 def test_optional_positional_is_not_required_in_the_payload_schema() -> None:
     from treaty._manifest import payload_schema
 
-    app = App("o", version="1")
+    app = App("o", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Hello:
@@ -532,7 +532,7 @@ def test_optional_positional_is_not_required_in_the_payload_schema() -> None:
 def test_undeclared_framework_exit_is_rejected_like_a_custom_one() -> None:
     from treaty import Exit
 
-    app = App("nf", version="1")
+    app = App("nf", version="1.0.0")
 
     @app.command("get", description="Get", danger_level="safe", exit_codes=())
     def get(args: NoArgs, ctx: Ctx) -> dict[str, str]:
@@ -553,7 +553,7 @@ def test_replay_schema_and_failed_data_validate_as_an_mcp_client_would() -> None
     class Up:
         effect: Literal["updated"] | None
 
-    app = App("up", version="1")
+    app = App("up", version="1.0.0")
     app.exit_code("TAKEN", 80, description="Taken", retryable=False, side_effects="none")
 
     @app.command("up", description="Up", danger_level="mutating", exit_codes=["TAKEN"])
@@ -569,7 +569,7 @@ def test_replay_schema_and_failed_data_validate_as_an_mcp_client_would() -> None
 
 
 def test_huge_ints_are_errors_not_crashes_in_process_and_in_output() -> None:
-    app = App("hg", version="1")
+    app = App("hg", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Size:
@@ -608,7 +608,7 @@ def test_prune_skips_foreign_entries_and_keeps_going(tmp_path: Path) -> None:
 def echo_app() -> App:
     from collections.abc import Iterable
 
-    app = App("echo", version="1")
+    app = App("echo", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Text:
@@ -677,7 +677,7 @@ def test_profile_keeps_explicit_relative_commands_absolute_without_resolving_sym
 ) -> None:
     from treaty._profile import build_profile
 
-    app = App("deployctl", version="1")
+    app = App("deployctl", version="1.0.0")
     venv_python = tmp_path / "bin" / "python"
     venv_python.parent.mkdir()
     venv_python.symlink_to(Path(os.__file__))
@@ -697,7 +697,7 @@ def test_profile_keeps_explicit_relative_commands_absolute_without_resolving_sym
 def test_audit_does_not_ask_to_redeclare_framework_retryable_codes() -> None:
     from treaty._audit import audit
 
-    app = App("rl", version="1")
+    app = App("rl", version="1.0.0")
 
     @app.command(
         "push",
@@ -736,7 +736,7 @@ def test_mcp_structured_content_escapes_lone_surrogates() -> None:
 
 
 def test_idempotency_key_works_when_args_serialize_to_non_json(tmp_path: Path) -> None:
-    app = App("pay", version="1", state_dir=tmp_path)
+    app = App("pay", version="1.0.0", state_dir=tmp_path)
 
     @dataclass(frozen=True, slots=True)
     class Money:

@@ -113,3 +113,51 @@ class Etag:
 
     def __str__(self) -> str:
         return self.value
+
+
+# response-envelope.json ResponseMeta.tool_version
+_SEMVER_RE = re.compile(
+    r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?"
+)
+_SCHEMA_VERSION_RE = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)")
+
+
+@dataclass(frozen=True, slots=True)
+class ToolVersion:
+    """Semver version of the tool, such as ``2.4.1``; ``meta.tool_version`` (REQ-F-023)"""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _SEMVER_RE.fullmatch(self.value):
+            raise InvalidValue(f"version {self.value!r} is not semver MAJOR.MINOR.PATCH")
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaVersion:
+    """``MAJOR.MINOR`` version of one command's output contract (REQ-F-022)"""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _SCHEMA_VERSION_RE.fullmatch(self.value):
+            raise InvalidValue(f"schema version {self.value!r} is not MAJOR.MINOR, such as 1.0")
+
+    @property
+    def major(self) -> int:
+        return int(self.value.partition(".")[0])
+
+    @property
+    def minor(self) -> int:
+        return int(self.value.partition(".")[2])
+
+    @property
+    def key(self) -> tuple[int, int]:
+        """For ordering: 1.10 comes after 1.9"""
+        return self.major, self.minor
+
+    def __str__(self) -> str:
+        return self.value

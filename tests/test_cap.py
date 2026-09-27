@@ -11,7 +11,7 @@ from treaty._cap import MARKER, MIN_BYTES, SLACK
 
 
 def big_app() -> App:
-    app = App("bigctl", version="1", max_output_bytes=MIN_BYTES)
+    app = App("bigctl", version="1.0.0", max_output_bytes=MIN_BYTES)
 
     # Opted out of pagination, so the byte cap is what bounds it
     @app.command(
@@ -166,7 +166,7 @@ def test_command_flag_named_like_a_global_is_rejected() -> None:
     class Args:
         max_output: int = Flag(default=0, description="Shadowed by the global flag")
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="max-output"):
 
         @app.command("go", description="Go", danger_level="safe", exit_codes=())

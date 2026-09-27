@@ -40,7 +40,7 @@ class Login:
 
 
 def review_app() -> App:
-    app = App("revctl", version="1")
+    app = App("revctl", version="1.0.0")
 
     @app.command(
         "name",
@@ -132,7 +132,7 @@ class NoStreamField:
 
 
 def test_field_shadowed_by_a_framework_flag_is_rejected() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match="supplied by the framework"):
 
         @app.command("a", description="A", has_network_io=True, danger_level="safe", exit_codes=())
@@ -205,7 +205,7 @@ class Count:
 
 
 def round_two_app() -> App:
-    app = App("r2", version="1")
+    app = App("r2", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Out:
@@ -246,7 +246,7 @@ def test_path_default_is_listed_in_the_manifest() -> None:
 
 
 def test_unlistable_default_fails_registration() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Odd:
@@ -276,7 +276,7 @@ def test_positionals_fill_in_argv_order_skipping_slots_set_by_flag() -> None:
 
 
 def test_array_positional_mixes_values_and_flags() -> None:
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
 
     @app.command("cat", description="Cat", danger_level="safe", exit_codes=())
     def cat(args: Cat, ctx: Ctx) -> dict[str, list[str]]:
@@ -326,7 +326,7 @@ def test_registration_rejects_positional_layouts_the_parser_cannot_serve() -> No
     class Capital:
         Name: str = Arg(description="Name")
 
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     for args_type, match in ((Greedy, "only the last positional"), (Capital, "lowercase")):
         with pytest.raises(RegistrationError, match=match):
             app.command(f"c{len(match)}", description="C", danger_level="safe", exit_codes=())(
@@ -346,7 +346,7 @@ def test_boolean_named_stream_is_rejected_on_streaming_commands() -> None:
     class Tail:
         stream: bool = Flag(default=True, description="Follow")
 
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match="supplied by the framework"):
 
         @app.command("tail", description="Tail", streaming=True, danger_level="safe", exit_codes=())
@@ -377,13 +377,13 @@ def test_flag_enums_and_str_subclass_scalars_serialize_as_declared() -> None:
 
     scalars = ScalarRegistry()
     assert schema_for(Perm, scalars) == {"type": "integer", "minimum": 0}
-    app = App("t", version="1")
+    app = App("t", version="1.0.0")
     app.scalar(Slug, parse=Slug, serialize=lambda s: f"slug:{s}")
     assert to_jsonable(Slug("abc"), app.scalars) == "slug:abc"
 
 
 def test_argument_order_ignores_example_globals_and_streams() -> None:
-    app = App("fmtapp", version="1")
+    app = App("fmtapp", version="1.0.0")
 
     @dataclass(frozen=True, slots=True)
     class Show:

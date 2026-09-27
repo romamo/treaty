@@ -33,7 +33,7 @@ class Window:
 
 
 def make_app() -> App:
-    app = App("sched", version="1")
+    app = App("sched", version="1.0.0")
 
     @app.command(
         "book",
@@ -114,7 +114,7 @@ def test_two_post_init_errors_in_one_run() -> None:
                 ]
             )
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("pair", description="Pair", exit_codes=(), danger_level="safe")
     def pair(args: Pair, ctx: Ctx) -> dict[str, int]:
@@ -191,7 +191,7 @@ def test_multiline_on_a_non_text_field_fails_registration() -> None:
     class Bad:
         count: int = Flag(description="Count", multiline=True)
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="multiline"):
 
         @app.command("bad", description="Bad", exit_codes=(), danger_level="safe")
@@ -205,7 +205,7 @@ def test_audit_suggests_multiline_for_free_text_fields() -> None:
         body: str = Flag(description="Post body")
         title: str = Flag(description="Title")
 
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
 
     @app.command("post", description="Post", exit_codes=(), danger_level="safe")
     def post(args: Post, ctx: Ctx) -> None:

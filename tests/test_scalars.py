@@ -70,7 +70,7 @@ class Receipt:
 
 
 def scalar_app() -> App:
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
     app.scalar(ResourceId, parse=ResourceId.from_boundary, pattern=_ID.pattern)
     app.scalar(TcpPort, parse=TcpPort, base=int, minimum=1, maximum=65535)
     app.scalar(Release, parse=Release.parse, serialize=lambda r: r.tag)
@@ -268,7 +268,7 @@ def test_pattern_type_preset_reaches_manifest_and_schema() -> None:
     class ShowArgs:
         run: RunId = Arg(description="Run to show")
 
-    app = App("runs", version="1")
+    app = App("runs", version="1.0.0")
     app.scalar(RunId, parse=RunId, pattern_type="uuid")
 
     @app.command("show", description="Show a run", danger_level="safe", exit_codes=())
@@ -293,7 +293,7 @@ def test_unregistered_class_is_a_registration_time_schema_error() -> None:
     class Args:
         service: ResourceId = Arg(description="Service")
 
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
     with pytest.raises(SchemaError, match="register a class with app.scalar"):
 
         @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
@@ -310,7 +310,7 @@ def test_unregistered_dataclass_in_output_stays_a_nested_object() -> None:
     class Out:
         service: ResourceId
 
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
 
     @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
     def deploy(args: Args, ctx: Ctx) -> Out:
@@ -328,7 +328,7 @@ def test_field_pattern_is_refused_on_a_scalar_field() -> None:
     class Args:
         service: ResourceId = Arg(description="Service", pattern="x+")
 
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
     app.scalar(ResourceId, parse=ResourceId.from_boundary)
     with pytest.raises(RegistrationError, match="pattern= is not allowed"):
 
@@ -361,13 +361,13 @@ def test_field_pattern_is_refused_on_a_scalar_field() -> None:
     ],
 )
 def test_invalid_registrations_fail_fast(kwargs: dict, match: str | None) -> None:
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
     with pytest.raises((RegistrationError, re.error), match=match):
         app.scalar(**kwargs)
 
 
 def test_duplicate_registration_is_refused() -> None:
-    app = App("fleet", version="1")
+    app = App("fleet", version="1.0.0")
     app.scalar(ResourceId, parse=ResourceId.from_boundary)
     with pytest.raises(RegistrationError, match="already a registered scalar"):
         app.scalar(ResourceId, parse=ResourceId.from_boundary)

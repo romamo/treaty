@@ -85,7 +85,7 @@ def login_app(kind: str = "browser", **meta: object) -> App:
 
 
 def test_requires_auth_without_required_scopes_fails_registration() -> None:
-    app = App("x", version="1", credentials=Fixed(()))
+    app = App("x", version="1.0.0", credentials=Fixed(()))
     with pytest.raises(RegistrationError, match="required_scopes"):
 
         @app.command(
@@ -96,7 +96,7 @@ def test_requires_auth_without_required_scopes_fails_registration() -> None:
 
 
 def test_requires_auth_without_credentials_fails_registration() -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match="credentials"):
 
         @app.command(
@@ -202,7 +202,7 @@ def test_check_permissions_with_insufficient_scopes_exits_8() -> None:
 
 
 def test_a_credential_without_scopes_is_never_over_privileged() -> None:
-    app = App("x", version="1", credentials=Fixed(()))
+    app = App("x", version="1.0.0", credentials=Fixed(()))
 
     @app.command(
         "sync",
@@ -226,7 +226,7 @@ def test_check_permissions_for_an_unknown_command_exits_5() -> None:
 
 
 def test_check_permissions_exists_only_with_credentials() -> None:
-    assert "check-permissions" not in App("x", version="1").manifest()["commands"]  # type: ignore[operator]
+    assert "check-permissions" not in App("x", version="1.0.0").manifest()["commands"]  # type: ignore[operator]
 
 
 # C-021, O-033: login commands
@@ -327,7 +327,7 @@ def test_the_manifest_is_valid() -> None:
     ],
 )
 def test_bad_login_declarations_fail_registration(meta: dict[str, object], match: str) -> None:
-    app = App("x", version="1")
+    app = App("x", version="1.0.0")
     with pytest.raises(RegistrationError, match=match):
 
         @app.command("login", description="Log in", danger_level="safe", exit_codes=(), **meta)  # type: ignore[arg-type]
@@ -339,7 +339,7 @@ def test_bad_login_declarations_fail_registration(meta: dict[str, object], match
 
 
 def test_audit_flags_broad_scopes_and_undeclared_logins() -> None:
-    app = App("x", version="1", credentials=Fixed(()))
+    app = App("x", version="1.0.0", credentials=Fixed(()))
 
     @app.command(
         "wipe",
@@ -363,7 +363,7 @@ def test_audit_flags_broad_scopes_and_undeclared_logins() -> None:
 
 
 def test_a_broad_scope_explained_in_the_description_passes() -> None:
-    app = App("x", version="1", credentials=Fixed(()))
+    app = App("x", version="1.0.0", credentials=Fixed(()))
 
     @app.command(
         "wipe",
@@ -382,7 +382,7 @@ def test_a_broad_scope_explained_in_the_description_passes() -> None:
 
 def test_an_idempotent_replay_still_checks_the_credential(tmp_path: Path) -> None:
     credentials = Fixed(["repo:write"])
-    app = App("gated", version="1", credentials=credentials, state_dir=tmp_path)
+    app = App("gated", version="1.0.0", credentials=credentials, state_dir=tmp_path)
 
     @app.command(
         "push",
