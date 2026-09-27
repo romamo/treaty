@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import traceback
+import types
 import uuid
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -48,7 +49,7 @@ from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
 from ._envelope import Envelope, ErrorDetail, WarningDetail, clean, json_safe, write_envelope
-from ._errors import CliExit, ParseError, RegistrationError, SchemaError
+from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Arg, Flag
 from ._help import render_command, render_root
@@ -63,7 +64,15 @@ from ._mode import (
     quiet_children,
     resolve_mode,
 )
-from ._page import DEFAULT_LIMIT, PageRequest, Position, request, take
+from ._page import (
+    CURSOR_FLAG,
+    DEFAULT_LIMIT,
+    PageRequest,
+    Position,
+    invalid_cursor,
+    request,
+    take,
+)
 from ._parse import (
     Invocation,
     Route,
@@ -302,6 +311,7 @@ class App:
         editor_alternatives: Sequence[str] = (),
         paginated: bool = False,
         default_limit: int = DEFAULT_LIMIT,
+        cursor_check: Callable[[str], None] | None = None,
         heartbeat: bool = False,
         stdin_input: bool = False,
         output_file: bool = False,
@@ -316,6 +326,8 @@ class App:
 
         ``paginated=True`` makes a list command: it returns ``list[T]`` or ``Page[T]``, and
         gets ``--limit`` (``default_limit`` items, 0 for all) and ``--cursor``.
+        ``cursor_check`` validates the handler's own ``Page.next_cursor`` when it comes
+        back, before the handler runs: a pure function raising ``ParseError`` to refuse it.
         ``heartbeat=True`` writes a heartbeat line to stdout every ``--heartbeat-ms``
         (10 s) while the handler runs, in JSON mode. ``stdin_input=True`` reads a payload
         into ``ctx.stdin_text`` before the handler runs: stdin up to the stdin cap, or any
@@ -340,6 +352,17 @@ class App:
                 f"(REQ-C-001, REQ-C-002); add {' and '.join(missing)}, or the values it has"
             )
         assert not isinstance(danger_level, _Unset) and not isinstance(exit_codes, _Unset)
+        if exit_codes is None or isinstance(exit_codes, str):
+            fix = f"exit_codes=({exit_codes!r},)" if exit_codes else "exit_codes=()"
+            raise RegistrationError(
+                f"{cmd_path}: exit_codes is a sequence of exit code names, not "
+                f"{exit_codes!r}; write {fix}"
+            )
+        if danger_level not in DangerLevel:
+            levels = ", ".join(d.value for d in DangerLevel)
+            raise RegistrationError(
+                f"{cmd_path}: danger_level={danger_level!r} is not one of {levels}"
+            )
         if requires_auth and self.credentials is None:
             raise RegistrationError(
                 f"{cmd_path}: requires_auth=True needs App(credentials=...), which tells "
@@ -393,6 +416,7 @@ class App:
                     editor_alternatives=editor_alternatives,
                     paginated=paginated,
                     default_limit=default_limit,
+                    cursor_check=cursor_check,
                     heartbeat=heartbeat,
                     stdin_input=stdin_input,
                     output_file=output_file,
@@ -713,6 +737,8 @@ class App:
             invocation = build_from_mapping(command, arguments, environ)
         except ParseError as exc:
             return run.arg_error(exc, meta={**meta, **_mode_meta(command)})
+        except ArgsCrashed as exc:
+            return run.args_crashed(command, exc, meta=meta)
         if command.streaming:
             # Buffered in-process, a stream returns only when it ends, so it always gets a
             # deadline: the caller's, else the app default, even over a command's None
@@ -844,6 +870,8 @@ class App:
             invocation = parse_command_args(command, route.tokens, environ)
         except ParseError as exc:
             return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
+        except ArgsCrashed as exc:
+            return run.emit(mode, run.args_crashed(command, exc))
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
             if command.path == EXEC_PATH:
@@ -1306,6 +1334,18 @@ class _Run:
             **kw,
         )
 
+    def args_crashed(
+        self,
+        command: Command,
+        exc: ArgsCrashed,
+        *,
+        started: float | None = None,
+        meta: Mapping[str, object] | None = None,
+    ) -> Envelope:
+        """A bug in the args ``__post_init__``: reported like a handler crash"""
+        values = types.SimpleNamespace(**exc.values)  # what the redactor reads secrets from
+        return self._crashed(command, values, exc.cause, started or self.started, meta or {})
+
     def after_start(self, exc: ParseError, **kw: Any) -> Envelope:
         """A ``ParseError`` from a handler or a resource's ``acquire``: user code already
         ran, so exit 2 would promise an agent a side-effect-free failure it cannot have
@@ -1335,6 +1375,11 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen"""
+        if command.paginated:
+            position = self._position(command, invocation, meta)
+            if isinstance(position, Envelope):
+                return position
+            invocation = dataclasses.replace(invocation, cursor=position)
         if command.auth is not None:
             token = self._login_token(command, invocation, meta)
             if isinstance(token, Envelope):
@@ -1373,6 +1418,37 @@ class _Run:
         if applied:
             extra["confirmed"] = True
         return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+
+    def _position(
+        self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
+    ) -> Position | Envelope:
+        """Where the page starts, bound to the command's other arguments (REQ-O-003): a
+        cursor from another listing, or one the command's ``cursor_check`` refuses, is
+        ``INVALID_CURSOR`` before the handler runs"""
+        args = invocation.args
+        # Secrets stay out: the digest is written to stdout inside every cursor
+        listed = {f.name: getattr(args, f.name) for f in command.fields if not f.secret}
+        try:
+            digest = fingerprint(command.path, listed, self.app.scalars)[:16]
+        except SchemaError as exc:
+            message = f"Command {command.path} has arguments a cursor cannot bind to: {exc}"
+            return self._broken(command, "INVALID_ARGS", message, self.started, meta or {})
+        except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
+            return self._crashed(command, args, exc, self.started, meta or {})
+        given = invocation.cursor
+        if given is None:
+            return Position(args=digest)
+        try:
+            if given.args != digest:
+                raise invalid_cursor("it was issued for different arguments")
+            if given.cursor is not None and command.cursor_check is not None:
+                command.cursor_check(given.cursor)
+        except ParseError as exc:
+            exc.context.setdefault("flag", CURSOR_FLAG)
+            return self.arg_error(exc, code="INVALID_CURSOR", meta=meta)
+        except Exception as exc:  # noqa: BLE001 - cursor_check= is user code
+            return self._crashed(command, args, exc, self.started, meta or {})
+        return given
 
     def _config_file(
         self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
@@ -2599,6 +2675,9 @@ class _Run:
             except ParseError as exc:
                 failed = {**meta, **_mode_meta(command)}
                 yield line_no, self.arg_error(exc, started=started, meta=failed)
+                continue
+            except ArgsCrashed as exc:
+                yield line_no, self.args_crashed(command, exc, started=started, meta=meta)
                 continue
             if command.streaming:
                 if invocation.no_stream:

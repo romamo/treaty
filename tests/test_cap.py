@@ -1,12 +1,13 @@
 import io
 import json
+import shlex
 from dataclasses import dataclass
 
 import pytest
 from conftest import spec_validator
 
 from treaty import App, Ctx, Flag, NoArgs, RegistrationError
-from treaty._cap import MARKER, MIN_BYTES
+from treaty._cap import MARKER, MIN_BYTES, SLACK
 
 
 def big_app() -> App:
@@ -74,17 +75,25 @@ def test_list_is_cut_to_the_longest_prefix_that_fits() -> None:
     assert meta["truncated"] is True and meta["total_count"] == 1000
     assert meta["returned_count"] == len(env["data"]) > 1
     assert env["data"] == [{"id": i, "name": f"item-{i}"} for i in range(len(env["data"]))]
-    assert meta["truncation_hint"] == f"bigctl items --max-output {meta['total_bytes']}"
+    assert meta["truncation_hint"] == f"bigctl items --max-output {meta['total_bytes'] + SLACK}"
     (warning,) = env["warnings"]
     assert warning["code"] == "FIELD_TRUNCATED" and warning["context"]["field"] == "$"
 
 
 def test_hint_returns_the_full_response() -> None:
     _, out = run(big_app(), ["items"])
-    total = envelope(out)["meta"]["total_bytes"]
-    code, out = run(big_app(), ["items", "--max-output", str(total)])
+    hint = shlex.split(envelope(out)["meta"]["truncation_hint"])
+    code, out = run(big_app(), hint[1:])
     env = envelope(out)
     assert code == 0 and len(env["data"]) == 1000 and "truncated" not in env["meta"]
+
+
+def test_max_output_hint_leaves_slack_for_a_slower_rerun() -> None:
+    """The rerun's meta (duration_ms) may be longer by a few bytes than the cut run's"""
+    _, out = run(big_app(), ["items"])
+    total = envelope(out)["meta"]["total_bytes"]
+    hint = shlex.split(envelope(out)["meta"]["truncation_hint"])
+    assert int(hint[-1]) >= total + SLACK
 
 
 def test_one_huge_item_keeps_the_item_and_cuts_its_field() -> None:

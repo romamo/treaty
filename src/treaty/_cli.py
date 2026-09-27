@@ -8,10 +8,10 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
-from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from ._app import App, NoArgs
 from ._audit import RULES, AuditReport, Severity, audit
 from ._context import Ctx
@@ -29,7 +29,7 @@ from ._profile import (
 )
 from ._scaffold import ProjectName, render
 
-cli = App("treaty", version=version("treaty"), description="Build and audit agent-ready CLIs")
+cli = App("treaty", version=__version__, description="Build and audit agent-ready CLIs")
 cli.exit_code(
     "CONFORMANCE_FAILED",
     80,

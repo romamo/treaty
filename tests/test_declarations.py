@@ -249,6 +249,25 @@ def test_audit_flags_network_calls_without_timeout() -> None:
     assert untimed_network_calls(fetch) == ["urllib.request.urlopen"]
 
 
+def test_audit_network_timeout_matches_request_verbs_only() -> None:
+    """Clients, sessions, and exception classes of requests and httpx take no request"""
+
+    def fetch(url: str) -> None:
+        requests.Session()  # noqa: F821
+        httpx.Client(base_url=url)  # noqa: F821
+        requests.exceptions.HTTPError(url)  # noqa: F821
+        loop.create_connection(url)  # noqa: F821
+        httpx.post(url)  # noqa: F821
+        socket.create_connection((url, 80))  # noqa: F821
+        http.client.HTTPSConnection(url)  # noqa: F821
+
+    assert untimed_network_calls(fetch) == [
+        "httpx.post",
+        "socket.create_connection",
+        "http.client.HTTPSConnection",
+    ]
+
+
 def test_audit_rule_only_applies_to_network_commands() -> None:
     from treaty._audit import audit
 

@@ -33,6 +33,8 @@ ENV_VAR = "TREATY_MAX_OUTPUT_BYTES"
 MAX_OUTPUT_FLAG = "max-output"
 MARKER = "[truncated]"
 MIN_BYTES = 4096
+SLACK = 1024
+"""Bytes a ``--max-output`` hint adds to the full size, for what varies between runs"""
 _MIN_STRING = 64  # shorter strings save less than the marker costs
 
 Key = str | int
@@ -221,7 +223,7 @@ def _truncated(
     if root is not None and listed and rerun.page is not None and isinstance(pagination, dict):
         # The next page starts at the first item the cut dropped (REQ-F-052)
         path, position = rerun.page
-        token = Position(position.cursor, position.skip + root.kept).encode(path)
+        token = dataclasses.replace(position, skip=position.skip + root.kept).encode(path)
         meta["pagination"] = {
             **pagination,
             "returned": root.kept,
@@ -238,7 +240,9 @@ def _truncated(
             else f"call again with limit {root.kept} and cursor {token}"
         )
     elif rerun.argv is not None:
-        meta["truncation_hint"] = shlex.join(with_flags(rerun.argv, {MAX_OUTPUT_FLAG: str(total)}))
+        # A rerun's meta differs by a few bytes (duration_ms), so the hint leaves slack
+        room = str(total + SLACK)
+        meta["truncation_hint"] = shlex.join(with_flags(rerun.argv, {MAX_OUTPUT_FLAG: room}))
     else:
         # An exec line or an MCP call has no argv of its own to repeat
         meta["truncation_hint"] = (

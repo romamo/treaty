@@ -14,19 +14,25 @@ from ._errors import ParseError
 
 PATTERN_TYPE = "filepath"
 _PERCENT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
+_CONTROL = {
+    "\x00": ("null byte", "null_byte"),
+    "\n": ("newline", "newline"),
+    "\r": ("carriage return", "carriage_return"),
+}
 
 
 def check_path(raw: str, flag: str) -> Path:
     """Return ``raw`` as a ``Path`` or raise a validation-phase ``ParseError``
 
-    Rejected, with ``rejected_pattern`` in the error context: null bytes,
+    Rejected, with ``rejected_pattern`` in the error context: null bytes, line breaks,
     percent-encoded sequences, and any ``..`` segment.
     """
-    if "\x00" in raw:
-        raise ParseError(
-            f"{flag!r} contains a null byte",
-            context={"flag": flag, "value": raw, "rejected_pattern": "null_byte"},
-        )
+    for char, (what, pattern) in _CONTROL.items():
+        if char in raw:
+            raise ParseError(
+                f"{flag!r} contains a {what}",
+                context={"flag": flag, "value": raw, "rejected_pattern": pattern},
+            )
     if _PERCENT_RE.search(raw):
         raise ParseError(
             f"{flag!r} contains a percent-encoded sequence",

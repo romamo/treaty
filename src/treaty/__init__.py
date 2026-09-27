@@ -1,5 +1,7 @@
 """treaty: zero-dependency CLI framework implementing the CLI Agent Spec."""
 
+from importlib.metadata import version
+
 from ._app import App, ExecArgs, Group, NoArgs
 from ._auth import Credentials
 from ._command import DangerLevel, Example, Renderer
@@ -17,6 +19,8 @@ from ._subprocess import Completed
 from ._table import table
 from ._timeout import Timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, Scope
+
+__version__ = version("treaty")
 
 __all__ = [
     "Affects",

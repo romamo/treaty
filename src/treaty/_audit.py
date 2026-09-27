@@ -230,9 +230,14 @@ def _network_io(app: App) -> Iterator[Finding]:
             )
 
 
-# Calls that open a connection and take timeout=; requests and httpx by module prefix
-_NETWORK_CALLS = frozenset({"urlopen", "create_connection", "HTTPConnection", "HTTPSConnection"})
+# Calls that open a connection and take timeout=: by name, and the request verbs of
+# requests and httpx (not their clients, sessions, or exception classes)
+_NETWORK_CALLS = frozenset({"urlopen", "HTTPConnection", "HTTPSConnection"})
+_CONNECT = frozenset({"create_connection", "socket.create_connection"})
 _NETWORK_MODULES = frozenset({"requests", "httpx"})
+_REQUEST_VERBS = frozenset(
+    {"get", "post", "put", "patch", "delete", "head", "options", "request", "stream"}
+)
 
 
 def _dotted(node: ast.expr) -> str | None:
@@ -259,7 +264,11 @@ def untimed_network_calls(handler: Callable[..., object]) -> list[str]:
         if name is None:
             continue
         parts = name.split(".")
-        network = parts[-1] in _NETWORK_CALLS or (len(parts) > 1 and parts[0] in _NETWORK_MODULES)
+        network = (
+            parts[-1] in _NETWORK_CALLS
+            or name in _CONNECT
+            or (len(parts) == 2 and parts[0] in _NETWORK_MODULES and parts[1] in _REQUEST_VERBS)
+        )
         has_timeout = any(k.arg == "timeout" or k.arg is None for k in node.keywords)
         if network and not has_timeout:
             found.append(name)
@@ -442,7 +451,7 @@ def _config_write_scope(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.config_write_scope is not None or c.danger_level is DangerLevel.SAFE:
             continue
-        if "config" in c.path.parts or c.path.parts[-1] == "set":
+        if "config" in c.path.parts:
             yield Finding(
                 "config-write-scope",
                 Severity.WARNING,

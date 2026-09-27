@@ -162,8 +162,9 @@ or `CI` is set, and `plain` otherwise.
 agents read and takes no renderer. `jsonl` is the same output under the name line-oriented
 readers ask for. Every other format writes the result data as text and errors as prose on
 stderr. `tsv` is built in: a header row, then one row per item (nested values as compact
-JSON); `treaty.table(",")` is the same renderer for CSV, `app.format(Format.CSV,
-render=table(","))`.
+JSON, `null` as an empty field, and a backslash, tab, or line break in a value escaped as
+`\\`, `\t`, `\n`, `\r`, never quoted); `treaty.table(",")` is the same renderer for CSV
+with the `csv` module's quoting, `app.format(Format.CSV, render=table(","))`.
 A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
 returns the text. Formats are `Format` members, never strings:
 
@@ -357,7 +358,9 @@ string where no child dominates to the longest prefix that fits. `meta` gets `tr
 `total_count` and `returned_count` when `data` is a list), and each cut adds a
 `FIELD_TRUNCATED` warning naming the field. For a list command whose page was cut the hint
 is the next page, `--limit <kept> --cursor <token>`, and `meta.pagination` points there
-too; otherwise it is the same command with the `--max-output` that returns everything.
+too; otherwise it is the same command with a `--max-output` 1 KiB above the full size,
+since a rerun's `meta` can be a few bytes longer. `--limit` and `--cursor` on the command
+line win over the same keys in a `--raw-payload`, so a hint appended to such a call runs.
 Plain mode is not capped.
 
 ## Lists
@@ -383,9 +386,13 @@ def releases(args: NoArgs, ctx: Ctx) -> Page[Release]:
 ```
 
 The framework slices whatever it gets to the limit, so a batch larger than asked is fine.
-Its own cursor is URL-safe base64 naming the command, the handler's cursor, and how many
-items of that batch were already delivered; one that does not decode or names another
-command exits `2` with `INVALID_CURSOR`. In `exec`, `_opts` take `limit` and `cursor`; MCP
+Its own cursor is URL-safe base64 naming the command, a digest of the other arguments,
+the handler's cursor, and how many items of that batch were already delivered; one that
+does not decode, names another command, or came from other arguments (`--q a`, then
+`--q b`) exits `2` with `INVALID_CURSOR`. `cursor_check=` validates the handler's own
+cursor before the handler runs: a pure function that takes the string and raises
+`ParseError` to refuse it, which also exits `2` with `INVALID_CURSOR`. JSON routes take
+`limit` as an integer only. In `exec`, `_opts` take `limit` and `cursor`; MCP
 tools take them as arguments. `--schema` shows `default_limit`, and the `paginated-list`
 audit rule flags list outputs without `paginated=True`. Streams are not paginated.
 

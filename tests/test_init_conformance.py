@@ -213,3 +213,11 @@ def test_write_paths_reject_percent_encoding_and_null_bytes(tmp_path: Path) -> N
 def test_write_paths_accept_absolute_paths(tmp_path: Path) -> None:
     code, env = run_cli(["init", "demo", "--directory", str(tmp_path / "demo"), "--dry-run"])
     assert code == 0 and env["data"]["directory"] == str(tmp_path / "demo")
+
+
+def test_scaffold_pins_the_treaty_version_it_was_generated_by() -> None:
+    from treaty import __version__
+    from treaty._scaffold import ProjectName, render
+
+    pyproject = render(ProjectName("demo"))["pyproject.toml"]
+    assert f'dependencies = ["treaty>={__version__}"]' in pyproject

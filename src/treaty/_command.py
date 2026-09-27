@@ -100,6 +100,8 @@ class Command:
     """A list command: ``--limit``, ``--cursor``, and ``meta.pagination`` (REQ-F-018)"""
     default_limit: Limit = Limit(DEFAULT_LIMIT)
     """Items per page without ``--limit`` (REQ-F-019)"""
+    cursor_check: Callable[[str], None] | None = None
+    """Validates the handler's own cursor from a ``--cursor`` token; raises ``ParseError``"""
     heartbeat: bool = False
     """JSON runs write heartbeat lines to stdout while the handler runs (REQ-F-053)"""
     stdin_input: bool = False
@@ -168,6 +170,7 @@ def build_command(
     editor_alternatives: Sequence[str] = (),
     paginated: bool = False,
     default_limit: int = DEFAULT_LIMIT,
+    cursor_check: Callable[[str], None] | None = None,
     heartbeat: bool = False,
     stdin_input: bool = False,
     output_file: bool = False,
@@ -187,6 +190,11 @@ def build_command(
         token_env_vars=token_env_vars,
         streaming=streaming,
     )
+    if cursor_check is not None and not (paginated and callable(cursor_check)):
+        raise RegistrationError(
+            f"{path}: cursor_check is a function validating a paginated command's own cursor; "
+            "pass one with paginated=True"
+        )
     if paginated and streaming:
         raise RegistrationError(
             f"{path}: a stream has no pages; drop paginated=True or streaming=True"
@@ -336,6 +344,7 @@ def build_command(
         editor_alternatives=tuple(editor_alternatives),
         paginated=paginated,
         default_limit=Limit(default_limit or None),
+        cursor_check=cursor_check,
         heartbeat=heartbeat,
         stdin_input=stdin_input,
         output_file=output_file,

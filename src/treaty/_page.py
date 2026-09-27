@@ -10,6 +10,7 @@ resumes after a page the byte cap cut short (REQ-F-052), so every cut can be fol
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import re
 from collections.abc import Sequence
@@ -21,7 +22,7 @@ from ._values import CommandPath, InvalidValue
 LIMIT_FLAG = "limit"
 CURSOR_FLAG = "cursor"
 DEFAULT_LIMIT = 20
-_VERSION = 1
+_VERSION = 2
 _TOKEN = re.compile(r"[A-Za-z0-9_-]+")
 
 
@@ -70,33 +71,49 @@ class Limit:
             raise InvalidValue("a page limit is at least 1, or None for no limit")
 
     @classmethod
-    def parse(cls, raw: object) -> Limit:
-        """A flag or JSON value; ``0`` means no limit (REQ-F-019)"""
+    def parse(cls, raw: str) -> Limit:
+        """The ``--limit`` text; ``0`` means no limit (REQ-F-019)"""
+        return cls.from_json(whole_number(raw, LIMIT_FLAG, "a whole number of items"))
+
+    @classmethod
+    def from_json(cls, raw: object) -> Limit:
+        """A JSON ``limit`` (``exec``, MCP, ``--raw-payload``): an integer, never text"""
         context = {"flag": LIMIT_FLAG, "value": raw}
-        if isinstance(raw, str) and raw.isascii() and raw.isdigit():
-            value = int(raw)
-        elif isinstance(raw, int) and not isinstance(raw, bool):
-            value = raw
-        else:
+        if isinstance(raw, bool) or not isinstance(raw, int):
             raise ParseError("'limit' expects a whole number of items", context=context)
-        if value < 0:
+        if raw < 0:
             raise ParseError(
                 "'limit' cannot be negative", context=context, suggestion="pass 0 for every item"
             )
-        return cls(None) if value == 0 else cls(value)
+        return cls(None) if raw == 0 else cls(raw)
+
+
+MAX_DIGITS = 18
+"""Longest whole number a flag takes as text; ``int()`` refuses past 4300 digits"""
+
+
+def whole_number(raw: str, flag: str, expects: str) -> int:
+    """ASCII digits, at most ``MAX_DIGITS`` of them, as an ``int``"""
+    if not (raw.isascii() and raw.isdigit()) or len(raw) > MAX_DIGITS:
+        shown = raw if len(raw) <= 32 else raw[:32] + "..."
+        raise ParseError(f"{flag!r} expects {expects}", context={"flag": flag, "value": shown})
+    return int(raw)
 
 
 @dataclass(frozen=True, slots=True)
 class Position:
-    """Where a page starts: the handler's cursor, and how many of the items the handler
-    returns there were delivered already"""
+    """Where a page starts: the handler's cursor, how many of the items the handler
+    returns there were delivered already, and a digest of the listing's other arguments"""
 
     cursor: str | None = None
     skip: int = 0
+    args: str = ""
+    """Digest of the arguments besides ``--limit`` and ``--cursor``; a cursor resumes
+    only the listing it came from"""
 
     def encode(self, path: CommandPath) -> str:
-        """The ``--cursor`` token: URL-safe, stateless, bound to one command"""
-        body = {"v": _VERSION, "cmd": path.value, "c": self.cursor, "s": self.skip}
+        """The ``--cursor`` token: URL-safe, stateless, bound to one command and its arguments"""
+        body = {"v": _VERSION, "cmd": path.value, "c": self.cursor, "s": self.skip, "a": self.args}
         raw = json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
         return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -104,28 +121,29 @@ class Position:
     def decode(cls, token: object, path: CommandPath) -> Position:
         """A token this command issued, or an ``INVALID_CURSOR`` argument error"""
         if not isinstance(token, str) or not _TOKEN.fullmatch(token):
-            raise _invalid(token, "it is not a cursor token")
+            raise invalid_cursor("it is not a cursor token")
         try:
             raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
             body = json.loads(raw)
         except ValueError:  # binascii.Error, a JSON or UTF-8 decode error
-            raise _invalid(token, "it does not decode") from None
+            raise invalid_cursor("it does not decode") from None
         if (
             not isinstance(body, dict)
-            or body.keys() != {"v", "cmd", "c", "s"}
+            or body.keys() != {"v", "cmd", "c", "s", "a"}
+            or not isinstance(body["a"], str)
             or body["v"] != _VERSION
             or not (body["c"] is None or isinstance(body["c"], str))
             or isinstance(body["s"], bool)
             or not isinstance(body["s"], int)
             or body["s"] < 0
         ):
-            raise _invalid(token, "it was not issued by this tool version")
+            raise invalid_cursor("it was not issued by this tool version")
         if body["cmd"] != path.value:
-            raise _invalid(token, f"it was issued by {body['cmd']!r}, not {path.value!r}")
-        return cls(body["c"], body["s"])
+            raise invalid_cursor(f"it was issued by {body['cmd']!r}, not {path.value!r}")
+        return cls(body["c"], body["s"], body["a"])
 
 
-def _invalid(token: object, why: str) -> ParseError:
+def invalid_cursor(why: str) -> ParseError:
     return ParseError(
         f"--cursor is invalid: {why}",
         context={"flag": CURSOR_FLAG},
@@ -177,8 +195,8 @@ def take(
     window = items[position.skip : end]
     following: Position | None = None
     if end is not None and len(items) > end:
-        following = Position(position.cursor, end)
+        following = dataclasses.replace(position, skip=end)
     elif after is not None:
-        following = Position(after)
+        following = Position(after, 0, position.args)
     token = None if following is None else following.encode(path)
     return window, Pagination(total=total, returned=len(window), next_cursor=token)

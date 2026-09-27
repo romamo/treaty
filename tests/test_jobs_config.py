@@ -353,6 +353,10 @@ def test_audit_flags_undeclared_config_writes_and_jobs() -> None:
     def start(args: NoArgs, ctx: Ctx) -> None:
         return None
 
+    @app.command("flag.set", description="Set a flag", danger_level="mutating", exit_codes=())
+    def set_flag(args: NoArgs, ctx: Ctx) -> Wrote:
+        return Wrote("updated", "")  # a bare 'set' outside config writes no config
+
     rules = {r.id: r for r in audit(app, "tool", limit=10).rules}
     assert [f.command for f in rules["config-write-scope"].findings] == ["config.put"]
     assert [f.command for f in rules["async-job"].findings] == ["start"]

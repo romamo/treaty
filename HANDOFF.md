@@ -46,7 +46,8 @@ The two do not share code.
   `ParseError` with structured context and becomes exit `2`
 - **Exit 2 only before user code (D2).** The args `__post_init__` is phase 1: `_finish`
   calls it whenever every field has a value and adds its `ParseError` (or the entries of a
-  `ParseError.combine`) to the collected errors. A `ParseError` or `Exit.ARG_ERROR` from a
+  `ParseError.combine`, or an `InvalidValue` from a value object) to the collected errors;
+  any other exception is `ArgsCrashed`, which every parse site reports as `HANDLER_CRASHED`. A `ParseError` or `Exit.ARG_ERROR` from a
   handler or `acquire` is `VALIDATION_AFTER_START`, exit 1, `phase: execution`
   (`_Run.after_start`). F-015's "execute hook registered before validate hooks" cannot
   happen: the framework owns the order and there are no hooks to register
@@ -121,7 +122,8 @@ The two do not share code.
 - **Every exit writes an envelope.** A handler exception becomes `HANDLER_CRASHED`
   (exit 1) with the redacted traceback on stderr. Broad `except Exception` exists only
   where user code runs: the handler, a scalar's `parse=`/`serialize=`, `cleanup=`,
-  `plain=`, and an exception's `__str__`. Nowhere else
+  `plain=`, `cursor_check=`, an args `__post_init__`, and an exception's `__str__`.
+  Nowhere else
 - **Exit codes must be declared.** A handler raises only what its manifest entry lists:
   `exit_codes=`, plus `_manifest.implicit_exit_codes`: `GENERAL_ERROR`, `ARG_ERROR`,
   `TIMEOUT`, and `PRECONDITION` (a stray `input()`) everywhere, `CONFLICT` on mutating
@@ -179,8 +181,9 @@ The two do not share code.
   `interactive=True` commands
 - **The framework slices every page.** A `paginated=True` handler returns the whole
   `list[T]` or one `Page[T]` batch; `_page.take` cuts it to the limit. The cursor is
-  base64url JSON of the command path, the handler's own cursor, and a skip count into the
-  batch that cursor returns, so one shape resumes a sliced batch, a handler batch, and a
+  base64url JSON of the command path, a digest of the non-secret args (checked in
+  `_Run._position` with the command's `cursor_check`, before user code), the handler's own
+  cursor, and a skip count into the batch that cursor returns, so one shape resumes a sliced batch, a handler batch, and a
   page the byte cap cut (`_cap.Rerun` carries the position and the argv for the hint).
   `meta.pagination` holds exactly the five spec keys (`additionalProperties: false`);
   `paginated` and `default_limit` are only in `--schema`. Streams are not paginated.

@@ -87,6 +87,17 @@ class ParseError(Exception):
         return out
 
 
+class ArgsCrashed(Exception):
+    """The args ``__post_init__`` raised something other than ``ParseError`` or
+    ``InvalidValue``: a bug in user code, reported as ``HANDLER_CRASHED`` (exit 1)"""
+
+    def __init__(self, cause: Exception, values: Mapping[str, object]) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.values = dict(values)
+        """The field values it was given, so the crash report can redact secrets"""
+
+
 class CliExit(Exception):
     """Raised by a handler to end the run with a declared exit code
 

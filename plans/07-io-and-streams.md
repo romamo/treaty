@@ -96,9 +96,9 @@ exit 2, `STDIN_TOO_LARGE`, with a `hint` field naming `--input-file`. Add `hint`
   `--output` writes a different file (one compact item per line)
 - **`tsv` is built in, `csv` is not.** O-001 names `tsv` as a minimum, so every app offers
   it; `treaty.table(delimiter)` is the renderer, and `app.format(Format.CSV,
-  render=table(","))` is the one line for CSV. Both use the `csv` module's quoting, so a
-  tab or quote inside a value round-trips through `csv.reader`. In a stream every event is
-  rendered on its own, header included
+  render=table(","))` is the one line for CSV. CSV uses the `csv` module's quoting; TSV
+  has none and escapes a backslash, tab, CR, or LF in a value as `\\`, `\t`, `\r`,
+  `\n`. In a stream every event is rendered on its own, header included
 - **`stdin_input` reads in `_Run.execute`**, before the idempotency and safe-default paths,
   and passes the text as `ctx.stdin_text` (no `StdinPayload` resource). In `exec` and
   `App.call` stdin is not the payload's, so those need `input_file` and otherwise exit `2`

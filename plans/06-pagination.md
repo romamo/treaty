@@ -83,7 +83,9 @@ like the flags.
 ## Deviations as built
 
 - **One cursor shape, no `PAGINATION_UNSUPPORTED`.** The cursor is base64url JSON of
-  `{"v": 1, "cmd": <path>, "c": <handler cursor>, "s": <skip>}`, where `skip` counts the
+  `{"v": 2, "cmd": <path>, "a": <args digest>, "c": <handler cursor>, "s": <skip>}`, where
+  `a` is 16 hex digits of the idempotency fingerprint of the non-secret fields (so a
+  cursor from `--q a` is `INVALID_CURSOR` under `--q b`; no HMAC) and `skip` counts the
   items of the batch at `c` already delivered. A handler that ignores `ctx.page` and
   returns everything, one that returns a bigger batch than asked, and a page the byte cap
   cut all resume correctly, so `next_cursor` is never null while items remain (F-018
@@ -105,6 +107,14 @@ like the flags.
   otherwise the same argv with `--max-output <total_bytes>`. `exec` lines and MCP calls
   have no argv to repeat, so their hint stays prose (with the limit and cursor for a page)
 - **`<APP>_MAX_OUTPUT_BYTES` wins over `TREATY_MAX_OUTPUT_BYTES`**; both stay
+- **`cursor_check=`** is an optional pure function over the handler's own cursor, run in
+  `_Run.execute` next to the digest check and before any user code but a scalar's
+  `serialize=`; its `ParseError` is `INVALID_CURSOR`, exit 2
+- **Argv `--limit` and `--cursor` win over a `--raw-payload`'s**, with no conflict error,
+  so a truncation hint appended to a raw-payload call runs; JSON routes take `limit` as an
+  integer only
+- **`--max-output` hints add 1 KiB** (`_cap.SLACK`) to the full size, because a rerun's
+  `meta` differs by a few bytes
 - **`ParseError(code=...)`** sets `error.code` of a single argument error, and each
   `error.errors` entry carries its `code`; `INVALID_CURSOR` is the first user
 - The `treaty rules` built-in is paginated, so the treaty CLI passes its own audit

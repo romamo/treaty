@@ -62,6 +62,8 @@ def test_valid_paths_pass_unchanged_and_serialize_as_strings(tmp_path: Path) -> 
         ("%2e%2e/etc/passwd", "percent_encoded"),
         ("files%2fetc", "percent_encoded"),
         ("a\x00b", "null_byte"),
+        ("a\nb", "newline"),
+        ("a\rb", "carriage_return"),
     ],
 )
 def test_hallucination_patterns_are_rejected_before_the_handler(raw: str, pattern: str) -> None:

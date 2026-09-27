@@ -1,6 +1,5 @@
 """I/O limits and streams: REQ-F-011, F-014, F-053, F-054, O-001."""
 
-import csv
 import io
 import json
 import os
@@ -258,8 +257,15 @@ def test_o001_jsonl_is_one_object_per_line_everywhere() -> None:
 def test_o001_tsv_is_built_in_with_a_header_row() -> None:
     code, out, _ = run(["rows", "--format", "tsv"])
     assert code == 0 and out.splitlines()[0] == "name\tsize\ttags"
-    rows = list(csv.reader(io.StringIO(out), delimiter="\t"))
-    assert rows[1:] == [["a", "1", '["x"]'], ["b\tc", "2", "[]"]]
+    rows = [line.split("\t") for line in out.splitlines()]
+    assert rows[1:] == [["a", "1", '["x"]'], ["b\\tc", "2", "[]"]]
+
+
+def test_o001_tsv_escapes_instead_of_quoting() -> None:
+    from treaty import table
+
+    out = table("\t")([{"a": 'x"y\\z', "b": "l1\nl2\r", "c": None}])
+    assert out == 'a\tb\tc\nx"y\\\\z\tl1\\nl2\\r\t\n'
 
 
 def test_o001_csv_to_a_file_with_the_envelope_on_stdout(tmp_path: Path) -> None:
@@ -269,6 +275,13 @@ def test_o001_csv_to_a_file_with_the_envelope_on_stdout(tmp_path: Path) -> None:
     spec_validator("response-envelope").validate(envelope)
     assert code == 0 and target.read_text().splitlines()[0] == "name,size,tags"
     assert envelope["data"] == {"path": str(target), "bytes": target.stat().st_size}
+
+
+@pytest.mark.parametrize(("command", "flag"), [("rows", "--output"), ("count", "--input-file")])
+def test_framework_path_flags_refuse_line_breaks(command: str, flag: str, tmp_path: Path) -> None:
+    code, out, _ = run([command, flag, str(tmp_path / "a\nb")])
+    assert code == 2 and json.loads(out)["error"]["context"]["rejected_pattern"] == "newline"
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_o001_output_with_a_format_name_exits_2_and_writes_nothing(tmp_path: Path) -> None:

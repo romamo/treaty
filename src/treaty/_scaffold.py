@@ -7,6 +7,7 @@ import re
 import sys
 from dataclasses import dataclass
 
+from . import __version__
 from ._errors import ParseError
 
 # PEP 508 names end in a letter or digit; no doubled hyphens
@@ -73,7 +74,7 @@ name = "{n}"
 version = "0.1.0"
 description = "{n}: an agent-ready CLI built on treaty"
 requires-python = ">=3.14"
-dependencies = ["treaty"]
+dependencies = ["treaty>={__version__}"]
 
 [project.scripts]
 {n} = "{pkg}.cli:main"

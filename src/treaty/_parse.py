@@ -18,10 +18,10 @@ from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, is_env_var_name
 from ._command import HEARTBEAT_FLAG, INPUT_FILE_FLAG, OUTPUT_FLAG, Command, DangerLevel
 from ._config import GLOBAL_FLAG
 from ._dispatch import loads_strict
-from ._errors import ParseError
+from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
 from ._idempotency import IdempotencyKey
-from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position
+from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path
 from ._secrets import (
     SecretRef,
@@ -32,7 +32,7 @@ from ._secrets import (
 )
 from ._timeout import Timeout
 from ._types import Classified, FlagType
-from ._values import CommandPath
+from ._values import CommandPath, InvalidValue
 
 TIMEOUT_FLAG = "timeout"
 CONFIRM_FLAG = "confirm-destructive"
@@ -502,15 +502,12 @@ def parse_command_args(
         errors.finish()
         mapping = _decode_raw_payload(raw_payload)
         built = build_from_mapping(command, mapping, env)
-        # Framework keys may come from argv or the payload; both only if they agree
+        # Framework keys may come from argv or the payload; both only if they agree, except
+        # --limit and --cursor, which win so a truncation hint appended to argv runs
         if timeout is not None and built.timeout is not None and timeout != built.timeout:
             raise _repeated(TIMEOUT_FLAG)
         if key is not None and built.idempotency_key not in (None, key):
             raise _repeated(IDEMPOTENCY_FLAG)
-        if limit is not None and built.limit not in (None, limit):
-            raise _repeated(LIMIT_FLAG)
-        if cursor is not None and built.cursor not in (None, cursor):
-            raise _repeated(CURSOR_FLAG)
         if token_var is not None and built.token_env_var not in (None, token_var):
             raise _repeated(TOKEN_ENV_FLAG)
         for flag, given in (
@@ -591,12 +588,11 @@ def output_path(raw: str) -> Path:
 
 def parse_heartbeat(raw: str) -> int:
     """``--heartbeat-ms``: whole milliseconds; 0 turns heartbeats off"""
-    if not (raw.isascii() and raw.isdigit()) or int(raw) > 86_400_000:
-        raise ParseError(
-            "'heartbeat-ms' expects whole milliseconds, at most a day; 0 turns heartbeats off",
-            context={"flag": HEARTBEAT_FLAG, "value": raw},
-        )
-    return int(raw)
+    expects = "whole milliseconds, at most a day; 0 turns heartbeats off"
+    value = whole_number(raw, HEARTBEAT_FLAG, expects)
+    if value > 86_400_000:
+        raise ParseError(f"'heartbeat-ms' expects {expects}", context={"flag": HEARTBEAT_FLAG})
+    return value
 
 
 def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
@@ -715,6 +711,11 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
     except ParseError as exc:
         errors.errors.extend(exc.errors or (exc,))
         errors.fail()
+    except InvalidValue as exc:  # a value object built in __post_init__ refused its input
+        errors.add(ParseError(str(exc), context={"command": command.path.value}))
+        errors.fail()
+    except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
+        raise ArgsCrashed(exc, values) from exc
     errors.finish()
     return args
 
@@ -745,7 +746,7 @@ def build_from_mapping(
                 timeout = Timeout.parse(value)
                 continue
             if flag == LIMIT_FLAG and command.paginated:
-                limit = Limit.parse(value)
+                limit = Limit.from_json(value)
                 continue
             if flag == INPUT_FILE_FLAG and command.stdin_input:
                 if not isinstance(value, str):
