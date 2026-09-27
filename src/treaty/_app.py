@@ -1574,7 +1574,9 @@ def buffer_stream(envelopes: Generator[Envelope]) -> Envelope:
     assert last is not None, "a stream always ends with a terminal envelope"
     meta = {k: v for k, v in last.extra_meta.items() if k not in ("seq", "end")}
     merged = list(last.warnings)
-    merged += [w for i, w in enumerate(warnings) if w not in merged and w not in warnings[:i]]
+    for warning in warnings:
+        if warning not in merged:
+            merged.append(warning)
     return dataclasses.replace(
         last, data=events, warnings=tuple(merged), extra_meta={**meta, "total": len(events)}
     )
