@@ -82,9 +82,8 @@ def without_userinfo(url: str) -> str:
     parts = urlsplit(url)
     if parts.username is None and parts.password is None:
         return url
-    host = parts.hostname or ""
-    netloc = f"{host}:{parts.port}" if parts.port is not None else host
-    return urlunsplit(parts._replace(netloc=netloc))
+    # The host and port as written: an IPv6 host keeps its brackets, a bad port its text
+    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2]))
 
 
 @dataclass(frozen=True, slots=True)

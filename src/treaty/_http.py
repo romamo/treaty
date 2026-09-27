@@ -46,15 +46,26 @@ DEFAULT_RETRY_AFTER_MS = 1000
 """A 429 without a readable ``Retry-After`` still says to wait (REQ-C-014)"""
 
 
+def _proxy_problem(raw: str) -> str | None:
+    """Why ``raw`` is no proxy URL ``ctx.http`` can use; None when it is one"""
+    parts = urlsplit(raw)
+    try:
+        parts.port
+    except ValueError:
+        return "has a port that is not a number from 0 to 65535"
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return "is not an http:// or https:// proxy URL; SOCKS proxies are not supported"
+    return None
+
+
 def parse_proxy(raw: object) -> str:
     """``--proxy``: an ``http://`` or ``https://`` URL with a host"""
     if not isinstance(raw, str):
         raise ParseError("'proxy' expects a URL", context={"flag": PROXY_FLAG})
-    parts = urlsplit(raw)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
+    problem = _proxy_problem(raw)
+    if problem is not None:
         raise ParseError(
-            f"--proxy {without_userinfo(raw)!r} is not an http:// or https:// proxy URL; "
-            "SOCKS proxies are not supported",
+            f"--proxy {without_userinfo(raw)!r} {problem}",
             context={"flag": PROXY_FLAG, "value": without_userinfo(raw)},
             suggestion="pass --proxy http://host:port",
         )
@@ -122,7 +133,18 @@ class ProxyConfig:
         bypass = _env(self.env, "NO_PROXY")
         if bypass and bypassed(parts, bypass[1]):
             return Route(None, bypass[0])
-        return Route(found[1], found[0])
+        name, raw = found
+        proxy = raw if "://" in raw else f"http://{raw}"  # host:port, as curl reads it
+        problem = _proxy_problem(proxy)
+        if problem is not None:
+            raise CliExit(
+                ExitCodeName("PRECONDITION"),
+                f"{name} {without_userinfo(raw)!r} {problem}",
+                code="PROXY_INVALID",
+                context={"variable": name, "value": without_userinfo(raw)},
+                fix_required=f"set {name} to http://host:port, or unset it",
+            )
+        return Route(proxy, name)
 
     def child_env(self) -> dict[str, str]:
         """The variables ``ctx.run`` children get, so ``--proxy`` and ``--no-proxy`` reach
@@ -205,6 +227,9 @@ class _Proxied(urllib.request.BaseHandler):
         self.proxies = proxies
 
     def http_request(self, req: urllib.request.Request) -> urllib.request.Request:
+        # A redirect copies the previous hop's headers: its proxy's credentials must not
+        # reach a host that bypasses the proxy, or another proxy
+        req.remove_header("Proxy-authorization")
         route = self.proxies.route(req.full_url)
         if route.proxy is not None:
             parts = urlsplit(route.proxy)
@@ -212,7 +237,7 @@ class _Proxied(urllib.request.BaseHandler):
                 user = unquote(parts.username)
                 password = unquote(parts.password or "")
                 token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
-                req.add_header("Proxy-Authorization", f"Basic {token}")
+                req.add_unredirected_header("Proxy-Authorization", f"Basic {token}")
             host = parts.hostname or ""
             req.set_proxy(f"{host}:{parts.port}" if parts.port else host, parts.scheme)
         return req

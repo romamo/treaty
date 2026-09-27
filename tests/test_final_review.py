@@ -5,14 +5,18 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
 import pytest
 from conftest import needs_posix_permissions
 from fixture_session_app import app as session_app
+from test_network_and_fs import Origin, net_app, serving
+from test_network_and_fs import run as net_run
 
 from treaty import App, Ctx, NoArgs, RegistrationError, SideEffect
+from treaty._envelope import without_userinfo
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,3 +195,54 @@ def test_cleanup_reports_a_path_it_cannot_remove_and_removes_the_rest(tmp_path: 
 def test_a_side_effect_that_would_cover_a_whole_root_or_escape_is_refused(pattern: str) -> None:
     with pytest.raises(RegistrationError):
         SideEffect(pattern, "temp")
+
+
+# F-037: ctx.http proxies
+
+
+def redirecting(target: str) -> type[BaseHTTPRequestHandler]:
+    """A proxy that sends every request on to ``target``"""
+
+    class Redirecting(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - the name http.server dispatches to
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    return Redirecting
+
+
+def test_proxy_credentials_never_follow_a_redirect_to_a_host_that_bypasses_the_proxy() -> None:
+    with serving(Origin) as origin, serving(redirecting(f"{origin.url}/landed")) as proxy:
+        env = {
+            "HTTP_PROXY": f"http://alice:s3cret@127.0.0.1:{proxy.server_port}",
+            "NO_PROXY": "127.0.0.1",
+        }
+        code, envelope = net_run(net_app(), ["get", "--url", "http://example.test/"], env)
+    assert code == 0, envelope
+    assert [path for _, path, _ in origin.seen] == ["/landed"]
+    assert all("Proxy-Authorization" not in headers for _, _, headers in origin.seen)
+
+
+def test_a_proxy_flag_with_a_bad_port_exits_2() -> None:
+    code, envelope = net_run(
+        net_app(), ["get", "--url", "http://x.test/", "--proxy", "http://p.test:99999"]
+    )
+    assert code == 2 and envelope["error"]["code"] == "ARG_ERROR", envelope
+
+
+def test_a_proxy_variable_with_a_bad_port_names_the_variable_instead_of_crashing() -> None:
+    code, envelope = net_run(
+        net_app(), ["get", "--url", "http://x.test/"], {"HTTP_PROXY": "http://u:pw@p.test:abc"}
+    )
+    error = envelope["error"]
+    assert code == 4 and error["code"] == "PROXY_INVALID", envelope
+    assert "HTTP_PROXY" in error["message"] and "pw" not in json.dumps(envelope)
+
+
+def test_a_proxy_named_in_an_error_keeps_an_ipv6_host_in_brackets() -> None:
+    assert without_userinfo("http://u:p@[::1]:8080/x") == "http://[::1]:8080/x"
