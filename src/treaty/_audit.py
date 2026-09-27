@@ -975,6 +975,35 @@ def _retry_declared(app: App) -> Iterator[Finding]:
             )
 
 
+def raises_without(handler: Callable[..., object], exit_name: str, keyword: str) -> bool:
+    """A call of ``Exit.<exit_name>(...)`` in the handler without ``keyword=``"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted(node.func)
+        if name is None or not (name == exit_name or name.endswith(f"Exit.{exit_name}")):
+            continue
+        if not any(k.arg in (keyword, None) for k in node.keywords):
+            return True
+    return False
+
+
+def _retry_hint(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if raises_without(c.handler, "RATE_LIMITED", "retry_after_ms"):
+            yield Finding(
+                "retry-hint",
+                Severity.WARNING,
+                c.path.value,
+                "raises RATE_LIMITED without retry_after_ms, which ends the run as "
+                "INVALID_EXIT (REQ-C-014)",
+                "Exit.RATE_LIMITED(..., retry_after_ms=<the Retry-After header in ms>)",
+            )
+
+
 def _profile(app: App) -> Iterator[Finding]:
     if not any(Path("conformance").glob("*.json")):
         yield Finding(
@@ -1108,6 +1137,7 @@ RULES: tuple[Rule, ...] = (
         Severity.WARNING,
         _env_prefix,
     ),
+    Rule("retry-hint", "Rate-limit errors say how long to wait", Severity.WARNING, _retry_hint),
     Rule("profile", "A conformance profile exists for the spec kit", Severity.ADVICE, _profile),
 )
 

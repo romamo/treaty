@@ -50,7 +50,8 @@ def run_json(app: App, argv: list[str]) -> tuple[int, dict]:
 def test_timeout_emits_envelope_and_exit_10() -> None:
     code, env = run_json(make_app(), ["fetch", "--seconds", "0.5"])
     assert code == 10 and env["ok"] is False
-    assert env["error"]["code"] == "TIMEOUT" and env["error"]["retryable"] is False
+    # fetch is read-only, so its timeout changed nothing and may be retried (REQ-C-014)
+    assert env["error"]["code"] == "TIMEOUT" and env["error"]["retryable"] is True
     assert env["error"]["context"]["timeout_ms"] == 50
     assert env["meta"]["timeout_ms"] == 50 and env["meta"]["duration_ms"] >= 50
 

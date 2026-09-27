@@ -7,9 +7,17 @@ from ._auth import Credentials
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
 from ._effect import Affects
-from ._envelope import Envelope, ErrorDetail, Meta, WarningDetail
-from ._errors import CliExit, Exit, ParseError, RegistrationError, SchemaError, TreatyError
-from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
+from ._envelope import Envelope, ErrorDetail, Meta, NetworkContext, Redirect, WarningDetail
+from ._errors import (
+    CliExit,
+    Exit,
+    ParseError,
+    RegistrationError,
+    SchemaError,
+    TreatyError,
+    already_exists,
+)
+from ._exit import ExitCodeEntry, FrameworkCode, RetryStrategy, SideEffects
 from ._flags import Arg, Flag
 from ._init import Init
 from ._jobs import Job, JobStore
@@ -51,15 +59,18 @@ __all__ = [
     "Job",
     "JobStore",
     "Meta",
+    "NetworkContext",
     "NoArgs",
     "Out",
     "Format",
     "Page",
     "PageRequest",
+    "Redirect",
     "ParseError",
     "RegistrationError",
     "Renderer",
     "Retry",
+    "RetryStrategy",
     "ScalarSpec",
     "SchemaError",
     "SchemaVersion",
@@ -68,5 +79,6 @@ __all__ = [
     "Timeout",
     "TreatyError",
     "WarningDetail",
+    "already_exists",
     "table",
 ]

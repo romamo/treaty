@@ -165,6 +165,8 @@ def command_entry(
     for code in implicit_exit_codes(command):
         entry = exits.framework(code)
         exit_codes.setdefault(str(entry.code.value), entry.to_json())
+    timeout = exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
+    exit_codes[str(timeout.code.value)] = timeout.to_json()
     if shared is not None:
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
     flags: dict[str, object] = {}

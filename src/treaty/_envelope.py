@@ -8,10 +8,12 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import IO
+from urllib.parse import urlsplit, urlunsplit
 
 from ._errors import RegistrationError
+from ._exit import RetryStrategy
 
 # Deeper than this, echoed input is cut: an agent needs the shape, not 1,000 brackets
 _MAX_DEPTH = 32
@@ -75,6 +77,74 @@ def sentence(text: str) -> str:
 _RETRY = "retry the same command; it had no side effects"
 
 
+def without_userinfo(url: str) -> str:
+    """A URL with any ``user:password@`` removed, for a proxy named in an error"""
+    parts = urlsplit(url)
+    if parts.username is None and parts.password is None:
+        return url
+    host = parts.hostname or ""
+    netloc = f"{host}:{parts.port}" if parts.port is not None else host
+    return urlunsplit(parts._replace(netloc=netloc))
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkContext:
+    """How a failed network call went out (REQ-F-037): only the framework's own client
+    sets it, so an error unrelated to the network never carries it"""
+
+    url: str
+    proxy_used: str | None
+    """The proxy URL, userinfo removed; None, written as null, for a direct connection"""
+    proxy_source: str | None
+    """The variable or setting the proxy came from, such as ``HTTPS_PROXY``"""
+    no_proxy: str | None
+    ssl_verify: bool
+    suggestion: str
+    """A shell command that diagnoses the failure, such as ``curl -v <url>``"""
+    status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.proxy_used is not None:
+            object.__setattr__(self, "proxy_used", without_userinfo(self.proxy_used))
+        if not self.suggestion:
+            raise RegistrationError("NetworkContext needs a diagnostic command in suggestion")
+
+    def to_json(self) -> dict[str, object]:
+        out: dict[str, object] = {
+            "url": without_userinfo(self.url),
+            "proxy_used": self.proxy_used,
+            "no_proxy": self.no_proxy,
+            "ssl_verify": self.ssl_verify,
+            "suggestion": self.suggestion,
+        }
+        if self.proxy_source is not None:
+            out["proxy_source"] = self.proxy_source
+        if self.status_code is not None:
+            out["status_code"] = self.status_code
+        return out
+
+
+class RedirectReason(StrEnum):
+    """Why a command path redirects, in ``error.redirect.reason``"""
+
+    RENAMED = "renamed"
+    RESTRUCTURED = "restructured"
+    DEPRECATED = "deprecated"
+    TYPO_CORRECTED = "typo_corrected"
+
+
+@dataclass(frozen=True, slots=True)
+class Redirect:
+    """``error.redirect`` of exit 13: the invocation to run instead, verbatim"""
+
+    command: str
+    permanent: bool
+    reason: RedirectReason
+
+    def to_json(self) -> dict[str, object]:
+        return {"command": self.command, "permanent": self.permanent, "reason": self.reason.value}
+
+
 @dataclass(frozen=True, slots=True)
 class ErrorDetail:
     code: str
@@ -98,6 +168,20 @@ class ErrorDetail:
     """Ways to log in without a browser, such as a token variable (REQ-O-033)"""
     retries_exhausted: int | None = None
     """Retries ``ctx.retry`` made before giving up (REQ-F-078)"""
+    retry_strategy: RetryStrategy | None = None
+    """How to space retries; retryable errors only (REQ-C-014)"""
+    conflict_id: str | None = None
+    """The id of the resource that already exists (REQ-C-028)"""
+    refresh_command: str | None = None
+    """The command that renews expired credentials (REQ-F-063)"""
+    expires_at: str | None = None
+    """ISO 8601 UTC time the credentials expired (REQ-F-063)"""
+    required_permission: str | None = None
+    """The first scope the credential lacks (REQ-F-063)"""
+    network_context: NetworkContext | None = None
+    """How a failed network call went out; set only by the framework (REQ-F-037)"""
+    redirect: Redirect | None = None
+    """The replacement invocation of exit 13 (REDIRECTED)"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
@@ -130,6 +214,16 @@ class ErrorDetail:
             out["fix_command"] = self.fix_command
         if self.retry_after_ms is not None:
             out["retry_after_ms"] = self.retry_after_ms
+        if self.retry_strategy is not None:
+            out["retry_strategy"] = self.retry_strategy.value
+        for name in ("conflict_id", "refresh_command", "expires_at", "required_permission"):
+            value = getattr(self, name)
+            if value is not None:
+                out[name] = value
+        if self.network_context is not None:
+            out["network_context"] = self.network_context.to_json()
+        if self.redirect is not None:
+            out["redirect"] = self.redirect.to_json()
         if self.fix_required is not None:
             out["fix_required"] = self.fix_required
         if self.retries_exhausted is not None:

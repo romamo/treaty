@@ -117,6 +117,8 @@ class CliExit(Exception):
         fix_command: str | None = None,
         fix_required: str | None = None,
         retry_after_ms: int | None = None,
+        retry_strategy: str | None = None,
+        conflict_id: str | None = None,
         data: object = None,
     ) -> None:
         super().__init__(message)
@@ -129,7 +131,27 @@ class CliExit(Exception):
         self.fix_command = fix_command
         self.fix_required = fix_required
         self.retry_after_ms = retry_after_ms
+        self.retry_strategy = retry_strategy
+        """A ``treaty.RetryStrategy`` value; the exit code's default when None"""
+        self.conflict_id = conflict_id
+        """The id of the resource that already exists (REQ-C-028)"""
         self.data = data
+
+
+def already_exists(existing: object, *, conflict_id: str, message: str | None = None) -> CliExit:
+    """The create-or-get answer (REQ-C-028): exit 6 ``CONFLICT`` with code
+    ``ALREADY_EXISTS`` and the existing resource as ``data``, so an agent retrying a create
+    reads the resource from the failure without a ``get``. ``existing`` has the handler's
+    return type, as ``data`` of any ``CliExit`` does."""
+    return CliExit(
+        ExitCodeName("CONFLICT"),
+        message if message is not None else f"{conflict_id} already exists",
+        code="ALREADY_EXISTS",
+        context={"conflict_id": conflict_id},
+        conflict_id=conflict_id,
+        suggestion="use data, the existing resource, as the result of the create",
+        data=existing,
+    )
 
 
 class _ExitFactory:

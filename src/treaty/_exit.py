@@ -6,7 +6,7 @@ Command-specific codes must fall in 79 to 125.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import IntEnum, StrEnum
 
 from ._errors import RegistrationError
@@ -17,6 +17,14 @@ class SideEffects(StrEnum):
     NONE = "none"
     PARTIAL = "partial"
     COMPLETE = "complete"
+
+
+class RetryStrategy(StrEnum):
+    """How an agent spaces its retries of a retryable error (REQ-C-014)"""
+
+    IMMEDIATE = "immediate"
+    LINEAR_BACKOFF = "linear_backoff"
+    EXPONENTIAL_BACKOFF = "exponential_backoff"
 
 
 class FrameworkCode(IntEnum):
@@ -46,12 +54,25 @@ class ExitCodeEntry:
     suggestion: str | None = None
     """The next step an agent takes after this failure, used when the raise gives none
     (REQ-C-013); not part of the manifest entry, whose schema is closed"""
+    retry_after_ms: int | None = None
+    """The wait before a retry when the raise gives none (REQ-C-014); off the manifest"""
+    retry_strategy: RetryStrategy | None = None
+    """How to space retries when the raise gives none (REQ-C-014); off the manifest"""
 
     def __post_init__(self) -> None:
         if self.retryable and self.side_effects is not SideEffects.NONE:
             raise RegistrationError(
                 f"{self.name}: retryable exit codes must declare side_effects 'none'"
             )
+        if not self.retryable and (self.retry_after_ms, self.retry_strategy) != (None, None):
+            raise RegistrationError(
+                f"{self.name}: retry_after_ms and retry_strategy are for retryable exit codes"
+            )
+        delay = self.retry_after_ms
+        if delay is not None and (isinstance(delay, bool) or not isinstance(delay, int)):
+            raise RegistrationError(f"{self.name}: retry_after_ms must be an int of milliseconds")
+        if delay is not None and delay <= 0:
+            raise RegistrationError(f"{self.name}: retry_after_ms must be positive")
         if not 1 <= len(self.description) <= 120:
             raise RegistrationError(f"{self.name}: description must be 1..120 characters")
         if self.description.endswith("."):
@@ -69,6 +90,13 @@ class ExitCodeEntry:
             "side_effects": self.side_effects.value,
         }
 
+
+# REQ-C-014: how to retry the framework's retryable codes; RATE_LIMITED has no default
+# delay because only the upstream's Retry-After knows it, so every raise must give one
+_RETRY_DEFAULTS: dict[FrameworkCode, tuple[int | None, RetryStrategy]] = {
+    FrameworkCode.RATE_LIMITED: (None, RetryStrategy.EXPONENTIAL_BACKOFF),
+    FrameworkCode.UNAVAILABLE: (1000, RetryStrategy.EXPONENTIAL_BACKOFF),
+}
 
 _FRAMEWORK: tuple[tuple[FrameworkCode, str, bool, SideEffects], ...] = (
     (FrameworkCode.SUCCESS, "Operation completed as intended", False, SideEffects.NONE),
@@ -156,7 +184,15 @@ _SIGNALS: tuple[tuple[str, int, str], ...] = (
 
 def framework_entries() -> tuple[ExitCodeEntry, ...]:
     framework = tuple(
-        ExitCodeEntry(ExitCodeName(code.name), ExitCode(code.value), desc, retryable, effects)
+        ExitCodeEntry(
+            ExitCodeName(code.name),
+            ExitCode(code.value),
+            desc,
+            retryable,
+            effects,
+            retry_after_ms=_RETRY_DEFAULTS.get(code, (None, None))[0],
+            retry_strategy=_RETRY_DEFAULTS.get(code, (None, None))[1],
+        )
         for code, desc, retryable, effects in _FRAMEWORK
     )
     signals = tuple(
@@ -200,6 +236,20 @@ class ExitCodeRegistry:
 
     def framework(self, code: FrameworkCode) -> ExitCodeEntry:
         return self._by_code[ExitCode(code.value)]
+
+    def timeout(self, *, read_only: bool) -> ExitCodeEntry:
+        """``TIMEOUT`` as one command declares it: a read-only command wrote nothing, so
+        its timeout has side_effects "none" and is retryable (REQ-C-014)"""
+        entry = self.framework(FrameworkCode.TIMEOUT)
+        if not read_only:
+            return entry
+        return replace(
+            entry,
+            description="The read-only operation exceeded its time limit; nothing changed",
+            retryable=True,
+            side_effects=SideEffects.NONE,
+            retry_strategy=RetryStrategy.EXPONENTIAL_BACKOFF,
+        )
 
     def by_code(self, code: int) -> ExitCodeEntry:
         try:

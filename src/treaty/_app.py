@@ -70,7 +70,7 @@ from ._envelope import (
     write_envelope,
 )
 from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
-from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
+from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy, SideEffects
 from ._flags import REDACTED, Arg, Flag
 from ._framework import framework_collisions
 from ._help import global_rows, render_command, render_root
@@ -267,9 +267,17 @@ class App:
         retryable: bool,
         side_effects: str,
         suggestion: str | None = None,
+        retry_after_ms: int | None = None,
+        retry_strategy: str | None = None,
     ) -> ExitCodeEntry:
         """Declare a command-specific exit code; ``suggestion`` is the next step an agent
-        takes after it, used when the ``Exit`` raised gives none"""
+        takes after it, and ``retry_after_ms`` and ``retry_strategy`` how a retryable one
+        is retried, each used when the ``Exit`` raised gives none"""
+        if retry_strategy is not None and retry_strategy not in RetryStrategy:
+            strategies = ", ".join(RetryStrategy)
+            raise RegistrationError(
+                f"{name}: retry_strategy={retry_strategy!r} is not one of {strategies}"
+            )
         return self.exits.register(
             ExitCodeEntry(
                 name=ExitCodeName(name),
@@ -278,6 +286,8 @@ class App:
                 retryable=retryable,
                 side_effects=SideEffects(side_effects),
                 suggestion=suggestion,
+                retry_after_ms=retry_after_ms,
+                retry_strategy=None if retry_strategy is None else RetryStrategy(retry_strategy),
             )
         )
 
@@ -1883,6 +1893,8 @@ class _Run:
                         f"{exc.seconds:g}s",
                         # Nothing ran, so retrying with the same key is safe
                         retryable=True,
+                        retry_after_ms=1000,
+                        retry_strategy=RetryStrategy.IMMEDIATE,
                         context={
                             "command": command.path.value,
                             "timeout_ms": timeout.milliseconds,
@@ -2068,13 +2080,14 @@ class _Run:
         except TimeoutExpired as exc:
             self.abandoned = exc.pending
             self._stop_children()
-            entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
+            entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
             return self._envelope(
                 entry.code.value,
                 error=ErrorDetail(
                     code="TIMEOUT",
                     message=f"Command {command.path} exceeded its {timeout.seconds}s timeout",
                     retryable=entry.retryable,
+                    retry_strategy=entry.retry_strategy,
                     context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
                     phase="execution",
                 ),
@@ -2248,7 +2261,7 @@ class _Run:
             return
         except TimeoutExpired:
             self._stop_children()
-            entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
+            entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
             what = "timeout" if whole else "timeout waiting for its next event"
             yield self._envelope(
                 entry.code.value,
@@ -2256,6 +2269,7 @@ class _Run:
                     code="TIMEOUT",
                     message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
                     retryable=entry.retryable,
+                    retry_strategy=entry.retry_strategy,
                     context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
                     phase="execution",
                 ),
@@ -2471,6 +2485,35 @@ class _Run:
                 return self._broken(command, "INVALID_EXIT", message, started, meta)
             # A reset time already past (negative) means retry now; fractions round up
             retry_after = max(0, math.ceil(retry_after))
+        else:
+            retry_after = entry.retry_after_ms
+        # ctx.retry's own RATE_LIMITED has no Retry-After to pass on (REQ-F-078)
+        if entry.name.value == FrameworkCode.RATE_LIMITED.name and not isinstance(
+            exc, RetriesExhausted
+        ):
+            if retry_after is None:
+                # REQ-C-014: an agent told only "rate limited" retries at once, into the limit
+                message = (
+                    f"Command {command.path} raised RATE_LIMITED without retry_after_ms; pass "
+                    "retry_after_ms=<the upstream Retry-After in ms>"
+                )
+                return self._broken(command, "INVALID_EXIT", message, started, meta)
+            retry_after = max(1, retry_after)  # the limit resets now: wait the least there is
+        strategy = entry.retry_strategy
+        if exc.retry_strategy is not None:
+            try:
+                strategy = RetryStrategy(exc.retry_strategy)
+            except ValueError:
+                message = (
+                    f"Command {command.path} raised {exc.name} with retry_strategy "
+                    f"{exc.retry_strategy!r}; use one of {', '.join(RetryStrategy)}"
+                )
+                return self._broken(command, "INVALID_EXIT", message, started, meta)
+        if exc.conflict_id is not None and not isinstance(exc.conflict_id, str):
+            message = (
+                f"Command {command.path} raised {exc.name} with a conflict_id that is not text"
+            )
+            return self._broken(command, "INVALID_EXIT", message, started, meta)
         try:
             data = self._payload(exc.data)
             context = _redacted(to_jsonable(exc.context, self.app.scalars, base=self.cwd), redact)
@@ -2482,20 +2525,23 @@ class _Run:
         assert isinstance(context, dict)
         # REQ-F-078: after the tool's own retries, an agent retrying on top would double them
         retried = exc.retried if isinstance(exc, RetriesExhausted) else None
+        retrying = entry.retryable and not retried
         return self._envelope(
             entry.code.value,
             data=data,
             error=ErrorDetail(
                 code=exc.code,
                 message=message,
-                retryable=entry.retryable and not retried,
+                retryable=retrying,
                 retries_exhausted=retried or None,
                 detail=exc.detail,
                 context=context,
                 suggestion=exc.suggestion if exc.suggestion is not None else entry.suggestion,
                 fix_command=exc.fix_command,
                 fix_required=exc.fix_required,
-                retry_after_ms=retry_after if entry.retryable and not retried else None,
+                retry_after_ms=retry_after if retrying else None,
+                retry_strategy=strategy if retrying else None,
+                conflict_id=exc.conflict_id,
                 phase="execution",
             ),
             started=started,
