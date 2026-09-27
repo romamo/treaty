@@ -6,6 +6,7 @@ import contextlib
 import contextvars
 import dataclasses
 import errno
+import inspect
 import io
 import json
 import math
@@ -1267,7 +1268,17 @@ def _invoke(
     if app.init is not None and command.path not in app.builtins and not app.init.initialized(ctx):
         raise init_required(app.name)
     resolver = Resolver(command.resource_graph, args, ctx, provided)
-    return command.handler(args, ctx, *resolver.all(command.resources))
+    result = command.handler(args, ctx, *resolver.all(command.resources))
+    if inspect.isawaitable(result):
+        # A decorated coroutine that registration could not see (REQ-F-049): its body
+        # never ran, which a success envelope would hide
+        if inspect.iscoroutine(result):
+            result.close()
+        raise TypeError(
+            f"handler {command.handler.__qualname__} returned an awaitable, which treaty never "
+            "awaits; make it a plain def (REQ-F-049)"
+        )
+    return result
 
 
 # ErrorDetail.code in response-envelope.json

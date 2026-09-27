@@ -1,14 +1,17 @@
 """Argument grammar: REQ-C-020, C-026, C-027, F-049, F-059, F-067, F-075, O-006, O-009"""
 
+import functools
 import io
 import json
+import signal
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from conftest import spec_validator
+from conftest import needs_posix_signals, spec_validator
 
-from treaty import App, Arg, Ctx, Flag, RegistrationError
+from treaty import App, Arg, Ctx, Flag, NoArgs, RegistrationError
 from treaty._audit import audit
 
 
@@ -116,3 +119,98 @@ def test_pattern_type_is_refused_where_it_cannot_apply() -> None:
         @app.command("n", description="N", danger_level="safe", exit_codes=())
         def n(args: Counted, ctx: Ctx) -> dict[str, str]:
             return {}
+
+
+# REQ-F-049: treaty's handlers are sync by design (04-D4), so async is what it refuses
+
+
+def test_an_async_handler_produces_a_framework_registration_error() -> None:
+    app = App("aio", version="1.0.0")
+    with pytest.raises(RegistrationError, match="async def"):
+
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
+        async def go(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+            return {}
+
+    async def later() -> None:
+        return None
+
+    with pytest.raises(RegistrationError, match="cleanup: is async def"):
+
+        @app.command("c", description="C", danger_level="safe", exit_codes=(), cleanup=later)
+        def c(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+            return {}
+
+    class Conn:
+        @classmethod
+        async def acquire(cls, args: object, ctx: Ctx) -> Conn:
+            return cls()
+
+    with pytest.raises(RegistrationError, match="acquire: is async def"):
+
+        @app.command("r", description="R", danger_level="safe", exit_codes=())
+        def r(args: NoArgs, ctx: Ctx, conn: Conn) -> dict[str, str]:
+            return {}
+
+
+def sync_signature(
+    fn: Callable[[NoArgs, Ctx], Coroutine[None, None, dict[str, str]]],
+) -> Callable[[NoArgs, Ctx], dict[str, str]]:
+    """A decorator that hides a coroutine function behind a plain one"""
+
+    @functools.wraps(fn)
+    def wrapper(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return fn(args, ctx)  # type: ignore[return-value]
+
+    return wrapper
+
+
+def test_an_async_operation_not_awaited_by_a_handler_is_detected() -> None:
+    ran: list[bool] = []
+    app = App("aio", version="1.0.0")
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
+    @sync_signature
+    async def go(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        ran.append(True)
+        return {}
+
+    code, envelope = run(app, ["go"])
+    assert code == 1 and envelope["error"]["code"] == "HANDLER_CRASHED"
+    assert "awaitable" in envelope["error"]["message"] and ran == []
+
+
+@needs_posix_signals
+def test_the_process_exits_only_after_its_teardown_hooks_have_resolved() -> None:
+    out = io.StringIO()
+    seen: list[str] = []
+    app = App("td", version="1.0.0", default_timeout=None)
+
+    @app.command(
+        "go",
+        description="Go",
+        danger_level="safe",
+        exit_codes=(),
+        cleanup=lambda: seen.append(out.getvalue()),
+    )
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        signal.raise_signal(signal.SIGTERM)
+        return {}
+
+    code = app.run(["go"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+    assert code == 143 and seen == [""] and json.loads(out.getvalue())["meta"]["exit_code"] == 143
+
+
+def test_a_command_that_performs_io_completes_all_writes_before_exiting(tmp_path: Any) -> None:
+    target = tmp_path / "out.txt"
+    app = App("w", version="1.0.0")
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        with target.open("w") as fh:
+            for n in range(1000):
+                fh.write(f"{n}\n")
+        return {"lines": 1000}
+
+    code, envelope = run(app, ["go"])
+    assert code == 0 and len(target.read_text().splitlines()) == envelope["data"]["lines"]

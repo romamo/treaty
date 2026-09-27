@@ -20,7 +20,7 @@ from ._jobs import Job, descriptor_schema
 from ._mode import Format
 from ._out import NO_ORDER, OutSpec, check_order
 from ._page import DEFAULT_LIMIT, Limit, Page
-from ._resources import ResourceSpec, dependency_params, resource_graph
+from ._resources import ResourceSpec, dependency_params, refuse_async, resource_graph
 from ._retry import Retry
 from ._scalars import ScalarRegistry
 from ._scan import ctx_calls
@@ -278,6 +278,8 @@ def build_command(
             f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
         )
     args_type, output_type, resources, paginated = _inspect_handler(fn, path, streaming, paginated)
+    refuse_async(cleanup, f"{path}: cleanup")
+    refuse_async(cursor_check, f"{path}: cursor_check")
     if cursor_check is not None and not (paginated and callable(cursor_check)):
         raise RegistrationError(
             f"{path}: cursor_check is a function validating a list command's own cursor; "

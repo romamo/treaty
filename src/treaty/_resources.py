@@ -32,8 +32,20 @@ class ResourceSpec:
     """The args class ``acquire`` is annotated to read, when it names one"""
 
 
+def refuse_async(fn: object, where: str) -> None:
+    """REQ-F-049 (04-D4): treaty runs no event loop, so an ``async def`` would return a
+    coroutine that is never awaited and its work would silently never happen"""
+    if inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn):
+        raise RegistrationError(
+            f"{where}: is async def, and treaty calls it without an event loop, so its body "
+            "would never run; make it a plain def, and call asyncio.run(...) inside it if it "
+            "needs async code (REQ-F-049)"
+        )
+
+
 def dependency_params(fn: Callable[..., object], where: str) -> tuple[type, ...]:
     """Resource classes named by the parameters after ``(args, ctx)``; validates that prefix"""
+    refuse_async(fn, where)
     params = list(inspect.signature(fn).parameters.values())
     if len(params) < 2 or any(
         p.kind not in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) for p in params
