@@ -103,13 +103,19 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `--global`, `ctx.config_path`, and `ctx.write_config`; atomic writes for config,
   idempotency records, and `--output`; `async-job` and `config-write-scope` audit rules.
   Level 2 is complete
+- 1.0 plan, reserved names: every flag name a 1.0 feature adds is one table in
+  `_framework.py`; a field taking one fails registration, and passing one before it lands
+  exits 2 `RESERVED_FLAG`
+- 1.0 plan, response meta (`plans/1.0/01-response-meta.md`): `command`, `timestamp`,
+  `schema_version`, `tool_version`, `cwd`, `trace_id`, `project_root`, and `retries` in
+  `meta`; `schema_version=`, `compat=` with `--schema-version`, `--output-schema`,
+  `--print-schema`, `project_root=`, `Retry` with `ctx.retry`, `treaty schema-lock`, and
+  four audit rules. Breaking: `Envelope` takes a `treaty.Meta`; `App(version=)` is semver
 
 ## 0.1.x: after the first minor release
 
 0.1.0 shipped Level 1 and Level 2 of the spec (see `COMPLIANCE.md`). Still open:
 
-- `meta.schema_version` on every response (REQ-F-022), derived from a per-command
-  `schema_version=` declaration
 - `CHANGELOG.md`
 - `docs/guide.md`: the judgement calls the audit cannot make (naming paths, what belongs in
   `error.context`, when a failure deserves its own exit code); short, because every

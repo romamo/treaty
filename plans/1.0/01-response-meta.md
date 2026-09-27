@@ -145,14 +145,27 @@ The README states that `data` is safe to cache and diff and `meta` is not.
 
 ## Tasks
 
-- [ ] `Meta`, `ToolVersion`; `command`, `timestamp`, `tool_version`, `cwd` on every envelope
-- [ ] `schema_version=` and `meta.schema_version`; `--schema` shows it
-- [ ] `treaty schema-lock` and the `schema-version` audit rule
-- [ ] `TOOL_TRACE_ID`: `meta.trace_id`, validation, children, log lines
-- [ ] `project_root=`, `ctx.project_root`, `meta.project_root`, `project-root` rule
-- [ ] `Retry`, `ctx.retry`, `--retries`, `--retry-delay`, `meta.retries`, `retry-declared` rule
-- [ ] `--output-schema` and `--print-schema`
-- [ ] `compat=`, `--schema-version`, `SCHEMA_DEPRECATED`, `SCHEMA_VERSION_UNSUPPORTED`
-- [ ] `volatile-data` audit rule; README section on `data` versus `meta`
-- [ ] MCP input schema and exec keys for the new flags; conformance profile probes
-- [ ] Update COMPLIANCE.md rows, README, HANDOFF, ROADMAP, CHANGELOG ("Breaking")
+- [x] `Meta`, `ToolVersion`; `command`, `timestamp`, `tool_version`, `cwd` on every envelope.
+  `meta.command` is the manifest key (`deploy.rollback`)
+- [x] `schema_version=` and `meta.schema_version`; `--schema` shows it
+- [x] `treaty schema-lock` and the `schema-version` audit rule. A key that became required
+  is additive for a reader of output, not breaking; one that became optional breaks it.
+  No lock file, no findings
+- [x] `TOOL_TRACE_ID`: `meta.trace_id`, validation, children, log lines. Children inherit
+  it through the run's env, which already seeds `Processes`
+- [x] `project_root=`, `ctx.project_root`, `meta.project_root`, `project-root` rule
+- [x] `Retry`, `ctx.retry`, `--retries`, `--retry-delay`, `meta.retries`, `retry-declared`
+  rule. `Retry(retries=3)` counts retries after the first attempt, matching `--retries`,
+  instead of `attempts`; a retry whose delay would pass the deadline is not made. With
+  `--retries 0` the error keeps the code's own `retryable`
+- [x] `--output-schema` and `--print-schema`. `--print-schema` is an alias on every path,
+  not only the root: the name is reserved, so it shadows nothing
+- [x] `compat=`, `--schema-version`, `SCHEMA_DEPRECATED`, `SCHEMA_VERSION_UNSUPPORTED`.
+  `--schema-version` is a root flag only (the manifest forbids repeating it per command);
+  JSON callers pass `schema_version` on any command
+- [x] `volatile-data` audit rule; README section on `data` versus `meta`. The fix says to
+  drop the field; `Out(volatile=True)` is left to 05
+- [x] MCP input schema and exec keys for the new flags. No new conformance profile probes:
+  the kit has no check for these fields
+- [x] Update COMPLIANCE.md rows, README, HANDOFF, ROADMAP. No `CHANGELOG.md` exists yet;
+  the breaking changes are listed in ROADMAP for 15 to collect

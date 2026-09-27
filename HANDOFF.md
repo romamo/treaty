@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 757 passed |
+| `uv run pytest` | 903 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -235,6 +235,18 @@ The two do not share code.
   the handler as `ctx.config`; only a global write locks (`<file>.lock`, left in place)
   and warns. `_atomic.write_atomic` (mkstemp in the target's directory, fsync, rename) is
   shared by idempotency records, config writes, and `--output`
+- **`meta` is built in one place, `_Run._envelope`,** from `_Run.current` (the command
+  being answered, set by `_route`, `App._call`, and each `exec` line), `pinned` (the
+  `--schema-version` shim), `retrier` (`meta.retries`), and what `_Run.__init__` read once:
+  `timestamp`, `cwd` (logical `PWD`), and `TOOL_TRACE_ID`. `Envelope.meta` is a frozen
+  `treaty.Meta`; `extra_meta` holds the rest (`pagination`, `dry_run`, `_line`, ...)
+- **Reserved flag names are one table** (`_framework.RESERVED_GLOBAL`, `RESERVED_OPT_IN`,
+  `UNIMPLEMENTED`). `framework_collisions` refuses fields taking one; `split_globals` and
+  `parse_command_args` answer an unimplemented one with `RESERVED_FLAG`. Implementing a
+  name means moving it into `IMPLEMENTED`
+- **`--schema-version` is global in argv and the key `schema_version` in JSON**, never a
+  `FLAGS` row, because a `CommandEntry.flags` map may not repeat a root flag;
+  `Command.pin` turns the major into the compat version, or refuses it
 - **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
   the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
 
@@ -309,20 +321,22 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
-F-011, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-031, F-034, F-044, F-045 (paths),
-F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-065, F-069, F-070,
+F-011, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024,
+F-025 (not the audit log), F-027, F-031, F-034, F-044, F-045 (paths),
+F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-065, F-069, F-070, F-078,
 C-001, C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
-C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-021, O-022, O-032, O-033, O-039, O-041,
+C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-013, O-014, O-021, O-022, O-032, O-033, O-039, O-041,
 O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
-Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
+Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),
+`--output-schema`, `--schema-version`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
 `--cursor` (list outputs), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
 (`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
-(`auth=`), `--global` (`config_write_scope=`), and
+(`auth=`), `--global` (`config_write_scope=`), `--retries` and `--retry-delay` (`retry=`), and
 `--<name>-from-env` / `--<name>-from-file` for each secret field. The per-command ones are
 rows of `_framework.FLAGS`: argv parsing, the JSON routes, the `--raw-payload` merge (one
 "given twice with different values" check; `--limit` and `--cursor` from argv win),

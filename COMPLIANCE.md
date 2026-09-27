@@ -6,7 +6,8 @@ commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, out
 hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations;
 06, pagination; 07, I/O and streams; 08, auth and scopes; 09, async jobs and config
 writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048), and
-re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039).
+re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039), then updated for
+the 1.0 plan's reserved names and response metadata (01).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -20,15 +21,15 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 65 | 30 | 64 | **50%** |
+| Level 3: full spec | 159 | 73 | 28 | 58 | **55%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 40 | 15 | 24 | **60%** |
+| Framework-automatic (F) | 79 | 46 | 14 | 19 | **67%** |
 | Command contract (C) | 30 | 15 | 8 | 7 | **63%** |
-| Opt-in (O) | 50 | 10 | 7 | 33 | **27%** |
+| Opt-in (O) | 50 | 12 | 6 | 32 | **30%** |
 
 ## Open mandatory requirements
 
@@ -60,13 +61,13 @@ open.
 | [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Done | Automatic: every non-streaming `list[T]` or `Page[T]` output is a list command (`paginated=False` opts out, flagged by the `paginated-list` advice rule); `meta.pagination` (total, returned, truncated, has_more, next_cursor) on every successful response; `next_cursor` as `--cursor` returns the next page |
 | [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Done | Default limit 20 on every list command, `default_limit=` per command, `--limit N`, `--limit 0` for all; the default is in `--schema` and the flag entry |
 | [REQ-F-020](../cli-agent-ergonomics/requirements/f-020-stable-array-sorting-in-json-output.md) | Stable Array Sorting in JSON Output | P2 | 3 | Partial | Object keys sorted; arrays are not |
-| [REQ-F-021](../cli-agent-ergonomics/requirements/f-021-data-meta-separation-in-response-envelope.md) | Data/Meta Separation in Response Envelope | P1 | 3 | Partial | Volatile fields live only in meta; no warning for timestamps in data |
-| [REQ-F-022](../cli-agent-ergonomics/requirements/f-022-schema-version-in-every-response.md) | Schema Version in Every Response | P1 | 3 | Not started | `schema_version` only in the manifest, not in response meta (ROADMAP 0.1.0) |
-| [REQ-F-023](../cli-agent-ergonomics/requirements/f-023-tool-version-in-every-response.md) | Tool Version in Every Response | P1 | 3 | Not started | No `meta.tool_version` |
-| [REQ-F-024](../cli-agent-ergonomics/requirements/f-024-request-id-and-trace-id-in-every-response.md) | Request ID and Trace ID in Every Response | P2 | 3 | Partial | `meta.request_id` present; no `trace_id`, `meta.command`, or `meta.timestamp` |
-| [REQ-F-025](../cli-agent-ergonomics/requirements/f-025-tool-trace-id-environment-variable-propagation.md) | TOOL_TRACE_ID Environment Variable Propagation | P2 | 3 | Not started | `TOOL_TRACE_ID` not propagated |
+| [REQ-F-021](../cli-agent-ergonomics/requirements/f-021-data-meta-separation-in-response-envelope.md) | Data/Meta Separation in Response Envelope | P1 | 3 | Done | Framework values live only in `meta`, which the README documents as volatile and `data` as safe to cache and diff; the registration-time warning is the `volatile-data` audit rule (no warning channel at registration) |
+| [REQ-F-022](../cli-agent-ergonomics/requirements/f-022-schema-version-in-every-response.md) | Schema Version in Every Response | P1 | 3 | Done | `meta.schema_version` on every response: the command's `schema_version=` (`MAJOR.MINOR`), else `1.0`; `treaty schema-lock` plus the `schema-version` audit rule fail a breaking change without a major bump and an additive one without a minor bump |
+| [REQ-F-023](../cli-agent-ergonomics/requirements/f-023-tool-version-in-every-response.md) | Tool Version in Every Response | P1 | 3 | Done | `meta.tool_version` is `App(version=)`, validated as semver, the value `--version` prints; no update check exists, so `update_available` is always absent (01-D3) |
+| [REQ-F-024](../cli-agent-ergonomics/requirements/f-024-request-id-and-trace-id-in-every-response.md) | Request ID and Trace ID in Every Response | P2 | 3 | Done | `request_id`, `command` (manifest key, or the app name), and `timestamp` (ISO 8601 UTC, ms) on every response; `trace_id` from `TOOL_TRACE_ID` when set; an unusable value exits 2 `TRACE_ID_INVALID` |
+| [REQ-F-025](../cli-agent-ergonomics/requirements/f-025-tool-trace-id-environment-variable-propagation.md) | TOOL_TRACE_ID Environment Variable Propagation | P2 | 3 | Partial | `ctx.run` children inherit `TOOL_TRACE_ID`; `ctx.log`, plain error lines, and crash headers on stderr carry the trace; the audit log criterion waits on F-026 |
 | [REQ-F-026](../cli-agent-ergonomics/requirements/f-026-append-only-audit-log.md) | Append-Only Audit Log | P2 | 3 | Not started | No append-only audit log (`treaty audit` is a static linter) |
-| [REQ-F-027](../cli-agent-ergonomics/requirements/f-027-cwd-in-response-meta.md) | CWD in Response Meta | P2 | 3 | Not started | No `meta.cwd` or `project_root` |
+| [REQ-F-027](../cli-agent-ergonomics/requirements/f-027-cwd-in-response-meta.md) | CWD in Response Meta | P2 | 3 | Done | `meta.cwd` on every response, the logical `PWD` when it names the same directory; `project_root=` markers give `meta.project_root` and `ctx.project_root`; audit rule `project-root` |
 | [REQ-F-028](../cli-agent-ergonomics/requirements/f-028-config-source-tracking-in-response-meta.md) | Config Source Tracking in Response Meta | P1 | 3 | Not started | No config layer, so no `meta.config_sources` |
 | [REQ-F-029](../cli-agent-ergonomics/requirements/f-029-auto-update-suppression-in-non-interactive-mode.md) | Auto-Update Suppression in Non-Interactive Mode | P1 | 3 | Partial | Holds only because treaty never checks for updates; no suppression hook for app authors |
 | [REQ-F-030](../cli-agent-ergonomics/requirements/f-030-child-process-session-tracking.md) | Child Process Session Tracking | P2 | 3 | Partial | `ctx.run` children are tracked and stopped on signal or timeout; no session tracking file |
@@ -117,8 +118,8 @@ open.
 | [REQ-F-075](../cli-agent-ergonomics/requirements/f-075-subcommand-additive-stability.md) | Subcommand Additive Stability | P1 | 3 | Not started | No deprecation metadata |
 | [REQ-F-076](../cli-agent-ergonomics/requirements/f-076-first-run-init-isolation.md) | First-Run Init Isolation | P1 | 3 | Partial | No first-run work; no `init` built-in or INIT_REQUIRED helper |
 | [REQ-F-077](../cli-agent-ergonomics/requirements/f-077-telemetry-non-blocking.md) | Telemetry Non-Blocking | P2 | 3 | Done | No network code or telemetry |
-| [REQ-F-078](../cli-agent-ergonomics/requirements/f-078-retry-count-in-response-meta.md) | Retry Count in Response Meta | P2 | 3 | Not started | No retry machinery |
-| [REQ-F-079](../cli-agent-ergonomics/requirements/f-079-global-option-scope.md) | Global Option Scope | P1 | 3 | Done | Root `flags` map; colliding command flags fail at registration |
+| [REQ-F-078](../cli-agent-ergonomics/requirements/f-078-retry-count-in-response-meta.md) | Retry Count in Response Meta | P2 | 3 | Done | `retry=Retry(...)` with `ctx.retry`, `--retries`, `--retry-delay`; `meta.retries` when above 0; exhaustion exits the declared code with `retryable: false` and `retries_exhausted`; the timeout bounds every attempt; audit rule `retry-declared` |
+| [REQ-F-079](../cli-agent-ergonomics/requirements/f-079-global-option-scope.md) | Global Option Scope | P1 | 3 | Done | Root `flags` map; colliding command flags fail at registration, including names reserved for 1.0 features, which exit 2 `RESERVED_FLAG` until they land |
 
 ## Command contract
 
@@ -171,8 +172,8 @@ open.
 | [REQ-O-010](../cli-agent-ergonomics/requirements/o-010-resume-from-flag-for-multi-step-commands.md) | --resume-from Flag for Multi-Step Commands | P2 | 3 | Not started | No `--resume-from` |
 | [REQ-O-011](../cli-agent-ergonomics/requirements/o-011-rollback-on-failure-flag.md) | --rollback-on-failure Flag | P2 | 3 | Not started | No rollback hook |
 | [REQ-O-012](../cli-agent-ergonomics/requirements/o-012-heartbeat-interval-flag.md) | --heartbeat-interval Flag | P2 | 3 | Not started | No `--heartbeat-interval` |
-| [REQ-O-013](../cli-agent-ergonomics/requirements/o-013-schema-output-schema-flag.md) | --schema / --output-schema Flag | P1 | 3 | Partial | `--schema` per command; no `--print-schema` alias or `--output-schema` |
-| [REQ-O-014](../cli-agent-ergonomics/requirements/o-014-schema-version-compatibility-flag.md) | --schema-version Compatibility Flag | P2 | 3 | Not started | No schema version negotiation |
+| [REQ-O-013](../cli-agent-ergonomics/requirements/o-013-schema-output-schema-flag.md) | --schema / --output-schema Flag | P1 | 3 | Done | `--schema`, the `--print-schema` alias, and `<cmd> --output-schema` (the `data` schema in an envelope); per-field stability tiers have no criterion or schema field |
+| [REQ-O-014](../cli-agent-ergonomics/requirements/o-014-schema-version-compatibility-flag.md) | --schema-version Compatibility Flag | P2 | 3 | Done | `compat={"1.4": shim}` served by `--schema-version MAJOR` (argv global, `schema_version` in JSON); `SCHEMA_DEPRECATED` warning; `SCHEMA_VERSION_UNSUPPORTED` exit 2; `<cmd> --schema` shows `schema_version` and `min_schema_version` |
 | [REQ-O-015](../cli-agent-ergonomics/requirements/o-015-show-config-flag.md) | --show-config Flag | P1 | 3 | Not started | No `--show-config` |
 | [REQ-O-016](../cli-agent-ergonomics/requirements/o-016-no-config-flag.md) | --no-config Flag | P1 | 3 | Not started | No `--no-config` |
 | [REQ-O-017](../cli-agent-ergonomics/requirements/o-017-cwd-root-flag.md) | --cwd / --root Flag | P2 | 3 | Not started | No `--cwd` |

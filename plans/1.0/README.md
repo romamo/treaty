@@ -67,6 +67,11 @@ with Phase A:
 
 ### Reserved names (one commit, first in Phase A)
 
+Landed: `RESERVED_GLOBAL`, `RESERVED_OPT_IN`, and `UNIMPLEMENTED` in `_framework.py`.
+An opt-in name whose keyword does not exist yet (`resumable=`, `rollback=`,
+`recursive_traversal=`) has a predicate that is always false; its workstream swaps in the
+real one and moves the name to `IMPLEMENTED`.
+
 Each name joins `GLOBAL_FLAGS` or the per-command framework flags. Until its feature lands,
 passing it exits 2 naming it as reserved.
 
