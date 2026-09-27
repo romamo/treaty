@@ -204,6 +204,7 @@ from ._subprocess import (
 )
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
+from ._tools import EXEC_PATH
 from ._update import UpdateCheck, available, check_allowed
 from ._values import (
     CommandPath,
@@ -217,7 +218,6 @@ from ._values import (
 from ._verbosity import TRACE_FIELDS, Level, Verbosity, resolve_verbosity, trace
 from ._walk import DEFAULT_MAX_DEPTH, Traversal, TraversalStopped
 
-EXEC_PATH = CommandPath("exec")
 CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
 MANIFEST_PATH = CommandPath("manifest")
 VERSION_PATH = CommandPath("version")
@@ -243,6 +243,24 @@ UNSET = _Unset()
 @dataclass(frozen=True, slots=True)
 class NoArgs:
     """Arguments dataclass for commands that take nothing"""
+
+
+ETAG_PATTERN = r"sha256:[0-9a-f]{32}"
+
+
+@dataclass(frozen=True, slots=True)
+class ManifestArgs:
+    etag: str | None = Flag(
+        default=None,
+        pattern=ETAG_PATTERN,
+        description="The etag of a manifest already held; when it is still current, data is "
+        "null and meta.not_modified is true",
+    )
+
+
+class NotModified(Exception):
+    """Raised by ``manifest --etag`` on a match: exit 0, ``data: null``, and
+    ``meta.not_modified: true`` (REQ-O-041)"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -990,9 +1008,16 @@ class App:
             danger_level="safe",
             exit_codes=(),
             ordered=True,  # positionals and enum values are in declaration order
+            examples=[
+                ("Print the manifest", f"{self.name} manifest"),
+                ("Refetch only when changed", f"{self.name} manifest --etag sha256:<etag>"),
+            ],
         )
-        def manifest(args: NoArgs, ctx: Ctx) -> dict[str, object]:
-            return self.manifest()
+        def manifest(args: ManifestArgs, ctx: Ctx) -> dict[str, object]:
+            built = self.manifest()
+            if args.etag is not None and args.etag == built["etag"]:
+                raise NotModified
+            return built
 
         @self.command(
             VERSION_PATH.value,
@@ -3320,6 +3345,8 @@ class _Run:
                 self._restore_cwd(before)
         except CliExit as exc:
             return self._exit_envelope(command, args, exc, started, full_meta)
+        except NotModified:
+            return self._envelope(0, started=started, meta={**full_meta, "not_modified": True})
         except ParseError as exc:
             return self.after_start(exc, started=started, meta=full_meta)
         except TimeoutExpired as exc:
