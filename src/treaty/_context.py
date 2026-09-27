@@ -11,6 +11,7 @@ from typing import TypeVar
 from ._cap import MARKER, TRUNCATED_CODE
 from ._config import ConfigFile
 from ._errors import RegistrationError
+from ._lifecycle import Teardown
 from ._locks import Locks
 from ._mode import Format
 from ._page import PageRequest
@@ -59,6 +60,8 @@ class Ctx:
     """The nearest directory, from the cwd up, holding a ``project_root=`` marker"""
     retrier: Retrier | None = field(default=None, repr=False, compare=False)
     locks: Locks | None = field(default=None, repr=False, compare=False)
+    teardown: Teardown | None = field(default=None, repr=False, compare=False)
+    """What the run releases when it ends: resources' ``release``, then ``cleanup=``"""
 
     def retry(self, fn: Callable[[], T]) -> T:
         """Call ``fn``, and again after ``--retry-delay`` while it raises one of the

@@ -30,6 +30,8 @@ class ResourceSpec:
     deps: tuple[type, ...]
     args_type: type | None = None
     """The args class ``acquire`` is annotated to read, when it names one"""
+    releases: bool = False
+    """The class defines ``release(self)``, called when the run ends (REQ-C-017)"""
 
 
 def refuse_async(fn: object, where: str) -> None:
@@ -77,7 +79,27 @@ def resource_spec(cls: type) -> ResourceSpec:
     first = next(iter(inspect.signature(acquire).parameters))
     wanted = typing.get_type_hints(acquire).get(first)
     args_type = wanted if isinstance(wanted, type) and wanted is not object else None
-    return ResourceSpec(cls=cls, acquire=acquire, deps=deps, args_type=args_type)
+    return ResourceSpec(
+        cls=cls, acquire=acquire, deps=deps, args_type=args_type, releases=_releases(cls)
+    )
+
+
+def _releases(cls: type) -> bool:
+    """``release(self) -> None``: a plain method the run calls once, after the handler"""
+    release = inspect.getattr_static(cls, "release", None)
+    if release is None:
+        return False
+    where = f"{cls.__qualname__}.release"
+    if not inspect.isfunction(release):
+        raise RegistrationError(f"{where} must be a plain method: def release(self) -> None")
+    refuse_async(release, where)
+    params = list(inspect.signature(release).parameters.values())
+    if len(params) != 1 or params[0].kind not in (
+        params[0].POSITIONAL_ONLY,
+        params[0].POSITIONAL_OR_KEYWORD,
+    ):
+        raise RegistrationError(f"{where} takes only self: def release(self) -> None")
+    return True
 
 
 def resource_graph(
@@ -152,6 +174,9 @@ class Resolver:
                 f"not {cls.__qualname__}"
             )
         self._cache[cls] = value
+        teardown = self._ctx.teardown
+        if spec.releases and teardown is not None:
+            teardown.add(f"{cls.__qualname__}.release", getattr(value, "release"))  # noqa: B009
         return value
 
     def all(self, classes: Sequence[type]) -> list[Any]:

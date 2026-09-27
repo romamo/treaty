@@ -379,7 +379,7 @@ class Dead(io.StringIO):
         return super().write(text)
 
 
-def test_a_finished_stream_skips_cleanup_when_its_last_line_is_lost() -> None:
+def test_a_finished_stream_cleans_up_once_when_its_last_line_is_lost() -> None:
     cleaned: list[bool] = []
     app = App("streamy", version="1.0.0")
 
@@ -397,4 +397,5 @@ def test_a_finished_stream_skips_cleanup_when_its_last_line_is_lost() -> None:
 
     # Each envelope is two writes: the JSON and its newline; the terminal one fails
     code = app.run(["two", "--format", "json"], stdout=Dead(4), stderr=io.StringIO(), env={})
-    assert code == 0 and cleaned == []
+    # Cleaned up when the generator ended (REQ-C-017), not again for the closed stdout
+    assert code == 0 and cleaned == [True]

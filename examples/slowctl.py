@@ -17,7 +17,9 @@ app = App("slowctl", version="0.1.0", default_timeout=2)
 @dataclass(frozen=True, slots=True)
 class Fetch:
     seconds: float = Flag(default=0.0, description="How long the fake network call blocks")
-    cleanup_seconds: float = Flag(default=0.0, description="How long cleanup takes after a signal")
+    cleanup_seconds: float = Flag(
+        default=0.0, description="How long cleanup takes when the run ends"
+    )
 
 
 def release_resources() -> None:

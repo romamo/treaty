@@ -438,9 +438,32 @@ def _cleanup(app: App) -> Iterator[Finding]:
                 "cleanup",
                 Severity.ADVICE,
                 c.path.value,
-                "network command has no cleanup hook for SIGINT and SIGTERM",
+                "network command has no cleanup hook for when the run ends, by any exit",
                 "cleanup=release_resources where the function "
-                "closes connections and removes temp files",
+                "closes connections and removes temp files, and is safe to call twice",
+            )
+
+
+# Methods that show a resource holds something the run must give back (REQ-C-017)
+_HOLDS = ("close", "__exit__", "terminate", "unlink")
+
+
+def _resource_release(app: App) -> Iterator[Finding]:
+    seen: set[type] = set()
+    for c in user_commands(app):
+        for cls, spec in c.resource_graph.items():
+            held = next((m for m in _HOLDS if hasattr(cls, m)), None)
+            if cls in seen or spec.releases or held is None:
+                continue
+            seen.add(cls)
+            call = "self.__exit__(None, None, None)" if held == "__exit__" else f"self.{held}()"
+            yield Finding(
+                "resource-release",
+                Severity.WARNING,
+                c.path.value,
+                f"resource {cls.__qualname__} has {held}() but no release(); treaty releases "
+                "a resource when the run ends, by any exit, only through release()",
+                f"def release(self) -> None: {call}  # in class {cls.__qualname__}",
             )
 
 
@@ -1341,6 +1364,12 @@ RULES: tuple[Rule, ...] = (
         "raw-payload", "Wide mutating commands accept --raw-payload", Severity.ADVICE, _raw_payload
     ),
     Rule("cleanup", "Network commands register a cleanup hook", Severity.ADVICE, _cleanup),
+    Rule(
+        "resource-release",
+        "Resources that hold something define release",
+        Severity.WARNING,
+        _resource_release,
+    ),
     Rule("broad-scope", "Required scopes are narrow", Severity.WARNING, _broad_scope),
     Rule("auth-declared", "Login commands declare auth", Severity.WARNING, _auth_declared),
     Rule(

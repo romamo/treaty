@@ -6,6 +6,7 @@ import contextlib
 import contextvars
 import dataclasses
 import errno
+import functools
 import inspect
 import io
 import json
@@ -97,6 +98,7 @@ from ._idempotency import (
 from ._init import INIT_COMMAND, Init, Initialized, run_init
 from ._init import required as init_required
 from ._jobs import Job, JobStore, with_links
+from ._lifecycle import Teardown
 from ._locks import LockHeld, Locks
 from ._manifest import (
     build_manifest,
@@ -1305,7 +1307,24 @@ def _invoke(
 ) -> object:
     """Check the credential, acquire the handler's resources, each once and in dependency
     order, then run it; ``active_scopes`` is app code, so it runs where the handler does.
-    ``provided`` holds what the run already has, such as the settings."""
+    ``provided`` holds what the run already has, such as the settings. The run's teardown
+    follows here, on the handler's thread, however it ended; a stream's follows its
+    generator instead (REQ-C-017)."""
+    teardown = ctx.teardown
+    if teardown is None:
+        return _call(app, command, args, ctx, provided)
+    teardown.begin()
+    if command.streaming:
+        return _call(app, command, args, ctx, provided)
+    try:
+        return _call(app, command, args, ctx, provided)
+    finally:
+        teardown.run()
+
+
+def _call(
+    app: App, command: Command, args: object, ctx: Ctx, provided: Mapping[type, object]
+) -> object:
     if command.requires_auth:
         app._gate(command, ctx)
     if app.init is not None and command.path not in app.builtins and not app.init.initialized(ctx):
@@ -1323,6 +1342,8 @@ def _invoke(
         )
     return result
 
+
+CLEANUP_FAILED = "CLEANUP_FAILED"
 
 # A plan line that never became a command: a plan of only these exits 2
 _UNREAD_LINE = frozenset({"DISPATCH_PARSE_ERROR", "INVALID_JSON"})
@@ -1483,6 +1504,10 @@ def _each(render: Renderer | None) -> Renderer | None:
     return lambda events: "".join(render(e) for e in events)
 
 
+def _ready(envelope: Envelope) -> Callable[[], Envelope]:
+    return lambda: envelope
+
+
 def _still_running(running: Sequence[Pending]) -> Pending | None:
     """The handler's worker when an interrupted wait left it running"""
     return next((p for p in running if p.worker.is_alive()), None)
@@ -1601,6 +1626,8 @@ class _Run:
         """The older schema version ``--schema-version`` selected for the current command"""
         self.retrier: Retrier | None = None
         """``ctx.retry`` of the current command, whose count is ``meta.retries``"""
+        self.teardown: Teardown | None = None
+        """What the current command's run releases when it ends (REQ-C-017)"""
         self.stable_all = False
         """``--stable-output`` on argv: every envelope of the run is stable (REQ-O-007)"""
         self.stable = False
@@ -1672,6 +1699,7 @@ class _Run:
             headless=headless,
             browser_open=BROWSER_OPEN in command.gui_operations,
         )
+        self.teardown = Teardown(command.cleanup, self._teardown_failed(command, args))
         policy = command.retry
         self.retrier = (
             None
@@ -1717,6 +1745,7 @@ class _Run:
             project_root=self.project_root(command),
             retrier=self.retrier,
             locks=Locks(self.locks_dir(), deadline),
+            teardown=self.teardown,
         )
 
     def locks_dir(self) -> Path | None:
@@ -1758,6 +1787,20 @@ class _Run:
         safe = json_safe(dict(context))
         assert isinstance(safe, dict)
         self.warnings.append(WarningDetail(code, message, context=safe))
+
+    def _teardown_failed(self, command: Command, args: object) -> Callable[[str, Exception], None]:
+        """A failed ``release`` or ``cleanup=``: the traceback on stderr and a
+        ``CLEANUP_FAILED`` warning naming the hook; the exit code stays (REQ-C-017)"""
+
+        def failed(hook: str, exc: Exception) -> None:
+            self.err.write(self._redactor(command, args)(_traceback(exc)))
+            self._warn(
+                CLEANUP_FAILED,
+                f"{hook} raised {type(exc).__name__}; stderr has the traceback",
+                {"hook": hook, "exception": type(exc).__qualname__},
+            )
+
+        return failed
 
     def _log_sink(self, command: Command, args: object, mode: Format) -> LogSink:
         """``ctx.log``: one line on stderr, secrets redacted, escapes stripped unless the
@@ -2381,6 +2424,7 @@ class _Run:
         except TimeoutExpired as exc:
             self.abandoned = exc.pending
             self._stop_children()
+            self._after_grace(running)
             entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
             return self._envelope(
                 entry.code.value,
@@ -2503,6 +2547,7 @@ class _Run:
         args = invocation.args
         seq = 0
         events: Iterator[object] | None = None
+        terminal: Callable[[], Envelope]
 
         def remaining() -> Timeout:
             if timeout.seconds is None:
@@ -2552,22 +2597,30 @@ class _Run:
                     stream_context,
                 )
                 if event is _END:
-                    self.in_flight = None  # the handler finished; nothing is left to clean up
+                    self.in_flight = None  # the handler finished; its teardown follows here
                     break
                 seq += 1
                 data = self._payload(self._shimmed(command, event), *self._output(command))
                 yield self._envelope(0, data=data, started=started, meta={**full_meta, "seq": seq})
+            terminal = functools.partial(
+                self._envelope,
+                0,
+                started=started,
+                meta={**full_meta, "seq": seq, "end": True, "total": seq},
+            )
         except CliExit as exc:
-            yield self._exit_envelope(command, args, exc, started, partial())
-            return
+            terminal = functools.partial(
+                self._exit_envelope, command, args, exc, started, partial()
+            )
         except ParseError as exc:
-            yield self.after_start(exc, started=started, meta=partial())
-            return
+            terminal = functools.partial(self.after_start, exc, started=started, meta=partial())
         except TimeoutExpired:
             self._stop_children()
+            self._grace(running)
             entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
             what = "timeout" if whole else "timeout waiting for its next event"
-            yield self._envelope(
+            terminal = functools.partial(
+                self._envelope,
                 entry.code.value,
                 error=ErrorDetail(
                     code="TIMEOUT",
@@ -2580,31 +2633,29 @@ class _Run:
                 started=started,
                 meta=partial(),
             )
-            return
         except Cancelled as exc:
             ran = events is not None or not exc.held or bool(running)
             meta_now = {**full_meta, "seq": seq}
-            yield self._cancelled(
+            cancelled = self._cancelled(
                 command, exc.signal, started, meta_now, handler_started=ran, running=running
             )
-            return
+            terminal = _ready(cancelled)
         except KeyboardInterrupt:
             sig = CancelSignal("SIGINT", 130)
             meta_now = {**full_meta, "seq": seq}
-            yield self._cancelled(command, sig, started, meta_now, running=running)
-            return
+            cancelled = self._cancelled(command, sig, started, meta_now, running=running)
+            terminal = _ready(cancelled)
         except InputRequired as exc:
-            yield self._input_required(exc, started, partial())
-            return
+            terminal = functools.partial(self._input_required, exc, started, partial())
         except SchemaError as exc:
             message = f"Command {command.path} yielded {exc}"
-            yield self._broken(command, "INVALID_OUTPUT", message, started, partial())
-            return
+            terminal = functools.partial(
+                self._broken, command, "INVALID_OUTPUT", message, started, partial()
+            )
         except GeneratorExit:
             raise  # the consumer closed the stream; nothing more may be yielded
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
-            yield self._crashed(command, args, exc, started, partial())
-            return
+            terminal = functools.partial(self._crashed, command, args, exc, started, partial())
         finally:
             # Run the handler's finally blocks now, unless a timed-out worker still holds it
             held = any(p.worker.is_alive() for p in running)
@@ -2614,9 +2665,10 @@ class _Run:
                 except Exception as exc:  # noqa: BLE001 - the handler's finally is user code
                     # The terminal envelope is already decided; the failure goes to stderr
                     self.err.write(self._redactor(command, args)(_traceback(exc)))
-        yield self._envelope(
-            0, started=started, meta={**full_meta, "seq": seq, "end": True, "total": seq}
-        )
+            if self.teardown is not None:
+                self.teardown.run()  # beside a held worker, past its grace (06-D3)
+        # Built after the teardown, so a CLEANUP_FAILED warning reaches it
+        yield terminal()
 
     def _heartbeat(
         self, command: Command, invocation: Invocation, mode: Format, started: float
@@ -2669,6 +2721,20 @@ class _Run:
             meta=meta,
         )
 
+    def _grace(self, running: Sequence[Pending]) -> None:
+        """Past its timeout, a handler with something to tear down gets the children's
+        grace to finish and tear down on its own thread"""
+        if self.teardown is not None and self.teardown.pending:
+            for pending in running:
+                pending.worker.join(GRACE_SECONDS)
+
+    def _after_grace(self, running: Sequence[Pending]) -> None:
+        """After the grace, the teardown runs here, beside the handler if it still runs
+        (06-D3)"""
+        self._grace(running)
+        if self.teardown is not None:
+            self.teardown.run()
+
     def _stop_children(self, cancelled: CancelSignal | None = None) -> None:
         """Terminate what the interrupted or abandoned handler still runs (REQ-F-030);
         ``cancelled`` is the signal, None for a timeout"""
@@ -2692,11 +2758,11 @@ class _Run:
         handler_started: bool = True,
         running: Sequence[Pending] = (),
     ) -> Envelope:
-        """Run the cleanup hook, then build the CANCELLED envelope (REQ-F-013, REQ-F-069)
+        """Tear the run down, then build the CANCELLED envelope (REQ-F-013, REQ-F-069)
 
         Before the handler started there is nothing to clean up and nothing partial.
         ``running`` holds the handler's worker, which gets the children's grace to finish
-        before the cleanup hook runs beside it.
+        and tear down on its own thread before the teardown runs here, beside it.
         """
         context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
         # Children first, so the envelope is written after they were signaled (REQ-F-031)
@@ -2706,12 +2772,11 @@ class _Run:
             # handed back so it can be closed, and cleanup never races the handler
             pending.worker.join(GRACE_SECONDS)
         self.in_flight = None  # cleaned up here; a closed stdout must not clean up again
-        if handler_started and command.cleanup is not None:
-            try:
-                command.cleanup()
-            except Exception as exc:  # noqa: BLE001 - cleanup= is user code
-                self.err.write("".join(traceback.format_exception(exc)))
-                context["cleanup_failed"] = type(exc).__qualname__
+        teardown = self.teardown
+        if handler_started and teardown is not None:
+            teardown.run()
+            if teardown.failures:
+                context["cleanup_failed"] = type(teardown.failures[0][1]).__qualname__
         entry = self.app.exits.by_code(sig.exit_code)
         return self._envelope(
             sig.exit_code,
@@ -3016,14 +3081,11 @@ class _Run:
         """The reader went away: nothing more can be written, and nothing goes to stderr.
         After a complete envelope or event (``tool logs | head -1``) the reader got what it
         wanted, so exit 0 (REQ-F-014); before any, it got no answer, so exit 141, the SIGPIPE
-        convention (``OUTPUT_CLOSED``). A stream cut off mid-way runs its cleanup hook like
-        a cancellation; a finished handler has nothing left to clean up."""
+        convention (``OUTPUT_CLOSED``). A stream cut off mid-way is torn down like a
+        cancellation; a finished handler already was."""
         command, self.in_flight = self.in_flight, None
-        if command is not None and command.cleanup is not None:
-            try:
-                command.cleanup()
-            except Exception as exc:  # noqa: BLE001 - cleanup= is user code
-                self.err.write(_traceback(exc))
+        if command is not None and self.teardown is not None:
+            self.teardown.run()
         if self.out is sys.stdout:
             # The interpreter flushes stdout at exit; a dead pipe would raise there too
             devnull = os.open(os.devnull, os.O_WRONLY)

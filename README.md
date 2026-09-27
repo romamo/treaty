@@ -695,6 +695,16 @@ typically a `kw_only=True` base class shared by every command. Resources must no
 process state such as the working directory, because `exec` runs many requests in one
 process.
 
+A resource that holds something, such as a connection or a temp file, defines
+`def release(self) -> None`. When the run ends, by any exit (a result, an error, a
+timeout, or a signal), treaty releases each acquired resource, newest first, then calls the
+command's `cleanup=` hook (REQ-C-017). The teardown runs once per run, however many exit
+paths race, so a hook written to be safe twice is never needed twice. A hook that raises
+leaves its traceback on stderr and a `CLEANUP_FAILED` warning naming it; the exit code
+stays. After a timeout the handler gets two seconds to finish before its teardown runs
+beside it. The `resource-release` audit rule flags a resource class with `close`,
+`__exit__`, `terminate`, or `unlink` but no `release`.
+
 ## Streaming
 
 A command declared `streaming=True` has a generator handler annotated `Iterator[T]`, and
@@ -784,14 +794,14 @@ handlers that call `fcntl.flock` or a `FileLock` themselves.
 
 ## Cancellation
 
-SIGINT and SIGTERM produce a `CANCELLED` envelope with exit `130` or `143`, run the
-command's optional `cleanup=` hook first, and a second signal during cleanup exits at once
+SIGINT and SIGTERM produce a `CANCELLED` envelope with exit `130` or `143`, tear the run
+down first (resources' `release`, then `cleanup=`), and a second signal during cleanup exits at once
 without a second write. A handler's own `except Exception` cannot swallow the signal, and a
 retry waiting for an idempotency key is interrupted too. A signal that arrives after the
 handler returned is held: the finished result is written with its own exit code, since
 the work it reports did happen. An `exec` plan stops at the first signal, even with
 `--ignore-errors`, and exits `130` or `143`. A reader that closes stdout early
-(`tool logs | head -1`) ends the run silently: the cleanup hook runs, nothing more is
+(`tool logs | head -1`) ends the run silently: the teardown runs, nothing more is
 written, and the exit is `0` once a complete envelope or event reached the reader, since it
 got what it wanted (REQ-F-014), or `141` (`OUTPUT_CLOSED`) when it left before any. All three
 signal codes appear in every command's `exit_codes` map.
