@@ -317,6 +317,21 @@ def test_an_unusable_tool_trace_id_exits_2(value: str) -> None:
     assert "trace_id" not in env["meta"]
 
 
+@pytest.mark.parametrize("argv", [["--help"], ["--version"], [], ["--schema"], ["manifest"]])
+def test_help_and_version_answer_over_an_unusable_tool_trace_id(argv: list[str]) -> None:
+    out, err = io.StringIO(), io.StringIO()
+    code = make_app().run(argv, stdout=out, stderr=err, env={"TOOL_TRACE_ID": "a\nb"})
+    assert code == 0
+
+
+def test_app_call_answers_version_over_an_unusable_tool_trace_id() -> None:
+    app = make_app()
+    assert app.call("version", {}, env={"TOOL_TRACE_ID": "a\nb"}).exit_code == 0
+    refused = app.call("get", {}, env={"TOOL_TRACE_ID": "a\nb"})
+    assert refused.exit_code == 2 and refused.error is not None
+    assert refused.error.code == "TRACE_ID_INVALID"
+
+
 def test_exec_lines_share_the_run_trace_and_name_their_own_command() -> None:
     plan = '{"_cmd": "get"}\n{"_cmd": "fail"}\n'
     out = io.StringIO()

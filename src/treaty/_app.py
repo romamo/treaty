@@ -1073,12 +1073,16 @@ class App:
             cap = OutputCap.resolve(None, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.arg_error(exc, meta={"_cmd": path})
-        try:
-            # No argv here: <APP>_CONFIG, <APP>_CONTEXT, and <APP>_INSTANCE_ID stand in
-            run.load_settings(config_options(self.name, environ))
-        except ParseError as exc:
-            if path not in {p.value for p in PURE_PATHS}:  # REQ-F-068
-                return run.arg_error(exc, meta={"_cmd": path})
+        # REQ-F-068: the pure built-ins answer over a bad TOOL_TRACE_ID or config layer
+        deferred = run.trace_error
+        if deferred is None:
+            try:
+                # No argv here: <APP>_CONFIG, <APP>_CONTEXT, and <APP>_INSTANCE_ID stand in
+                run.load_settings(config_options(self.name, environ))
+            except ParseError as exc:
+                deferred = exc
+        if deferred is not None and path not in {p.value for p in PURE_PATHS}:
+            return run.arg_error(deferred, meta={"_cmd": path})
         envelope = self._call(run, path, arguments, environ)
         return cap_envelope(envelope, cap, Rerun(argv=None, page=run.page))
 
@@ -1086,8 +1090,6 @@ class App:
         self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
     ) -> Envelope:
         meta: dict[str, object] = {"_cmd": path}
-        if run.trace_error is not None:
-            return run.arg_error(run.trace_error, meta=meta)
         try:
             command_path = CommandPath(path)
         except InvalidValue as exc:
@@ -1219,24 +1221,23 @@ class App:
             return run.emit(Format.JSON, run.arg_error(exc))
         run.stable = run.stable_all = globals_.stable_output
         run.unmask, run.unprotected = globals_.unmask, globals_.no_injection_protection
-        if run.trace_error is not None:
-            return run.emit(mode, run.arg_error(run.trace_error))
-        # REQ-F-068: help, version, and the schema answer even when a config layer is
-        # invalid, so a bad file is reported only by what reads the settings
-        config_error: ParseError | None = None
-        try:
-            run.load_settings(
-                config_options(
-                    self.name,
-                    environ,
-                    config=globals_.config,
-                    context=globals_.context,
-                    no_config=globals_.no_config,
-                    instance_id=globals_.instance_id,
+        # REQ-F-068: help, version, and the schema answer even over a bad TOOL_TRACE_ID or
+        # an invalid config layer, which only what runs a command reports
+        config_error = run.trace_error
+        if config_error is None:
+            try:
+                run.load_settings(
+                    config_options(
+                        self.name,
+                        environ,
+                        config=globals_.config,
+                        context=globals_.context,
+                        no_config=globals_.no_config,
+                        instance_id=globals_.instance_id,
+                    )
                 )
-            )
-        except ParseError as exc:
-            config_error = exc
+            except ParseError as exc:
+                config_error = exc
         if globals_.show_config:
             if config_error is not None:
                 return run.emit(mode, run.arg_error(config_error))
