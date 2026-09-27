@@ -255,6 +255,10 @@ def command_entry(
         out["requires"] = [r.to_json() for r in command.requires]  # REQ-C-026
     if command.steps:
         out["steps"] = [s.value for s in command.steps]  # REQ-C-008
+    if command.platform:
+        out["platform"] = list(command.platform)  # REQ-C-018
+    if command.required_tools:
+        out["required_tools"] = {t: v.value for t, v in sorted(command.required_tools.items())}
     if command.subprocess is not None:
         out["subprocess"] = command.subprocess.to_json(command.fields)  # REQ-C-019
     if command.secret_env_vars:
@@ -359,8 +363,11 @@ def build_manifest(
     framework_version: str,
     formats: Sequence[Format],
     app_name: str,
+    *,
+    dependencies: Sequence[Mapping[str, str]] = (),
 ) -> dict[str, object]:
-    """The manifest tree with the shared exit-code table hoisted to the root"""
+    """The manifest tree with the shared exit-code table hoisted to the root; the app's
+    declared ``dependencies`` too, when it has any (REQ-O-031)"""
     shared = shared_exit_codes(exits)
     flags = global_flag_entries(formats, app_name)
     entries = {
@@ -368,15 +375,17 @@ def build_manifest(
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
     # Everything an agent caches: a new global flag or shared code must change the etag
-    shape = {
+    shape: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "flags": flags,
         "exit_codes": shared,
         "commands": entries,
     }
+    if dependencies:
+        shape["dependencies"] = [dict(d) for d in sorted(dependencies, key=lambda d: d["name"])]
     digest = hashlib.sha256(canonical_json(shape).encode()).hexdigest()
     etag = Etag(f"sha256:{digest[:32]}")
-    return {
+    manifest: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "framework_version": framework_version,
         "etag": etag.value,
@@ -384,3 +393,6 @@ def build_manifest(
         "exit_codes": shared,
         "commands": entries,
     }
+    if dependencies:
+        manifest["dependencies"] = shape["dependencies"]
+    return manifest

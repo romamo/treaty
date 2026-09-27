@@ -63,7 +63,7 @@ def adapter_app() -> App:
 
 def test_one_tool_per_command_except_exec_with_dots_as_underscores() -> None:
     names = [e.name for e in tool_entries(adapter_app())]
-    assert names == ["log_tail", "manifest", "push", "version"]
+    assert names == ["doctor", "log_tail", "manifest", "push", "version"]
     assert tool_name(next(e.path for e in tool_entries(adapter_app()) if e.name == "log_tail")) == (
         "log_tail"
     )
@@ -138,7 +138,13 @@ def test_call_reports_validation_errors_and_unknown_commands() -> None:
     assert bad.error.errors is not None and bad.error.errors[0]["field"] == "retries"
     unknown = app.call("nope", {})
     assert unknown.error is not None and unknown.error.code == "UNKNOWN_COMMAND"
-    assert unknown.error.context["available"] == ["log.tail", "manifest", "push", "version"]
+    assert unknown.error.context["available"] == [
+        "doctor",
+        "log.tail",
+        "manifest",
+        "push",
+        "version",
+    ]
     assert app.call("exec", {}).error is not None
     assert app.call("Not A Path", {}).error is not None
 
@@ -156,7 +162,13 @@ def test_call_tool_maps_names_and_passes_unknown_through() -> None:
     assert call_tool(app, entries, "log_tail", {"count": 1}).data == [{"n": 0}]
     unknown = call_tool(app, entries, "log.tail", {"count": 1})
     assert unknown.error is not None and unknown.error.code == "UNKNOWN_TOOL"
-    assert unknown.error.context["available"] == ["log_tail", "manifest", "push", "version"]
+    assert unknown.error.context["available"] == [
+        "doctor",
+        "log_tail",
+        "manifest",
+        "push",
+        "version",
+    ]
 
 
 def test_call_writes_nothing_to_the_process_streams(capsys: pytest.CaptureFixture[str]) -> None:
@@ -201,6 +213,7 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
         "config_set",
         "deploy_rollback",
         "deploy_start",
+        "doctor",
         "job_cancel",
         "job_status",
         "manifest",

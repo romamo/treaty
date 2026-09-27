@@ -110,3 +110,40 @@ def shell_safe(field: FieldInfo, value: object) -> ParseError | None:
             "and not starting with -",
         )
     return None
+
+
+# sys.platform values, freebsd and the like matched by prefix (freebsd14)
+PLATFORMS = frozenset(
+    {
+        "aix",
+        "android",
+        "cygwin",
+        "darwin",
+        "emscripten",
+        "freebsd",
+        "ios",
+        "linux",
+        "netbsd",
+        "openbsd",
+        "sunos",
+        "wasi",
+        "win32",
+    }
+)
+UNSUPPORTED_PLATFORM = "UNSUPPORTED_PLATFORM"
+
+
+def check_platform(where: str, platform: Sequence[str]) -> tuple[str, ...]:
+    """``platform=("linux", "darwin")``: ``sys.platform`` values; empty is every platform"""
+    if isinstance(platform, str):
+        raise RegistrationError(f"{where}: platform is a list, such as platform=[{platform!r}]")
+    unknown = sorted(str(p) for p in platform if p not in PLATFORMS)
+    if unknown:
+        raise RegistrationError(
+            f"{where}: platform {unknown} are not sys.platform values; use {sorted(PLATFORMS)}"
+        )
+    return tuple(dict.fromkeys(platform))
+
+
+def supports(platform: Sequence[str], current: str) -> bool:
+    return not platform or any(current.startswith(p) for p in platform)

@@ -312,6 +312,36 @@ def _subprocess_declared(app: App) -> Iterator[Finding]:
             )
 
 
+def _builtin_shadowed(app: App) -> Iterator[Finding]:
+    for path in app.shadowed_builtins:
+        yield Finding(
+            "builtin-shadowed",
+            Severity.ADVICE,
+            path.value,
+            f"an app command or group named {path.value} replaces the built-in {path.value}, "
+            "which agents look for on every treaty app (13-D1)",
+            f"rename the app's {path.value}, such as {app.name}-{path.value}, to keep the built-in",
+        )
+
+
+def _required_tools(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        seen: set[str] = set()
+        for call in ctx_calls(c.handler):
+            binary = None if not call.argv else call.argv[0].literal
+            if binary is None or binary in c.required_tools or binary in seen:
+                continue
+            seen.add(binary)
+            yield Finding(
+                "required-tools",
+                Severity.ADVICE,
+                c.path.value,
+                f"runs {binary!r} (line {call.line} of the handler), which required_tools does "
+                "not list, so doctor cannot check it is installed (REQ-C-018)",
+                f'required_tools={{"{binary}": "<minimum version>"}}',
+            )
+
+
 # Whole words, plus the common fused forms; "profile" and "tempo" are not paths
 _PATH_NAME_HINTS = re.compile(
     r"(^|_)(path|dir|directory|file|folder|filepath|dirpath|filename|dirname)($|_)"
@@ -1404,6 +1434,18 @@ RULES: tuple[Rule, ...] = (
         "Commands that run a child declare its arguments",
         Severity.WARNING,
         _subprocess_declared,
+    ),
+    Rule(
+        "required-tools",
+        "Programs a command runs are in required_tools",
+        Severity.ADVICE,
+        _required_tools,
+    ),
+    Rule(
+        "builtin-shadowed",
+        "App commands keep the yielding built-ins' names free",
+        Severity.ADVICE,
+        _builtin_shadowed,
     ),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),

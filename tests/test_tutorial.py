@@ -288,7 +288,7 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
 
     got = asyncio.run(session())
     tools = got["tools"]
-    assert sorted(tools) == ["add", "done", "list", "manifest", "purge", "version"]
+    assert sorted(tools) == ["add", "doctor", "done", "list", "manifest", "purge", "version"]
     assert tools["list"].annotations.read_only_hint is True
     assert tools["purge"].annotations.destructive_hint is True
     assert "idempotency_key" in tools["add"].input_schema["properties"]

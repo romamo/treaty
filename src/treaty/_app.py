@@ -41,6 +41,7 @@ from ._auth import (
     scope_set,
 )
 from ._batch import Batch, ItemError
+from ._builtins import register_doctor
 from ._cap import (
     DEFAULT_CAP,
     DEFAULT_STDIN_CAP,
@@ -64,8 +65,9 @@ from ._command import (
 )
 from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
-from ._declare import Subprocess
+from ._declare import UNSUPPORTED_PLATFORM, Subprocess, supports
 from ._deprecation import Deprecated
+from ._deps import Dependency, check_dependencies
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
 from ._env import KNOWN, SESSION, STATE_DIR, app_var
@@ -257,6 +259,7 @@ class App:
         settings: type | None = None,
         init: Init | None = None,
         companions: Sequence[str] = (),
+        dependencies: Sequence[Dependency] = (),
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
@@ -266,7 +269,12 @@ class App:
         parameter with the class (REQ-F-028). ``init`` is the app's one-time setup: it
         adds the ``init`` built-in, and other commands exit 4 with ``INIT_REQUIRED``
         until it has run (REQ-F-076). ``companions`` names the other programs a
-        ``fix_command`` may run, such as ``("mkdir",)`` (REQ-C-030)."""
+        ``fix_command`` may run, such as ``("mkdir",)`` (REQ-C-030). ``dependencies``
+        lists the external tools the app needs, each a ``treaty.Dependency`` that the
+        ``doctor`` built-in checks and the manifest lists (REQ-O-031).
+
+        ``doctor`` is a built-in that yields: an app command or group of the same name
+        replaces it (13-D1). ``manifest``, ``version``, and ``exec`` are reserved."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -300,6 +308,11 @@ class App:
         self.companions = frozenset(companions)
         self._fixes_checked = False
         self._redirects: dict[CommandPath, Moved] = {}
+        self.dependencies = check_dependencies(dependencies, name)
+        self._yielding: set[CommandPath] = set()
+        """Built-ins an app command of the same name replaces (13-D1)"""
+        self._shadowed: list[CommandPath] = []
+        self._builtins: frozenset[CommandPath] = frozenset()
         self._register_builtins(enable_exec)
         self._builtins = frozenset(self._commands)
 
@@ -398,6 +411,7 @@ class App:
 
     def group(self, path: str, *, description: str) -> Group:
         prefix = CommandPath(path)
+        self._yield_to(prefix)
         if prefix in self._commands:
             raise RegistrationError(f"{prefix} is already a command")
         if any(r == prefix or r.is_ancestor_of(prefix) for r in self._redirects):
@@ -456,6 +470,8 @@ class App:
         rollback: Rollback | None = None,
         external: bool = False,
         subprocess: Subprocess | None = None,
+        platform: Sequence[str] = (),
+        required_tools: Mapping[str, str] | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -516,6 +532,10 @@ class App:
         declared field is refused in phase 1, exit 2 ``SHELL_METACHARACTER``, when it
         holds a shell metacharacter or starts with ``-``. Without it the declaration is
         derived from ``ctx.run([...])`` list literals, and not checked (REQ-C-019).
+        ``platform=["linux"]`` names the ``sys.platform`` values the command supports;
+        elsewhere it still runs, with an ``UNSUPPORTED_PLATFORM`` warning.
+        ``required_tools={"dpkg-deb": "1.19.0"}`` names the programs it runs and their
+        minimum versions, each a ``doctor`` check (REQ-C-018).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
@@ -660,14 +680,31 @@ class App:
                     rollback=rollback,
                     external=external,
                     subprocess=subprocess,
+                    platform=platform,
+                    required_tools=required_tools,
                 )
             )
             return fn
 
         return register
 
+    def _yield_to(self, path: CommandPath) -> None:
+        """Drop each yielding built-in that ``path`` would clash with (13-D1)"""
+        for builtin in sorted(self._yielding, key=lambda p: p.value):
+            if builtin == path or builtin.is_ancestor_of(path) or path.is_ancestor_of(builtin):
+                del self._commands[builtin]
+                self._yielding.discard(builtin)
+                self._builtins -= {builtin}
+                self._shadowed.append(builtin)
+
+    @property
+    def shadowed_builtins(self) -> tuple[CommandPath, ...]:
+        """Built-ins an app command or group took the name of"""
+        return tuple(self._shadowed)
+
     def _register(self, command: Command) -> None:
         path = command.path
+        self._yield_to(path)
         taken = framework_collisions(command)
         if taken:
             raise RegistrationError(
@@ -715,6 +752,7 @@ class App:
         ``restructured``, ``deprecated``, or ``typo_corrected``; ``permanent=False``
         tells an agent not to remember the mapping."""
         source, target = CommandPath(old), CommandPath(to)
+        self._yield_to(source)
         if reason not in RedirectReason:
             reasons = ", ".join(RedirectReason)
             raise RegistrationError(f"redirect {source}: reason={reason!r} is not one of {reasons}")
@@ -810,6 +848,8 @@ class App:
         )
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {"name": self.name, "version": self.version}
+
+        self._yielding.add(register_doctor(self))
 
         if self.init is not None:
             setup = self.init
@@ -1047,7 +1087,14 @@ class App:
 
     def manifest(self) -> dict[str, object]:
         self.check_fixes()
-        return build_manifest(self._commands, self.exits, self.version, self.formats, self.name)
+        return build_manifest(
+            self._commands,
+            self.exits,
+            self.version,
+            self.formats,
+            self.name,
+            dependencies=[d.to_json() for d in self.dependencies],
+        )
 
     def environment(self) -> list[tuple[str, str]]:
         """Every variable the app reads, by its prefixed name, with what it sets
@@ -1769,6 +1816,13 @@ class _Run:
             browser_open=BROWSER_OPEN in command.gui_operations,
             headless_behavior=command.headless_behavior or HeadlessBehavior.EMIT_IN_OUTPUT,
         )
+        if not supports(command.platform, sys.platform):
+            self._warn(
+                UNSUPPORTED_PLATFORM,
+                f"{command.path} is not supported on {sys.platform}; it declares "
+                f"{', '.join(command.platform)}",
+                {"platform": sys.platform, "supported": list(command.platform)},
+            )
         self.teardown = Teardown(command.cleanup, self._teardown_failed(command, args))
         self.steps = (
             StepTracker(

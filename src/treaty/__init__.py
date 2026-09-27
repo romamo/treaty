@@ -9,6 +9,7 @@ from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
 from ._declare import Subprocess
 from ._deprecation import Deprecated
+from ._deps import Dependency
 from ._effect import Affects
 from ._envelope import Envelope, ErrorDetail, Meta, NetworkContext, Redirect, WarningDetail
 from ._errors import (
@@ -47,6 +48,7 @@ __all__ = [
     "CliExit",
     "CommandPath",
     "DefaultWhenAbsent",
+    "Dependency",
     "Deprecated",
     "Completed",
     "Credentials",

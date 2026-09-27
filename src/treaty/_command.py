@@ -15,8 +15,9 @@ from typing import Any
 from ._auth import AuthKind, check_declaration
 from ._batch import ITEM_KEYS, batch_item, batch_schema
 from ._config import ConfigScope
-from ._declare import Subprocess, check_subprocess, derive_subprocess
+from ._declare import Subprocess, check_platform, check_subprocess, derive_subprocess
 from ._deprecation import Deprecated
+from ._deps import Version, check_required_tools
 from ._effect import can_carry, with_replay_effect
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, inspect_fields
@@ -190,6 +191,10 @@ class Command:
     shell_checked: tuple[str, ...] = ()
     """Fields refused in phase 1 with a shell metacharacter: the declared
     ``user_controlled_args``, never derived ones (08-D1)"""
+    platform: tuple[str, ...] = ()
+    """``sys.platform`` values the command supports; empty is all (REQ-C-018)"""
+    required_tools: Mapping[str, Version] = field(default_factory=dict)
+    """Programs the command runs, to their minimum versions; checked by ``doctor``"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -308,6 +313,8 @@ def build_command(
     rollback: Rollback | None = None,
     external: bool = False,
     subprocess: Subprocess | None = None,
+    platform: Sequence[str] = (),
+    required_tools: Mapping[str, str] | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -554,6 +561,8 @@ def build_command(
         external=external,
         subprocess=child,
         shell_checked=() if declared_child is None else declared_child.user_controlled_args,
+        platform=check_platform(str(path), platform),
+        required_tools=check_required_tools(str(path), required_tools or {}),
         batch=batch,
     )
 
