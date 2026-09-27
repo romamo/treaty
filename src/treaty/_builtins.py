@@ -15,6 +15,7 @@ from ._deps import Found, Version, dependency_result, find, tool_check
 from ._effect import Affects
 from ._errors import CliExit
 from ._flags import Flag
+from ._session import outputs
 from ._values import CommandPath, ExitCodeName
 
 if TYPE_CHECKING:
@@ -94,13 +95,17 @@ def register_cleanup(app: App) -> CommandPath:
     @app.command(
         CLEANUP_PATH.value,
         description="Remove the temp and cache paths the tool's commands declare in "
-        "filesystem_side_effects",
+        "filesystem_side_effects, and the output files commands handed out",
         danger_level="destructive",
         exit_codes=(),
         examples=[("See what would be removed", f"{app.name} cleanup --dry-run")],
     )
     def cleanup(args: CleanupArgs, ctx: Ctx) -> Cleaned:
-        paths = sorted(_cleared(app, ctx.env.get("HOME")))
+        found = _cleared(app, ctx.env.get("HOME"))
+        if ctx.session is not None:
+            # REQ-F-043: ctx.output_file files; running sessions remove their own
+            found.update(str(p) for p in outputs(ctx.session.root.path))
+        paths = sorted(found)
         if args.dry_run:
             summary = f"Removes {len(paths)} temp and cache paths"
             return Cleaned("would_delete", [], Affects(summary, tuple(paths), len(paths)))

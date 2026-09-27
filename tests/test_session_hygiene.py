@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -13,6 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from conftest import WINDOWS, needs_posix_signals
 from fixture_session_app import app as session_app
 
 from treaty import App, Ctx, NoArgs
@@ -420,3 +422,208 @@ def test_operations_in_other_directories_work_with_absolute_paths_from_cwd(
     proc = tool(["read", "a.txt", "--cwd", str(tmp_path)])
     envelope = json.loads(proc.stdout)
     assert proc.returncode == 0 and data_of(envelope)["text"] == "from a"
+
+
+# F-032, F-043, F-030: the session temp directory
+
+
+def scratch(tmp_path: Path, *argv: str) -> dict[str, object]:
+    status, envelope, _ = run(session_app, ["scratch", *argv], env={"TMPDIR": str(tmp_path)})
+    assert status == 0, envelope
+    return envelope
+
+
+def test_the_temp_directory_path_is_exposed_as_a_framework_api_and_an_env_var(
+    tmp_path: Path,
+) -> None:
+    envelope = scratch(tmp_path)
+    data = data_of(envelope)
+    assert data["tmp_dir"] == meta_of(envelope)["session_tmp_dir"]
+    assert data["child_tmpdir"] == data["child_gettempdir"] == data["tmp_dir"]
+    assert str(data["temp_file"]).startswith(str(data["tmp_dir"]))
+    request_id = meta_of(envelope)["request_id"]
+    assert Path(str(data["tmp_dir"])).name == request_id  # the run identifier
+
+
+def test_two_parallel_invocations_never_write_to_the_same_temp_file_path(tmp_path: Path) -> None:
+    env = {"TMPDIR": str(tmp_path)}
+    procs = [
+        subprocess.Popen(
+            [sys.executable, str(SESSIONCTL), "scratch"],
+            env={**BASE_ENV, **env},
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(3)
+    ]
+    outputs = [json.loads(p.communicate(timeout=30)[0]) for p in procs]
+    dirs = {data_of(o)["tmp_dir"] for o in outputs}
+    files = {data_of(o)["temp_file"] for o in outputs}
+    assert len(dirs) == len(files) == 3
+
+
+def test_after_a_command_exits_normally_its_session_temp_directory_is_removed(
+    tmp_path: Path,
+) -> None:
+    envelope = scratch(tmp_path)
+    assert not Path(str(meta_of(envelope)["session_tmp_dir"])).exists()
+    proc = tool(["scratch"], env={"TMPDIR": str(tmp_path)})
+    assert not Path(str(meta_of(json.loads(proc.stdout))["session_tmp_dir"])).exists()
+
+
+def test_a_run_that_uses_no_temp_directory_makes_none(tmp_path: Path) -> None:
+    _, envelope, _ = run(session_app, ["environ"], env={"TMPDIR": str(tmp_path)})
+    assert "session_tmp_dir" not in meta_of(envelope)
+    assert list(tmp_path.iterdir()) == []
+
+
+@needs_posix_signals
+def test_after_a_command_exits_via_signal_its_session_temp_directory_is_removed(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "child.pid"
+    proc = subprocess.Popen(
+        [sys.executable, str(SESSIONCTL), "hold", "--pid-file", str(marker)],
+        env={**BASE_ENV, "TMPDIR": str(tmp_path)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 10
+    while not marker.exists() or not marker.read_text():
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    child = int(marker.read_text())
+    session = next(p for p in (tmp_path / f"sessionctl-{os.getuid()}").iterdir())
+    assert (session / "children.pids").read_text().split() == [str(child)]
+    proc.send_signal(signal.SIGTERM)
+    out, _ = proc.communicate(timeout=30)
+    assert proc.returncode == 143
+    assert meta_of(json.loads(out))["session_tmp_dir"] == str(session)
+    assert not session.exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(child, 0)  # SIGTERM reached the tracked child: no orphan
+
+
+def test_the_session_tracking_file_exists_and_is_readable_while_children_are_running(
+    tmp_path: Path,
+) -> None:
+    status, envelope, _ = run(session_app, ["kids"], env={"TMPDIR": str(tmp_path)})
+    assert status == 0, envelope
+    listed, own = str(data_of(envelope)["stdout"]).rsplit("\n", 2)[:2]
+    assert listed.split() == [own]
+
+
+def test_no_orphaned_child_remains_and_meta_session_pid_file_is_absent_once_they_exited(
+    tmp_path: Path,
+) -> None:
+    status, envelope, _ = run(session_app, ["kids"], env={"TMPDIR": str(tmp_path)})
+    pid = int(str(data_of(envelope)["stdout"]).split()[-1])
+    assert "session_pid_file" not in meta_of(envelope)
+    if not WINDOWS:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+def test_the_session_temp_directory_is_namespaced_by_instance_id(tmp_path: Path) -> None:
+    envelope = scratch(tmp_path, "--instance-id", "agent-7")
+    where = Path(str(meta_of(envelope)["session_tmp_dir"]))
+    assert where.parent.parent.name == "instances" and where.parent.name == "agent-7"
+
+
+def report(tmp_path: Path, *argv: str) -> dict[str, object]:
+    status, envelope, _ = run(session_app, ["report", *argv], env={"TMPDIR": str(tmp_path)})
+    assert status == 0, envelope
+    return data_of(envelope)
+
+
+def test_a_response_that_includes_a_caller_facing_output_file_includes_a_cleanup_object(
+    tmp_path: Path,
+) -> None:
+    data = report(tmp_path)
+    assert Path(str(data["output_file"])).read_text() == "{}"
+    cleanup = data["cleanup"]
+    assert isinstance(cleanup, dict)
+    assert set(cleanup) == {"command", "auto_cleanup_after_seconds"}
+    assert cleanup["auto_cleanup_after_seconds"] == 300
+
+
+def test_cleanup_command_is_a_valid_directly_executable_shell_command(tmp_path: Path) -> None:
+    data = report(tmp_path)
+    cleanup = data["cleanup"]
+    assert isinstance(cleanup, dict)
+    subprocess.run(str(cleanup["command"]), shell=True, check=True)  # noqa: S602 - the point
+    assert not Path(str(data["output_file"])).exists()
+
+
+def test_files_older_than_auto_cleanup_after_seconds_are_pruned_when_any_command_next_runs(
+    tmp_path: Path,
+) -> None:
+    kept = Path(str(report(tmp_path, "--keep", "300")["output_file"]))
+    expired = Path(str(report(tmp_path, "--keep", "1")["output_file"]))
+    assert expired.exists() and kept.exists()
+    time.sleep(2.1)  # the expiry rounds up to a whole second
+    run(session_app, ["environ"], env={"TMPDIR": str(tmp_path)})
+    assert not expired.exists() and not expired.parent.exists()
+    assert kept.exists()
+
+
+def test_a_session_directory_left_by_a_killed_run_is_pruned_after_a_day(tmp_path: Path) -> None:
+    left = scratch(tmp_path)
+    stale = Path(str(meta_of(left)["session_tmp_dir"]))
+    stale.mkdir(mode=0o700)
+    day_ago = time.time() - 2 * 86_400
+    os.utime(stale, (day_ago, day_ago))
+    fresh = stale.with_name("fresh")
+    fresh.mkdir(mode=0o700)
+    run(session_app, ["environ"], env={"TMPDIR": str(tmp_path)})
+    assert not stale.exists() and fresh.exists()
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX permission bits")
+def test_all_temp_files_are_created_with_mode_0600(tmp_path: Path) -> None:
+    assert data_of(scratch(tmp_path))["file_mode"] == 0o600
+    assert report(tmp_path)["file_mode"] == 0o600
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX permission bits")
+def test_all_temp_directories_are_created_with_mode_0700(tmp_path: Path) -> None:
+    assert data_of(scratch(tmp_path))["dir_mode"] == 0o700
+    assert report(tmp_path)["dir_mode"] == 0o700
+    root = tmp_path / f"sessionctl-{os.getuid()}"
+    assert root.stat().st_mode & 0o777 == 0o700
+    assert (root / "out").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX permission bits")
+def test_umask_does_not_widen_permissions(tmp_path: Path) -> None:
+    old = os.umask(0)
+    try:
+        data = data_of(scratch(tmp_path))
+        written = report(tmp_path)
+    finally:
+        os.umask(old)
+    assert (data["dir_mode"], data["file_mode"]) == (0o700, 0o600)
+    assert (written["dir_mode"], written["file_mode"]) == (0o700, 0o600)
+
+
+@pytest.mark.skipif(WINDOWS, reason="symlinks need privileges on Windows")
+def test_a_planted_symlink_root_is_refused(tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (tmp_path / f"sessionctl-{os.getuid()}").symlink_to(elsewhere)
+    status, envelope, _ = run(session_app, ["scratch"], env={"TMPDIR": str(tmp_path)})
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert status == 4 and error["code"] == "TEMP_DIR_UNSAFE"
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_the_cleanup_built_in_removes_output_files(tmp_path: Path) -> None:
+    path = Path(str(report(tmp_path)["output_file"]))
+    status, envelope, _ = run(
+        session_app, ["cleanup", "--confirm-destructive"], env={"TMPDIR": str(tmp_path)}
+    )
+    assert status == 0, envelope
+    assert str(path.parent) in data_of(envelope)["removed"]  # type: ignore[operator]
+    assert not path.exists()

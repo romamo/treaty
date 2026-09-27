@@ -1,4 +1,5 @@
-"""Teardown of one handler run: resource ``release`` hooks, then ``cleanup=`` (REQ-C-017).
+"""Teardown of one handler run: resource ``release`` hooks, then ``cleanup=`` (REQ-C-017),
+then what the framework removes last, such as the session temp directory (REQ-F-032).
 
 Every way a run ends calls ``Teardown.run``: the worker once the handler returns or
 raises, the timeout and signal paths after the handler's grace, a stream once its
@@ -23,6 +24,7 @@ class Teardown:
 
     def __init__(self, cleanup: Hook | None, failed: Failed) -> None:
         self._hooks: list[tuple[str, Hook]] = []
+        self._last: list[tuple[str, Hook]] = []
         self._cleanup = cleanup
         self._failed = failed
         self._lock = threading.Lock()
@@ -35,14 +37,16 @@ class Teardown:
         """The handler's run starts; before it, there is nothing to clean up"""
         self._began = True
 
-    def add(self, name: str, release: Hook) -> None:
-        """Release ``release`` when the run ends; framework resources register here too"""
+    def add(self, name: str, release: Hook, *, last: bool = False) -> None:
+        """Release ``release`` when the run ends; framework resources register here too.
+        ``last`` runs it after ``cleanup=``, which may still use what it removes."""
         with self._lock:
-            self._hooks.append((name, release))
+            (self._last if last else self._hooks).append((name, release))
 
     @property
     def pending(self) -> bool:
-        """Whether ``run`` has hooks left to call"""
+        """Whether ``run`` has hooks left to call that may wait on the handler; the
+        framework's ``last`` hooks never do"""
         with self._lock:
             return not self._done and (bool(self._hooks) or self._began and bool(self._cleanup))
 
@@ -56,11 +60,13 @@ class Teardown:
                 return
             first, self._done = not self._done, True
             hooks = [*reversed(self._hooks)]
+            last = list(self._last)
         if not first:
             self._finished.wait(wait)
             return
         if self._cleanup is not None:
             hooks.append((CLEANUP_HOOK, self._cleanup))
+        hooks.extend(last)
         try:
             for name, hook in hooks:
                 try:

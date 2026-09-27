@@ -30,6 +30,7 @@ from typing import IO, Any
 
 from ._atomic import write_atomic
 from ._errors import CliExit, RegistrationError
+from ._session import Session
 from ._signals import Cancelled, CancelSignal
 from ._timeout import Timeout
 from ._values import ExitCodeName
@@ -142,8 +143,11 @@ class Processes:
         headless_behavior: HeadlessBehavior = HeadlessBehavior.EMIT_IN_OUTPUT,
         background: BackgroundSlot | None = None,
         cwd: Path | None = None,
+        session: Session | None = None,
     ) -> None:
         self.env = dict(env)
+        self.session = session
+        """The run's temp directory, the children's ``TMPDIR`` and pid file (REQ-F-030)"""
         self.cwd = cwd
         """``--cwd``: where children start, and what a relative ``cwd=`` is under"""
         self.deadline = deadline
@@ -240,6 +244,7 @@ class Processes:
                         proc.stdout.close()
                 with self._lock:
                     self._live.difference_update(procs)
+                self._track()
             stderrs = [_read(err) for err in errs]
         codes = [proc.returncode for proc in procs]
         stage = next((i for i in range(len(codes)) if _failed(codes, i)), len(codes) - 1)
@@ -342,6 +347,22 @@ class Processes:
             live = list(self._live)
         self._stop(live)
 
+    @property
+    def tracked(self) -> bool:
+        """Children still run: ``meta.session_pid_file`` names their pid file (09-D2)"""
+        with self._lock:
+            return bool(self._live)
+
+    def _track(self) -> None:
+        if self.session is None:
+            return
+        with self._lock:
+            pids = [p.pid for p in self._live]
+        self.session.track(pids)
+
+    def _temp_env(self) -> dict[str, str]:
+        return {} if self.session is None else self.session.child_env()
+
     def _where(self, cwd: Path | None) -> Path | None:
         if self.cwd is None:
             return cwd
@@ -390,7 +411,7 @@ class Processes:
                 stdout=subprocess.PIPE,
                 stderr=stderr,
                 cwd=self._where(cwd),
-                env={**self.env, **(env or {})},
+                env={**self.env, **self._temp_env(), **(env or {})},
                 start_new_session=True,
             )
         except OSError as exc:
@@ -404,6 +425,8 @@ class Processes:
             closed = self._closed
             if not closed:
                 self._live.add(proc)
+        if not closed:
+            self._track()
         if closed:
             # terminate() ran while Popen did: this child is not tracked, so stop it here
             _signal(proc, kill=True)

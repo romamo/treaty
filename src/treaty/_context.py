@@ -17,6 +17,7 @@ from ._mode import Format
 from ._page import PageRequest
 from ._prompt import Prompter
 from ._retry import Retrier
+from ._session import DEFAULT_KEEP_SECONDS, Session
 from ._steps import StepTracker
 from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Processes, Spawned
 from ._timeout import Timeout
@@ -68,6 +69,31 @@ class Ctx:
     teardown: Teardown | None = field(default=None, repr=False, compare=False)
     """What the run releases when it ends: resources' ``release``, then ``cleanup=``"""
     steps: StepTracker | None = field(default=None, repr=False, compare=False)
+    session: Session | None = field(default=None, repr=False, compare=False)
+    """The run's private temp directory and output files (REQ-F-032, REQ-F-043)"""
+
+    @property
+    def tmp_dir(self) -> Path:
+        """This run's own temp directory, ``0700``, made on first use and removed when the
+        run ends, on any exit; children of ``ctx.run`` get it as ``TMPDIR``. Two runs,
+        even in parallel, never share one (REQ-F-032)"""
+        return self._session().directory()
+
+    def temp_file(self, suffix: str = "") -> Path:
+        """A new, empty ``0600`` file in ``tmp_dir``, removed with it"""
+        return self._session().temp_file(suffix)
+
+    def output_file(self, name: str, *, keep_seconds: int = DEFAULT_KEEP_SECONDS) -> Path:
+        """A new, empty ``0600`` file named ``name`` for the caller to read after the run.
+        It outlives the run: an object ``data`` gets ``cleanup``, with the shell
+        ``command`` that deletes it and ``auto_cleanup_after_seconds``, after which a
+        later run of the tool deletes it (REQ-F-043)"""
+        return self._session().output_file(name, keep_seconds)
+
+    def _session(self) -> Session:
+        if self.session is None:
+            raise RegistrationError("the temp directory exists only while a command runs")
+        return self.session
 
     def step(self, name: str) -> bool:
         """Complete the step in progress and start ``name``, the next of the command's

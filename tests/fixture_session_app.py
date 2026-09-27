@@ -74,5 +74,69 @@ def chdir(args: Move, ctx: Ctx) -> dict[str, str]:
     return {"now": os.getcwd()}
 
 
+@app.command("scratch", description="Use the temp directory", danger_level="safe", exit_codes=())
+def scratch(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+    note = ctx.tmp_dir / "note.txt"
+    note.write_text("x")
+    temp = ctx.temp_file(".json")
+    code = "import os, tempfile; print(os.environ['TMPDIR'], tempfile.gettempdir())"
+    child_tmp, child_gettempdir = ctx.run([sys.executable, "-c", code]).stdout.split()
+    return {
+        "tmp_dir": ctx.tmp_dir,
+        "temp_file": temp,
+        "child_tmpdir": child_tmp,
+        "child_gettempdir": child_gettempdir,
+        "dir_mode": ctx.tmp_dir.stat().st_mode & 0o777,
+        "file_mode": temp.stat().st_mode & 0o777,
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class Keep:
+    keep: int = Flag(default=300, description="Seconds the file is kept")
+
+
+@app.command("report", description="Write a report file", danger_level="safe", exit_codes=())
+def report(args: Keep, ctx: Ctx) -> dict[str, object]:
+    path = ctx.output_file("report.json", keep_seconds=args.keep)
+    path.write_text("{}")
+    return {
+        "output_file": path,
+        "file_mode": path.stat().st_mode & 0o777,
+        "dir_mode": path.parent.stat().st_mode & 0o777,
+    }
+
+
+WATCH_PIDS = """
+import os, sys, time
+path = os.path.join(os.environ["TMPDIR"], "children.pids")
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline:
+    if os.path.exists(path) and str(os.getpid()) in open(path).read().split():
+        break
+    time.sleep(0.01)
+print(open(path).read(), end="")
+print(os.getpid())
+"""
+
+
+@app.command("kids", description="A child reads the pid file", danger_level="safe", exit_codes=())
+def kids(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+    return {"stdout": ctx.run([sys.executable, "-c", WATCH_PIDS]).stdout}
+
+
+@dataclass(frozen=True, slots=True)
+class Hold:
+    pid_file: Path = Flag(description="Where the child writes its pid")
+
+
+@app.command("hold", description="A child that waits", danger_level="safe", exit_codes=())
+def hold(args: Hold, ctx: Ctx) -> dict[str, str]:
+    code = "import os, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"
+    ctx.tmp_dir  # noqa: B018 - the session directory exists before the signal
+    ctx.run([sys.executable, "-c", code, str(args.pid_file)])
+    return {}
+
+
 if __name__ == "__main__":
     app.main()

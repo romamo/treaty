@@ -168,6 +168,7 @@ from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
+from ._session import Session, SessionRoot, prune
 from ._settings import EMPTY as EMPTY_SETTINGS
 from ._settings import ConfigOptions, Resolved, SettingsSpec
 from ._settings import options as config_options
@@ -1566,6 +1567,7 @@ def _call(
 
 CLEANUP_FAILED = "CLEANUP_FAILED"
 CWD_CHANGED = "CWD_CHANGED"
+SESSION_HOOK = "session temp dir"
 
 
 def _process_cwd() -> str | None:
@@ -1848,6 +1850,9 @@ class _Run:
         self.unprotected = False
         """``--no-injection-protection``: no trust tags on external content (REQ-O-023)"""
         self._roots: dict[tuple[str, ...], Path | None] = {}
+        self.session: Session | None = None
+        """The current command's temp directory and output files (REQ-F-032)"""
+        self.pruned = False
         self.cwd_given = False
         """``--cwd`` set ``cwd``: relative paths and children are under it (REQ-O-017)"""
         self.update_available: str | None = None
@@ -1941,6 +1946,7 @@ class _Run:
             headless_behavior=command.headless_behavior or HeadlessBehavior.EMIT_IN_OUTPUT,
             background=self.background_slot(command),
             cwd=self.cwd if self.cwd_given else None,
+            session=self.session_for(),
         )
         if not supports(command.platform, sys.platform):
             self._warn(
@@ -1950,6 +1956,8 @@ class _Run:
                 {"platform": sys.platform, "supported": list(command.platform)},
             )
         self.teardown = Teardown(command.cleanup, self._teardown_failed(command, args))
+        assert self.processes.session is not None
+        self.teardown.add(SESSION_HOOK, self.processes.session.remove, last=True)
         self.steps = (
             StepTracker(
                 command.steps,
@@ -2008,7 +2016,18 @@ class _Run:
             locks=Locks(self.locks_dir(), deadline),
             teardown=self.teardown,
             steps=self.steps,
+            session=self.processes.session,
         )
+
+    def session_for(self) -> Session:
+        """A new session for the command about to run; the first also prunes what
+        expired or a killed run left behind (REQ-F-043)"""
+        root = SessionRoot.of(self.app.name, self.env, self.settings.options.instance_id)
+        if not self.pruned:
+            self.pruned = True
+            prune(root.path, time.time())
+        self.session = Session(root, self.request_id)
+        return self.session
 
     def chosen_cwd(self, raw: str) -> Path:
         """``--cwd``: an existing directory, relative to the working directory, checked
@@ -2187,6 +2206,11 @@ class _Run:
         extra |= self.settings.meta()
         if self.update_available is not None:
             extra["update_available"] = self.update_available
+        if self.session is not None and self.session.made is not None:
+            extra["session_tmp_dir"] = str(self.session.made)
+            pid_file = self.session.pid_file
+            if self.processes is not None and self.processes.tracked and pid_file is not None:
+                extra["session_pid_file"] = str(pid_file)  # children still run (09-D2)
         command = self.current
         if command is None:
             name, version, root = self.app.name, ENVELOPE_SCHEMA_VERSION, None
@@ -2969,6 +2993,7 @@ class _Run:
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, exc, started, full_meta)
         data = self._with_open_url(data)
+        data = self._with_cleanup(data)
         if command.danger_level is not DangerLevel.SAFE:
             problem = batch_problem or effect_problem(
                 data,
@@ -3345,6 +3370,13 @@ class _Run:
         if url is None or not isinstance(data, dict) or data.get("open_url") is not None:
             return data
         return {**data, "open_url": url}
+
+    def _with_cleanup(self, data: object) -> object:
+        """Files from ``ctx.output_file`` put ``cleanup`` in an object ``data`` (REQ-F-043)"""
+        cleanup = None if self.session is None else self.session.cleanup()
+        if cleanup is None or not isinstance(data, dict) or data.get("cleanup") is not None:
+            return data
+        return {**data, "cleanup": cleanup}
 
     def _cancelled(
         self,
@@ -4102,6 +4134,7 @@ class _Run:
             # One command per line
             self.warnings, self.token, self.config_file = [], None, None
             self.current, self.pinned, self.retrier = None, None, None
+            self.session, self.processes = None, None
             self.stable = self.stable_all
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
