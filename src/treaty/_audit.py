@@ -529,6 +529,73 @@ def _handler_tree(handler: Callable[..., object]) -> ast.AST | None:
         return None  # no source to scan (REPL, exec, C extension)
 
 
+def _self_attrs(node: ast.AST) -> list[str]:
+    """``self.<name>`` reads under ``node``, in source order, each once"""
+    names = [
+        n.attr
+        for n in ast.walk(node)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "self"
+    ]
+    return list(dict.fromkeys(names))
+
+
+def cross_field_checks(args_type: type) -> list[tuple[str, str, object]]:
+    """``(first, second, compared)`` for each ``if`` in the args ``__post_init__`` that
+    reads two fields and raises: ``compared`` is the constant ``first`` is compared
+    with (``self.first == "csv"``), or ``...`` when there is none"""
+    post_init = args_type.__dict__.get("__post_init__")
+    tree = None if post_init is None else _handler_tree(post_init)
+    if tree is None:
+        return []
+    found: list[tuple[str, str, object]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If) or not any(
+            isinstance(n, ast.Raise) for b in node.body for n in ast.walk(b)
+        ):
+            continue
+        attrs = _self_attrs(node.test)
+        if len(attrs) < 2:
+            continue
+        compared: object = ...
+        for cmp in ast.walk(node.test):
+            if (
+                isinstance(cmp, ast.Compare)
+                and _self_attrs(cmp.left) == [attrs[0]]
+                and isinstance(cmp.ops[0], ast.Eq)
+                and isinstance(cmp.comparators[0], ast.Constant)
+            ):
+                compared = cmp.comparators[0].value
+        found.append((attrs[0], attrs[1], compared))
+    return found
+
+
+def _conditional_rules(app: App) -> Iterator[Finding]:
+    """REQ-C-026: a cross-field check only __post_init__ knows is invisible to --schema"""
+    for c in user_commands(app):
+        declared = {r.field.name for r in c.requires}
+        names = {f.name: f.flag for f in c.fields}
+        for first, second, compared in cross_field_checks(c.args_type):
+            if first in declared or first not in names or second not in names:
+                continue
+            if compared is ...:
+                fix = (
+                    f'requires=[treaty.Excludes("{names[first]}", prohibited=("{names[second]}",))]'
+                )
+            else:
+                fix = (
+                    f'requires=[treaty.RequiredWhen("{names[first]}", {compared!r}, '
+                    f'then=("{names[second]}",))]'
+                )
+            yield Finding(
+                "conditional-rules",
+                Severity.ADVICE,
+                c.path.value,
+                f"__post_init__ checks {first} against {second}, which --schema cannot show, "
+                "so an agent learns the rule from a failing call (heuristic, REQ-C-026)",
+                f"{fix}, if that is the rule; then drop the check from __post_init__",
+            )
+
+
 # REQ-F-021: names of values that differ on every call; created_at is a fact of the record
 _VOLATILE_NAMES = re.compile(
     r"^((fetched|generated|retrieved|requested|queried|rendered)_at|timestamp|now|"
@@ -1229,6 +1296,12 @@ RULES: tuple[Rule, ...] = (
     Rule("no-shell", "Handlers never run a shell", Severity.WARNING, _no_shell),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),
+    Rule(
+        "conditional-rules",
+        "Cross-field checks are declared with requires=",
+        Severity.ADVICE,
+        _conditional_rules,
+    ),
     Rule(
         "multiline-flag",
         "Free-text fields that may span lines declare multiline",

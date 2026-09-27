@@ -22,6 +22,7 @@ from ._out import NO_ORDER, OutSpec, check_order
 from ._page import DEFAULT_LIMIT, Limit, Page
 from ._resources import ResourceSpec, dependency_params, refuse_async, resource_graph
 from ._retry import Retry
+from ._rules import BoundRule, bind_rules
 from ._scalars import ScalarRegistry
 from ._scan import ctx_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
@@ -149,6 +150,8 @@ class Command:
     """Renews expired credentials: ``error.refresh_command`` of ``CREDENTIALS_EXPIRED``"""
     aliases: tuple[CommandPath, ...] = ()
     """Old paths that redirect here with exit 13 (``App.redirect``); manifest ``aliases``"""
+    requires: tuple[BoundRule, ...] = ()
+    """Conditional argument rules, checked in phase 1 (REQ-C-026); manifest ``requires``"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -254,6 +257,7 @@ def build_command(
     provided: Sequence[type] = (),
     fix_commands: Mapping[str, str] | None = None,
     refreshes_auth: bool = False,
+    requires: Sequence[object] = (),
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -308,6 +312,7 @@ def build_command(
             f'{path}: a command that writes config is mutating; set danger_level="mutating"'
         )
     fields = inspect_fields(args_type, scalars)
+    rules = bind_rules(requires, fields, f"{path}")
     flags = {f.flag for f in fields}
     unknown = [name for name in editor_alternatives if name not in flags]
     if unknown:
@@ -427,6 +432,7 @@ def build_command(
         order=order,
         fix_commands=dict(fix_commands or {}),
         refreshes_auth=refreshes_auth,
+        requires=rules,
     )
 
 

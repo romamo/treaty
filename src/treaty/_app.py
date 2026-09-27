@@ -136,6 +136,7 @@ from ._plain import render_event, render_plain
 from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._resources import Resolver
 from ._retry import Retrier, RetriesExhausted, Retry
+from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._settings import EMPTY as EMPTY_SETTINGS
@@ -428,6 +429,7 @@ class App:
         ordered: bool = False,
         fix_commands: Mapping[str, str] | None = None,
         refreshes_auth: bool = False,
+        requires: Sequence[RequiredWhen | Excludes | DefaultWhenAbsent] = (),
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -462,6 +464,9 @@ class App:
         error code when the raise gives none: one command of this app or a companion, run
         verbatim, never destructive (REQ-C-030). ``refreshes_auth=True`` marks the command
         that renews expired credentials, named in ``CREDENTIALS_EXPIRED`` (REQ-F-063).
+        ``requires=[RequiredWhen("format", "csv", then=("separator",)), Excludes("output",
+        prohibited=("stdout",))]`` declares cross-field rules, checked before the args
+        ``__post_init__`` and listed in the manifest (REQ-C-026).
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -575,6 +580,7 @@ class App:
                     provided=() if self.settings is None else (self.settings.cls,),
                     fix_commands=fixes,
                     refreshes_auth=refreshes_auth,
+                    requires=requires,
                 )
             )
             return fn

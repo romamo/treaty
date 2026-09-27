@@ -215,6 +215,8 @@ def command_entry(
         out["job_descriptor_schema"] = command.output_schema
     if command.config_write_scope is not None:
         out["config_write_scope"] = command.config_write_scope.value  # REQ-C-025
+    if command.requires:
+        out["requires"] = [r.to_json() for r in command.requires]  # REQ-C-026
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret

@@ -272,7 +272,7 @@ class FieldInfo:
             "description": description,
         }
         if self.default is not MISSING and self.default is not None:
-            entry["default"] = _jsonable_default(self.default, self.scalar)
+            entry["default"] = jsonable_default(self.default, self.scalar)
         if self.flag_type is FlagType.ENUM:
             entry["enum_values"] = list(self.classified.enum_values)
         if self.spec.short is not None:
@@ -317,15 +317,15 @@ _PRESET_HINTS = {
 }
 
 
-def _jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
+def jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, tuple):
-        return [_jsonable_default(v, scalar) for v in value]
+        return [jsonable_default(v, scalar) for v in value]
     if scalar is not None and isinstance(value, scalar.cls):
-        return _jsonable_default(scalar.serialize(value), None)
+        return jsonable_default(scalar.serialize(value), None)
     if isinstance(value, float) and not math.isfinite(value):
         raise RegistrationError(f"default {value!r} is not a finite number")
     if value is not None and not isinstance(value, (bool, int, float, str)):

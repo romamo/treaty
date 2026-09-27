@@ -34,6 +34,7 @@ from ._idempotency import IdempotencyKey
 from ._json5 import Unreadable, loads_forgiving
 from ._page import Limit, Position
 from ._paths import check_path
+from ._rules import check_rules
 from ._secrets import (
     SecretRef,
     SecretSource,
@@ -525,8 +526,12 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
                 context={"missing": missing, "command": command.path.value},
             )
         )
+    # REQ-C-026: on what the caller supplied, before defaults fill the rest
+    broken = check_rules(command.requires, values, {f for f in failed if f is not None})
+    for exc in broken:
+        errors.add(exc)
     named = {n for f in command.fields for n in (f.name, f.flag, *f.exposed_flags())}
-    if missing or not failed.isdisjoint(named):
+    if missing or broken or not failed.isdisjoint(named):
         errors.fail()  # a field without its value would give __post_init__ a false default
     for f in command.fields:
         if f.name not in values:

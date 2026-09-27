@@ -6,12 +6,23 @@ import json
 import signal
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from conftest import needs_posix_signals, spec_validator
 
-from treaty import App, Arg, Ctx, Flag, NoArgs, RegistrationError
+from treaty import (
+    App,
+    Arg,
+    Ctx,
+    DefaultWhenAbsent,
+    Excludes,
+    Flag,
+    NoArgs,
+    ParseError,
+    RegistrationError,
+    RequiredWhen,
+)
 from treaty._audit import audit
 
 
@@ -293,3 +304,137 @@ def test_an_exec_line_is_normalized_too() -> None:
     first, second = (json.loads(line) for line in out.getvalue().splitlines())
     assert code == 1 and first["ok"] is True and second["error"]["code"] == "INVALID_JSON"
     assert json.loads(second["error"]["corrected_input"])["_cmd"] == "deploy"
+
+
+# REQ-C-026
+
+
+@dataclass(frozen=True, slots=True)
+class ExportArgs:
+    layout: Literal["csv", "json", "parquet"] = Arg(description="Output format")
+    separator: str | None = Flag(default=None, description="Field separator for CSV")
+    output: str | None = Flag(default=None, description="Output file")
+    stdout: bool = Flag(default=False, description="Write to stdout instead")
+    compress: bool = Flag(default=False, description="Compress output")
+    level: int = Flag(default=0, description="Compression level")
+
+
+EXPORT_RULES = [
+    RequiredWhen("layout", "csv", then=("separator",)),
+    Excludes("output", prohibited=("stdout",)),
+    DefaultWhenAbsent("output", target="level", default=9),
+]
+
+
+def export_app(touched: list[str] | None = None) -> App:
+    app = App("ex", version="1.0.0")
+
+    @app.command(
+        "export", description="Export", danger_level="safe", exit_codes=(), requires=EXPORT_RULES
+    )
+    def export(args: ExportArgs, ctx: Ctx) -> dict[str, object]:
+        if touched is not None:
+            touched.append("ran")
+        return {"level": args.level, "separator": args.separator}
+
+    return app
+
+
+def test_csv_layout_without_separator_exits_2_with_a_structured_error() -> None:
+    code, envelope = run(export_app(), ["export", "csv"])
+    error = envelope["error"]
+    assert code == 2 and error["context"]["flag"] == "separator"
+    assert error["context"]["rule"] == {
+        "if_flag": "layout",
+        "if_value": "csv",
+        "then_required": ["separator"],
+    }
+    assert run(export_app(), ["export", "csv", "--separator", ","])[0] == 0
+    assert run(export_app(), ["export", "json"])[0] == 0
+
+
+def test_the_schema_output_includes_the_full_conditional_dependency_graph() -> None:
+    code, envelope = run(export_app(), ["export", "--schema"])
+    assert code == 0 and envelope["data"]["requires"] == [
+        {"if_flag": "layout", "if_value": "csv", "then_required": ["separator"]},
+        {"if_flag": "output", "prohibited": ["stdout"]},
+        {"if_flag": "output", "target_flag": "level", "default": 9},
+    ]
+    spec_validator("manifest-response").validate(export_app().manifest())
+
+
+def test_mutually_exclusive_flags_exit_2_in_phase_1_before_any_io() -> None:
+    touched: list[str] = []
+    code, envelope = run(export_app(touched), ["export", "json", "--output", "r.json", "--stdout"])
+    assert code == 2 and envelope["error"]["phase"] == "validation" and touched == []
+    assert "mutually exclusive" in envelope["error"]["message"]
+    envelope_obj = export_app(touched).call(
+        "export", {"layout": "csv", "output": "r", "stdout": True}, env={}
+    )
+    assert envelope_obj.exit_code == 2 and touched == []
+    assert envelope_obj.error is not None and len(envelope_obj.error.errors or ()) == 2
+
+
+def test_an_agent_can_determine_the_required_flags_from_the_schema_alone() -> None:
+    """The rules in --schema decide every combination the handler would refuse"""
+    rules = export_app().manifest()["commands"]["export"]["requires"]
+
+    def required(given: dict[str, object]) -> set[str]:
+        return {
+            flag
+            for r in rules
+            if "then_required" in r and given.get(r["if_flag"]) == r["if_value"]
+            for flag in r["then_required"]
+        }
+
+    for fmt in ("csv", "json", "parquet"):
+        argv = ["export", fmt, *(f"--{f}=," for f in sorted(required({"layout": fmt})))]
+        assert run(export_app(), argv)[0] == 0, argv
+
+
+def test_default_when_absent_changes_the_default_post_init_sees() -> None:
+    code, envelope = run(export_app(), ["export", "json"])
+    assert code == 0 and envelope["data"]["level"] == 9
+    code, envelope = run(export_app(), ["export", "json", "--output", "r"])
+    assert envelope["data"]["level"] == 0
+    code, envelope = run(export_app(), ["export", "json", "--level", "3"])
+    assert envelope["data"]["level"] == 3
+
+
+def export_handler(args: ExportArgs, ctx: Ctx) -> dict[str, object]:
+    return {}
+
+
+def test_a_rule_naming_an_unknown_flag_or_a_wrong_value_fails_registration() -> None:
+    app = App("bad", version="1.0.0")
+    for rules, match in (
+        ([RequiredWhen("fmt", "csv", then=("separator",))], "not a flag"),
+        ([RequiredWhen("layout", "xml", then=("separator",))], "not a value"),
+        ([Excludes("output", prohibited=("layout",))], "always required"),
+        ([DefaultWhenAbsent("output", target="level", default="high")], "not a value"),
+    ):
+        with pytest.raises(RegistrationError, match=match):
+            app.command("x", description="X", danger_level="safe", exit_codes=(), requires=rules)(
+                export_handler
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class HandChecked:
+    layout: str = Flag(default="json", description="Format")
+    separator: str | None = Flag(default=None, description="Separator")
+
+    def __post_init__(self) -> None:
+        if self.layout == "csv" and self.separator is None:
+            raise ParseError("csv needs a separator", context={"flag": "separator"})
+
+
+def test_audit_suggests_requires_for_a_cross_field_post_init_check() -> None:
+    app = App("hc", version="1.0.0")
+
+    @app.command("x", description="X", danger_level="safe", exit_codes=())
+    def x(args: HandChecked, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    [finding] = findings(app, "conditional-rules")
+    assert 'RequiredWhen("layout", \'csv\', then=("separator",))' in finding.fix

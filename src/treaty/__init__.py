@@ -25,6 +25,7 @@ from ._mode import Format
 from ._out import Binary, Out
 from ._page import Page, PageRequest
 from ._retry import Retry
+from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarSpec
 from ._subprocess import Completed
 from ._table import table
@@ -40,6 +41,7 @@ __all__ = [
     "Binary",
     "CliExit",
     "CommandPath",
+    "DefaultWhenAbsent",
     "Completed",
     "Credentials",
     "Ctx",
@@ -47,6 +49,7 @@ __all__ = [
     "Envelope",
     "ErrorDetail",
     "Example",
+    "Excludes",
     "ExecArgs",
     "Expired",
     "Exit",
@@ -70,6 +73,7 @@ __all__ = [
     "ParseError",
     "RegistrationError",
     "Renderer",
+    "RequiredWhen",
     "Retry",
     "RetryStrategy",
     "ScalarSpec",
