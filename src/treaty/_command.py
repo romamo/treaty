@@ -32,7 +32,7 @@ from ._scan import ctx_calls, shell_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
 from ._steps import STEP_KEYS, Rollback, StepName
-from ._subprocess import BROWSER_OPEN
+from ._subprocess import BROWSER_OPEN, HeadlessBehavior
 from ._timeout import Timeout
 from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope, ToolVersion
@@ -122,6 +122,8 @@ class Command:
     """A destructive command that runs as a dry run unless ``--live`` (REQ-O-048)"""
     gui_operations: tuple[str, ...] = ()
     """Display operations the handler may start; only ``browser_open`` (REQ-C-024)"""
+    headless_behavior: HeadlessBehavior | None = None
+    """What a headless run does instead; declared with every ``gui_operations``"""
     interactive: bool = False
     """The handler may ask through ``ctx.prompt`` and ``ctx.confirm`` (REQ-C-005)"""
     editor_alternatives: tuple[str, ...] = ()
@@ -267,6 +269,7 @@ def build_command(
     streaming: bool = False,
     safe_default: bool = False,
     gui_operations: Sequence[str] = (),
+    headless_behavior: HeadlessBehavior | None = None,
     interactive: bool = False,
     editor_alternatives: Sequence[str] = (),
     paginated: bool | None = None,
@@ -350,7 +353,7 @@ def build_command(
         )
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
-    _check_gui(path, output_type, gui_operations)
+    _check_gui(path, output_type, gui_operations, headless_behavior)
     step_names = _check_steps(path, steps, resumable, rollback, streaming, output_type)
     _check_ctx_calls(
         fn,
@@ -508,6 +511,7 @@ def build_command(
         resource_graph=resource_graph(resources, str(path), args_type, provided),
         safe_default=safe_default,
         gui_operations=tuple(gui_operations),
+        headless_behavior=headless_behavior,
         interactive=interactive,
         editor_alternatives=tuple(editor_alternatives),
         paginated=paginated,
@@ -747,13 +751,31 @@ def _page_output(
     return list[item], True  # type: ignore[valid-type]
 
 
-def _check_gui(path: CommandPath, output_type: object, gui_operations: Sequence[str]) -> None:
+def _check_gui(
+    path: CommandPath,
+    output_type: object,
+    gui_operations: Sequence[str],
+    headless_behavior: HeadlessBehavior | None,
+) -> None:
     unknown = sorted(set(gui_operations) - {BROWSER_OPEN})
     if unknown:
         raise RegistrationError(
             f"{path}: gui_operations {unknown} are not supported; {BROWSER_OPEN!r} is"
         )
-    if gui_operations and not can_carry(output_type, "open_url"):
+    if gui_operations and headless_behavior is None:
+        behaviors = ", ".join(repr(b.value) for b in HeadlessBehavior)
+        raise RegistrationError(
+            f"{path}: gui_operations needs headless_behavior= ({behaviors}), what a run "
+            'without a display does instead (REQ-C-024); headless_behavior="emit_in_output" '
+            "puts the URL in data.open_url"
+        )
+    if headless_behavior is not None and not gui_operations:
+        raise RegistrationError(
+            f"{path}: headless_behavior= describes gui_operations; declare "
+            f"gui_operations=[{BROWSER_OPEN!r}] or drop it"
+        )
+    emits = headless_behavior is HeadlessBehavior.EMIT_IN_OUTPUT
+    if emits and not can_carry(output_type, "open_url"):
         raise RegistrationError(
             f"{path}: a command that opens a browser must return an object with an "
             "'open_url' field, where a headless run puts the URL (REQ-F-057), such as "

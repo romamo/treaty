@@ -18,7 +18,7 @@ from ._page import PageRequest
 from ._prompt import Prompter
 from ._retry import Retrier
 from ._steps import StepTracker
-from ._subprocess import Argv, Completed, Processes
+from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Processes
 from ._timeout import Timeout
 
 LogSink = Callable[[str, Mapping[str, object]], None]
@@ -167,9 +167,14 @@ class Ctx:
         )
 
     def open_url(self, url: str) -> bool:
-        """Open ``url`` in a browser and return True; when headless, open nothing, return
-        False, and the framework puts the URL in ``data.open_url`` (REQ-F-057)"""
-        return self.processes.open_url(url)
+        """Open ``url`` in a browser and return True; when headless, open nothing and return
+        False, and the command's ``headless_behavior`` says what happens instead: the URL
+        in ``data.open_url``, a ``GUI_SKIPPED`` warning, or exit 4 (REQ-F-057, REQ-C-024)"""
+        opened = self.processes.open_url(url)
+        skipped = self.processes.headless_behavior is HeadlessBehavior.SKIP
+        if self.processes.headless and skipped:
+            self.warn(GUI_SKIPPED, "Headless: the browser was not opened", url=url)
+        return opened
 
     def prompt(self, text: str, *, flag: str) -> str:
         """Ask a person for ``text``; ``--<flag>`` is how an agent supplies the answer

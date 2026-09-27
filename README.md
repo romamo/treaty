@@ -377,12 +377,20 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
 `App.main()` writes the same pager and, off a terminal, editor settings into
 `os.environ`, so programs started without `ctx.run` inherit them too.
 
-A command that opens a browser declares `gui_operations=["browser_open"]` and returns an
-`open_url: str | None` field. `ctx.open_url(url)` opens it and returns `True`, except in a
-headless run (no terminal on stdin and stdout, `CI`, or no `DISPLAY` or `WAYLAND_DISPLAY`
-on Linux or over SSH): then nothing opens, the URL lands in `data.open_url`, and every
-envelope of the run has `meta.headless: true` (REQ-F-057). `ctx.headless` tells the
-handler.
+A command that opens a browser declares `gui_operations=["browser_open"]` and
+`headless_behavior=`, which registration requires (REQ-C-024). `ctx.open_url(url)` opens
+it and returns `True`, except in a headless run (no terminal on stdin and stdout, `CI`, or
+no `DISPLAY` or `WAYLAND_DISPLAY` on Linux or over SSH): then nothing opens, every
+envelope of the run has `meta.headless: true` (REQ-F-057), and `headless_behavior` says
+what happens instead:
+
+- `"emit_in_output"`: the URL lands in `data.open_url`, so the output type needs an
+  `open_url: str | None` field
+- `"skip"`: `ctx.open_url` returns `False` with a `GUI_SKIPPED` warning naming the URL
+- `"error"`: the run exits `4`, `PRECONDITION`, code `GUI_UNAVAILABLE`, with the URL in
+  `error.context.url`
+
+`ctx.headless` tells the handler.
 
 ## Prompts
 

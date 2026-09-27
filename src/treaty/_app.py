@@ -160,7 +160,7 @@ from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
 from ._steps import Rollback, RollbackStatus, StepError, StepTracker
-from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, Processes
+from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, HeadlessBehavior, Processes
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._values import (
@@ -424,6 +424,7 @@ class App:
         streaming: bool = False,
         safe_default: bool = False,
         gui_operations: Sequence[str] = (),
+        headless_behavior: str | None = None,
         interactive: bool = False,
         editor_alternatives: Sequence[str] = (),
         paginated: bool | None = None,
@@ -508,6 +509,9 @@ class App:
         ``_trusted: false`` with an ``UNTRUSTED_CONTENT`` warning (REQ-F-035);
         ``treaty.Out(external=True)`` marks one field instead. Every command's ``data`` has
         tokens and base64 blobs masked unless ``--unmask`` (REQ-F-058).
+        ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
+        ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
+        ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -555,6 +559,11 @@ class App:
             placements = ", ".join(p.value for p in OptionPlacement)
             raise RegistrationError(
                 f"{cmd_path}: option_placement={option_placement!r} is not one of {placements}"
+            )
+        if headless_behavior is not None and headless_behavior not in HeadlessBehavior:
+            behaviors = ", ".join(b.value for b in HeadlessBehavior)
+            raise RegistrationError(
+                f"{cmd_path}: headless_behavior={headless_behavior!r} is not one of {behaviors}"
             )
         if config_write_scope is not None and config_write_scope not in ConfigScope:
             scopes = ", ".join(c.value for c in ConfigScope)
@@ -608,6 +617,9 @@ class App:
                     streaming=streaming,
                     safe_default=safe_default,
                     gui_operations=gui_operations,
+                    headless_behavior=None
+                    if headless_behavior is None
+                    else HeadlessBehavior(headless_behavior),
                     interactive=interactive,
                     editor_alternatives=editor_alternatives,
                     paginated=paginated,
@@ -1747,6 +1759,7 @@ class _Run:
             deadline=deadline,
             headless=headless,
             browser_open=BROWSER_OPEN in command.gui_operations,
+            headless_behavior=command.headless_behavior or HeadlessBehavior.EMIT_IN_OUTPUT,
         )
         self.teardown = Teardown(command.cleanup, self._teardown_failed(command, args))
         self.steps = (

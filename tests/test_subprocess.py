@@ -382,6 +382,7 @@ def browser_app() -> App:
         danger_level="safe",
         exit_codes=(),
         gui_operations=["browser_open"],
+        headless_behavior="emit_in_output",
     )
     def login(args: NoArgs, ctx: Ctx) -> Login:
         opened = ctx.open_url("https://example.com/device?code=ABC")
@@ -432,6 +433,7 @@ def test_gui_operations_need_an_open_url_field() -> None:
             danger_level="safe",
             exit_codes=(),
             gui_operations=["browser_open"],
+            headless_behavior="emit_in_output",
         )
         def x(args: NoArgs, ctx: Ctx) -> Argv:
             return Argv()

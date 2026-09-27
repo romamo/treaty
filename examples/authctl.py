@@ -41,6 +41,7 @@ class Session:
     auth="browser",
     refreshes_auth=True,
     gui_operations=["browser_open"],
+    headless_behavior="emit_in_output",
     examples=[("Log in without a browser", "authctl login --headless")],
 )
 def login(args: NoArgs, ctx: Ctx) -> Session:

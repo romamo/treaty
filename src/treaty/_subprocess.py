@@ -24,6 +24,7 @@ import time
 import webbrowser
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import IO
 
@@ -41,6 +42,18 @@ STDERR_TAIL = 4096
 """Characters of a failed child's stderr kept in the error context"""
 BROWSER_OPEN = "browser_open"
 """The ``gui_operations`` entry that allows ``ctx.open_url``"""
+GUI_SKIPPED = "GUI_SKIPPED"
+
+
+class HeadlessBehavior(StrEnum):
+    """What a headless ``ctx.open_url`` does instead of opening a window (REQ-C-024)"""
+
+    EMIT_IN_OUTPUT = "emit_in_output"
+    """Opens nothing; the URL goes to ``data.open_url``"""
+    SKIP = "skip"
+    """Opens nothing; a ``GUI_SKIPPED`` warning names the URL"""
+    ERROR = "error"
+    """The run exits 4, ``PRECONDITION``, with the URL in ``error.context``"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,11 +110,13 @@ class Processes:
         deadline: float | None,
         headless: bool,
         browser_open: bool,
+        headless_behavior: HeadlessBehavior = HeadlessBehavior.EMIT_IN_OUTPUT,
     ) -> None:
         self.env = dict(env)
         self.deadline = deadline
         self.headless = headless
         self.browser_open = browser_open
+        self.headless_behavior = headless_behavior
         self.suppressed_url: str | None = None
         """The URL ``open_url`` did not open because the run is headless (REQ-F-057)"""
         self._live: set[subprocess.Popen[bytes]] = set()
@@ -217,13 +232,23 @@ class Processes:
         return done
 
     def open_url(self, url: str) -> bool:
-        """Open ``url`` in a browser, or, headless, leave it for ``data.open_url``"""
+        """Open ``url`` in a browser; headless, do what ``headless_behavior`` says"""
         if not self.browser_open:
             raise RegistrationError(
                 f"ctx.open_url needs gui_operations=[{BROWSER_OPEN!r}] on the command (REQ-C-024)"
             )
         if self.headless:
-            self.suppressed_url = url
+            if self.headless_behavior is HeadlessBehavior.ERROR:
+                raise CliExit(
+                    ExitCodeName("PRECONDITION"),
+                    "The command opens a browser, and no display or person is here to see it",
+                    code="GUI_UNAVAILABLE",
+                    context={"url": url, "gui_operation": BROWSER_OPEN},
+                    fix_required="open the URL in error.context.url yourself, or run the "
+                    "command where a display is available",
+                )
+            if self.headless_behavior is HeadlessBehavior.EMIT_IN_OUTPUT:
+                self.suppressed_url = url
             return False
         return webbrowser.open(url)
 

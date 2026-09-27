@@ -241,8 +241,8 @@ def command_entry(
         out["non_interactive_alternatives"] = list(command.editor_alternatives)
     if command.gui_operations:
         out["gui_operations"] = list(command.gui_operations)
-        # The only behavior treaty has: the URL goes to data.open_url (REQ-C-024)
-        out["headless_behavior"] = "emit_in_output"
+        assert command.headless_behavior is not None  # checked at registration
+        out["headless_behavior"] = command.headless_behavior.value  # REQ-C-024
     if command.auth is not None:
         out["headless_supported"] = command.auth.headless_supported  # REQ-C-021
         out["token_env_vars"] = list(command.token_env_vars)
