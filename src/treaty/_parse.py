@@ -16,6 +16,7 @@ from typing import NoReturn
 
 from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, is_env_var_name
 from ._command import HEARTBEAT_FLAG, INPUT_FILE_FLAG, OUTPUT_FLAG, Command, DangerLevel
+from ._config import GLOBAL_FLAG
 from ._dispatch import loads_strict
 from ._errors import ParseError
 from ._flags import FieldInfo, apply_scalar
@@ -77,6 +78,8 @@ class Invocation:
     """``--token-env-var`` of a login command: the one variable to read the token from"""
     token: str | None = None
     """The pre-acquired token of a login command, read before the handler runs"""
+    global_config: bool = False
+    """``--global`` of a config-writing command: write the user file, not the project's"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +252,7 @@ def parse_command_args(
     output: Path | None = None
     headless = False
     token_var: str | None = None
+    global_config = False
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -418,6 +422,12 @@ def parse_command_args(
                     headless = True
                     i += 1
                     continue
+                if name == GLOBAL_FLAG and command.config_write_scope is not None:
+                    if has_eq:
+                        raise ParseError(f"'{name}' takes no value", context={"flag": name})
+                    global_config = True
+                    i += 1
+                    continue
                 if name == TOKEN_ENV_FLAG and command.auth is not None:
                     parsed_var = env_var(value_after(tok, TOKEN_ENV_FLAG, has_eq, inline))
                     if token_var is not None and token_var != parsed_var:
@@ -508,6 +518,7 @@ def parse_command_args(
             (NO_STREAM_FLAG, no_stream),
             (LIVE_FLAG, live),
             (HEADLESS_FLAG, headless),
+            (GLOBAL_FLAG, global_config),
             *switches.items(),
         ):
             spellings = (flag, flag.replace("-", "_"))
@@ -529,6 +540,7 @@ def parse_command_args(
             output=output,
             headless=headless or built.headless,
             token_env_var=token_var if token_var is not None else built.token_env_var,
+            global_config=global_config or built.global_config,
         )
     _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
@@ -547,6 +559,7 @@ def parse_command_args(
         output=output,
         headless=headless,
         token_env_var=token_var,
+        global_config=global_config,
     )
 
 
@@ -663,6 +676,8 @@ def known_flags(command: Command) -> list[str]:
         flags.append(OUTPUT_FLAG)
     if command.auth is not None:
         flags.extend((HEADLESS_FLAG, TOKEN_ENV_FLAG))
+    if command.config_write_scope is not None:
+        flags.append(GLOBAL_FLAG)
     return flags
 
 
@@ -719,6 +734,7 @@ def build_from_mapping(
     input_file: Path | None = None
     headless = False
     token_var: str | None = None
+    global_config = False
     errors = _Collector()
     for key, value in mapping.items():
         try:
@@ -778,6 +794,13 @@ def build_from_mapping(
                     )
                 headless = value
                 continue
+            if flag == GLOBAL_FLAG and command.config_write_scope is not None:
+                if not isinstance(value, bool):
+                    raise ParseError(
+                        f"{key!r} expects a boolean", context={"field": key, "value": value}
+                    )
+                global_config = value
+                continue
             if flag == TOKEN_ENV_FLAG and command.auth is not None:
                 if not isinstance(value, str):
                     raise ParseError(f"{key!r} expects a string", context={"field": key})
@@ -826,6 +849,7 @@ def build_from_mapping(
         input_file=input_file,
         headless=headless,
         token_env_var=token_var,
+        global_config=global_config,
     )
 
 

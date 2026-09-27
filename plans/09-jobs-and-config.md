@@ -58,11 +58,11 @@ def set_(args: SetArgs, ctx: Ctx) -> Written:
 
 ## Tasks
 
-- [ ] `Job`, `async_job=`, `JobStore` protocol, `job status` built-in
-- [ ] `config_write_scope=`, `--global`, `ctx.config_path`, `ctx.write_config`
-- [ ] `_atomic.py` shared by idempotency and config writes
-- [ ] Audit rules `async-job` and `config-write-scope`
-- [ ] Extend `examples/deployctl.py` with `deploy.start` and `config.set` for the kit
+- [x] `Job`, `async_job=`, `JobStore` protocol, `job status` built-in
+- [x] `config_write_scope=`, `--global`, `ctx.config_path`, `ctx.write_config`
+- [x] `_atomic.py` shared by idempotency and config writes
+- [x] Audit rules `async-job` and `config-write-scope`
+- [x] Extend `examples/deployctl.py` with `deploy.start` and `config.set` for the kit
 
 ## Tests
 
@@ -70,3 +70,38 @@ def set_(args: SetArgs, ctx: Ctx) -> Written:
 - `job status` returns exit 0, 3, 4, 5 for the four states
 - `config.set` writes `./.deployctl.toml`; with `--global` writes the user path and warns
 - A write killed between temp file and rename leaves the old config intact
+
+## Deviations as built
+
+- **The descriptor follows the spec, not this plan.** `Job(job_id, status,
+  poll_interval_ms=5000, timeout_ms=600000, effect=None)` with `status` one of `running`,
+  `complete`, `failed`, `cancelled`; the framework adds `terminal`, `status_command`, and
+  `cancel_command`. No `pending` or `created_at`. `effect` lets a mutating async command
+  meet REQ-C-003
+- **`job cancel` too.** The spec's descriptor carries `cancel_command`, so `JobStore` has
+  `status(job_id, ctx)` and `cancel(job_id, ctx)`; `job cancel` is mutating and fills
+  `effect: updated` when the store leaves it empty. Both built-ins are registered by
+  `App(jobs=)`, and `async_job=True` without it is a registration error
+- **`job status` reuses framework entries.** The registry holds one entry per number, so 3
+  is `PARTIAL_FAILURE` with code `JOB_RUNNING`, 4 is `PRECONDITION` with `JOB_FAILED` or
+  `JOB_CANCELLED`, 5 is `NOT_FOUND` with `JOB_NOT_FOUND`, each with the job as `data`.
+  `PARTIAL_FAILURE` is not retryable, so a running job carries `poll_interval_ms` in its
+  context and suggestion instead of `retry_after_ms`
+- **Scopes use the spec's names.** `config_write_scope="local"` (project file, `--global`
+  for the user file) and `"global"` (user file only, exit 2 without `--global`); `session`
+  has no file to name and is refused. The project file is `./.<app>.toml` in the working
+  directory, not the nearest one up the tree. A config command must be mutating
+- **Only a global write locks**, on `<file>.lock` next to it, left in place like the
+  idempotency locks; a project file is not shared between sessions the same way
+- **The registration warning is the `config-write-scope` audit rule** (a warning), like
+  treaty's other name heuristics; treaty cannot see file writes, only names. Calling
+  `ctx.write_config` without the declaration is stronger: a registration error, found by
+  scanning the handler. `async-job` is advice for `start`, `submit`, `enqueue`, `launch`,
+  and `trigger` commands
+- **`_atomic.write_atomic` uses `mkstemp`**, so concurrent writers never share a temp file,
+  fsyncs before the rename, keeps an existing file's mode, and removes the temp file on
+  failure. `--output` goes through it too, which completes F-070
+- **The interrupted-write test fails the write with an unencodable character** after the
+  temp file is open, rather than killing a process between write and rename
+- **The example store is a stub**: `deployctl`'s `Deployments` reports every `deploy-*`
+  job complete; `tests/test_jobs_config.py` uses a store with all four states

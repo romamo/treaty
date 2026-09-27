@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ._config import ConfigFile
+from ._errors import RegistrationError
 from ._mode import Format
 from ._page import PageRequest
 from ._prompt import Prompter
@@ -43,6 +45,21 @@ class Ctx:
     token: str | None = field(default=None, repr=False)
     """A login command's pre-acquired token (``auth=``): from ``--token-env-var`` or the
     first set variable of ``token_env_vars``; redacted from logs and tracebacks"""
+    config: ConfigFile | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def config_path(self) -> Path | None:
+        """The file ``write_config`` writes (``config_write_scope=``), else None: the
+        project's ``./.<app>.toml``, or the user's with ``--global``"""
+        return None if self.config is None else self.config.path
+
+    def write_config(self, text: str) -> Path:
+        """Replace the config file with ``text`` through a temporary file and a rename, so
+        an interrupted write leaves the old file; a global write is locked and adds a
+        ``GLOBAL_CONFIG_MODIFIED`` warning (REQ-C-025)"""
+        if self.config is None:
+            raise RegistrationError("ctx.write_config needs config_write_scope= on the command")
+        return self.config.write(text)
 
     def log(self, message: str, **fields: object) -> None:
         """Write one diagnostic line to stderr, never stdout (REQ-F-006)

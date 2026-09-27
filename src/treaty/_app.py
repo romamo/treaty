@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn, TextIO, cast
 
+from ._atomic import write_atomic
 from ._auth import (
     OVER_PRIVILEGED,
     AuthKind,
@@ -41,15 +42,17 @@ from ._command import (
     Renderer,
     build_command,
 )
+from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
 from ._envelope import Envelope, ErrorDetail, WarningDetail, clean, json_safe, write_envelope
 from ._errors import CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
-from ._flags import REDACTED, Flag
+from ._flags import REDACTED, Arg, Flag
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
+from ._jobs import Job, JobStore, with_links
 from ._manifest import build_manifest, command_schema
 from ._mode import (
     Format,
@@ -116,6 +119,11 @@ class CheckPermissionsArgs:
 
 
 @dataclass(frozen=True, slots=True)
+class JobArgs:
+    job_id: str = Arg(description="The job_id of the job descriptor")
+
+
+@dataclass(frozen=True, slots=True)
 class ExecArgs:
     ignore_errors: bool = Flag(default=False, description="Continue past a failed line")
     input_file: Path | None = Flag(
@@ -154,9 +162,12 @@ class App:
         state_dir: str | Path | None = None,
         enable_exec: bool = True,
         credentials: Credentials | None = None,
+        jobs: JobStore | None = None,
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
-        ``requires_auth=True`` commands and adds the ``check-permissions`` built-in"""
+        ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
+        ``jobs`` looks up the jobs ``async_job=True`` commands start, for the ``job status``
+        and ``job cancel`` built-ins."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         self.name = name
@@ -173,6 +184,7 @@ class App:
         self._groups: dict[CommandPath, str] = {}
         self._renderers: dict[Format, Renderer] = {}
         self.credentials = credentials
+        self.jobs = jobs
         self._register_builtins(enable_exec)
 
     # Registration
@@ -295,6 +307,8 @@ class App:
         requires_auth: bool = False,
         auth: str | None = None,
         token_env_vars: Sequence[str] = (),
+        async_job: bool = False,
+        config_write_scope: str | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -309,7 +323,9 @@ class App:
         ``requires_auth=True`` checks the app's ``credentials`` for ``required_scopes``
         before the handler runs. ``auth="browser"`` or ``"device"`` marks a login command:
         it gets ``--headless`` and ``--token-env-var``, and ``ctx.token`` from
-        ``<APP>_TOKEN`` or the ``token_env_vars`` after it.
+        ``<APP>_TOKEN`` or the ``token_env_vars`` after it. ``async_job=True`` returns a
+        ``treaty.Job`` polled with ``job status``. ``config_write_scope="local"`` or
+        ``"global"`` lets ``ctx.write_config`` change the project or user config file.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -331,6 +347,16 @@ class App:
         if auth is not None and auth not in AuthKind:
             kinds = ", ".join(k.value for k in AuthKind)
             raise RegistrationError(f"{cmd_path}: auth={auth!r} is not one of {kinds}")
+        if async_job and self.jobs is None:
+            raise RegistrationError(
+                f"{cmd_path}: async_job=True needs App(jobs=...), which answers job status and "
+                "job cancel for the jobs it starts"
+            )
+        if config_write_scope is not None and config_write_scope not in ConfigScope:
+            scopes = ", ".join(c.value for c in ConfigScope)
+            raise RegistrationError(
+                f"{cmd_path}: config_write_scope={config_write_scope!r} is not one of {scopes}"
+            )
         overrides = dict(renderers or {})
         for mode, render in overrides.items():
             _check_renderer(f"{cmd_path}: renderers", mode, render)
@@ -372,6 +398,10 @@ class App:
                     requires_auth=requires_auth,
                     auth=None if auth is None else AuthKind(auth),
                     token_env_vars=token_env_vars,
+                    async_job=async_job,
+                    config_write_scope=None
+                    if config_write_scope is None
+                    else ConfigScope(config_write_scope),
                 )
             )
             return fn
@@ -422,6 +452,8 @@ class App:
 
         if self.credentials is not None:
             self._register_check_permissions(self.credentials)
+        if self.jobs is not None:
+            self._register_jobs(self.jobs)
 
         if enable_exec:
 
@@ -485,6 +517,59 @@ class App:
             report = coverage.report(target.path.value)
             report["over_privileged"] = flagged
             return report
+
+    def _register_jobs(self, jobs: JobStore) -> None:
+        """``job status`` and ``job cancel`` (REQ-C-022); the store is app code"""
+        group = self.group("job", description="Check on or cancel async jobs")
+
+        def found(job: Job | None, job_id: str) -> Job:
+            if job is None:
+                raise CliExit(
+                    ExitCodeName("NOT_FOUND"),
+                    f"no job {job_id!r}",
+                    code="JOB_NOT_FOUND",
+                    context={"job_id": job_id},
+                )
+            if not isinstance(job, Job):
+                raise TypeError(f"the JobStore returned {type(job).__name__}, not treaty.Job")
+            return job
+
+        @group.command(
+            "status",
+            description="Show an async job: exit 0 complete, 3 running, 4 failed, 5 unknown",
+            danger_level="safe",
+            exit_codes=("PARTIAL_FAILURE", "PRECONDITION", "NOT_FOUND"),
+        )
+        def status(args: JobArgs, ctx: Ctx) -> Job:
+            job = found(jobs.status(args.job_id, ctx), args.job_id)
+            if job.status == "running":
+                raise CliExit(
+                    ExitCodeName("PARTIAL_FAILURE"),
+                    f"job {job.job_id} is still running",
+                    code="JOB_RUNNING",
+                    context={"job_id": job.job_id, "poll_interval_ms": job.poll_interval_ms},
+                    suggestion=f"poll again in {job.poll_interval_ms} ms",
+                    data=job,
+                )
+            if job.status != "complete":
+                raise CliExit(
+                    ExitCodeName("PRECONDITION"),
+                    f"job {job.job_id} is {job.status}",
+                    code="JOB_FAILED" if job.status == "failed" else "JOB_CANCELLED",
+                    context={"job_id": job.job_id, "status": job.status},
+                    data=job,
+                )
+            return job
+
+        @group.command(
+            "cancel",
+            description="Ask an async job to stop and show it",
+            danger_level="mutating",
+            exit_codes=("NOT_FOUND",),
+        )
+        def cancel(args: JobArgs, ctx: Ctx) -> Job:
+            job = found(jobs.cancel(args.job_id, ctx), args.job_id)
+            return job if job.effect is not None else dataclasses.replace(job, effect="updated")
 
     def _command_named(self, name: str) -> Command:
         """``deploy rollback`` as typed, or ``deploy.rollback`` as the manifest keys it"""
@@ -998,6 +1083,8 @@ class _Run:
         """``ctx.warn`` entries of the command that runs now, added to its envelopes"""
         self.token: str | None = None
         """A login command's token, redacted wherever a secret argument is"""
+        self.config: ConfigFile | None = None
+        """The config file the command that runs now may write"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -1076,6 +1163,7 @@ class _Run:
             stdin_text=invocation.stdin_text,
             page=page,
             token=invocation.token,
+            config=self.config if command.config_write_scope is not None else None,
         )
 
     def _warn(self, code: str, message: str, context: Mapping[str, object]) -> None:
@@ -1185,6 +1273,11 @@ class _Run:
                 return token
             self.token = token
             invocation = dataclasses.replace(invocation, token=token)
+        if command.config_write_scope is not None:
+            config = self._config_file(command, invocation, meta)
+            if isinstance(config, Envelope):
+                return config
+            self.config = config
         if command.stdin_input:
             try:
                 payload = self._read_input(invocation.input_file, meta=meta)
@@ -1212,6 +1305,32 @@ class _Run:
         if applied:
             extra["confirmed"] = True
         return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+
+    def _config_file(
+        self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
+    ) -> ConfigFile | Envelope:
+        """The file ``ctx.write_config`` writes; a global-only command needs ``--global``"""
+        if command.config_write_scope is ConfigScope.GLOBAL and not invocation.global_config:
+            return self.arg_error(
+                ParseError(
+                    f"Command {command.path} writes the global config and needs --global",
+                    context={"flag": "global", "command": command.path.value},
+                    suggestion="rerun with --global to confirm the user-wide change",
+                ),
+                meta=meta,
+            )
+        if not invocation.global_config:
+            return ConfigFile(local_config(self.app.name), False, self._warn)
+        path = user_config(self.app.name, self.env)
+        if path is None:
+            return self._state_error(
+                "CONFIG_DIR_UNKNOWN",
+                "no directory for the global config",
+                "set XDG_CONFIG_HOME or HOME",
+                time.perf_counter(),
+                meta or {},
+            )
+        return ConfigFile(path, True, self._warn)
 
     def _login_token(
         self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
@@ -1959,6 +2078,8 @@ class _Run:
     def _payload(self, value: object) -> object:
         """A result or exit ``data`` as envelope data: an object, an array, or null"""
         data = to_jsonable(value, self.app.scalars)
+        if isinstance(value, Job) and isinstance(data, dict):
+            data = with_links(data, self.app.name)  # REQ-C-022
         if data is not None and not isinstance(data, (dict, list)):
             raise SchemaError(f"{type(value).__name__}, not an object, array, or null")
         return data
@@ -2060,7 +2181,7 @@ class _Run:
                     envelope, "RENDER_FAILED", f"the {mode} renderer failed", path
                 )
         try:
-            path.write_text(text, encoding="utf-8")
+            write_atomic(path, text, new_mode=0o644)  # REQ-F-070
         except OSError as exc:
             return self._file_error(
                 envelope, "OUTPUT_UNWRITABLE", f"cannot write --output: {exc.strerror}", path
@@ -2355,7 +2476,7 @@ class _Run:
             line = raw.strip()
             if not line:
                 continue
-            self.warnings, self.token = [], None  # each line is its own command
+            self.warnings, self.token, self.config = [], None, None  # one command per line
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:

@@ -15,7 +15,6 @@ after 24 hours; an expired lock file is removed only while nobody holds it.
 from __future__ import annotations
 
 import dataclasses
-import errno
 import hashlib
 import json
 import os
@@ -30,46 +29,13 @@ from enum import Enum
 from pathlib import Path
 from typing import IO
 
+from ._atomic import lock as _lock
+from ._atomic import try_lock as _try_lock
+from ._atomic import unlock as _unlock
+from ._atomic import write_atomic
 from ._errors import ParseError, SchemaError
 from ._scalars import ScalarRegistry
 from ._values import CommandPath
-
-if sys.platform == "win32":
-    import msvcrt
-
-    def _try_lock(handle: IO[str]) -> bool:
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as exc:
-            if exc.errno in (errno.EACCES, errno.EDEADLOCK):
-                return False
-            raise
-        return True
-
-    def _lock(handle: IO[str]) -> None:
-        # LK_LOCK gives up after ten one-second attempts; a retry must wait as long as it takes
-        while not _try_lock(handle):
-            time.sleep(0.05)
-
-    def _unlock(handle: IO[str]) -> None:
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-
-else:
-    import fcntl
-
-    def _try_lock(handle: IO[str]) -> bool:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return False
-        return True
-
-    def _lock(handle: IO[str]) -> None:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-
-    def _unlock(handle: IO[str]) -> None:
-        fcntl.flock(handle, fcntl.LOCK_UN)
-
 
 STATE_ENV = "TREATY_STATE_DIR"
 TTL_SECONDS = 24 * 60 * 60
@@ -190,11 +156,7 @@ class Slot:
                 "created_at": record.created_at,
             }
         )
-        tmp = self.path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(body)
-        os.replace(tmp, self.path)
+        write_atomic(self.path, body)
 
     def prune(self, now: float) -> None:
         """Remove other keys' expired records and idle locks; separate from ``save`` so a

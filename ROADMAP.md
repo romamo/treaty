@@ -98,6 +98,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `CREDENTIAL_OVER_PRIVILEGED` warning), `check-permissions`, login commands with `auth=`,
   `--headless`, `--token-env-var`, and `ctx.token`; `ctx.warn`; `broad-scope` and
   `auth-declared` audit rules
+- Async jobs and config writes (REQ-C-022, C-025, F-070): `async_job=True` returning
+  `treaty.Job` with `App(jobs=)`, `job status` and `job cancel`; `config_write_scope=` with
+  `--global`, `ctx.config_path`, and `ctx.write_config`; atomic writes for config,
+  idempotency records, and `--output`; `async-job` and `config-write-scope` audit rules.
+  Level 2 is complete
 
 ## 0.1.0: first release
 

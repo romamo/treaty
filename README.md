@@ -109,7 +109,8 @@ uv add --editable /path/to/treaty
 ## Built-ins
 
 Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`);
-`App(credentials=...)` adds `check-permissions` (see Credentials).
+`App(credentials=...)` adds `check-permissions` (see Credentials) and `App(jobs=...)` adds
+`job status` and `job cancel` (see Async jobs).
 `<app> --version` at the root is an alias for `<app> version`; a command's own `--version`
 flag is never shadowed.
 `exec` reads one `DispatchRequest` per stdin line and dispatches in-process, writing one
@@ -432,6 +433,38 @@ browser login in a headless run (no terminal, `CI`, or `--headless`) without a t
 `--schema` shows `headless_supported` and `token_env_vars`; `ctx.warn(code, message,
 **context)` adds a warning to any command's response.
 
+## Async jobs
+
+A command that starts work it does not wait for declares `async_job=True` and returns a
+`treaty.Job` (REQ-C-022); the app answers for its jobs through `App(jobs=...)`, an object
+with `status(job_id, ctx)` and `cancel(job_id, ctx)` that each return a `Job` or `None`:
+
+```python
+app = App("deployctl", version="1.4.0", jobs=Deployments())
+
+@app.command("deploy.start", description="Start a deployment", danger_level="mutating",
+             exit_codes=(), async_job=True)
+def start(args: Start, ctx: Ctx) -> Job:
+    return Job(backend.submit(args.service), "running", effect="created")
+```
+
+`data` gets `terminal`, `status_command`, and `cancel_command` next to the `Job` fields, and
+`--schema` shows `async: true` and `job_descriptor_schema`. `job status <id>` exits `0` when
+the job is complete, `3` (`JOB_RUNNING`, with `poll_interval_ms`) while it runs, `4` when it
+failed or was cancelled, and `5` for an unknown id; `job cancel <id>` asks it to stop.
+
+## Config writes
+
+A command that changes a config file declares where (REQ-C-025) and writes through
+`ctx.write_config(text)`. `config_write_scope="local"` writes `./.<app>.toml` in the working
+directory, or with `--global` the user file `$XDG_CONFIG_HOME/<app>/config.toml`
+(`~/.config/<app>/config.toml`); `"global"` writes only the user file and exits `2` without
+`--global`. `ctx.config_path` names the file. Every write goes to a temporary file in the
+same directory and is renamed over the target, so an interrupted write leaves the old
+file; a global write also takes an advisory lock and adds a `GLOBAL_CONFIG_MODIFIED`
+warning. The `config-write-scope` audit rule flags `config` and `set` commands without the
+declaration.
+
 ## Validation errors
 
 Phase 1 keeps going past a bad value, an unknown flag, or a refused secret, so one run
@@ -682,7 +715,8 @@ fix using your own names: missing examples, danger levels that contradict comman
 mutating commands without their own exit codes, retryable codes on non-idempotent commands,
 untyped outputs, undeclared network I/O, path-like fields not typed `Path`, wide mutating
 commands without `--raw-payload`, missing cleanup hooks, blanket scopes, login commands
-without `auth=`, and a missing conformance profile. `--all` lists
+without `auth=`, commands that start work without returning a job, config writes without a
+scope, and a missing conformance profile. `--all` lists
 everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and
 piping the output gives an envelope an agent can act on. Rules see declarations only; the
 conformance kit covers runtime behaviour.

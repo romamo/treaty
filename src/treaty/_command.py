@@ -12,9 +12,11 @@ from enum import StrEnum
 from typing import Any
 
 from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, AuthKind, check_declaration
+from ._config import GLOBAL_FLAG, ConfigScope
 from ._effect import can_carry, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
+from ._jobs import Job, descriptor_schema
 from ._mode import Format
 from ._page import CURSOR_FLAG, DEFAULT_LIMIT, LIMIT_FLAG, Limit, Page
 from ._resources import ResourceSpec, dependency_params, resource_graph
@@ -110,6 +112,10 @@ class Command:
     """A login command (REQ-C-021): ``--headless``, ``--token-env-var``, ``ctx.token``"""
     token_env_vars: tuple[str, ...] = ()
     """Where a login command looks for a pre-acquired token, in order; ``<APP>_TOKEN`` first"""
+    async_job: bool = False
+    """Returns a ``treaty.Job`` for work that goes on after the process exits (REQ-C-022)"""
+    config_write_scope: ConfigScope | None = None
+    """The config file ``ctx.write_config`` may change (REQ-C-025)"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -168,6 +174,8 @@ def build_command(
     requires_auth: bool = False,
     auth: AuthKind | None = None,
     token_env_vars: Sequence[str] = (),
+    async_job: bool = False,
+    config_write_scope: ConfigScope | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -195,7 +203,17 @@ def build_command(
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
     _check_gui(path, output_type, gui_operations)
-    _check_ctx_calls(fn, path, gui_operations, interactive, editor_alternatives)
+    _check_ctx_calls(fn, path, gui_operations, interactive, editor_alternatives, config_write_scope)
+    returns_job = isinstance(output_type, type) and issubclass(output_type, Job)
+    if async_job and not returns_job:
+        raise RegistrationError(
+            f"{path}: an async_job command returns treaty.Job, or a dataclass extending it, "
+            "as its job descriptor (REQ-C-022)"
+        )
+    if config_write_scope is not None and danger_level is DangerLevel.SAFE:
+        raise RegistrationError(
+            f'{path}: a command that writes config is mutating; set danger_level="mutating"'
+        )
     fields = inspect_fields(args_type, scalars)
     flags = {f.flag for f in fields}
     unknown = [name for name in editor_alternatives if name not in flags]
@@ -246,6 +264,7 @@ def build_command(
         OUTPUT_FLAG: output_file,
         HEADLESS_FLAG: auth is not None,
         TOKEN_ENV_FLAG: auth is not None,
+        GLOBAL_FLAG: config_write_scope is not None,
     }
     taken = sorted(
         f.flag
@@ -285,6 +304,8 @@ def build_command(
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
     output_schema = schema_for(output_type, scalars)
+    if returns_job:
+        output_schema = descriptor_schema(output_schema)
     if danger_level is not DangerLevel.SAFE:
         output_schema = with_replay_effect(output_schema)
     return Command(
@@ -323,6 +344,8 @@ def build_command(
         token_env_vars=tuple(
             dict.fromkeys((default_env_var(app_name, "token"), *token_env_vars)) if auth else ()
         ),
+        async_job=async_job,
+        config_write_scope=config_write_scope,
     )
 
 
@@ -368,6 +391,7 @@ def _check_ctx_calls(
     gui_operations: Sequence[str],
     interactive: bool,
     editor_alternatives: Sequence[str],
+    config_write_scope: ConfigScope | None,
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
     for call in ctx_calls(fn):
@@ -385,6 +409,11 @@ def _check_ctx_calls(
             raise RegistrationError(
                 f"{where} asks a person; declare interactive=True, which adds --yes and "
                 "--non-interactive (REQ-C-005)"
+            )
+        if call.method == "write_config" and config_write_scope is None:
+            raise RegistrationError(
+                f'{where} writes config; declare config_write_scope="local" (or "global") '
+                "(REQ-C-025)"
             )
         if call.method == "edit" and not editor_alternatives:
             raise RegistrationError(

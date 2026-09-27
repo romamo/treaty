@@ -9,6 +9,7 @@ from ._envelope import Envelope, ErrorDetail, WarningDetail
 from ._errors import CliExit, Exit, ParseError, RegistrationError, SchemaError, TreatyError
 from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
 from ._flags import Arg, Flag
+from ._jobs import Job, JobStore
 from ._mode import Format
 from ._page import Page, PageRequest
 from ._scalars import ScalarSpec
@@ -38,6 +39,8 @@ __all__ = [
     "Flag",
     "FrameworkCode",
     "Group",
+    "Job",
+    "JobStore",
     "NoArgs",
     "Format",
     "Page",

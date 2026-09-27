@@ -15,6 +15,7 @@ from ._command import (
     Command,
     DangerLevel,
 )
+from ._config import GLOBAL_FLAG, ConfigScope
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._mode import Format
 from ._page import CURSOR_FLAG, LIMIT_FLAG
@@ -175,6 +176,18 @@ def command_entry(
         for code in (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED):
             entry = exits.framework(code)
             exit_codes.setdefault(str(entry.code.value), entry.to_json())
+    if command.config_write_scope is not None:
+        only_global = command.config_write_scope is ConfigScope.GLOBAL
+        entry_global: dict[str, object] = {
+            "type": "boolean",
+            "required": only_global,
+            "description": "Required: the command writes the user config file"
+            if only_global
+            else "Write the user config file instead of the project's",
+        }
+        if not only_global:
+            entry_global["default"] = False
+        flags[GLOBAL_FLAG] = entry_global
     if command.auth is not None:
         flags[HEADLESS_FLAG] = {
             "type": "boolean",
@@ -266,6 +279,11 @@ def command_entry(
     if command.auth is not None:
         out["headless_supported"] = command.auth.headless_supported  # REQ-C-021
         out["token_env_vars"] = list(command.token_env_vars)
+    if command.async_job:
+        out["async"] = True  # REQ-C-022
+        out["job_descriptor_schema"] = command.output_schema
+    if command.config_write_scope is not None:
+        out["config_write_scope"] = command.config_write_scope.value  # REQ-C-025
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret
@@ -372,6 +390,12 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         properties[INPUT_FILE_FLAG.replace("-", "_")] = {
             "type": "string",
             "description": "Path of the file holding the input",
+        }
+    if command.config_write_scope is not None:
+        properties[GLOBAL_FLAG] = {
+            "type": "boolean",
+            "default": False,
+            "description": "Write the user config file instead of the project's",
         }
     if command.auth is not None:
         properties[HEADLESS_FLAG] = {

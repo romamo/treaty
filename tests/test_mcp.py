@@ -195,7 +195,15 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
 
     got = asyncio.run(scenario())
     assert got["server"] == ("deployctl", "1.4.0")
-    assert got["tools"] == ["deploy_rollback", "manifest", "version"]
+    assert got["tools"] == [
+        "config_set",
+        "deploy_rollback",
+        "deploy_start",
+        "job_cancel",
+        "job_status",
+        "manifest",
+        "version",
+    ]
     rollback = got["rollback"]
     assert rollback.annotations.destructive_hint is True  # type: ignore[attr-defined]
     assert rollback.input_schema["required"] == ["service"]  # type: ignore[attr-defined]

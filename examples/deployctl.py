@@ -1,11 +1,23 @@
 """Example CLI built on treaty. Run: uv run examples/deployctl.py deploy rollback api --dry-run"""
 
+import json
 from dataclasses import dataclass
 from typing import Literal
 
-from treaty import Affects, App, Arg, Ctx, Exit, Flag
+from treaty import Affects, App, Arg, Ctx, Exit, Flag, Job
 
-app = App("deployctl", version="1.4.0", description="Manage deployments")
+
+class Deployments:
+    """Where jobs live; a real app asks its deploy API"""
+
+    def status(self, job_id: str, ctx: Ctx) -> Job | None:
+        return Job(job_id, "complete") if job_id.startswith("deploy-") else None
+
+    def cancel(self, job_id: str, ctx: Ctx) -> Job | None:
+        return Job(job_id, "complete", effect="noop") if job_id.startswith("deploy-") else None
+
+
+app = App("deployctl", version="1.4.0", description="Manage deployments", jobs=Deployments())
 app.exit_code(
     "DEPLOY_CONFLICT",
     79,
@@ -54,6 +66,56 @@ def rollback(args: Rollback, ctx: Ctx) -> Plan:
         )
         return Plan("would_update", args.service, release, args.strategy, affects)
     return Plan("updated", args.service, release, args.strategy)
+
+
+@dataclass(frozen=True, slots=True)
+class Start:
+    service: str = Arg(description="Service name")
+
+
+@deploy.command(
+    "start",
+    description="Start deploying a service; poll the returned job for the outcome",
+    danger_level="mutating",
+    exit_codes=(),
+    async_job=True,
+    examples=[("Start a deployment", "deployctl deploy start api")],
+)
+def start(args: Start, ctx: Ctx) -> Job:
+    return Job(f"deploy-{args.service}", "running", effect="created")
+
+
+@dataclass(frozen=True, slots=True)
+class Setting:
+    name: str = Arg(description="Setting name, such as region")
+    value: str = Arg(description="New value")
+
+
+@dataclass(frozen=True, slots=True)
+class Written:
+    effect: Literal["updated"]
+    name: str
+    value: str
+    path: str
+
+
+config = app.group("config", description="Change settings")
+
+
+@config.command(
+    "set",
+    description="Set a setting in the project config, or the user config with --global",
+    danger_level="mutating",
+    exit_codes=(),
+    config_write_scope="local",
+    examples=[("Set the region", "deployctl config set region eu-west-1")],
+)
+def set_(args: Setting, ctx: Ctx) -> Written:
+    assert ctx.config_path is not None
+    old = ctx.config_path.read_text().splitlines() if ctx.config_path.exists() else []
+    kept = [line for line in old if not line.startswith(f"{args.name} =")]
+    path = ctx.write_config("\n".join([*kept, f"{args.name} = {json.dumps(args.value)}"]) + "\n")
+    return Written("updated", args.name, args.value, str(path))
 
 
 if __name__ == "__main__":

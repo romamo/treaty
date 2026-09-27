@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 678 passed |
+| `uv run pytest` | 703 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -207,6 +207,17 @@ The two do not share code.
   empty, exits 4 with `TOKEN_REQUIRED` and `ErrorDetail.auth_methods`. `_Run.token` joins
   the redactor's spellings. `--headless` also makes `ctx.headless` and `ctx.open_url`
   headless, but not `meta.headless`, which describes the environment
+- **A `Job` in data gets its links in `_Run._payload`.** Any `treaty.Job` result or exit
+  `data` (the built-ins' too) gains `terminal`, `status_command`, and `cancel_command`;
+  `descriptor_schema` adds them to the output schema, which the manifest also serves as
+  `job_descriptor_schema`. `job status` reuses framework codes: 3 is `PARTIAL_FAILURE`
+  (`JOB_RUNNING`), 4 `PRECONDITION` (`JOB_FAILED`, `JOB_CANCELLED`), 5 `NOT_FOUND`, each
+  with the job as `data`. `App(jobs=)` registers the `job` group before any user command
+- **Config paths are decided in `_Run.execute`**, before idempotency: the project file is
+  `Path.cwd() / .<app>.toml`, the user file comes from the run's env. `ConfigFile` reaches
+  the handler as `ctx.config`; only a global write locks (`<file>.lock`, left in place)
+  and warns. `_atomic.write_atomic` (mkstemp in the target's directory, fsync, rename) is
+  shared by idempotency records, config writes, and `--output`
 - **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
   the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
 
@@ -244,6 +255,9 @@ src/treaty/
   _paths.py      check_path(): null bytes, percent-encoding, and .. in Path flags
   _secrets.py    secret sources (--x-from-env, --x-from-file) and their resolution
   _auth.py       Credentials protocol, AuthKind, scope coverage for the gate and check-permissions
+  _jobs.py       Job descriptor, JobStore protocol, descriptor schema and links
+  _config.py     ConfigScope, project and user config paths, ConfigFile (ctx.write_config)
+  _atomic.py     write_atomic() and the advisory file locks idempotency and config share
   _scan.py       registration-time scan of a handler's ctx.<method>() calls
   _prompt.py     Prompter (ctx.prompt, ctx.confirm, ctx.edit), InputRequired, stdin guard
   _subprocess.py Processes (ctx.run, ctx.pipeline, ctx.open_url), Completed, group kill
@@ -251,7 +265,8 @@ src/treaty/
   _timeout.py    Timeout VO, call_with_timeout()
   _types.py      annotation classification shared by _flags and _schema
   _values.py     CommandPath, ExitCodeName, ExitCode, Scope, Etag
-examples/        deployctl.py (destructive, raw payload), slowctl.py (timeout, cleanup),
+examples/        deployctl.py (destructive, raw payload, async job, config write),
+                 slowctl.py (timeout, cleanup),
                  authctl.py (credentials, login)
 conformance/     deployctl.json profile and launcher for the spec kit
 tests/           one file per feature; conftest.py holds the shared app fixture
@@ -277,9 +292,10 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
 F-011, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-031, F-034, F-044, F-045 (paths),
-F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-065, F-069, C-001,
-C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets), C-021,
-C-023, C-029, O-001, O-003, O-021, O-022, O-032, O-033, O-039, O-041, O-047, O-048, O-050. See `COMPLIANCE.md` for
+F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-065, F-069, F-070,
+C-001, C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
+C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-021, O-022, O-032, O-033, O-039, O-041,
+O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
@@ -288,7 +304,7 @@ command `--timeout` (network and streaming), `--confirm-destructive` (destructiv
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
 `--cursor` (`paginated=True`), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
 (`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
-(`auth=`), and
+(`auth=`), `--global` (`config_write_scope=`), and
 `--<name>-from-env` / `--<name>-from-file` for each secret field.
 
 ## Gotchas

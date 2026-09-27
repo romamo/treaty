@@ -4,7 +4,8 @@ Status of treaty against the 159 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
 hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations;
-06, pagination; 07, I/O and streams; 08, auth and scopes).
+06, pagination; 07, I/O and streams; 08, auth and scopes; 09, async jobs and config
+writes).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -17,26 +18,22 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
-| Level 2: every P0 (includes Level 1) | 51 | 49 | 0 | 2 | **96%** |
-| Level 3: full spec | 159 | 60 | 31 | 68 | **47%** |
+| Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
+| Level 3: full spec | 159 | 63 | 30 | 66 | **49%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 39 | 16 | 24 | **59%** |
-| Command contract (C) | 30 | 13 | 7 | 10 | **55%** |
+| Framework-automatic (F) | 79 | 40 | 15 | 24 | **60%** |
+| Command contract (C) | 30 | 15 | 7 | 8 | **62%** |
 | Opt-in (O) | 50 | 8 | 8 | 34 | **24%** |
 
 ## Open mandatory requirements
 
-Level 2 (every P0) is the level the spec calls agent-reliable. These 2 requirements
-stand between treaty and a Level 2 claim; Level 1 is complete.
-
-| ID | Title | Priority | Level | Status | Notes |
-|----|-------|----------|-------|--------|-------|
-| [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Not started | No async job descriptor |
-| [REQ-C-025](../cli-agent-ergonomics/requirements/c-025-config-writing-commands-declare-write-scope.md) | Config-Writing Commands Declare Write Scope | P0 | 2 | Not started | No config write scope |
+Level 2 (every P0) is the level the spec calls agent-reliable. All 51 Level 2
+requirements are done, so treaty meets Level 2 (51 of 51) as well as Level 1; none are
+open.
 
 ## Framework-automatic
 
@@ -111,7 +108,7 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-F-067](../cli-agent-ergonomics/requirements/f-067-interspersed-option-parsing.md) | Interspersed Option Parsing | P1 | 3 | Partial | Globals accepted anywhere before `--`; no `option_placement: strict` |
 | [REQ-F-068](../cli-agent-ergonomics/requirements/f-068-help-and-version-flag-purity.md) | Help and Version Flag Purity | P0 | 2 | Done | Help, schema, and version resolve before parsing and resources |
 | [REQ-F-069](../cli-agent-ergonomics/requirements/f-069-sigint-handler-installation.md) | SIGINT Handler Installation | P0 | 2 | Done | SIGINT exits 130; second signal exits immediately |
-| [REQ-F-070](../cli-agent-ergonomics/requirements/f-070-atomic-write-via-rename.md) | Atomic Write via Rename | P1 | 3 | Partial | Atomic write used internally for idempotency records; no public helper |
+| [REQ-F-070](../cli-agent-ergonomics/requirements/f-070-atomic-write-via-rename.md) | Atomic Write via Rename | P1 | 3 | Done | `write_atomic` (temp file in the target's directory, fsync, rename, cleanup on failure) for idempotency records, config writes, and `--output` |
 | [REQ-F-071](../cli-agent-ergonomics/requirements/f-071-file-descriptor-leak-prevention.md) | File Descriptor Leak Prevention | P1 | 3 | Done | File descriptors are non-inheritable (PEP 446); no children spawned |
 | [REQ-F-072](../cli-agent-ergonomics/requirements/f-072-lf-line-ending-enforcement.md) | LF Line Ending Enforcement | P1 | 3 | Partial | Writes `\n`; stdout not forced to `\n` on Windows |
 | [REQ-F-073](../cli-agent-ergonomics/requirements/f-073-env-var-namespace-prefix.md) | Environment Variable Namespace Prefix | P1 | 3 | Partial | Env vars prefixed `TREATY_`, not per tool; unprefixed `CI` is read |
@@ -147,10 +144,10 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-C-019](../cli-agent-ergonomics/requirements/c-019-subprocess-invoking-commands-declare-argument-sche.md) | Subprocess-Invoking Commands Declare Argument Schema | P1 | 3 | Not started | No subprocess API |
 | [REQ-C-020](../cli-agent-ergonomics/requirements/c-020-resource-id-fields-declare-validation-pattern.md) | Resource ID Fields Declare Validation Pattern | P1 | 3 | Partial | Presets and `pattern=` checked in phase 1; no warning for ID fields without a pattern |
 | [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Done | `auth="browser"` or `"device"` declares a login command; `--schema` and the manifest carry `headless_supported` and `token_env_vars`; a headless browser login without a token exits 4 with `TOKEN_REQUIRED` |
-| [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Not started | No async job descriptor |
+| [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Done | `async_job=True` requires a `treaty.Job` output and `App(jobs=)`; `data` carries all seven descriptor fields; `--schema` has `async` and `job_descriptor_schema`; `job status` exits 0, 3, 4, 5 |
 | [REQ-C-023](../cli-agent-ergonomics/requirements/c-023-editor-requiring-commands-declare-non-interactive-.md) | Editor-Requiring Commands Declare Non-Interactive Alternative | P1 | 3 | Done | `editor_alternatives=[...]` gives `requires_editor` and `non_interactive_alternatives`, checked against the command's flags; `ctx.edit` without it is a `RegistrationError` |
 | [REQ-C-024](../cli-agent-ergonomics/requirements/c-024-gui-launching-commands-declare-headless-behavior.md) | GUI-Launching Commands Declare Headless Behavior | P1 | 3 | Partial | `gui_operations=["browser_open"]` with `headless_behavior: emit_in_output` in the manifest; `skip` and `error` behaviors not offered |
-| [REQ-C-025](../cli-agent-ergonomics/requirements/c-025-config-writing-commands-declare-write-scope.md) | Config-Writing Commands Declare Write Scope | P0 | 2 | Not started | No config write scope |
+| [REQ-C-025](../cli-agent-ergonomics/requirements/c-025-config-writing-commands-declare-write-scope.md) | Config-Writing Commands Declare Write Scope | P0 | 2 | Done | `config_write_scope="local"` writes `./.<app>.toml`, `--global` the XDG user file with `GLOBAL_CONFIG_MODIFIED`; `ctx.write_config` is atomic and locks global writes; `config-write-scope` audit warning |
 | [REQ-C-026](../cli-agent-ergonomics/requirements/c-026-commands-declare-conditional-argument-dependencies.md) | Commands Declare Conditional Argument Dependencies | P1 | 3 | Not started | No conditional argument rules (ROADMAP 0.3.0) |
 | [REQ-C-027](../cli-agent-ergonomics/requirements/c-027-commands-declare-option-placement.md) | Commands Declare Option Placement Convention | P1 | 3 | Not started | No `option_placement`; tokens after `--` are rejected, not forwarded |
 | [REQ-C-028](../cli-agent-ergonomics/requirements/c-028-already-exists-response-pattern.md) | ALREADY_EXISTS Response Pattern | P1 | 3 | Partial | `Exit.CONFLICT(code="ALREADY_EXISTS", data=...)` works; not a prescribed pattern |

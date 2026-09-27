@@ -23,7 +23,9 @@ from ._types import FlagType
 if TYPE_CHECKING:
     from ._app import App
 
-BUILTINS = frozenset({"manifest", "version", "exec", "check-permissions"})
+BUILTINS = frozenset(
+    {"manifest", "version", "exec", "check-permissions", "job.status", "job.cancel"}
+)
 _DESTRUCTIVE_VERBS = ("delete", "remove", "destroy", "drop", "purge", "reset", "rollback", "wipe")
 _MUTATING_VERBS = ("create", "update", "set", "add", "apply", "deploy", "write", "push", "start")
 _NETWORK_HINTS = re.compile(r"\b(socket|http\.client|urllib|requests|httpx|aiohttp|grpc)\b")
@@ -420,6 +422,37 @@ def _auth_declared(app: App) -> Iterator[Finding]:
             )
 
 
+_ASYNC_VERBS = frozenset({"start", "submit", "enqueue", "launch", "trigger"})
+
+
+def _async_job(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if not c.async_job and c.path.parts[-1] in _ASYNC_VERBS:
+            yield Finding(
+                "async-job",
+                Severity.ADVICE,
+                c.path.value,
+                "name suggests work that goes on after the command returns; agents cannot "
+                "poll it without a job descriptor (REQ-C-022)",
+                "async_job=True returning treaty.Job, with App(jobs=...) to answer job status",
+            )
+
+
+def _config_write_scope(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.config_write_scope is not None or c.danger_level is DangerLevel.SAFE:
+            continue
+        if "config" in c.path.parts or c.path.parts[-1] == "set":
+            yield Finding(
+                "config-write-scope",
+                Severity.WARNING,
+                c.path.value,
+                "looks like a config write but declares no config_write_scope; agents cannot "
+                "tell whether it changes a shared user file (REQ-C-025)",
+                'config_write_scope="local" and write through ctx.write_config',
+            )
+
+
 def _profile(app: App) -> Iterator[Finding]:
     if not any(Path("conformance").glob("*.json")):
         yield Finding(
@@ -486,6 +519,13 @@ RULES: tuple[Rule, ...] = (
     Rule("cleanup", "Network commands register a cleanup hook", Severity.ADVICE, _cleanup),
     Rule("broad-scope", "Required scopes are narrow", Severity.WARNING, _broad_scope),
     Rule("auth-declared", "Login commands declare auth", Severity.WARNING, _auth_declared),
+    Rule("async-job", "Commands that start work return a job", Severity.ADVICE, _async_job),
+    Rule(
+        "config-write-scope",
+        "Config writes declare their scope",
+        Severity.WARNING,
+        _config_write_scope,
+    ),
     Rule("profile", "A conformance profile exists for the spec kit", Severity.ADVICE, _profile),
 )
 
