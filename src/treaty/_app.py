@@ -2411,7 +2411,7 @@ class _Run:
         root = SessionRoot.of(self.app.name, self.env, self.settings.options.instance_id)
         if not self.pruned:
             self.pruned = True
-            prune(root.path, time.time())
+            prune(root, time.time())
         self.session = Session(root, self.request_id)
         return self.session
 

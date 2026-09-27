@@ -664,6 +664,7 @@ def test_tool_cleanup_removes_all_paths_declared_as_temp_or_cache(tmp_path: Path
         "cleaned": [],
         "total_bytes_freed": 0,
         "skipped": [],
+        "failed": [],
         "would_affect": None,
     }
 

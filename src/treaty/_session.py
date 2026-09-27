@@ -6,7 +6,7 @@ The root is ``<temp>/<app>-<uid>/``, or ``instances/<id>/`` under it for an
 a umask never widens them, and a root that is a symlink or someone else's is refused.
 The session directory is ``<root>/<request id>/``, made on first use by ``ctx.tmp_dir``,
 ``ctx.temp_file()``, or a child of ``ctx.run``, and removed when the run ends. Files from
-``ctx.output_file()`` outlive the run under ``<root>/out/<expiry>-<request id>/``; no
+``ctx.output_file()`` outlive the run under ``<root>/out/<expiry>-<request id>-<n>/``; no
 daemon removes them: each run prunes what expired, and session directories a killed run
 left behind for a day.
 """
@@ -53,13 +53,21 @@ class SessionRoot:
         one directory per user"""
         base = env.get("TMPDIR") or env.get("TEMP") or env.get("TMP") or tempfile.gettempdir()
         user = f"-{os.getuid()}" if hasattr(os, "getuid") else ""
-        return cls(Path(base) / f"{app_name}{user}", instance)
+        return cls(Path(base).absolute() / f"{app_name}{user}", instance)
 
     @property
     def path(self) -> Path:
         if self.instance is None:
             return self.user
         return self.user / INSTANCES_DIR / self.instance.value
+
+    def owned(self) -> bool:
+        """Whether every directory of the root exists and passes ``private_dir``'s check,
+        without making any: pruning must never follow a planted root"""
+        parts = [self.user]
+        if self.instance is not None:
+            parts += [self.user / INSTANCES_DIR, self.path]
+        return all(_owned_dir(p) for p in parts)
 
     def make(self) -> Path:
         """The root, each directory of it private"""
@@ -69,6 +77,16 @@ class SessionRoot:
         return path
 
 
+def _owned_dir(path: Path) -> bool:
+    """A directory, not a symlink, owned by the user running this"""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    owner = getattr(os, "getuid", None)
+    return stat.S_ISDIR(info.st_mode) and (owner is None or info.st_uid == owner())
+
+
 def private_dir(path: Path) -> Path:
     """``path`` as a directory only its owner reads: made ``0700``, and refused when it is
     a symlink, not a directory, or owned by another user (a planted directory)"""
@@ -76,13 +94,7 @@ def private_dir(path: Path) -> Path:
         os.mkdir(path, 0o700)
     except FileExistsError:
         pass
-    info = os.lstat(path)
-    owner = getattr(os, "getuid", None)
-    if (
-        stat.S_ISLNK(info.st_mode)
-        or not stat.S_ISDIR(info.st_mode)
-        or (owner is not None and info.st_uid != owner())
-    ):
+    if not _owned_dir(path):
         raise CliExit(
             ExitCodeName("PRECONDITION"),
             f"The temp directory {path} is a symlink, not a directory, or not the user's",
@@ -112,23 +124,29 @@ def _removed(path: Path) -> None:
     shutil.rmtree(path, onexc=gone)
 
 
-def prune(root: Path, now: float) -> None:
+def prune(root: SessionRoot, now: float) -> None:
     """Output files past their expiry, and session directories a killed run left; no
-    daemon does this, so each run does it once (REQ-F-043)"""
-    if not root.is_dir():
+    daemon does this, so each run does it once (REQ-F-043). Only under a root that is the
+    user's own, and best effort: what cannot be removed now waits for a later run."""
+    if not root.owned():
         return
-    for entry in os.scandir(root):
+    due: list[str] = []
+    for entry in os.scandir(root.path):
         if entry.name in (OUT_DIR, INSTANCES_DIR) or not entry.is_dir(follow_symlinks=False):
             continue
         if now - entry.stat(follow_symlinks=False).st_mtime > STALE_SESSION_SECONDS:
-            _removed(Path(entry.path))
-    out = root / OUT_DIR
-    if not out.is_dir():
-        return
-    for entry in os.scandir(out):
-        expiry, dash, _ = entry.name.partition("-")
-        if dash and expiry.isdigit() and int(expiry) <= now:
-            _removed(Path(entry.path))
+            due.append(entry.path)
+    out = root.path / OUT_DIR
+    if _owned_dir(out):
+        for entry in os.scandir(out):
+            expiry, dash, _ = entry.name.partition("-")
+            if dash and expiry.isdigit() and int(expiry) <= now:
+                due.append(entry.path)
+    for path in due:
+        try:
+            _removed(Path(path))
+        except OSError:
+            continue
 
 
 def outputs(root: Path) -> list[Path]:
@@ -153,6 +171,8 @@ class Session:
         self._dir: Path | None = None
         self._removed = False
         self._outputs: list[tuple[Path, int]] = []
+        self._out_id = uuid.uuid4().hex[:8]
+        """Tells apart the output files of ``exec`` lines, which share a request id"""
         self._lock = threading.Lock()
 
     @property
@@ -180,7 +200,7 @@ class Session:
         expiry = math.ceil(time.time() + keep_seconds)  # never removed before it was due
         with self._lock:
             out = private_dir(self.root.make() / OUT_DIR)
-            where = private_dir(out / f"{expiry}-{self.request_id}")
+            where = private_dir(out / f"{expiry}-{self.request_id}-{self._out_id}")
             path = private_file(where / name)
             self._outputs.append((path, keep_seconds))
         return path

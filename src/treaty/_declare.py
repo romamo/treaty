@@ -181,6 +181,14 @@ class SideEffect:
             self.path.startswith(("/", "~/")) or re.match(r"[A-Za-z]:[\\/]", self.path)
         ):
             raise RegistrationError(f"{where}: path is absolute or starts with ~/")
+        segments = re.split(r"[\\/]", re.sub(r"^(~/|/|[A-Za-z]:[\\/])", "", self.path))
+        if any(s in (".", "..") for s in segments):
+            raise RegistrationError(f"{where}: path has no . or .. segments")
+        if not re.sub(r"\{[^{}/]*\}|\*", "", segments[0]):
+            # cleanup would remove all of / or the home directory
+            raise RegistrationError(
+                f"{where}: path names a directory under / or ~/, not every entry of either"
+            )
         if self.type not in SideEffectType:
             kinds = ", ".join(t.value for t in SideEffectType)
             raise RegistrationError(f"{where}: type={self.type!r} is not one of {kinds}")

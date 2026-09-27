@@ -592,8 +592,10 @@ def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
   declared `temp`, `cache`, and `log` path, the caches, and handed-out output files;
   `--scope temp|cache|logs` narrows it, `--min-age SECONDS` keeps anything changed more
   recently (listed under `skipped`), and `data.cleaned` gives each path's `type` and
-  `bytes_freed`, with `total_bytes_freed` (REQ-O-027). `credential` and `config` paths
-  are never removed
+  `bytes_freed`, with `total_bytes_freed` (REQ-O-027). A path it cannot remove is listed
+  in `data.failed` with a `CLEANUP_INCOMPLETE` warning. `credential` and `config` paths
+  are never removed, nor a match reached through a symlink a placeholder matched; a path
+  of just `/` or `~/` plus a placeholder, or with a `..` segment, is refused
 - `status` (safe, exits 0 whatever exists) lists every declared side effect with the
   absolute paths it matches and their sizes (`--show-side-effects`), and the state files,
   config files, idempotency records, the audit log, and declared `credential` and `config`

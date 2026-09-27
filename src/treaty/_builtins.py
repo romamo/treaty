@@ -198,6 +198,8 @@ class Cleaned:
     total_bytes_freed: int
     skipped: list[str]
     """Paths in scope changed within ``--min-age`` seconds, left in place"""
+    failed: list[str]
+    """Paths it could not remove, such as one holding a read-only directory"""
     cleaned: list[Freed] = Out(sort_key="path")
     """Every path removed, with the bytes it held; empty in a dry run"""
     would_affect: Affects | None = None
@@ -228,18 +230,31 @@ def register_cleanup(app: App) -> CommandPath:
         if args.dry_run:
             summary = f"Removes {len(paths)} {args.scope} paths"
             affects = Affects(summary, tuple(paths), len(paths))
-            return Cleaned("would_delete", 0, skipped, [], affects)
-        for path in paths:
-            target = Path(path)
-            if target.is_dir() and not target.is_symlink():
-                shutil.rmtree(target)
-            elif target.exists() or target.is_symlink():
-                target.unlink()
-        freed = [Freed(p, found[p].value, sizes[p][0]) for p in paths]
+            return Cleaned("would_delete", 0, skipped, [], [], affects)
+        failed = [p for p in paths if not _removed(Path(p))]
+        if failed:
+            ctx.warn(
+                "CLEANUP_INCOMPLETE",
+                f"{len(failed)} paths could not be removed; see data.failed",
+                paths=failed,
+            )
+        freed = [Freed(p, found[p].value, sizes[p][0]) for p in paths if p not in failed]
         total = sum(f.bytes_freed for f in freed)
-        return Cleaned("deleted" if paths else "noop", total, skipped, freed)
+        return Cleaned("deleted" if freed else "noop", total, skipped, failed, freed)
 
     return CLEANUP_PATH
+
+
+def _removed(target: Path) -> bool:
+    """Remove a path, a symlink as the link itself; False when some of it stays"""
+    try:
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        elif target.exists() or target.is_symlink():
+            target.unlink()
+    except OSError:
+        return False
+    return True
 
 
 def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
@@ -270,7 +285,17 @@ def declared(
             pattern = effect.pattern(home)
             if pattern is not None:
                 where = glob.escape(pattern).replace("[*]", "*")
-                yield path, effect, pattern, sorted(glob.glob(where, include_hidden=True))
+                found = glob.glob(where, include_hidden=True)
+                yield path, effect, pattern, sorted(m for m in found if not _linked(m, pattern))
+
+
+def _linked(match: str, pattern: str) -> bool:
+    """Whether ``match`` was reached through a symlink a wildcard matched, or one below
+    it: cleaning it would remove what the link points at. The declared prefix may hold
+    links, such as ``/tmp`` on macOS; the match itself is removed as a link."""
+    parts = Path(match).parts
+    first = next((i for i, p in enumerate(Path(pattern).parts) if "*" in p), len(parts))
+    return any(Path(*parts[: i + 1]).is_symlink() for i in range(first, len(parts) - 1))
 
 
 def _measure(path: Path) -> tuple[int, float]:
@@ -282,7 +307,10 @@ def _measure(path: Path) -> tuple[int, float]:
     size, newest = 0, top.st_mtime
     for root, dirs, files in os.walk(path):
         for name in (*dirs, *files):
-            st = Path(root, name).lstat()
+            try:
+                st = Path(root, name).lstat()
+            except FileNotFoundError:  # removed by someone else since the walk listed it
+                continue
             newest = max(newest, st.st_mtime)
             size += 0 if stat.S_ISDIR(st.st_mode) else st.st_size
     return size, newest
