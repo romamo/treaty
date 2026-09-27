@@ -462,6 +462,17 @@ def build_command(
     if external:
         output_schema = with_trust_tags(output_schema)
     shims = _compat(path, compat or {}, schema_version, output_type, scalars)
+    for shim in shims:
+        # An older shape still answers the same contracts, or every pinned call fails
+        # after the handler has run
+        where = f"{path}: compat[{shim.version.value!r}]"
+        if danger_level is not DangerLevel.SAFE and not can_carry(shim.output_type, "effect"):
+            raise RegistrationError(
+                f"{where} returns no 'effect' field, which {danger_level.value} commands "
+                "answer with (REQ-C-003)"
+            )
+        if step_names:
+            _check_step_output(where, shim.output_type)
     if returns_job:
         output_schema = descriptor_schema(output_schema)
     if batch:
@@ -602,11 +613,17 @@ def _check_steps(
         raise RegistrationError(
             f"{path}: a stream's events show its progress; drop steps= or streaming=True"
         )
+    _check_step_output(str(path), output_type)
+    return names
+
+
+def _check_step_output(where: str, output_type: object) -> None:
+    """A steps= command's output, or an older shape of it, carries the step fields"""
     base, optional = strip_optional(output_type)
     is_object = is_dataclass_type(base) or base is dict or typing.get_origin(base) is dict
     if optional or not is_object:
         raise RegistrationError(
-            f"{path}: a steps= command returns an object, a dataclass or dict, whose data "
+            f"{where}: a steps= command returns an object, a dataclass or dict, whose data "
             f"carries completed_steps, failed_step, and skipped_steps; not {output_type!r}"
         )
     if is_dataclass_type(base):
@@ -614,10 +631,9 @@ def _check_steps(
         taken = sorted(STEP_KEYS & {f.name for f in dataclasses.fields(base)})
         if taken:
             raise RegistrationError(
-                f"{path}: output fields {taken} are the step fields treaty adds to data; "
+                f"{where}: output fields {taken} are the step fields treaty adds to data; "
                 "rename them"
             )
-    return names
 
 
 def _with_step_fields(schema: JsonSchema, steps: Sequence[StepName]) -> JsonSchema:

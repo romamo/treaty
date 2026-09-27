@@ -695,3 +695,55 @@ def test_json_payload_schemas_offer_schema_version_on_compat_commands() -> None:
     commands = {p.value: c for p, c in make_app().commands.items()}
     assert "schema_version" in payload_schema(commands["get"])["properties"]
     assert "schema_version" not in payload_schema(commands["fail"])["properties"]
+
+
+@dataclass(frozen=True, slots=True)
+class Applied:
+    effect: str
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedV1:
+    done: bool
+
+
+def applied_to_v1(out: Applied) -> AppliedV1:
+    return AppliedV1(done=True)
+
+
+def applied_to_list(out: Applied) -> list[str]:
+    return [out.effect]
+
+
+def test_a_compat_shape_of_a_mutating_command_needs_an_effect_field() -> None:
+    app = App("itemctl", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"compat\['1.0'\] returns no 'effect'"):
+
+        @app.command(
+            "apply",
+            description="Apply",
+            danger_level="mutating",
+            exit_codes=(),
+            schema_version="2.0",
+            compat={"1.0": applied_to_v1},
+        )
+        def apply(args: NoArgs, ctx: Ctx) -> Applied:
+            return Applied("updated")
+
+
+def test_a_compat_shape_of_a_steps_command_is_an_object() -> None:
+    app = App("itemctl", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"compat\['1.0'\]: a steps= command"):
+
+        @app.command(
+            "apply",
+            description="Apply",
+            danger_level="safe",
+            exit_codes=(),
+            schema_version="2.0",
+            compat={"1.0": applied_to_list},
+            steps=["check"],
+        )
+        def apply(args: NoArgs, ctx: Ctx) -> Applied:
+            ctx.step("check")
+            return Applied("noop")
