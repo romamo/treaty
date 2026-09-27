@@ -657,3 +657,22 @@ def test_a_settings_post_init_that_refuses_a_value_exits_2_and_spares_help() -> 
     assert code == 2 and error["code"] == "CONFIG_INVALID"
     assert "port must be 0 or more" in error["message"]
     assert app.call("port", {}, env=env).exit_code == 2
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("deep.json", '{"region": ' + "[" * 100_000 + "]" * 100_000 + "}"),
+        ("deep.toml", "region = " + "[" * 100_000 + "]" * 100_000 + "\n"),
+        ("big.json", '{"retries": ' + "9" * 5000 + "}"),
+    ],
+)
+def test_a_config_file_too_deep_or_too_big_to_decode_is_config_invalid(
+    tmp_path: Path, name: str, text: str
+) -> None:
+    path = tmp_path / name
+    path.write_text(text)
+    app = fixture_config_app.app
+    code, out, _ = run(["show", "--config", str(path)], app=app)
+    assert code == 2 and json.loads(out)["error"]["code"] == "CONFIG_INVALID"
+    assert run(["--help", "--config", str(path)], app=app)[0] == 0

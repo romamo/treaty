@@ -284,7 +284,8 @@ def _load(path: Path) -> dict[str, object]:
         raise _invalid(path, None, f"cannot read it: {exc.__class__.__name__}") from None
     try:
         data = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
-    except (tomllib.TOMLDecodeError, json.JSONDecodeError) as exc:
+    except (ValueError, RecursionError) as exc:
+        # Decode errors, an integer past the digit limit, and nesting past the stack
         raise _invalid(
             path, None, f"not valid {path.suffix.lstrip('.') or 'TOML'}: {exc}"
         ) from None
