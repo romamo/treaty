@@ -676,3 +676,25 @@ def test_a_config_file_too_deep_or_too_big_to_decode_is_config_invalid(
     code, out, _ = run(["show", "--config", str(path)], app=app)
     assert code == 2 and json.loads(out)["error"]["code"] == "CONFIG_INVALID"
     assert run(["--help", "--config", str(path)], app=app)[0] == 0
+
+
+@dataclass(frozen=True, slots=True)
+class Keyed:
+    api_token: str = ""
+    api_keys: tuple[str, ...] = ()
+
+
+def test_a_secret_setting_is_redacted_from_logs_errors_and_tracebacks() -> None:
+    app = App("my-tool", version="1.0.0", description="Rows", settings=Keyed)
+
+    @app.command("call", description="Call", danger_level="safe", exit_codes=())
+    def call(args: NoArgs, ctx: Ctx, settings: Keyed) -> dict[str, int]:
+        ctx.log(f"calling with {settings.api_token} and {settings.api_keys[1]}")
+        raise RuntimeError(f"auth failed for {settings.api_token}")
+
+    env = {"MY_TOOL_API_TOKEN": "sk-live-abcdef", "MY_TOOL_API_KEYS": "kx-one-1234,kx-two-5678"}
+    code, out, err = run(["call"], env, app=app)
+    assert code == 1
+    for secret in ("sk-live-abcdef", "kx-two-5678"):
+        assert secret not in out and secret not in err
+    assert "[REDACTED]" in err

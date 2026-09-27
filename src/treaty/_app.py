@@ -3266,15 +3266,24 @@ class _Run:
             self.err.write(f"{where}; recorded, but pruning expired records failed: {exc}\n")
 
     def _redactor(self, command: Command, args: object) -> Callable[[str], str]:
-        """Replace every spelling of the run's secret values: the value, its serialized
-        form for a registered scalar, and the escaped form ``repr`` puts in messages"""
+        """Replace every spelling of the run's secret values, the secret arguments' and
+        settings': the value, its serialized form for a registered scalar, and the
+        escaped form ``repr`` puts in messages"""
         spellings: set[str] = set()
         if self.token is not None and len(self.token) >= MIN_REDACTED:
             spellings.update({self.token, repr(self.token)[1:-1]})
-        for f in command.fields:
-            value = getattr(args, f.name, None) if f.secret else None
+        secrets = [(getattr(args, f.name, None), f.default) for f in command.fields if f.secret]
+        spec, settings = self.app.settings, self.settings.value
+        if spec is not None and settings is not None:
+            for setting in spec.fields:
+                value = getattr(settings, setting.name)
+                if setting.secret and value != setting.default:
+                    # A tuple setting, such as api_keys, holds one secret per item
+                    items = value if isinstance(value, tuple) else (value,)
+                    secrets += [(item, None) for item in items]
+        for value, default in secrets:
             # A default is in the source anyway; redacting it (max_tokens=1) garbles text
-            if value is None or value == f.default:
+            if value is None or value == default:
                 continue
             forms: list[object] = [value, str(value), repr(value)]
             if not isinstance(value, (str, int, float)):
