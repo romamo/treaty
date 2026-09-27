@@ -255,6 +255,8 @@ def command_entry(
         out["requires"] = [r.to_json() for r in command.requires]  # REQ-C-026
     if command.steps:
         out["steps"] = [s.value for s in command.steps]  # REQ-C-008
+    if command.subprocess is not None:
+        out["subprocess"] = command.subprocess.to_json(command.fields)  # REQ-C-019
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret

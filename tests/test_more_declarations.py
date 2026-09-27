@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 from conftest import WINDOWS, spec_validator
 
-from treaty import App, Ctx, NoArgs, RegistrationError
+from treaty import App, Arg, Ctx, Flag, NoArgs, RegistrationError, Subprocess
+from treaty._audit import audit
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 URL = "https://example.com/device?code=ABC"
@@ -190,3 +191,108 @@ def test_in_non_headless_mode_the_gui_operation_proceeds_normally(tmp_path: Path
     assert envelope["ok"] is True and envelope["data"]["status"] == "opened"
     assert "headless" not in envelope["meta"]
     assert opened.read_text() == URL
+
+
+# REQ-C-019
+
+
+@dataclass(frozen=True, slots=True)
+class Echo:
+    text: str = Arg(description="Text to echo")
+    files: tuple[str, ...] = Flag(default=(), description="More words")
+
+
+def echo_app(declared: bool) -> App:
+    app = App("echoer", version="1.0.0")
+    child = Subprocess("echo", user_controlled_args=("text",), hardcoded_args=("-n",))
+
+    @app.command(
+        "say",
+        description="Echo text",
+        danger_level="safe",
+        exit_codes=(),
+        subprocess=child if declared else None,
+    )
+    def say(args: Echo, ctx: Ctx) -> dict[str, str]:
+        return {"stdout": ctx.run(["echo", "-n", args.text, *args.files]).stdout}
+
+    return app
+
+
+@pytest.mark.skipif(WINDOWS, reason="echo is a POSIX program")
+def test_a_user_supplied_argument_to_the_subprocess_api_is_protected_by_req_f_044(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "pwned"
+    code, env = run(echo_app(declared=False), ["say", f"; touch {marker}"])
+    assert code == 0
+    assert env["data"] == {"stdout": f"; touch {marker}"}
+    assert not marker.exists()
+
+
+def test_the_schema_output_includes_a_subprocess_section() -> None:
+    derived = echo_app(declared=False).manifest()["commands"]["say"]  # type: ignore[index]
+    assert derived["subprocess"] == {
+        "binary": "echo",
+        "user_controlled_args": ["text", "files"],
+        "hardcoded_args": ["-n"],
+    }
+    out = io.StringIO()
+    echo_app(declared=True).run(
+        ["say", "--schema", "--format", "json"], stdout=out, stderr=io.StringIO(), env={}
+    )
+    schema = json.loads(out.getvalue())["data"]
+    assert schema["subprocess"] == {
+        "binary": "echo",
+        "user_controlled_args": ["text"],
+        "hardcoded_args": ["-n"],
+    }
+    spec_validator("manifest-response").validate(echo_app(declared=True).manifest())
+
+
+@pytest.mark.parametrize("value", ["a; rm -rf /", "$(id)", "a|b", "`id`", "a&b", "-rf"])
+def test_a_shell_metacharacter_in_a_user_derived_subprocess_argument_is_rejected_with_exit_2(
+    value: str,
+) -> None:
+    code, env = run(echo_app(declared=True), ["say", f"--text={value}"])
+    assert code == 2
+    error = env["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "SHELL_METACHARACTER" and error["context"]["field"] == "text"
+
+
+def test_derived_arguments_are_not_checked_for_metacharacters() -> None:
+    """08-D1: only fields the author declares; an argument list needs no check"""
+    code, env = run(echo_app(declared=False), ["say", "a|b"])
+    assert code == 0 and env["data"] == {"stdout": "a|b"}
+
+
+def test_subprocess_names_real_fields() -> None:
+    app = App("echoer", version="1.0.0")
+    with pytest.raises(RegistrationError, match="not fields"):
+
+        @app.command(
+            "say",
+            description="x",
+            danger_level="safe",
+            exit_codes=(),
+            subprocess=Subprocess("echo", user_controlled_args=("nope",)),
+        )
+        def say(args: Echo, ctx: Ctx) -> dict[str, str]:
+            return {}
+
+
+def test_audit_flags_a_child_whose_arguments_cannot_be_derived() -> None:
+    app = App("echoer", version="1.0.0")
+
+    @app.command("say", description="x", danger_level="safe", exit_codes=())
+    def say(args: Echo, ctx: Ctx) -> dict[str, str]:
+        argv = ["echo", args.text]
+        return {"stdout": ctx.run(argv).stdout}
+
+    rules = {r.id: r for r in audit(app, "echoer", limit=3).rules}
+    [finding] = rules["subprocess-declared"].findings
+    assert finding.command == "say" and "treaty.Subprocess" in finding.fix
+    assert rules["subprocess-declared"].passed is False
+    clean = {r.id: r for r in audit(echo_app(declared=False), "echoer", limit=3).rules}
+    assert clean["subprocess-declared"].passed

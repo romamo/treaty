@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from ._command import Command, OptionPlacement
+from ._declare import shell_safe
 from ._dispatch import invalid_json
 from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
@@ -636,6 +637,11 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
     whenever every field has a value, so its ``ParseError`` (or several, through
     ``ParseError.combine``) joins the errors of an unknown flag in the same run.
     """
+    for f in command.fields:
+        if f.name in command.shell_checked and f.name in values:
+            refused = shell_safe(f, values[f.name])  # REQ-C-019, REQ-F-044
+            if refused is not None:
+                errors.add(refused)
     failed = {e.field for e in errors.errors}
     missing = [
         f.env_flag if f.secret else f.flag

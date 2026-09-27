@@ -64,6 +64,7 @@ from ._command import (
 )
 from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
+from ._declare import Subprocess
 from ._deprecation import Deprecated
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
@@ -454,6 +455,7 @@ class App:
         resumable: bool = False,
         rollback: Rollback | None = None,
         external: bool = False,
+        subprocess: Subprocess | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -509,6 +511,11 @@ class App:
         ``_trusted: false`` with an ``UNTRUSTED_CONTENT`` warning (REQ-F-035);
         ``treaty.Out(external=True)`` marks one field instead. Every command's ``data`` has
         tokens and base64 blobs masked unless ``--unmask`` (REQ-F-058).
+        ``subprocess=Subprocess("git", user_controlled_args=("ref",), hardcoded_args=("log",))``
+        declares the child a command runs and which fields become its arguments; each
+        declared field is refused in phase 1, exit 2 ``SHELL_METACHARACTER``, when it
+        holds a shell metacharacter or starts with ``-``. Without it the declaration is
+        derived from ``ctx.run([...])`` list literals, and not checked (REQ-C-019).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
@@ -652,6 +659,7 @@ class App:
                     resumable=resumable,
                     rollback=rollback,
                     external=external,
+                    subprocess=subprocess,
                 )
             )
             return fn

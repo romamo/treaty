@@ -7,6 +7,7 @@ from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
+from ._declare import Subprocess
 from ._deprecation import Deprecated
 from ._effect import Affects
 from ._envelope import Envelope, ErrorDetail, Meta, NetworkContext, Redirect, WarningDetail
@@ -90,6 +91,7 @@ __all__ = [
     "Scope",
     "SideEffects",
     "StepName",
+    "Subprocess",
     "Timeout",
     "TreatyError",
     "WarningDetail",

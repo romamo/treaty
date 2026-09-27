@@ -295,6 +295,23 @@ def _network_timeout(app: App) -> Iterator[Finding]:
             )
 
 
+def _subprocess_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.subprocess is not None:
+            continue
+        runs = [call for call in ctx_calls(c.handler) if call.method in ("run", "pipeline")]
+        if runs:
+            yield Finding(
+                "subprocess-declared",
+                Severity.WARNING,
+                c.path.value,
+                f"ctx.{runs[0].method}() on line {runs[0].line} of the handler builds its "
+                "argument list at run time, so the manifest cannot say which binary gets "
+                "which argument (REQ-C-019)",
+                'subprocess=treaty.Subprocess("<binary>", user_controlled_args=("<field>",))',
+            )
+
+
 # Whole words, plus the common fused forms; "profile" and "tempo" are not paths
 _PATH_NAME_HINTS = re.compile(
     r"(^|_)(path|dir|directory|file|folder|filepath|dirpath|filename|dirname)($|_)"
@@ -1381,6 +1398,12 @@ RULES: tuple[Rule, ...] = (
         "Network calls pass the command timeout",
         Severity.WARNING,
         _network_timeout,
+    ),
+    Rule(
+        "subprocess-declared",
+        "Commands that run a child declare its arguments",
+        Severity.WARNING,
+        _subprocess_declared,
     ),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),

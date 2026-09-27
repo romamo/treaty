@@ -16,6 +16,16 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
+class ArgvItem:
+    """One element of a ``ctx.run([...])`` list literal"""
+
+    literal: str | None = None
+    """The element, when it is a string literal"""
+    fields: tuple[str, ...] = ()
+    """The ``args.<field>`` reads in it, such as ``args.target`` or ``*args.files``"""
+
+
+@dataclass(frozen=True, slots=True)
 class CtxCall:
     method: str
     line: int
@@ -26,6 +36,8 @@ class CtxCall:
     """The ``args.<field>`` reads among the call's arguments"""
     literal: str | None = None
     """The first argument, when it is a string literal"""
+    argv: tuple[ArgvItem, ...] | None = None
+    """``ctx.run``'s argument list, when it is a list or tuple literal"""
 
 
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
@@ -52,24 +64,34 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
             first = node.args[0]
             stages = first.elts if method == "pipeline" and isinstance(first, ast.List) else [first]
             shell = any(_text(stage) for stage in stages)
-        fields = tuple(
-            dict.fromkeys(
-                n.attr
-                for arg in (*node.args, *(k.value for k in node.keywords))
-                for n in ast.walk(arg)
-                if isinstance(n, ast.Attribute)
-                and isinstance(n.value, ast.Name)
-                and n.value.id == params[0]
-            )
-        )
+        fields = _reads(params[0], *node.args, *(k.value for k in node.keywords))
         first_arg = node.args[0] if node.args else None
-        literal = (
-            first_arg.value
-            if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str)
-            else None
-        )
-        calls.append(CtxCall(method, node.lineno, shell, fields, literal))
+        literal = _literal(first_arg)
+        argv = None
+        if method == "run" and isinstance(first_arg, (ast.List, ast.Tuple)):
+            argv = tuple(ArgvItem(_literal(e), _reads(params[0], e)) for e in first_arg.elts)
+        calls.append(CtxCall(method, node.lineno, shell, fields, literal, argv))
     return calls
+
+
+def _reads(args_name: str, *nodes: ast.expr) -> tuple[str, ...]:
+    """The ``<args>.<field>`` reads under ``nodes``, each once, in order"""
+    return tuple(
+        dict.fromkeys(
+            n.attr
+            for node in nodes
+            for n in ast.walk(node)
+            if isinstance(n, ast.Attribute)
+            and isinstance(n.value, ast.Name)
+            and n.value.id == args_name
+        )
+    )
+
+
+def _literal(node: ast.expr | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
 
 
 _SHELL_CALLS = frozenset(

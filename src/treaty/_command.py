@@ -15,6 +15,7 @@ from typing import Any
 from ._auth import AuthKind, check_declaration
 from ._batch import ITEM_KEYS, batch_item, batch_schema
 from ._config import ConfigScope
+from ._declare import Subprocess, check_subprocess, derive_subprocess
 from ._deprecation import Deprecated
 from ._effect import can_carry, with_replay_effect
 from ._errors import ParseError, RegistrationError
@@ -183,6 +184,12 @@ class Command:
     """Undoes completed steps under ``--rollback-on-failure`` (REQ-O-011)"""
     external: bool = False
     """``data`` is content from outside the tool: trust-tagged (REQ-F-035)"""
+    subprocess: Subprocess | None = None
+    """The child binary and its arguments: ``subprocess=``, else derived from the
+    handler's ``ctx.run([...])`` calls (REQ-C-019)"""
+    shell_checked: tuple[str, ...] = ()
+    """Fields refused in phase 1 with a shell metacharacter: the declared
+    ``user_controlled_args``, never derived ones (08-D1)"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -300,6 +307,7 @@ def build_command(
     resumable: bool = False,
     rollback: Rollback | None = None,
     external: bool = False,
+    subprocess: Subprocess | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -388,6 +396,8 @@ def build_command(
             "take from_stdin=True"
         )
     rules = bind_rules(requires, fields, f"{path}")
+    declared_child = check_subprocess(str(path), subprocess, fields)
+    child = declared_child or derive_subprocess(ctx_calls(fn), fields)
     if option_placement is OptionPlacement.STRICT:
         _check_strict(path, fields)
     flags = {f.flag for f in fields}
@@ -542,6 +552,8 @@ def build_command(
         resumable=resumable,
         rollback=rollback,
         external=external,
+        subprocess=child,
+        shell_checked=() if declared_child is None else declared_child.user_controlled_args,
         batch=batch,
     )
 
