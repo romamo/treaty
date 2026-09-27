@@ -46,16 +46,18 @@ class Teardown:
         with self._lock:
             return not self._done and (bool(self._hooks) or self._began and bool(self._cleanup))
 
-    def run(self) -> None:
+    def run(self, wait: float | None = None) -> None:
         """Call every hook once, the first time only; a failing hook does not stop the rest.
-        A call while another thread's is under way returns once that one has finished."""
+        A call while another thread's is under way returns once that one has finished, or
+        after ``wait`` seconds: a hook that hangs on the handler's thread must not hold
+        up the answer to a timeout or a signal."""
         with self._lock:
             if not self._began:
                 return
             first, self._done = not self._done, True
             hooks = [*reversed(self._hooks)]
         if not first:
-            self._finished.wait()
+            self._finished.wait(wait)
             return
         if self._cleanup is not None:
             hooks.append((CLEANUP_HOOK, self._cleanup))

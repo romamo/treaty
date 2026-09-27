@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -312,3 +313,45 @@ def test_release_takes_only_self() -> None:
         @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: NoArgs, ctx: Ctx, odd: Odd) -> dict[str, bool]:
             return {}
+
+
+def test_a_second_teardown_call_waits_at_most_its_bound_for_a_hanging_hook() -> None:
+    release = threading.Event()
+    teardown = Teardown(None, lambda hook, exc: None)
+    teardown.begin()
+    teardown.add("Conn.release", lambda: release.wait(30))
+    worker = threading.Thread(target=teardown.run)
+    worker.start()
+    time.sleep(0.05)
+    started = time.monotonic()
+    teardown.run(0.1)
+    assert time.monotonic() - started < 5
+    release.set()
+    worker.join()
+
+
+def test_a_release_that_hangs_on_the_handler_thread_does_not_hold_up_the_timeout() -> None:
+    unblock = threading.Event()
+
+    class Conn:
+        @classmethod
+        def acquire(cls, args: NoArgs, ctx: Ctx) -> Self:
+            return cls()
+
+        def release(self) -> None:
+            unblock.wait(60)
+
+    app = App("hangctl", version="1.0.0", description="Hangs")
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=(), timeout=0.2)
+    def go(args: NoArgs, ctx: Ctx, conn: Conn) -> dict[str, int]:
+        time.sleep(0.4)
+        return {"n": 1}
+
+    started = time.monotonic()
+    try:
+        code, envelope, _ = run(app, ["go"])
+    finally:
+        unblock.set()
+    assert code == 10 and envelope["error"]["code"] == "TIMEOUT"
+    assert time.monotonic() - started < 15

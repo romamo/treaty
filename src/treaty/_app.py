@@ -2950,7 +2950,7 @@ class _Run:
                     # The terminal envelope is already decided; the failure goes to stderr
                     self.err.write(self._redactor(command, args)(_traceback(exc)))
             if self.teardown is not None:
-                self.teardown.run()  # beside a held worker, past its grace (06-D3)
+                self.teardown.run(GRACE_SECONDS)  # beside a held worker, past its grace (06-D3)
         # Built after the teardown, so a CLEANUP_FAILED warning reaches it
         yield self._present(command, terminal())
 
@@ -3021,7 +3021,7 @@ class _Run:
         (06-D3)"""
         self._grace(running)
         if self.teardown is not None:
-            self.teardown.run()
+            self.teardown.run(GRACE_SECONDS)
 
     def _stop_children(self, cancelled: CancelSignal | None = None) -> None:
         """Terminate what the interrupted or abandoned handler still runs (REQ-F-030);
@@ -3062,7 +3062,7 @@ class _Run:
         self.in_flight = None  # cleaned up here; a closed stdout must not clean up again
         teardown = self.teardown
         if handler_started and teardown is not None:
-            teardown.run()
+            teardown.run(GRACE_SECONDS)
             if teardown.failures:
                 context["cleanup_failed"] = type(teardown.failures[0][1]).__qualname__
         entry = self.app.exits.by_code(sig.exit_code)
@@ -3373,7 +3373,7 @@ class _Run:
         cancellation; a finished handler already was."""
         command, self.in_flight = self.in_flight, None
         if command is not None and self.teardown is not None:
-            self.teardown.run()
+            self.teardown.run(GRACE_SECONDS)
         if self.out is sys.stdout:
             # The interpreter flushes stdout at exit; a dead pipe would raise there too
             devnull = os.open(os.devnull, os.O_WRONLY)
