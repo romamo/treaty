@@ -627,3 +627,57 @@ def test_the_cleanup_built_in_removes_output_files(tmp_path: Path) -> None:
     assert status == 0, envelope
     assert str(path.parent) in data_of(envelope)["removed"]  # type: ignore[operator]
     assert not path.exists()
+
+
+# F-060: third-party stdout
+
+NOISYCTL = Path(__file__).resolve().parent / "fixture_noisy_app.py"
+
+
+def noisy(command: str) -> tuple[dict[str, object], str]:
+    proc = subprocess.run(
+        [sys.executable, str(NOISYCTL), command],
+        env=BASE_ENV,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout), proc.stderr  # one JSON document: nothing ahead of it
+
+
+def stray(envelope: dict[str, object]) -> list[object]:
+    warnings = envelope["warnings"]
+    assert isinstance(warnings, list)
+    return [w for w in warnings if w["code"] == "THIRD_PARTY_STDOUT"]
+
+
+def test_a_library_that_calls_print_on_import_does_not_contaminate_the_json_stdout() -> None:
+    envelope, err = noisy("quiet")
+    assert data_of(envelope) == {"status": "ok"}
+    assert "initialized\n" in err
+
+
+def test_the_intercepted_string_appears_as_a_warning_with_its_text() -> None:
+    envelope, _ = noisy("quiet")
+    assert stray(envelope) == [
+        {
+            "code": "THIRD_PARTY_STDOUT",
+            "message": "Third-party code wrote to stdout; the text went to stderr",
+            "context": {"text": "initialized", "bytes": len("initialized\n")},
+        }
+    ]
+
+
+def test_json_loads_of_stdout_succeeds_when_native_code_or_a_child_writes_to_it() -> None:
+    envelope, err = noisy("native")
+    [warning] = stray(envelope)
+    assert warning["context"]["text"] == "initialized\nfrom C code\nfrom a child"  # type: ignore[index]
+    assert "from C code\n" in err and "from a child\n" in err
+
+
+def test_json_shaped_writes_go_to_stderr_without_a_warning() -> None:
+    envelope, err = noisy("json")
+    assert [w["context"]["text"] for w in stray(envelope)] == ["initialized"]  # type: ignore[index]
+    assert '{"status": "ok"}\n' in err

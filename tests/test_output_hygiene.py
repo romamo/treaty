@@ -77,7 +77,7 @@ def test_print_in_a_handler_goes_to_stderr_with_a_warning() -> None:
         {
             "code": "THIRD_PARTY_STDOUT",
             "message": "Third-party code wrote to stdout; the text went to stderr",
-            "context": {"bytes": len("initialized\n")},
+            "context": {"text": "initialized", "bytes": len("initialized\n")},
         }
     ]
 

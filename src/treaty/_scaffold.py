@@ -77,7 +77,7 @@ requires-python = ">=3.14"
 dependencies = ["treaty>={__version__}"]
 
 [project.scripts]
-{n} = "{pkg}.cli:main"
+{n} = "{pkg}.entry:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
@@ -90,7 +90,19 @@ build-backend = "uv_build"
 testpaths = ["tests"]
 {sources}''',
         f"src/{pkg}/__init__.py": f'"""{n}."""\n',
-        f"src/{pkg}/cli.py": f'''"""Command-line entry point for {n}."""
+        f"src/{pkg}/entry.py": f'''"""The {n} command: stdout is guarded before anything imports."""
+
+from treaty import intercept_stdout
+
+
+def main() -> None:
+    # REQ-F-060: a library that prints on import writes to stderr, not ahead of the JSON
+    intercept_stdout()
+    from {pkg}.cli import app
+
+    app.main()
+''',
+        f"src/{pkg}/cli.py": f'''"""The {n} app; the command starts in entry.py."""
 
 from dataclasses import dataclass
 
@@ -193,10 +205,6 @@ def delete(args: DeleteArgs, ctx: Ctx) -> Deletion:
             effect="would_delete", name=args.name, status="found", would_affect=affects
         )
     return Deletion(effect="deleted", name=args.name, status="deleted")
-
-
-def main() -> None:
-    app.main()
 ''',
         "tests/__init__.py": "",
         "tests/test_cli.py": f"""import io

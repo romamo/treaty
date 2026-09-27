@@ -31,6 +31,7 @@ from ._page import Page, PageRequest
 from ._retry import Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarSpec
+from ._stdout import intercept_stdout
 from ._steps import Rollback, StepName
 from ._subprocess import Completed, Spawned
 from ._table import table
@@ -103,5 +104,6 @@ __all__ = [
     "UpdateCheck",
     "WarningDetail",
     "already_exists",
+    "intercept_stdout",
     "table",
 ]

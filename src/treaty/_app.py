@@ -174,6 +174,8 @@ from ._settings import ConfigOptions, Resolved, SettingsSpec
 from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
+from ._stdout import TEXT_CAP, intercept_stdout, prose
+from ._stdout import active as active_interceptor
 from ._steps import Rollback, RollbackStatus, StepError, StepTracker
 from ._subprocess import (
     BROWSER_OPEN,
@@ -1320,14 +1322,19 @@ class App:
                 if isinstance(stream, io.TextIOWrapper):
                     stream.reconfigure(newline="\n")
             sys.exit(self.run(sys.argv[1:], env=started_env))
-        # REQ-F-006 below Python: for the run, descriptor 1 is stderr, so a child or C code
-        # writing to it cannot corrupt the envelope, which goes to a copy of the original
+        # REQ-F-006, REQ-F-060 below Python: for the run, descriptor 1 is a pipe to
+        # stderr, so a child or C code writing to it cannot corrupt the envelope, which
+        # goes to a copy of the original; the next envelope warns with what it caught
         stdout.flush()
-        saved = os.dup(1)
-        os.dup2(sys.stderr.fileno(), 1)
+        interceptor = intercept_stdout()
         # REQ-F-072: LF on every platform; Windows text mode would write CRLF
-        envelopes = open(  # noqa: SIM115 - closed below, after descriptor 1 is restored
-            saved, "w", encoding=stdout.encoding, errors=stdout.errors, buffering=1, newline="\n"
+        envelopes = open(  # noqa: SIM115 - closed below, before descriptor 1 is restored
+            os.dup(interceptor.saved),
+            "w",
+            encoding=stdout.encoding,
+            errors=stdout.errors,
+            buffering=1,
+            newline="\n",
         )
         if isinstance(sys.stderr, io.TextIOWrapper):
             sys.stderr.reconfigure(newline="\n")
@@ -1337,8 +1344,8 @@ class App:
         finally:
             sys.stdout = stdout
             envelopes.flush()
-            os.dup2(saved, 1)
             envelopes.close()
+            interceptor.close()
         sys.exit(code)
 
     def run(
@@ -1596,6 +1603,7 @@ class _StrayStdout(io.TextIOBase):
         super().__init__()
         self._err = err
         self._bytes = 0
+        self._text = ""
 
     def writable(self) -> bool:
         return True
@@ -1612,15 +1620,19 @@ class _StrayStdout(io.TextIOBase):
     def write(self, text: str, /) -> int:
         self._err.write(text)
         self._bytes += len(text.encode("utf-8", "surrogatepass"))
+        if len(self._text) < TEXT_CAP:
+            self._text += text[: TEXT_CAP - len(self._text)]
         return len(text)
 
     def flush(self) -> None:
         self._err.flush()
 
-    def take(self) -> int:
-        """Bytes written since the last call"""
-        written, self._bytes = self._bytes, 0
-        return written
+    def take(self) -> tuple[str, int]:
+        """The text, cut to ``TEXT_CAP`` characters, and the bytes written since the last
+        call"""
+        taken = (self._text, self._bytes)
+        self._text, self._bytes = "", 0
+        return taken
 
 
 def _text(exc: BaseException) -> str:
@@ -1902,12 +1914,18 @@ class _Run:
 
     def _write(self, envelope: Envelope) -> None:
         """One JSON envelope on stdout, warning when text was printed there since the last"""
-        written = 0 if self.stray is None else self.stray.take()
-        if written:
+        text, written = ("", 0) if self.stray is None else self.stray.take()
+        below = active_interceptor()
+        if below is not None:
+            caught, count = below.take()
+            text, written = (text + caught)[:TEXT_CAP], written + count
+        # REQ-F-060: JSON printed by mistake is not reported, so it is never seen twice
+        text = prose(text)
+        if written and text.strip():
             warning = WarningDetail(
                 "THIRD_PARTY_STDOUT",
                 "Third-party code wrote to stdout; the text went to stderr",
-                context={"bytes": written},
+                context={"text": text.rstrip("\r\n"), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         write_envelope(cap_envelope(envelope, self.cap, Rerun(self.argv, self.page)), self.out)
