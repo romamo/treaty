@@ -928,6 +928,27 @@ which returns one envelope with every event in `data` and `meta.total`; a failur
 `--no-stream` keeps the events seen so far in `data`. In `exec`, each event line carries
 `_line` and `_cmd`. Streaming commands must be `safe`: the effect and idempotency
 contracts describe one response. In a text format the renderer gets one event per call.
+Summary lines carry `meta.pagination`; `--stream` on a command that cannot stream answers
+with one envelope and a `STREAMING_NOT_SUPPORTED` warning.
+
+## Asking for less output
+
+Every command takes these without any code of its own:
+
+- `--fields id,name` keeps those top-level keys of `data` (or of each item of a list);
+  `ok`, `error`, `warnings`, and `meta` are never filtered (REQ-O-002)
+- `--token-limit N` cuts `data` to N tokens on item and field boundaries, with
+  `meta.truncated`, `meta.token_limit`, and `meta.next_token_offset`; `--token-offset N`
+  starts the window there, and `--token-count` runs the command and returns only
+  `meta.token_count`. `--tokenizer` picks `approx` (bytes over 4, the default),
+  `cl100k_base` or `o200k_base` with `treaty[tiktoken]`, or one from
+  `app.tokenizer("name", count=fn)` (REQ-O-049)
+- `--format id` writes the primary id alone, one per line, for piping into another
+  command's `--flag -`; an output with an `id` field offers it, and `id_field="user_id"`
+  names another (REQ-O-005)
+
+A `heartbeat=True` command also takes `--heartbeat-interval SECONDS`, which writes
+`[12s] <status>` on stderr from the latest `ctx.progress("...")` call (REQ-O-012).
 
 ## Destructive commands
 

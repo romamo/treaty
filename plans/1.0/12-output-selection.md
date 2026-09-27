@@ -119,13 +119,13 @@ The work is one test per criterion and moving the row to Done.
 
 ## Tasks
 
-- [ ] Phase A: reserve the six global names in `GLOBAL_FLAGS` and `split_globals`; each exits 2 as reserved
-- [ ] Root manifest `flags` entries and help rows for every new global
-- [ ] `--fields` projection in `_Run._present`; exec `_opts.fields`
-- [ ] `--stream`: warning, contradiction with `--no-stream`, `pagination` on the terminal envelope
-- [ ] `id_field=`, `Format.ID`, `_Run._emit_id`, manifest `output_formats`; audit rule `id-field`
-- [ ] `ctx.progress()`, `--heartbeat-interval`, `heartbeats` in `call_with_timeout`; `_check_ctx_calls` rule
-- [ ] `Budget` in `_cap.py`; `app.tokenizer()` and `approx`; `--token-limit`, `--token-offset`, `--token-count`, `--tokenizer`
-- [ ] `treaty[tiktoken]` extra registering `cl100k_base` and `o200k_base`
-- [ ] Tests named after each acceptance criterion of O-002, O-004, O-005, O-012, O-049, O-050
-- [ ] COMPLIANCE rows (O-050 to Done now; O-012 Partial until O-008); README, HANDOFF, ROADMAP (0.3.0 `--max-tokens` line)
+- [x] Phase A: reserve the six global names in `GLOBAL_FLAGS` and `split_globals`; each exits 2 as reserved (landed earlier; all six are now in `IMPLEMENTED`)
+- [x] Root manifest `flags` entries and help rows for every new global
+- [x] `--fields` projection in `_Run._present`; exec `_opts.fields` (also an MCP argument). Applies to built-ins too, since the criterion says every command
+- [x] `--stream`: warning, contradiction with `--no-stream`, `pagination` on the terminal envelope (only on a clean end; `--no-stream` drops it)
+- [x] `id_field=`, `Format.ID`, manifest `output_formats`; audit rule `id-field`. No `_emit_id`: `id_lines` is the `id` renderer, and `_present` checks the ids first (`INVALID_OUTPUT`). Inference and the registration check read the output schema, so a `dict` output needs `id_field=` and is checked as it answers. `output_formats` lists only `id`
+- [x] `--heartbeat-interval`, `heartbeats` in `call_with_timeout`. `ctx.progress()` already existed (11) and stays callable anywhere, so no `_check_ctx_calls` rule; it records the status for the heartbeat line
+- [x] `app.tokenizer()` and `approx`; `--token-limit`, `--token-offset`, `--token-count`, `--tokenizer` (in `_select.py`). No `Budget` in `_cap.py`: `_cap.shrink` is the byte cap's cut search with a pluggable `fits`, which the token budget calls. The budget measures `data` as compact JSON in every `--format`, not the renderer's text; `--token-count` with `--token-limit` or `--token-offset` exits 2. `app.tokenizer(default=True)` sets the default
+- [x] `treaty[tiktoken]` extra; `cl100k_base` and `o200k_base` resolve lazily when `--tokenizer` names them, and exit 2 `TOKENIZER_UNAVAILABLE` without the extra
+- [x] Tests named after each acceptance criterion of O-002, O-004, O-005, O-012, O-049, O-050 (`tests/test_output_selection.py`)
+- [x] COMPLIANCE rows (all six Done: O-008 landed with 11, so O-012 is Done too); README, HANDOFF, ROADMAP (the `--max-tokens` line)

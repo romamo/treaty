@@ -191,6 +191,13 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `log-not-print`. Behavior changes: off a terminal or under `CI`, `ctx.log` and stray
   `print()` text no longer reach stderr; every app writes an audit log under
   `XDG_DATA_HOME` unless `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`
+- 1.0 plan, output selection and streaming flags (`plans/1.0/12-output-selection.md`):
+  `--fields`, `--stream` (a `STREAMING_NOT_SUPPORTED` warning on commands that cannot
+  stream; `meta.pagination` on a stream's summary line), `--format id` with
+  `id_field=`, `--heartbeat-interval` with `ctx.progress()` status lines on stderr,
+  `--token-limit`, `--token-offset`, `--token-count`, `--tokenizer`, `app.tokenizer()`,
+  the `treaty[tiktoken]` extra, and the audit rule `id-field`. Behavior change: an app
+  with an output `id` field offers `--format id`, listed in the manifest's `format` enum
 
 ## 0.1.x: after the first minor release
 
@@ -235,7 +242,8 @@ matching audit rule so adoption never requires reading the spec.
   `--rollback-on-failure`, and `treaty.Batch`
 - Framework-managed locks with `retry_after_ms` (REQ-F-033): done, `ctx.lock`
 - Dependency declarations and a `doctor` built-in (REQ-O-031)
-- Token budget flags `--max-tokens` and `--fields` (REQ-O-049)
+- Token budget flags and `--fields` (REQ-O-049, REQ-O-002): done in 1.0 plan 12 as
+  `--token-limit`, `--token-offset`, `--token-count`, and `--tokenizer`, the spec's names
 
 ## Later
 

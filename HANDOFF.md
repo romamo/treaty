@@ -374,6 +374,17 @@ The two do not share code.
 - **The audit log is `_journal.py`** (`_audit.py` is the linter): the run resolves the path
   once (`env_error` holds a bad `<APP>_AUDIT_LOG`, like a bad `TOOL_TRACE_ID`); the test
   suite points `XDG_DATA_HOME` at a temp dir in `conftest.pytest_configure`
+- **Output selection is `_select.py`** (12): `--fields` projects at the end of
+  `_Run._present`, per envelope, with `self.fields` set in `_pin` like `stable` (an exec
+  line's `fields` wins over argv's). The token budget (`TokenBudget.apply`) runs in
+  `_write` and `_emit_text` after `settle` and before the byte cap, over `data` as compact
+  JSON; its cuts reuse `_cap.shrink`, the byte cap's cut search with a pluggable `fits`.
+  `--token-count` forces JSON mode in `_route`. `--format id` is checked in `_present`
+  (`INVALID_OUTPUT`) and written by `id_lines` as the renderer
+- **`call_with_timeout` takes `heartbeats`**: each ticks on its own due time on the
+  waiting thread, so `--heartbeat-ms` (JSON on stdout) and `--heartbeat-interval` (plain
+  text on stderr, at ERROR level so only `--quiet` hides it) run together; `ctx.progress`
+  stores the redacted status in `_Run.status` whatever the verbosity
 - **`ctx.http` never uses urllib's proxy logic**: `ProxyHandler` and `proxy_bypass*`
   read `os.environ` and, on macOS, the system settings, so the opener gets
   `ProxyHandler({})` and `_Proxied`, a pre-processor that routes each request (redirects
@@ -415,6 +426,7 @@ src/treaty/
   _protect.py    protect(), tagged(): masking and trust tags of data (REQ-F-058, F-035)
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
+  _select.py     --fields, TokenBudget, tokenizers, --format id lines (12)
   _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
   _table.py      table(): delimited rows under a header, the built-in tsv renderer
   _command.py    Command record, build_command(), handler signature inspection
@@ -489,19 +501,20 @@ F-046, F-047, F-048, F-050, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-0
 F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
 C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-010, C-011 (not `status`), C-012,
 C-013, C-015, C-016, C-017, C-018, C-019,
-C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-003, O-007, O-008, O-010, O-011, O-013, O-014, O-015, O-016, O-017, O-018, O-019, O-020, O-021, O-022,
-O-023, O-024, O-025, O-030, O-031, O-032, O-033, O-036, O-037, O-039, O-040, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
+C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-002, O-003, O-004, O-005, O-007, O-008, O-010, O-011, O-012, O-013, O-014, O-015, O-016, O-017, O-018, O-019, O-020, O-021, O-022,
+O-023, O-024, O-025, O-030, O-031, O-032, O-033, O-036, O-037, O-039, O-040, O-041, O-042, O-047, O-048, O-049, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),
 `--output-schema`, `--schema-version`, `--stable-output`, `--unmask`,
 `--no-injection-protection`, `--max-output`, `--config`,
 `--context`, `--no-config`, `--show-config`, `--instance-id`, `--cwd`, `--no-update-check`,
-`--quiet`, `--verbose`, `--debug`, `--warnings-as-errors`, and per
+`--quiet`, `--verbose`, `--debug`, `--warnings-as-errors`, `--fields`, `--stream`,
+`--token-limit`, `--token-offset`, `--token-count`, `--tokenizer`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
-`--cursor` (list outputs), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
+`--cursor` (list outputs), `--heartbeat-ms` and `--heartbeat-interval` (`heartbeat=True`), `--input-file`
 (`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
 (`auth=`), `--global` (`config_write_scope=`), `--retries` and `--retry-delay` (`retry=`),
 `--resume-from` (`resumable=True`), `--rollback-on-failure` (`rollback=`), `--no-cache` and

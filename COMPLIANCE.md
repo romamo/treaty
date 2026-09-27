@@ -11,7 +11,7 @@ the 1.0 plan's reserved names, response metadata (01), output data contract (05)
 layer (02), error contract (03), argument grammar (04), multi-step commands and
 lifecycle (06), output security (07), additional command declarations (08), session
 and process hygiene (09), network and filesystem utilities (10), and logging,
-verbosity, and the audit log (11).
+verbosity, and the audit log (11), and output selection and streaming flags (12).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -25,7 +25,7 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 138 | 9 | 12 | **90%** |
+| Level 3: full spec | 159 | 144 | 7 | 8 | **93%** |
 
 ## By tier
 
@@ -33,7 +33,7 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Framework-automatic (F) | 79 | 76 | 3 | 0 | **98%** |
 | Command contract (C) | 30 | 29 | 1 | 0 | **98%** |
-| Opt-in (O) | 50 | 33 | 5 | 12 | **71%** |
+| Opt-in (O) | 50 | 39 | 3 | 8 | **81%** |
 
 ## Open mandatory requirements
 
@@ -165,17 +165,17 @@ open.
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
 | [REQ-O-001](../cli-agent-ergonomics/requirements/o-001-output-format-flag.md) | --format Output Format Flag | P0 | 2 | Done | `--format` json, jsonl, plain, tsv built in, others registered; unknown values exit 2 listing the offered ones; `--output PATH` on `output_file=True` commands, refusing format names |
-| [REQ-O-002](../cli-agent-ergonomics/requirements/o-002-fields-selector.md) | --fields Selector | P2 | 3 | Not started | No `--fields` |
+| [REQ-O-002](../cli-agent-ergonomics/requirements/o-002-fields-selector.md) | --fields Selector | P2 | 3 | Done | Global `--fields id,name` on every command, built-ins included: keeps those top-level keys of object `data` or of each object item, after masking and trust tags and before the token budget and byte cap; unknown names ignored, `_source`/`_trusted` kept, `ok`/`error`/`warnings`/`meta` untouched; applies to each stream event, and an exec line or MCP call may set `fields` |
 | [REQ-O-003](../cli-agent-ergonomics/requirements/o-003-limit-and-cursor-pagination-flags.md) | --limit and --cursor Pagination Flags | P0 | 2 | Done | `--limit` and `--cursor` on every list command (and in exec, MCP, raw payloads, where `limit` must be an integer); base64url stateless cursors bound to the command and a digest of its other arguments; a malformed, foreign, or other-arguments cursor exits 2 with `INVALID_CURSOR`. Cursors are unsigned: a hand-edited inner cursor is refused only by the command's `cursor_check=` |
-| [REQ-O-004](../cli-agent-ergonomics/requirements/o-004-output-jsonl-stream-flag.md) | --format jsonl / --stream Flag | P2 | 3 | Partial | Streaming handlers with `--no-stream`; no `--stream` opt-in |
-| [REQ-O-005](../cli-agent-ergonomics/requirements/o-005-output-id-extraction-mode.md) | --format id Extraction Mode | P3 | 3 | Not started | No `--format id` |
+| [REQ-O-004](../cli-agent-ergonomics/requirements/o-004-output-jsonl-stream-flag.md) | --format jsonl / --stream Flag | P2 | 3 | Done | `streaming=True` commands stream envelope lines by default (`streaming_default` in the manifest, `--no-stream` for one envelope); the summary line carries `meta.pagination`; global `--stream` is a no-op there, exit 2 with `--no-stream`, and on any other command answers buffered with a `STREAMING_NOT_SUPPORTED` warning, the criterion rather than the wire example's exit-2 error (12-D1) |
+| [REQ-O-005](../cli-agent-ergonomics/requirements/o-005-output-id-extraction-mode.md) | --format id Extraction Mode | P3 | 3 | Done | `--format id` writes the `id_field=` value (inferred as `id` when the output or its items have one) alone, one per line for lists and streams; registration checks the field is a str, int, UUID, or string scalar; an id with whitespace exits 1 `INVALID_OUTPUT`; a command without one exits 2; a page with more writes `next: --cursor` on stderr; `output_formats` in the manifest; `id-field` audit rule |
 | [REQ-O-006](../cli-agent-ergonomics/requirements/o-006-stdin-as-id-source.md) | Stdin as ID Source (-) | P3 | 3 | Done | `Flag(from_stdin=True)` and `Arg(from_stdin=True)`: `-` reads stdin through the capped reader, one item per line for an array; empty stdin exits 2 with `EMPTY_STDIN` |
 | [REQ-O-007](../cli-agent-ergonomics/requirements/o-007-stable-output-flag.md) | --stable-output Flag | P3 | 3 | Done | Global `--stable-output` (`stable_output` in exec and MCP): no `request_id`, `timestamp`, or `retries`, `duration_ms` 0, `Out(volatile=True)` fields dropped, no heartbeats; byte-identical stdout tested |
 | [REQ-O-008](../cli-agent-ergonomics/requirements/o-008-quiet-verbose-debug-verbosity-flags.md) | --quiet / --verbose / --debug Verbosity Flags | P1 | 3 | Done | `--quiet`, `--verbose`, `--debug` on every command, exclusive (exit 2); `--quiet` writes zero bytes from Python code, not even tracebacks; `--debug` traces config resolution, the timeout, each `ctx.http` request, each child, locks, the audit log, and routes every `logging` record through redaction. A C extension writing to descriptor 2 is out of reach |
 | [REQ-O-009](../cli-agent-ergonomics/requirements/o-009-validate-only-flag.md) | --validate-only Flag | P1 | 3 | Done | `--validate-only` on every command: phase 1 only, `data: null` and `meta.validation_only: true` with exit 0, exit 2 listing every error; the gate, idempotency store, and handler never run (exit 2 over the schema's 3, X6) |
 | [REQ-O-010](../cli-agent-ergonomics/requirements/o-010-resume-from-flag-for-multi-step-commands.md) | --resume-from Flag for Multi-Step Commands | P2 | 3 | Done | `resumable=True` adds `--resume-from STEP` (an enum of the steps; unknown exits 2); earlier steps' `ctx.step` returns False and they are `skipped_steps`; failures carry `resume_from`; audit rule `resume-guard`; a conformance probe |
 | [REQ-O-011](../cli-agent-ergonomics/requirements/o-011-rollback-on-failure-flag.md) | --rollback-on-failure Flag | P2 | 3 | Done | `rollback=` adds `--rollback-on-failure`; a failed step calls it with the completed steps, newest first, before the teardown; `data.rollback_status` is completed, failed (with `rollback_error`), or not_attempted; exit stays 3; `--schema` says `rollback_available` |
-| [REQ-O-012](../cli-agent-ergonomics/requirements/o-012-heartbeat-interval-flag.md) | --heartbeat-interval Flag | P2 | 3 | Not started | No `--heartbeat-interval` |
+| [REQ-O-012](../cli-agent-ergonomics/requirements/o-012-heartbeat-interval-flag.md) | --heartbeat-interval Flag | P2 | 3 | Done | `--heartbeat-interval SECONDS` on `heartbeat=True` commands writes `[<elapsed>s] <status>` on stderr, plain text, with the latest `ctx.progress()` message (redacted, one line) or `running`; ticks beside `--heartbeat-ms` on its own interval; nothing under `--quiet` |
 | [REQ-O-013](../cli-agent-ergonomics/requirements/o-013-schema-output-schema-flag.md) | --schema / --output-schema Flag | P1 | 3 | Done | `--schema`, the `--print-schema` alias, and `<cmd> --output-schema` (the `data` schema in an envelope); per-field stability tiers have no criterion or schema field |
 | [REQ-O-014](../cli-agent-ergonomics/requirements/o-014-schema-version-compatibility-flag.md) | --schema-version Compatibility Flag | P2 | 3 | Done | `compat={"1.4": shim}` served by `--schema-version MAJOR` (argv global, `schema_version` in JSON); `SCHEMA_DEPRECATED` warning; `SCHEMA_VERSION_UNSUPPORTED` exit 2; `<cmd> --schema` shows `schema_version` and `min_schema_version` |
 | [REQ-O-015](../cli-agent-ergonomics/requirements/o-015-show-config-flag.md) | --show-config Flag | P1 | 3 | Done | `--show-config` anywhere, also at the root: `data.effective_config` (secret-named fields `[REDACTED]`), per-key `sources` (`env:VAR`, `file:/abs`, `default`), `precedence_order` (`env-vars`, each file, `defaults`); JSON in every mode |
@@ -212,5 +212,5 @@ open.
 | [REQ-O-046](../cli-agent-ergonomics/requirements/o-046-agents-md-ci-validation.md) | AGENTS.md CI Validation | P2 | 3 | Not started | No AGENTS.md check in CI |
 | [REQ-O-047](../cli-agent-ergonomics/requirements/o-047-tool-check-permissions-built-in-command.md) | tool check-permissions Built-In Command | P0 | 2 | Done | `check-permissions` with and without `--for` over `App(credentials=)`; insufficient scopes exit 8 with `missing_scopes`; gated commands warn `CREDENTIAL_OVER_PRIVILEGED` |
 | [REQ-O-048](../cli-agent-ergonomics/requirements/o-048-destructive-commands-default-dry-run.md) | Destructive Commands Default to Dry-Run Mode | P0 | 2 | Done | `safe_default=True`: dry run and exit 0 without `--live`; `--live` alone applies (it is the confirmation; `requires_confirmation` stays true in `--schema`); `meta.dry_run` on every response, `meta.confirmed` when applied; `safe_default` in the manifest |
-| [REQ-O-049](../cli-agent-ergonomics/requirements/o-049-llm-token-budget-flags.md) | LLM Token Budget Flags | P2 | 3 | Not started | No token budget flags (ROADMAP 0.3.0) |
-| [REQ-O-050](../cli-agent-ergonomics/requirements/o-050-tool-exec-built-in-command.md) | tool exec Built-In Command | P2 | 3 | Partial | `exec` built-in with per-line envelopes; no `jsonl` format |
+| [REQ-O-049](../cli-agent-ergonomics/requirements/o-049-llm-token-budget-flags.md) | LLM Token Budget Flags | P2 | 3 | Done | Global `--token-limit`, `--token-offset`, `--token-count`, `--tokenizer`, measured over `data` as compact JSON; windows move over whole items of the data array (or the largest array in object data), with `meta.token_offset` and `meta.next_token_offset`; a cut sets `meta.truncated` with `FIELD_TRUNCATED` warnings and no sentinel in `data` (12-D2); `--token-count` runs the command and answers JSON with `data: null` and `meta.token_count` whatever `--format` says; `approx` (bytes over 4) by default, `app.tokenizer()`, and `cl100k_base`/`o200k_base` with `treaty[tiktoken]` |
+| [REQ-O-050](../cli-agent-ergonomics/requirements/o-050-tool-exec-built-in-command.md) | tool exec Built-In Command | P2 | 3 | Done | `exec` dispatches each line in-process with `_cmd` and `_line` in `meta`, stops at the first failure unless `--ignore-errors` (exit 1 either way), forwards `--dry-run` to non-safe commands, answers `DISPATCH_PARSE_ERROR` with `phase: validation` for an unreadable line, exits 2 when no line parses, and `--format jsonl` works; each criterion has a test |

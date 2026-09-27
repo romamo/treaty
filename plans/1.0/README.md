@@ -70,7 +70,8 @@ with Phase A:
 Landed: `RESERVED_GLOBAL`, `RESERVED_OPT_IN`, and `UNIMPLEMENTED` in `_framework.py`.
 An opt-in name whose keyword does not exist yet had a predicate that is always false; its
 workstream swapped in the real one and moved the name to `IMPLEMENTED`. Every opt-in name
-is implemented now (`recursive_traversal=` landed with 10).
+is implemented now (`recursive_traversal=` landed with 10), and every global one since 12
+(`--fields`, `--stream`, and the four token flags), so `UNIMPLEMENTED` is empty.
 
 Each name joins `GLOBAL_FLAGS` or the per-command framework flags. Until its feature lands,
 passing it exits 2 naming it as reserved.
@@ -106,7 +107,8 @@ Phase B   08 ── 13      09      10      11      12 (after 07)      14 (after
 - **07 before 12**: both extend the one output step `_Run._present` (mask, trust tags,
   `--fields`, token budget, byte cap, in that order). Landed: `_present` runs where
   `execute` and `stream` make each envelope, before any sink; the byte cap stays in
-  `_write`
+  `_write`. 12 added `--fields` at the end of `_present` and the token budget in `_write`
+  and `_emit_text`, after `settle` and before the byte cap
 - **02 before 14**: 14's env var inventory reads 02's registry of known variables
 - **08 before 13**: 13 extends 08's `doctor` and `cleanup`
 
