@@ -8,7 +8,7 @@ all iterate ``FLAGS`` instead of spelling the flags out.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -103,9 +103,78 @@ def flag_named(command: Command, name: str, *, json: bool = False) -> FrameworkF
     return next((f for f in framework_flags(command, json=json) if f.name == name), None)
 
 
+def _never(command: Command) -> bool:
+    """For an opt-in keyword that does not exist yet: no command can declare it"""
+    return False
+
+
+# REQ-F-079: flag names treaty keeps for itself, so no app field takes one; reserving a
+# name after 1.0 would break the apps that did. A name leaves UNIMPLEMENTED when its
+# feature lands; until then, passing it exits 2 as reserved.
+RESERVED_GLOBAL: frozenset[str] = frozenset(
+    {
+        "output-schema",
+        "print-schema",
+        "schema-version",
+        "config",
+        "context",
+        "no-config",
+        "show-config",
+        "instance-id",
+        "validate-only",
+        "stable-output",
+        "unmask",
+        "no-injection-protection",
+        "cwd",
+        "no-update-check",
+        "quiet",
+        "verbose",
+        "debug",
+        "warnings-as-errors",
+        "fields",
+        "stream",
+        "token-limit",
+        "token-offset",
+        "token-count",
+        "tokenizer",
+    }
+)
+"""Reserved on every command"""
+
+RESERVED_OPT_IN: Mapping[str, Callable[[Command], bool]] = {
+    "retries": _never,  # retry= (01)
+    "retry-delay": _never,  # retry= (01)
+    "resume-from": _never,  # resumable= (06)
+    "rollback-on-failure": _never,  # rollback= (06)
+    "proxy": lambda c: c.has_network_io,
+    "no-proxy": lambda c: c.has_network_io,
+    "no-follow-symlinks": _never,  # recursive_traversal= (10)
+    "max-depth": _never,  # recursive_traversal= (10)
+}
+"""Reserved on the commands that opt in to the feature"""
+
+UNIMPLEMENTED: frozenset[str] = RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)
+"""Reserved names whose feature has not landed yet"""
+
+
+def reserved_names(command: Command) -> frozenset[str]:
+    """Every name reserved on ``command``"""
+    return RESERVED_GLOBAL | {n for n, applies in RESERVED_OPT_IN.items() if applies(command)}
+
+
+def reserved_flag(name: str) -> ParseError:
+    """A reserved name passed before its feature exists"""
+    return ParseError(
+        f"--{name} is reserved for a treaty feature this version does not have",
+        code="RESERVED_FLAG",
+        context={"flag": name},
+        suggestion=f"drop --{name}; the manifest lists the flags this version accepts",
+    )
+
+
 def framework_collisions(command: Command) -> list[str]:
-    """Fields whose flag a framework flag of the command would shadow"""
-    names = {f.name for f in framework_flags(command)}
+    """Fields whose flag a framework flag, or a name reserved for one, would shadow"""
+    names = {f.name for f in framework_flags(command)} | reserved_names(command)
     return sorted(
         f.flag
         for f in command.fields

@@ -440,8 +440,8 @@ class App:
         taken = framework_collisions(command)
         if taken:
             raise RegistrationError(
-                f"{path}: flags {taken} are supplied by the framework for this command and "
-                "would never reach the handler; rename the fields"
+                f"{path}: flags {taken} are supplied by the framework for this command, or "
+                "reserved for it (REQ-F-079), and would never reach the handler; rename the fields"
             )
         if path in self._commands:
             raise RegistrationError(f"{path} is already registered")

@@ -16,7 +16,7 @@ class DeployArgs:
     env: Literal["staging", "prod"] = Flag(default="staging", description="Target")
     replicas: int = Flag(default=1, description="Replica count")
     token: str = Flag(default="", description="Deploy token")
-    verbose: bool = Flag(default=False, description="Chatty")
+    chatty: bool = Flag(default=False, description="Chatty")
 
 
 def make_app() -> App:

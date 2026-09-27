@@ -57,7 +57,7 @@ def test_guessed_representation_flags_point_to_format(argv: list[str]) -> None:
 
 
 def test_other_unknown_flags_get_no_hint() -> None:
-    _, env = run(["list", "--verbose"])
+    _, env = run(["list", "--loud"])
     # Only the generic next step every validation error carries (REQ-C-013)
     assert env["error"]["suggestion"] == env["error"]["fix_required"]
 

@@ -18,7 +18,15 @@ from ._command import Command
 from ._dispatch import loads_strict
 from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
-from ._framework import RAW_PAYLOAD_FLAG, flag_named, framework_flags
+from ._framework import (
+    RAW_PAYLOAD_FLAG,
+    RESERVED_GLOBAL,
+    UNIMPLEMENTED,
+    flag_named,
+    framework_flags,
+    reserved_flag,
+    reserved_names,
+)
 from ._idempotency import IdempotencyKey
 from ._page import Limit, Position
 from ._paths import check_path
@@ -136,6 +144,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             help_ = True
         elif tok == "--schema":
             schema = True
+        elif name in RESERVED_GLOBAL and name in UNIMPLEMENTED:
+            raise reserved_flag(name)
         elif name in VALUED_GLOBALS:
             if eq:
                 value = inline
@@ -313,6 +323,12 @@ def parse_command_args(
                         value = spec.parse(value_after(tok, name, has_eq, inline), command)
                     if framework.setdefault(spec.attr, value) != value:
                         raise _repeated(name)
+                    i += 1
+                    continue
+                if name in UNIMPLEMENTED and name in reserved_names(command):
+                    errors.add(reserved_flag(name))
+                    if not has_eq and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                        i += 1  # its value, rather than misread it as a positional
                     i += 1
                     continue
                 found = command.field_by_flag(name)
