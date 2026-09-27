@@ -8,8 +8,8 @@ hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declar
 writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048), and
 re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039), then updated for
 the 1.0 plan's reserved names, response metadata (01), output data contract (05), config
-layer (02), error contract (03), argument grammar (04), and multi-step commands and
-lifecycle (06).
+layer (02), error contract (03), argument grammar (04), multi-step commands and
+lifecycle (06), and output security (07).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -23,15 +23,15 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 106 | 15 | 38 | **71%** |
+| Level 3: full spec | 159 | 109 | 16 | 34 | **74%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 59 | 8 | 12 | **80%** |
+| Framework-automatic (F) | 79 | 61 | 8 | 10 | **82%** |
 | Command contract (C) | 30 | 25 | 2 | 3 | **87%** |
-| Opt-in (O) | 50 | 22 | 5 | 23 | **49%** |
+| Opt-in (O) | 50 | 23 | 6 | 21 | **52%** |
 
 ## Open mandatory requirements
 
@@ -76,8 +76,8 @@ open.
 | [REQ-F-031](../cli-agent-ergonomics/requirements/f-031-sigterm-forwarding-to-tracked-children.md) | SIGTERM Forwarding to Tracked Children | P2 | 3 | Done | SIGTERM or SIGINT sends SIGTERM to each tracked child's process group, SIGKILL after 2 s, before the `CANCELLED` envelope |
 | [REQ-F-032](../cli-agent-ergonomics/requirements/f-032-session-scoped-temp-directory.md) | Session-Scoped Temp Directory | P2 | 3 | Not started | No session-scoped temp directory |
 | [REQ-F-033](../cli-agent-ergonomics/requirements/f-033-lock-acquisition-with-timeout-and-retry-after-ms.md) | Lock Acquisition with Timeout and retry_after_ms | P2 | 3 | Done | `ctx.lock(name, wait=, retry_after_ms=)`: `flock` under the state dir's `locks/`, released by the block and by the kernel on exit or SIGTERM; timeout exits 4 `LOCK_HELD`, retryable, with `holder_pid`, `holder_age_ms`; `lock-declared` rule |
-| [REQ-F-034](../cli-agent-ergonomics/requirements/f-034-secret-field-auto-redaction-in-logs.md) | Secret Field Auto-Redaction in Logs | P1 | 3 | Partial | Secret args redacted in errors and tracebacks; response fields are not redacted by name |
-| [REQ-F-035](../cli-agent-ergonomics/requirements/f-035-external-data-trust-tagging.md) | External Data Trust Tagging | P1 | 3 | Not started | No `_trusted` or `_source` tagging |
+| [REQ-F-034](../cli-agent-ergonomics/requirements/f-034-secret-field-auto-redaction-in-logs.md) | Secret Field Auto-Redaction in Logs | P1 | 3 | Partial | One `SECRET_NAME` rule (`_redact.py`) for inferred secret flags, `--show-config`, `ctx.log`, and plain-mode error context on stderr, case-insensitive; stdout is not redacted. `scrub()` is the entry point the audit log must call; the two audit-log criteria wait for F-026 |
+| [REQ-F-035](../cli-agent-ergonomics/requirements/f-035-external-data-trust-tagging.md) | External Data Trust Tagging | P1 | 3 | Done | `external=True` on a command or `Out(external=True)` on a field: `_source: external` and `_trusted: false` at the top of `data` (each object item of a list, each stream event and exec line) with an `UNTRUSTED_CONTENT` warning; the output schema lists both tags; `--no-injection-protection` suppresses them; audit rule `external-data` |
 | [REQ-F-036](../cli-agent-ergonomics/requirements/f-036-http-client-proxy-environment-variable-compliance.md) | HTTP Client Proxy Environment Variable Compliance | P1 | 3 | Not started | No framework HTTP client, so no proxy or CA handling |
 | [REQ-F-037](../cli-agent-ergonomics/requirements/f-037-network-error-context-block.md) | Network Error Context Block | P1 | 3 | Partial | `treaty.NetworkContext` and `error.network_context` frozen (`proxy_used` always written, userinfo redacted, absent on non-network errors, no `CliExit` keyword); the producer, `ctx.http`, lands in workstream 10 (X2) |
 | [REQ-F-038](../cli-agent-ergonomics/requirements/f-038-verbosity-auto-quiet-in-non-tty-context.md) | Verbosity Auto-Quiet in Non-TTY Context | P2 | 3 | Not started | No `progress()`/`log()` API or verbosity flags |
@@ -100,7 +100,7 @@ open.
 | [REQ-F-055](../cli-agent-ergonomics/requirements/f-055-editor-and-visual-no-op-in-non-tty-mode.md) | $EDITOR and $VISUAL No-Op in Non-TTY Mode | P0 | 2 | Done | Off a terminal, children get `EDITOR`, `VISUAL`, `GIT_EDITOR`=`true`; `ctx.edit` exits 4 `EDITOR_REQUIRED` with `alternatives[]`; on a terminal the editor runs |
 | [REQ-F-056](../cli-agent-ergonomics/requirements/f-056-terminal-width-wrapping-disabled-in-json-mode.md) | Terminal Width Wrapping Disabled in JSON Mode | P0 | 2 | Done | Compact JSON; never wraps to terminal width |
 | [REQ-F-057](../cli-agent-ergonomics/requirements/f-057-headless-environment-detection-and-gui-suppression.md) | Headless Environment Detection and GUI Suppression | P0 | 2 | Done | Headless when stdin or stdout is not a TTY, `CI`, or no `DISPLAY`/`WAYLAND_DISPLAY` on Linux or over SSH; `meta.headless` on every envelope; `ctx.open_url` needs `gui_operations` and fills `data.open_url` |
-| [REQ-F-058](../cli-agent-ergonomics/requirements/f-058-high-entropy-field-masking.md) | High-Entropy Field Masking | P1 | 3 | Not started | No high-entropy masking or `--unmask` |
+| [REQ-F-058](../cli-agent-ergonomics/requirements/f-058-high-entropy-field-masking.md) | High-Entropy Field Masking | P1 | 3 | Done | JWT, base64, and credential-named strings in `data` become `[JWT: sub=..., exp=...]`, `[BASE64: n bytes]`, `[KEY: first8...]` with a `HIGH_ENTROPY_MASKED` warning listing the paths; `Out(high_entropy=True)` always masks, `False` exempts; `x-high-entropy` in the output schema. Deviation (07-D2): a match counts only when it decodes (a JWT header with `alg`; base64 not all hex, mixed case with a digit, at least 4.3 bits per character), so SHAs, paths, versions, and host names stay readable |
 | [REQ-F-059](../cli-agent-ergonomics/requirements/f-059-json5-input-normalization.md) | JSON5 Input Normalization | P1 | 3 | Done | `--raw-payload` and `exec` lines (treaty's only JSON inputs; `--config` is a file) accept trailing commas, `//` and `/* */` comments, single quotes, and unquoted keys (`_json5.py`); anything worse exits 2 with `INVALID_JSON` and `error.corrected_input` when a repair reads it |
 | [REQ-F-060](../cli-agent-ergonomics/requirements/f-060-third-party-stdout-interception.md) | Third-Party Stdout Interception | P1 | 3 | Partial | `sys.stdout` is swapped to stderr during a run with a warning; writes to fd 1 and import-time prints are not caught |
 | [REQ-F-061](../cli-agent-ergonomics/requirements/f-061-symlink-loop-detection-in-traversal-utilities.md) | Symlink Loop Detection in Traversal Utilities | P1 | 3 | Not started | No traversal utilities |
@@ -184,7 +184,7 @@ open.
 | [REQ-O-020](../cli-agent-ergonomics/requirements/o-020-no-update-check-flag.md) | --no-update-check Flag | P1 | 3 | Not started | No `--no-update-check` |
 | [REQ-O-021](../cli-agent-ergonomics/requirements/o-021-confirm-destructive-flag.md) | --confirm-destructive Flag | P0 | 2 | Done | Unconfirmed destructive runs exit 2 with the preview and the `would_affect` summary; `--schema` has `requires_confirmation: true` |
 | [REQ-O-022](../cli-agent-ergonomics/requirements/o-022-secret-from-env-secret-from-file-flags.md) | --secret-from-env / --secret-from-file Flags | P1 | 3 | Done | `--x-from-env` and `--x-from-file` |
-| [REQ-O-023](../cli-agent-ergonomics/requirements/o-023-no-injection-protection-flag.md) | --no-injection-protection Flag | P3 | 3 | Not started | No trust tagging flag |
+| [REQ-O-023](../cli-agent-ergonomics/requirements/o-023-no-injection-protection-flag.md) | --no-injection-protection Flag | P3 | 3 | Partial | `--no-injection-protection` (argv only) drops the trust tags, adds `meta.injection_protection: false`, an `INJECTION_PROTECTION_DISABLED` warning, and a structured line on stderr; `--help` and the manifest describe it as "Security: ...". The audit-log record waits for F-026 |
 | [REQ-O-024](../cli-agent-ergonomics/requirements/o-024-context-config-override-flag.md) | --context / --config Override Flag | P1 | 3 | Done | `--config PATH` (or `<APP>_CONFIG`; TOML, or JSON by suffix) is the only file read and the write target of config commands; `--context NAME` (or `<APP>_CONTEXT`, else the file's `current_context`) overlays `[contexts.NAME]`, `meta.context`; an unknown one exits 2 `CONTEXT_UNKNOWN`; runs share no state |
 | [REQ-O-025](../cli-agent-ergonomics/requirements/o-025-warnings-as-errors-flag.md) | --warnings-as-errors Flag | P3 | 3 | Not started | No warn API, so no `--warnings-as-errors` |
 | [REQ-O-026](../cli-agent-ergonomics/requirements/o-026-tool-doctor-built-in-command.md) | tool doctor Built-In Command | P1 | 3 | Not started | No `doctor` built-in |
@@ -198,7 +198,7 @@ open.
 | [REQ-O-034](../cli-agent-ergonomics/requirements/o-034-tool-generate-skills-built-in-command.md) | tool generate-skills Built-In Command | P2 | 3 | Not started | No skill generation |
 | [REQ-O-035](../cli-agent-ergonomics/requirements/o-035-tool-mcp-validate-built-in-command.md) | tool mcp-validate Built-In Command | P2 | 3 | Not started | No MCP drift check |
 | [REQ-O-036](../cli-agent-ergonomics/requirements/o-036-instance-id-flag-for-agent-state-namespacing.md) | --instance-id Flag for Agent State Namespacing | P1 | 3 | Done | `--instance-id` or `<APP>_INSTANCE_ID` puts the user config at `<config home>/<app>/instances/<id>/config.toml` and state under `instances/<id>` (XDG locations, not `~/.tool/instances/`); `meta.instance_id`; every config write is locked, so concurrent writes go one after another |
-| [REQ-O-037](../cli-agent-ergonomics/requirements/o-037-unmask-flag-for-high-entropy-fields.md) | --unmask Flag for High-Entropy Fields | P2 | 3 | Not started | No entropy masking |
+| [REQ-O-037](../cli-agent-ergonomics/requirements/o-037-unmask-flag-for-high-entropy-fields.md) | --unmask Flag for High-Entropy Fields | P2 | 3 | Done | `--unmask` global switch, argv only: no environment variable, config file, exec `_opts`, or MCP argument sets it (`App.call(unmask=True)` in-process); `--schema` has a `security_flags` object saying it exposes sensitive values; the idempotency store keeps the raw result, so a replay with `--unmask` returns it |
 | [REQ-O-038](../cli-agent-ergonomics/requirements/o-038-heartbeat-ms-flag-for-long-running-commands.md) | --heartbeat-ms Flag for Long-Running Commands | P1 | 3 | Done | `heartbeat=True` adds `--heartbeat-ms` (10 s default, `0` off); lines are `{"status":"running","heartbeat":true,"elapsed_ms":...}`, the final envelope has no `heartbeat` field |
 | [REQ-O-039](../cli-agent-ergonomics/requirements/o-039-input-file-flag-for-stdin-commands.md) | --input-file Flag for Stdin Commands | P1 | 3 | Done | `stdin_input=True` adds `--input-file` (any size, `-` for stdin); over-cap stdin exits 2 with `STDIN_TOO_LARGE` and a `hint`; `exec` has it too |
 | [REQ-O-040](../cli-agent-ergonomics/requirements/o-040-no-follow-symlinks-flag-for-traversal-commands.md) | --no-follow-symlinks Flag for Traversal Commands | P1 | 3 | Not started | No `--no-follow-symlinks`/`--max-depth` |

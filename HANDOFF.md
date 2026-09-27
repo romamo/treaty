@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1150 passed |
+| `uv run pytest` | 1180 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -326,6 +326,18 @@ The two do not share code.
 - **`Batch[T]` commands keep `output_type = T`** with `Command.batch`; `_run_handler`
   builds `summary` and `results` in `_batch_data` without passing the whole `data`
   through `arrange`, so results keep the handler's order; `_batch_envelope` exits 3
+- **`_Run._present` is the one output-security step** (`_protect.py`), applied where a
+  command's envelope is made, not at each sink: `execute` wraps `_answer`, and `stream`
+  presents each event and the terminal envelope, so `--output`, `exec`, `App.call`, and
+  `--no-stream` all get the same masked, tagged `data`. It runs after `_keyed`, so the
+  idempotency store holds the raw result and a replay with `--unmask` returns it.
+  Built-ins are skipped. The typed walk uses `_output(command)` for a success, `object`
+  for exit data and a batch; `buffer_stream` carries the events' warnings over. Workstream
+  12's `--fields` and token budget belong after it
+- **Two secret-name checks, one vocabulary** (`_redact.py`): `SECRET_NAME` (substring,
+  REQ-F-034's list plus `cookie` and a `pass` segment) for inputs, settings, logs, and
+  stderr, where over-redaction is harmless; `secret_field` (the last word) for masking
+  output, where it is not (`author`, `token_count`)
 
 ## Layout
 
@@ -342,6 +354,8 @@ src/treaty/
   _lifecycle.py  Teardown: one run's release hooks, then cleanup=, once on every exit
   _steps.py      StepName, StepTracker, Rollback: steps=, ctx.step, resume and rollback
   _batch.py      Batch, Item, ItemError, batch_schema(): per-item results (REQ-C-009)
+  _redact.py     SECRET_NAME, secret_field(), scrub(): what a secret name is (REQ-F-034)
+  _protect.py    protect(), tagged(): masking and trust tags of data (REQ-F-058, F-035)
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
@@ -412,16 +426,17 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
 F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-022, F-023, F-024,
-F-025 (not the audit log), F-027, F-028, F-031, F-034, F-040, F-044, F-045 (paths),
-F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-064, F-065, F-069,
+F-025 (not the audit log), F-027, F-028, F-031, F-034 (not the audit log), F-035, F-040, F-044, F-045 (paths),
+F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-062, F-064, F-065, F-069,
 F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
 C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-012, C-013, C-015, C-016, C-017,
 C-020 (all presets), C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-007, O-010, O-011, O-013, O-014, O-015, O-016, O-021, O-022,
-O-024, O-032, O-033, O-036, O-039, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
+O-023 (not the audit log), O-024, O-032, O-033, O-036, O-037, O-039, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),
-`--output-schema`, `--schema-version`, `--stable-output`, `--max-output`, `--config`,
+`--output-schema`, `--schema-version`, `--stable-output`, `--unmask`,
+`--no-injection-protection`, `--max-output`, `--config`,
 `--context`, `--no-config`, `--show-config`, `--instance-id`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`

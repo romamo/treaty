@@ -130,13 +130,31 @@ ever sees a raw secret, and tags survive `--fields` because framework keys are k
 
 ## Tasks
 
-- [ ] `_redact.py`: one `SECRET_NAME`; `scrub` moved; `Flag(secret=None)` uses it; plain-mode error context scrubbed
-- [ ] Reserve `unmask` and `no-injection-protection` in `GLOBAL_FLAGS`; parse both in `split_globals`; root manifest entries and help rows
-- [ ] `treaty.Field` marker; `Command.masked_fields` and `Command.external_fields` from the output type; refuse `_source`/`_trusted` field names
-- [ ] `_protect.mask` with JWT, base64, and key summaries and their guards; unit tests per shape
-- [ ] `_Run._present` at every sink (`_write`, `_emit_text`, `to_file`, `App.call`); `HIGH_ENTROPY_MASKED`; `--unmask`
-- [ ] `external=` keyword; tagging for objects, list items, streams, exec lines; `UNTRUSTED_CONTENT`; output schema tags
-- [ ] `--no-injection-protection`: meta field, warning, stderr record
-- [ ] Audit rules `external-data` and `high-entropy` with generated fixes
-- [ ] Tests named after each acceptance criterion, including env var cannot unmask and replay with `--unmask`
-- [ ] COMPLIANCE rows F-034 (stays Partial until F-026), F-035, F-058, O-023, O-037; README, HANDOFF, ROADMAP, changelog "Breaking"
+- [x] `_redact.py`: one `SECRET_NAME`; `scrub` moved; `Flag(secret=None)` uses it; plain-mode error context scrubbed.
+  Note: `SECRET_NAME` drops the old log regex's `^api` branch, which would have made
+  `--api-url` a secret input; output masking uses `secret_field` (the last word of the
+  name) from the same vocabulary, so `author` and `token_count` are not masked
+- [x] Reserve `unmask` and `no-injection-protection` in `GLOBAL_FLAGS`; parse both in `split_globals`; root manifest entries and help rows.
+  Note: both are `SWITCH_GLOBALS` and `IMPLEMENTED` in `_framework.py`; the help rows come
+  from the manifest entries (`SECURITY_FLAGS`)
+- [x] `treaty.Field` marker; `Command.masked_fields` and `Command.external_fields` from the output type; refuse `_source`/`_trusted` field names.
+  Note: X1, no `Field`: `Out(high_entropy=, external=)` on `OutSpec`. No per-command
+  field tables: `_protect.protect` walks `data` with the output type and reads each
+  field's `OutSpec`, which also covers nested fields
+- [x] `_protect.mask` with JWT, base64, and key summaries and their guards; unit tests per shape.
+  Note: base64 also needs mixed case and a digit, and the entropy floor is 4.3 bits per
+  character (4.5 missed a few percent of 30-byte random blobs); a short `[KEY: ...]`
+  shows at most half the value
+- [x] `_Run._present` at every sink (`_write`, `_emit_text`, `to_file`, `App.call`); `HIGH_ENTROPY_MASKED`; `--unmask`.
+  Note: applied once where the envelope is made (`execute`, each `stream` envelope)
+  rather than at four sinks, which would present `--output` twice; every sink sees it
+- [x] `external=` keyword; tagging for objects, list items, streams, exec lines; `UNTRUSTED_CONTENT`; output schema tags
+- [x] `--no-injection-protection`: meta field, warning, stderr record
+- [x] Audit rules `external-data` and `high-entropy` with generated fixes.
+  Note: `external-data` flags `has_network_io=True` and `ctx.run`/`ctx.pipeline`, not
+  file reads, which are too often the tool's own state (treaty's `schema-lock`)
+- [x] Tests named after each acceptance criterion, including env var cannot unmask and replay with `--unmask` (`tests/test_output_security.py`)
+- [x] COMPLIANCE rows F-034 (stays Partial until F-026), F-035, F-058, O-023, O-037; README, HANDOFF, ROADMAP, changelog "Breaking".
+  Note: O-023 is Partial too (its audit-log criterion waits for F-026); no CHANGELOG file
+  exists yet, so the breaking changes are listed in ROADMAP. Truncation warnings now name
+  `data.x[0]` like `ctx.truncated`, not `$.x[0]`

@@ -146,6 +146,14 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   are a `RegistrationError`; unparseable JSON input is `INVALID_JSON` instead of
   `ARG_ERROR` (or `DISPATCH_PARSE_ERROR` for an `exec` line); `validate_only` is a
   framework key; every manifest entry gains `option_placement`
+- 1.0 plan, output security (`plans/1.0/07-output-security.md`): JWT, base64, and
+  credential-named strings in `data` masked unless `--unmask`, `external=True` and
+  `Out(external=True, high_entropy=...)` with `_source`/`_trusted` tags,
+  `--no-injection-protection`, one `SECRET_NAME` rule and `scrub()` for logs and stderr;
+  audit rules `external-data` and `high-entropy`. Breaking: masked `data` by default, the
+  global names `unmask` and `no-injection-protection`, fields named `_source` or
+  `_trusted`, more names inferred secret (`cookie`, a `pass` segment), and truncation
+  warnings name `data.x` instead of `$.x`
 
 ## 0.1.x: after the first minor release
 

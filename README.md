@@ -159,7 +159,7 @@ In `exec` and MCP, where stdin is taken, such a command needs `input_file`.
 ## Flag order
 
 `--format`, `--help`, `--schema` (alias `--print-schema`), `--output-schema`,
-`--schema-version`, `--stable-output`, and `--max-output` are global: they are accepted anywhere before `--`,
+`--schema-version`, `--stable-output`, `--unmask`, `--no-injection-protection`, and `--max-output` are global: they are accepted anywhere before `--`,
 so a command cannot declare a flag with those names or the short `-h`. The manifest lists
 them once, in its root `flags` map (ManifestResponse 3.0). Names treaty keeps for features
 still to come (`--config`, `--quiet`, `--verbose`, `--fields`, and others, listed in
@@ -937,6 +937,32 @@ class Report:
     users: list[User] = Out(sort_key="id")
     top: list[str] = Out(ordered=True)
     fetched_at: str = Out(default="", volatile=True)
+```
+
+## Output security
+
+`data` is safe to put in an agent's context by default:
+
+- **Masked**: a string that decodes as a JWT becomes `[JWT: sub=user_123,
+  exp=2024-03-11T15:00:00Z]`, a base64 blob `[BASE64: 192 bytes]`, and a field whose
+  name ends in a credential word (`access_token`, `client_secret`, `api_key`) `[KEY:
+  ghp_abc1...]`; a `HIGH_ENTROPY_MASKED` warning lists the paths. Git SHAs, hex digests,
+  paths, versions, and host names are left alone. `--unmask` returns the raw values; no
+  environment variable, config file, exec line, or MCP argument can set it.
+  `Out(high_entropy=True)` always masks a field, `Out(high_entropy=False)` never (a
+  content hash to compare). Rule `high-entropy`
+- **Tagged**: `external=True` on a command whose `data` comes from outside the tool (a
+  file, an API response), or `Out(external=True)` on the field that holds it, adds
+  `"_source": "external", "_trusted": false` to `data` (to each object of a list) and an
+  `UNTRUSTED_CONTENT` warning. `--no-injection-protection` drops the tags, sets
+  `meta.injection_protection: false`, and reports its use on stderr. Rule `external-data`
+
+```python
+@dataclass(frozen=True, slots=True)
+class Page:
+    url: str
+    body: str = Out(external=True)
+    etag: str = Out(high_entropy=False)
 ```
 
 ## Raw payloads

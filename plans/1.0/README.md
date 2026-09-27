@@ -104,7 +104,9 @@ Phase B   08 ── 13      09      10      11      12 (after 07)      14 (after
   `ctx.teardown.add(name, fn)`; `ctx.lock` kept its `with` block, which a resource's
   `release` can close
 - **07 before 12**: both extend the one output step `_Run._present` (mask, trust tags,
-  `--fields`, token budget, byte cap, in that order)
+  `--fields`, token budget, byte cap, in that order). Landed: `_present` runs where
+  `execute` and `stream` make each envelope, before any sink; the byte cap stays in
+  `_write`
 - **02 before 14**: 14's env var inventory reads 02's registry of known variables
 - **08 before 13**: 13 extends 08's `doctor` and `cleanup`
 
