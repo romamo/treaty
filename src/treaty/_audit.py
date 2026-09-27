@@ -203,11 +203,11 @@ def _paginated_list(app: App) -> Iterator[Finding]:
         if c.output_schema.get("type") == "array" and not (c.paginated or c.streaming):
             yield Finding(
                 "paginated-list",
-                Severity.WARNING,
+                Severity.ADVICE,
                 c.path.value,
-                "returns a list without paginated=True, so it has no default limit, "
+                "returns a list with paginated=False, so it has no default limit, "
                 "--limit, --cursor, or meta.pagination (REQ-F-018, REQ-F-019)",
-                "paginated=True; return the list, or a treaty.Page read with ctx.page",
+                "drop paginated=False unless the list is small and bounded by design",
             )
 
 
@@ -503,8 +503,8 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         "paginated-list",
-        "Commands returning lists are paginated",
-        Severity.WARNING,
+        "List commands keep the framework's pagination",
+        Severity.ADVICE,
         _paginated_list,
     ),
     Rule("network-io", "Network commands declare has_network_io", Severity.WARNING, _network_io),

@@ -171,10 +171,13 @@ def test_safe_default_live_and_confirmed_applies() -> None:
     assert APPLIED == ["logs"]
 
 
-def test_safe_default_live_alone_still_needs_confirmation() -> None:
+def test_safe_default_live_alone_is_the_confirmation() -> None:
     code, env = run(make_app(safe_default=True), ["purge", "logs", "--live"])
-    assert code == 2 and env["error"]["code"] == "CONFIRMATION_REQUIRED"  # type: ignore[index]
-    assert meta_of(env)["dry_run"] is True and APPLIED == []
+    assert code == 0 and env["data"]["effect"] == "deleted"  # type: ignore[index]
+    assert meta_of(env)["dry_run"] is False and meta_of(env)["confirmed"] is True
+    assert APPLIED == ["logs"]
+    _, env = run(make_app(safe_default=True), ["purge", "--schema"])
+    assert env["data"]["requires_confirmation"] is True  # type: ignore[index]
 
 
 def test_safe_default_dry_run_flag_wins_over_live() -> None:

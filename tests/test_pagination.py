@@ -232,9 +232,9 @@ def test_f052_tool_env_var_sets_the_cap() -> None:
 
 def test_registration_checks() -> None:
     app = App("x", version="1")
-    with pytest.raises(RegistrationError, match="paginated=True"):
+    with pytest.raises(RegistrationError, match="paginated=False"):
 
-        @app.command("a", description="a", danger_level="safe", exit_codes=())
+        @app.command("a", description="a", danger_level="safe", exit_codes=(), paginated=False)
         def a(args: NoArgs, ctx: Ctx) -> Page[Item]:
             return Page(items=[])
 
@@ -279,12 +279,36 @@ def test_wrong_runtime_output_is_invalid_output() -> None:
     assert code == 1 and env["error"]["code"] == "INVALID_OUTPUT"
 
 
-def test_audit_flags_an_unpaginated_list_command() -> None:
+def test_f018_every_list_output_is_paginated_by_default() -> None:
     app = App("x", version="1")
 
     @app.command("ls", description="ls", danger_level="safe", exit_codes=())
     def ls(args: NoArgs, ctx: Ctx) -> list[Item]:
+        return [Item(str(i)) for i in range(30)]
+
+    @app.command("page", description="page", danger_level="safe", exit_codes=())
+    def page(args: NoArgs, ctx: Ctx) -> Page[Item]:
+        return Page(items=[Item("x")])
+
+    @app.command("stream", description="s", danger_level="safe", exit_codes=(), streaming=True)
+    def stream(args: NoArgs, ctx: Ctx) -> Iterator[list[Item]]:
+        yield []
+
+    assert app.commands[CommandPath("ls")].paginated
+    assert app.commands[CommandPath("page")].paginated
+    assert not app.commands[CommandPath("stream")].paginated
+    code, env = call(app, ["ls"])
+    assert code == 0 and len(env["data"]) == 20 and env["meta"]["pagination"]["has_more"]
+
+
+def test_audit_advises_on_a_list_command_that_opts_out() -> None:
+    app = App("x", version="1")
+
+    @app.command("ls", description="ls", danger_level="safe", exit_codes=(), paginated=False)
+    def ls(args: NoArgs, ctx: Ctx) -> list[Item]:
         return []
 
+    code, env = call(app, ["ls"])
+    assert code == 0 and "pagination" not in env["meta"]
     rule = next(r for r in audit(app, "x", limit=5).rules if r.id == "paginated-list")
-    assert not rule.passed and rule.findings[0].command == "ls"
+    assert rule.severity == "advice" and rule.findings[0].command == "ls"

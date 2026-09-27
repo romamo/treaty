@@ -165,7 +165,9 @@ def command_entry(
             "type": "boolean",
             "required": False,
             "default": False,
-            "description": "Required to apply; without it the command previews and exits 2",
+            "description": "Not needed: --live applies and is the confirmation"
+            if command.safe_default
+            else "Required to apply; without it the command previews and exits 2",
         }
     if command.interactive:
         flags[YES_FLAG] = {
@@ -246,7 +248,7 @@ def command_entry(
             "type": "boolean",
             "required": False,
             "default": False,
-            "description": "Apply, with --confirm-destructive; without it the command runs "
+            "description": "Apply; this is the confirmation. Without it the command runs "
             "as a dry run and exits 0",
         }
     out: dict[str, object] = {
@@ -358,14 +360,16 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         properties[CONFIRM_KEY] = {
             "type": "boolean",
             "default": False,
-            "description": "Required to apply; without it the command previews and fails "
+            "description": "Not needed: live applies and is the confirmation"
+            if command.safe_default
+            else "Required to apply; without it the command previews and fails "
             "with CONFIRMATION_REQUIRED",
         }
     if command.safe_default:
         properties[LIVE_FLAG] = {
             "type": "boolean",
             "default": False,
-            "description": "Apply, with confirm_destructive; without it the command runs "
+            "description": "Apply; this is the confirmation. Without it the command runs "
             "as a dry run",
         }
     if command.interactive:

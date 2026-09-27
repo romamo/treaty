@@ -72,8 +72,8 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - `treaty.Affects` as `would_affect` on destructive dry runs, checked at registration and
   per run, and quoted by `CONFIRMATION_REQUIRED` (REQ-C-004); `requires_confirmation: true`
   in `--schema` (REQ-O-021)
-- `safe_default=True` destructive commands: dry run by default with exit 0, `--live` with
-  `--confirm-destructive` to apply, `meta.dry_run` on every response (REQ-O-048)
+- `safe_default=True` destructive commands: dry run by default with exit 0, `--live` to
+  apply (it is the confirmation), `meta.dry_run` on every response (REQ-O-048)
 - `network-timeout` audit rule: network calls without `timeout=` in network commands
   (REQ-C-012)
 - Subprocess API (REQ-F-044, F-046, F-055, F-057, F-062, F-065): `ctx.run` and

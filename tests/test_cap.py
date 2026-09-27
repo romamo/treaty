@@ -13,7 +13,14 @@ from treaty._cap import MARKER, MIN_BYTES, SLACK
 def big_app() -> App:
     app = App("bigctl", version="1", max_output_bytes=MIN_BYTES)
 
-    @app.command("items", description="Many small items", danger_level="safe", exit_codes=())
+    # Opted out of pagination, so the byte cap is what bounds it
+    @app.command(
+        "items",
+        description="Many small items",
+        danger_level="safe",
+        exit_codes=(),
+        paginated=False,
+    )
     def items(args: NoArgs, ctx: Ctx) -> list[dict[str, object]]:
         return [{"id": i, "name": f"item-{i}"} for i in range(1000)]
 

@@ -117,4 +117,9 @@ like the flags.
   `meta` differs by a few bytes
 - **`ParseError(code=...)`** sets `error.code` of a single argument error, and each
   `error.errors` entry carries its `code`; `INVALID_CURSOR` is the first user
-- The `treaty rules` built-in is paginated, so the treaty CLI passes its own audit
+- **Pagination is automatic for list outputs.** F-018 is framework-automatic, so
+  `paginated` defaults to None: every non-streaming command returning `list[T]` or
+  `Page[T]` is a list command, since the skip-count cursor resumes any list.
+  `paginated=False` opts out, and the `paginated-list` audit rule became advice on those
+  opt-outs instead of a warning on undeclared lists
+- The `treaty rules` built-in returns a list, so it is paginated like any other

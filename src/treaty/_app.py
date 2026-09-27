@@ -309,7 +309,7 @@ class App:
         gui_operations: Sequence[str] = (),
         interactive: bool = False,
         editor_alternatives: Sequence[str] = (),
-        paginated: bool = False,
+        paginated: bool | None = None,
         default_limit: int = DEFAULT_LIMIT,
         cursor_check: Callable[[str], None] | None = None,
         heartbeat: bool = False,
@@ -324,8 +324,9 @@ class App:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
 
-        ``paginated=True`` makes a list command: it returns ``list[T]`` or ``Page[T]``, and
-        gets ``--limit`` (``default_limit`` items, 0 for all) and ``--cursor``.
+        A command returning ``list[T]`` or ``Page[T]`` is a list command: it gets
+        ``--limit`` (``default_limit`` items, 0 for all), ``--cursor``, and
+        ``meta.pagination``; ``paginated=False`` opts a ``list[T]`` out.
         ``cursor_check`` validates the handler's own ``Page.next_cursor`` when it comes
         back, before the handler runs: a pure function raising ``ParseError`` to refuse it.
         ``heartbeat=True`` writes a heartbeat line to stdout every ``--heartbeat-ms``
@@ -1405,17 +1406,17 @@ class _Run:
             return self._keyed(command, invocation, mode, meta=meta)
         # REQ-O-048: a dry run unless --live; --dry-run still wins, as a preview is safe
         dry_run = not invocation.live or _dry_run_requested(invocation.args)
-        if dry_run:
-            args = invocation.args
-            assert dataclasses.is_dataclass(args) and not isinstance(args, type)
-            invocation = dataclasses.replace(
-                invocation, args=dataclasses.replace(args, dry_run=True)
-            )
+        args = invocation.args
+        assert dataclasses.is_dataclass(args) and not isinstance(args, type)
+        # --live is the explicit confirmation; --confirm-destructive is not also needed
+        invocation = dataclasses.replace(
+            invocation,
+            args=dataclasses.replace(args, dry_run=True) if dry_run else args,
+            confirmed=not dry_run,
+        )
         envelope = self._keyed(command, invocation, mode, meta=meta)
-        # --live without --confirm-destructive still only previews
-        applied = not dry_run and invocation.confirmed
-        extra: dict[str, object] = {"dry_run": not applied}
-        if applied:
+        extra: dict[str, object] = {"dry_run": dry_run}
+        if not dry_run:
             extra["confirmed"] = True
         return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
 

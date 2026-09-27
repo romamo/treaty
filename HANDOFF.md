@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 729 passed |
+| `uv run pytest` | 756 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -67,7 +67,8 @@ The two do not share code.
   need no `would_affect`
 - **`safe_default=True` is decided in `_Run.execute`**, before the idempotency path: no
   `--live`, or `--dry-run`, turns `dry_run` on, so the rest of the pipeline sees an
-  ordinary dry run. `--dry-run` wins over `--live` because the kit previews a destructive
+  ordinary dry run; `--live` alone sets `confirmed`, since it is the explicit confirmation
+  (O-048), while `requires_confirmation` stays true in `--schema`. `--dry-run` wins over `--live` because the kit previews a destructive
   probe by appending `--dry-run` to its argv. `meta.dry_run` is added to every envelope of
   the command, argument errors included; `meta.confirmed` only to an applied live run
 - **Timeouts use a daemon thread**, not `SIGALRM`, so they work on Windows, off the main
@@ -179,7 +180,11 @@ The two do not share code.
   `readline` (what `input()` calls) finds stdin empty; piped data reads normally.
   `App.call` swaps neither stream. `--yes` and `--non-interactive` exist only on
   `interactive=True` commands
-- **The framework slices every page.** A `paginated=True` handler returns the whole
+- **Every list output is paginated.** `paginated=None` (the default) makes any
+  non-streaming `list[T]` or `Page[T]` output a list command (REQ-F-018 is
+  framework-automatic); `paginated=False` opts a `list[T]` out, and the `paginated-list`
+  audit rule is advice on those opt-outs
+- **The framework slices every page.** A paginated handler returns the whole
   `list[T]` or one `Page[T]` batch; `_page.take` cuts it to the limit. The cursor is
   base64url JSON of the command path, a digest of the non-secret args (checked in
   `_Run._position` with the command's `cursor_check`, before user code), the handler's own
@@ -314,7 +319,7 @@ Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-outpu
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
-`--cursor` (`paginated=True`), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
+`--cursor` (list outputs), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
 (`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
 (`auth=`), `--global` (`config_write_scope=`), and
 `--<name>-from-env` / `--<name>-from-file` for each secret field.

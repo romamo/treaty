@@ -365,14 +365,16 @@ Plain mode is not capped.
 
 ## Lists
 
-A command declared `paginated=True` returns `list[T]` or `treaty.Page[T]` and gets
-`--limit` (default 20, `default_limit=` per command, `0` for every item) and `--cursor`.
+Every command that returns `list[T]` or `treaty.Page[T]` is a list command (REQ-F-018),
+with no declaration: it gets `--limit` (default 20, `default_limit=` per command, `0` for
+every item) and `--cursor`. `paginated=False` opts a small, bounded `list[T]` out, and the
+`paginated-list` audit rule advises on each opt-out; streams are never paginated.
 Every successful response carries `meta.pagination` with `total`, `returned`, `truncated`,
 `has_more`, and `next_cursor`; pass `next_cursor` as `--cursor` for the next page:
 
 ```python
 @app.command("releases.list", description="List releases", danger_level="safe",
-             exit_codes=(), paginated=True)
+             exit_codes=())
 def releases(args: NoArgs, ctx: Ctx) -> list[Release]:
     return store.all()  # the framework slices it
 ```
@@ -393,8 +395,7 @@ does not decode, names another command, or came from other arguments (`--q a`, t
 cursor before the handler runs: a pure function that takes the string and raises
 `ParseError` to refuse it, which also exits `2` with `INVALID_CURSOR`. JSON routes take
 `limit` as an integer only. In `exec`, `_opts` take `limit` and `cursor`; MCP
-tools take them as arguments. `--schema` shows `default_limit`, and the `paginated-list`
-audit rule flags list outputs without `paginated=True`. Streams are not paginated.
+tools take them as arguments. `--schema` shows `default_limit`. Streams are not paginated.
 
 ## Secrets
 
@@ -605,9 +606,11 @@ for a program; a dry run without it exits `1` with `INVALID_EFFECT` (REQ-C-004).
 `--schema` of a destructive command has `requires_confirmation: true` (REQ-O-021).
 
 `safe_default=True` makes the dry run the default instead (REQ-O-048): without `--live` the
-command previews and exits `0`, and `--live --confirm-destructive` applies it (`--live`
-alone still exits `2`). Every response of such a command carries `meta.dry_run`, and a
-live one `meta.confirmed`; the manifest shows `safe_default: true` and the `--live` flag.
+command previews and exits `0`, and `--live` applies it: `--live` is the explicit
+confirmation, so `--confirm-destructive` is not also needed. `--schema` still shows
+`requires_confirmation: true`. Every response of such a command carries `meta.dry_run`,
+and a live one `meta.confirmed`; the manifest shows `safe_default: true` and the `--live`
+flag.
 
 ## Effects and idempotency keys
 

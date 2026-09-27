@@ -90,9 +90,13 @@ additive: plain destructive commands keep the exit-2 confirmation gate that O-02
 - `--dry-run` wins over `--live` instead of being a contradiction: the kit previews a
   destructive probe by appending `--dry-run` to its argv, and the probe for a
   `safe_default` command is `argv + --live`, so that preview must exit 0
-- `meta.dry_run` is true on every response that applied nothing, `--live` without
-  confirmation included (it still only previews), and on argument errors; `meta.confirmed`
-  appears only on an applied live run
+- **`--live` is the confirmation on a `safe_default` command**: `--live` alone applies, and
+  `--confirm-destructive` is not also required (it is accepted and changes nothing). The
+  spec's acceptance criterion says `--live` executes, and O-048 describes safe-default as
+  replacing the gate with a preview then commit workflow. `requires_confirmation` stays
+  true in `--schema`, since applying still takes an explicit flag
+- `meta.dry_run` is true on every response that applied nothing and on argument errors;
+  `meta.confirmed` appears only on a live run
 - The `exit-codes` audit rule stays: an explicit `exit_codes=()` on a non-safe command is
   still worth a warning
 - Migration touched `benchmark/cli/treaty/democli.py` too; its filter check moved from a
@@ -105,5 +109,5 @@ additive: plain destructive commands keep the exit-2 confirmation gate that O-02
   naming both missing arguments
 - `--schema` of a destructive command has `requires_confirmation: true`
 - `safe_default=True`: no flags gives exit 0, `would_*`, `meta.dry_run: true`, sentinel
-  untouched; `--live --confirm-destructive` applies; `--live` alone exits 2
+  untouched; `--live` alone applies
 - The audit flags `urlopen(url)` inside a network command and accepts `urlopen(url, timeout=...)`

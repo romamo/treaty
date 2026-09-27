@@ -168,7 +168,7 @@ def build_command(
     gui_operations: Sequence[str] = (),
     interactive: bool = False,
     editor_alternatives: Sequence[str] = (),
-    paginated: bool = False,
+    paginated: bool | None = None,
     default_limit: int = DEFAULT_LIMIT,
     cursor_check: Callable[[str], None] | None = None,
     heartbeat: bool = False,
@@ -190,11 +190,6 @@ def build_command(
         token_env_vars=token_env_vars,
         streaming=streaming,
     )
-    if cursor_check is not None and not (paginated and callable(cursor_check)):
-        raise RegistrationError(
-            f"{path}: cursor_check is a function validating a paginated command's own cursor; "
-            "pass one with paginated=True"
-        )
     if paginated and streaming:
         raise RegistrationError(
             f"{path}: a stream has no pages; drop paginated=True or streaming=True"
@@ -207,7 +202,12 @@ def build_command(
         raise RegistrationError(
             f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
         )
-    args_type, output_type, resources = _inspect_handler(fn, path, streaming, paginated)
+    args_type, output_type, resources, paginated = _inspect_handler(fn, path, streaming, paginated)
+    if cursor_check is not None and not (paginated and callable(cursor_check)):
+        raise RegistrationError(
+            f"{path}: cursor_check is a function validating a list command's own cursor; "
+            "pass one to a command returning list[T] or treaty.Page[T]"
+        )
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
     _check_gui(path, output_type, gui_operations)
@@ -358,26 +358,32 @@ def build_command(
     )
 
 
-def _page_output(output_type: object, path: CommandPath, paginated: bool) -> object:
-    """A list command's output is ``list[T]`` or ``Page[T]``, served as ``list[T]``"""
+def _page_output(
+    output_type: object, path: CommandPath, paginated: bool | None
+) -> tuple[object, bool]:
+    """A list command's output is ``list[T]`` or ``Page[T]``, served as ``list[T]``; with
+    ``paginated=None`` every such output is a list command (REQ-F-018)"""
     annotation = resolve_alias(output_type)
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
     if annotation is Page or origin is Page:
-        if not paginated:
+        if paginated is False:
             raise RegistrationError(
-                f"{path}: returns treaty.Page but is not a list command; add paginated=True"
+                f"{path}: returns treaty.Page but paginated=False; drop paginated=False"
             )
-        return list[args[0] if args else object]  # type: ignore[misc]
-    if not paginated:
-        return output_type
+        return list[args[0] if args else object], True  # type: ignore[misc]
+    item: object = None
     if origin in (list, collections.abc.Sequence) and len(args) == 1:
-        return list[args[0]]  # type: ignore[valid-type]
-    if origin is tuple and len(args) == 2 and args[1] is Ellipsis:
-        return list[args[0]]  # type: ignore[valid-type]
-    raise RegistrationError(
-        f"{path}: a paginated command returns list[T] or treaty.Page[T], not {output_type!r}"
-    )
+        item = args[0]
+    elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
+        item = args[0]
+    if paginated is False or (paginated is None and item is None):
+        return output_type, False
+    if item is None:
+        raise RegistrationError(
+            f"{path}: a paginated command returns list[T] or treaty.Page[T], not {output_type!r}"
+        )
+    return list[item], True  # type: ignore[valid-type]
 
 
 def _check_gui(path: CommandPath, output_type: object, gui_operations: Sequence[str]) -> None:
@@ -432,8 +438,8 @@ def _check_ctx_calls(
 
 
 def _inspect_handler(
-    fn: Handler, path: CommandPath, streaming: bool, paginated: bool
-) -> tuple[type, object, tuple[type, ...]]:
+    fn: Handler, path: CommandPath, streaming: bool, paginated: bool | None
+) -> tuple[type, object, tuple[type, ...], bool]:
     resources = dependency_params(fn, f"{path}: handler")
     params = list(inspect.signature(fn).parameters.values())
     hints = typing.get_type_hints(fn)
@@ -445,12 +451,13 @@ def _inspect_handler(
     output_type = hints["return"]
     if streaming:
         output_type = _event_type(output_type, path)
-    output_type = _page_output(output_type, path, paginated)
+        paginated = False  # a stream has no pages; its events may be lists
+    output_type, paginated = _page_output(output_type, path, paginated)
     if not is_payload_type(output_type):
         what = "each yielded event" if streaming else "return type"
         raise RegistrationError(f"{path}: {what} must serialize to a JSON object, array, or null")
     assert isinstance(args_type, type)
-    return args_type, output_type, resources
+    return args_type, output_type, resources, paginated
 
 
 _STREAM_ORIGINS = (
