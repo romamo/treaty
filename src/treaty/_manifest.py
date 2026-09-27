@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from ._command import Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
-from ._mode import OutputMode
+from ._mode import Format
 from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG, NO_STREAM_FLAG, TIMEOUT_FLAG
 from ._schema import JsonSchema
 from ._values import CommandPath, Etag
@@ -27,14 +27,21 @@ _ALWAYS = (
 )
 
 
-# REQ-F-079: split_globals accepts these anywhere on every command path
-GLOBAL_FLAG_ENTRIES: dict[str, object] = {
-    "format": {
-        "type": "enum",
-        "required": False,
-        "enum_values": [m.value for m in OutputMode],
-        "description": "Output representation; json when stdout is not a terminal, plain otherwise",
-    },
+def global_flag_entries(formats: Sequence[Format]) -> dict[str, object]:
+    """REQ-F-079: split_globals accepts these anywhere on every command path"""
+    return {
+        "format": {
+            "type": "enum",
+            "required": False,
+            "enum_values": [m.value for m in formats],
+            "description": "Output representation; json when stdout is not a terminal, "
+            "plain otherwise",
+        },
+        **_FIXED_GLOBAL_FLAGS,
+    }
+
+
+_FIXED_GLOBAL_FLAGS: dict[str, object] = {
     "max-output": {
         "type": "integer",
         "required": False,
@@ -223,10 +230,14 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
 
 
 def build_manifest(
-    commands: Mapping[CommandPath, Command], exits: ExitCodeRegistry, framework_version: str
+    commands: Mapping[CommandPath, Command],
+    exits: ExitCodeRegistry,
+    framework_version: str,
+    formats: Sequence[Format],
 ) -> dict[str, object]:
     """The manifest tree with the shared exit-code table hoisted to the root"""
     shared = shared_exit_codes(exits)
+    flags = global_flag_entries(formats)
     entries = {
         path.value: command_entry(cmd, exits, commands, shared=shared)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
@@ -234,7 +245,7 @@ def build_manifest(
     # Everything an agent caches: a new global flag or shared code must change the etag
     shape = {
         "schema_version": SCHEMA_VERSION,
-        "flags": GLOBAL_FLAG_ENTRIES,
+        "flags": flags,
         "exit_codes": shared,
         "commands": entries,
     }
@@ -244,7 +255,7 @@ def build_manifest(
         "schema_version": SCHEMA_VERSION,
         "framework_version": framework_version,
         "etag": etag.value,
-        "flags": GLOBAL_FLAG_ENTRIES,
+        "flags": flags,
         "exit_codes": shared,
         "commands": entries,
     }

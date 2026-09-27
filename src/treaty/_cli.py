@@ -17,6 +17,7 @@ from ._audit import RULES, AuditReport, Severity, audit
 from ._context import Ctx
 from ._errors import Exit
 from ._flags import Arg, Flag
+from ._mode import Format
 from ._profile import (
     SPEC_FALLBACK,
     build_profile,
@@ -155,7 +156,7 @@ def render_audit(data: Any) -> str:
         ("List every finding as JSON", "treaty audit myapp.cli:app --all --format json"),
         ("Fail a CI step on warnings", "treaty audit myapp.cli:app --strict"),
     ],
-    plain=render_audit,
+    renderers={Format.PLAIN: render_audit},
 )
 def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     if args.limit < 1:
@@ -218,7 +219,7 @@ def render_init(data: Any) -> str:
     danger_level="mutating",
     exit_codes=["CONFLICT"],
     examples=[("New project", "treaty init deployctl")],
-    plain=render_init,
+    renderers={Format.PLAIN: render_init},
 )
 def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     name = ProjectName(args.name)
@@ -343,7 +344,7 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
     supports_raw_payload=True,
     examples=[("Write and run", "treaty conformance myapp.cli:app --run")],
     timeout=900,
-    plain=render_conformance,
+    renderers={Format.PLAIN: render_conformance},
 )
 def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     app = load_app(args.target)

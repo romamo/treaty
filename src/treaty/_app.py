@@ -27,7 +27,7 @@ from ._command import (
     DangerLevel,
     Example,
     Handler,
-    PlainRenderer,
+    Renderer,
     build_command,
 )
 from ._context import Ctx
@@ -40,7 +40,7 @@ from ._flags import REDACTED, Flag
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._manifest import build_manifest, command_schema
-from ._mode import OutputMode, resolve_mode
+from ._mode import Format, resolve_mode
 from ._parse import (
     Invocation,
     Route,
@@ -61,6 +61,7 @@ from ._timeout import Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
 
 EXEC_PATH = CommandPath("exec")
+MANIFEST_PATH = CommandPath("manifest")
 VERSION_PATH = CommandPath("version")
 DEFAULT_TIMEOUT = Timeout(60.0)
 
@@ -130,6 +131,7 @@ class App:
         self._state: Mapping[str, object] = dict(state or {})
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
+        self._renderers: dict[Format, Renderer] = {}
         self._register_builtins(enable_exec)
 
     # Registration
@@ -185,6 +187,31 @@ class App:
             )
         )
 
+    def format(self, mode: Format, *, render: Renderer) -> None:
+        """Offer ``--format <mode>``, written by ``render`` for every command without its own
+        renderer for it; declare it before the commands overriding it
+
+        ``plain`` is always offered, and registering it replaces the built-in ``key: value``
+        lines. ``json`` is the response envelope agents read, so it takes no renderer.
+        """
+        _check_renderer("app.format", mode, render)
+        if mode in self._renderers:
+            raise RegistrationError(f"--format {mode} already has a renderer")
+        self._renderers[mode] = render
+
+    @property
+    def formats(self) -> tuple[Format, ...]:
+        """The ``--format`` values this app offers, in ``Format`` order"""
+        built_in = (Format.PLAIN, Format.JSON)
+        return tuple(m for m in Format if m in built_in or m in self._renderers)
+
+    def renderer(self, command: Command, mode: Format) -> Renderer | None:
+        """The command's renderer for a text mode, else the app's; None is plain's built-in"""
+        if command.path == MANIFEST_PATH:
+            # The manifest is for agents: every text mode keeps it JSON, indented for reading
+            return _json_text
+        return command.renderers.get(mode, self._renderers.get(mode))
+
     def group(self, path: str, *, description: str) -> Group:
         prefix = CommandPath(path)
         if prefix in self._commands:
@@ -208,10 +235,18 @@ class App:
         timeout: float | None | _Inherit = INHERIT,
         supports_raw_payload: bool = False,
         cleanup: Cleanup | None = None,
-        plain: PlainRenderer | None = None,
+        renderers: Mapping[Format, Renderer] | None = None,
         streaming: bool = False,
     ) -> Callable[[Handler], Handler]:
         cmd_path = CommandPath(path)
+        overrides = dict(renderers or {})
+        for mode, render in overrides.items():
+            _check_renderer(f"{cmd_path}: renderers", mode, render)
+            if mode not in self.formats:
+                raise RegistrationError(
+                    f"{cmd_path}: --format {mode} is not offered; "
+                    f"register it first with app.format(Format.{mode.name}, render=...)"
+                )
         if isinstance(timeout, _Inherit):
             # A stream serves until told to stop; the app default is for one-shot handlers
             command_timeout = Timeout(None) if streaming else None
@@ -233,7 +268,7 @@ class App:
                     timeout=command_timeout,
                     supports_raw_payload=supports_raw_payload,
                     cleanup=cleanup,
-                    plain=plain,
+                    renderers=overrides,
                     scalars=self.scalars,
                     streaming=streaming,
                 )
@@ -266,12 +301,9 @@ class App:
                 )
 
     def _register_builtins(self, enable_exec: bool) -> None:
-        # The manifest is for agents: plain mode keeps it JSON, indented for reading
-        @self.command(
-            "manifest", description="Print the command manifest for agents", plain=_json_text
-        )
+        @self.command(MANIFEST_PATH.value, description="Print the command manifest for agents")
         def manifest(args: NoArgs, ctx: Ctx) -> dict[str, object]:
-            return build_manifest(self._commands, self.exits, self.version)
+            return self.manifest()
 
         @self.command(VERSION_PATH.value, description="Print the tool name and version")
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
@@ -323,7 +355,7 @@ class App:
         return self._commands
 
     def manifest(self) -> dict[str, object]:
-        return build_manifest(self._commands, self.exits, self.version)
+        return build_manifest(self._commands, self.exits, self.version, self.formats)
 
     def effective_timeout(self, command: Command, override: Timeout | None) -> Timeout:
         if override is not None:
@@ -396,8 +428,8 @@ class App:
                 )
             if invocation.timeout is None and self.effective_timeout(command, None).seconds is None:
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
-            return buffer_stream(run.stream(command, invocation, OutputMode.JSON, meta=meta))
-        return run.execute(command, invocation, OutputMode.JSON, meta=meta)
+            return buffer_stream(run.stream(command, invocation, Format.JSON, meta=meta))
+        return run.execute(command, invocation, Format.JSON, meta=meta)
 
     def main(self) -> NoReturn:
         sys.exit(self.run(sys.argv[1:]))
@@ -437,11 +469,11 @@ class App:
         try:
             globals_, rest = split_globals(argv)
             mode = resolve_mode(
-                globals_.format, environ, out.isatty() if isatty is None else isatty
+                globals_.format, environ, out.isatty() if isatty is None else isatty, self.formats
             )
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output)
         except ParseError as exc:
-            return run.emit(OutputMode.JSON, run.arg_error(exc))
+            return run.emit(Format.JSON, run.arg_error(exc))
         route = resolve_path(rest, self._commands)
         if route.path is None and not route.prefix and route.tokens == ("--version",):
             # Root-only alias so a command's own --version flag is never shadowed
@@ -481,13 +513,14 @@ class App:
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
                 return run.exec(invocation.args, inp)
+            render = self.renderer(command, mode)
             if command.streaming:
                 envelopes = run.stream(command, invocation, mode)
                 if invocation.no_stream:
-                    return run.emit(mode, buffer_stream(envelopes), render=_each(command.plain))
+                    return run.emit(mode, buffer_stream(envelopes), render=_each(render))
                 run.in_flight = command
-                return run.emit_stream(mode, envelopes, render=command.plain)
-            return run.emit(mode, run.execute(command, invocation, mode), render=command.plain)
+                return run.emit_stream(mode, envelopes, render=render)
+            return run.emit(mode, run.execute(command, invocation, mode), render=render)
 
 
 def _invoke(command: Command, args: object, ctx: Ctx) -> object:
@@ -559,12 +592,21 @@ def _warned(envelope: Envelope, code: str, message: str, command: Command) -> En
 
 
 def _json_text(data: Any) -> str:
-    """Machine output in plain mode: the data alone, indented, without the envelope"""
+    """Machine output in a text mode: the data alone, indented, without the envelope"""
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
-def _each(render: PlainRenderer | None) -> PlainRenderer | None:
-    """``plain=`` renders one event; --no-stream data is the list of them"""
+def _check_renderer(where: str, mode: object, render: object) -> None:
+    if not isinstance(mode, Format):
+        raise RegistrationError(f"{where}: {mode!r} is not a Format member")
+    if mode is Format.JSON:
+        raise RegistrationError(f"{where}: json is the response envelope and takes no renderer")
+    if not callable(render):
+        raise RegistrationError(f"{where}: the {mode} renderer is not callable")
+
+
+def _each(render: Renderer | None) -> Renderer | None:
+    """A renderer takes one event; --no-stream data is the list of them"""
     if render is None:
         return None
     return lambda events: "".join(render(e) for e in events)
@@ -674,7 +716,7 @@ class _Run:
         self,
         command: Command,
         invocation: Invocation,
-        mode: OutputMode,
+        mode: Format,
         *,
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
@@ -787,7 +829,7 @@ class _Run:
         self,
         command: Command,
         invocation: Invocation,
-        mode: OutputMode,
+        mode: Format,
         slot: Slot,
         call: str,
         *,
@@ -854,7 +896,7 @@ class _Run:
         self,
         command: Command,
         invocation: Invocation,
-        mode: OutputMode,
+        mode: Format,
         *,
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
@@ -969,7 +1011,7 @@ class _Run:
         self,
         command: Command,
         invocation: Invocation,
-        mode: OutputMode,
+        mode: Format,
         *,
         meta: Mapping[str, object] | None = None,
     ) -> Generator[Envelope]:
@@ -1324,13 +1366,11 @@ class _Run:
 
     # Output
 
-    def emit(
-        self, mode: OutputMode, envelope: Envelope, *, render: PlainRenderer | None = None
-    ) -> int:
-        if mode is OutputMode.JSON:
+    def emit(self, mode: Format, envelope: Envelope, *, render: Renderer | None = None) -> int:
+        if mode is Format.JSON:
             write_envelope(cap_envelope(envelope, self.cap), self.out)
             return envelope.exit_code
-        return self._emit_plain(envelope, render)
+        return self._emit_text(mode, envelope, render)
 
     def output_closed(self) -> int:
         """The reader went away (``tool logs | head``): nothing more can be written, so exit
@@ -1351,13 +1391,13 @@ class _Run:
 
     def emit_stream(
         self,
-        mode: OutputMode,
+        mode: Format,
         envelopes: Generator[Envelope],
         *,
-        render: PlainRenderer | None,
+        render: Renderer | None,
     ) -> int:
         """Write each envelope as it arrives; the exit code is the terminal envelope's,
-        or GENERAL_ERROR when the plain renderer failed on a successful stream"""
+        or GENERAL_ERROR when the renderer failed on a successful stream"""
         # Closed on any exit, so a dead reader (BrokenPipeError) still runs the handler's
         # finally blocks instead of leaving them to garbage collection
         with contextlib.closing(envelopes):
@@ -1365,18 +1405,18 @@ class _Run:
 
     def _write_stream(
         self,
-        mode: OutputMode,
+        mode: Format,
         envelopes: Generator[Envelope],
-        render: PlainRenderer | None,
+        render: Renderer | None,
     ) -> int:
         code = 0
         render_failed = False
         for envelope in drain(envelopes):
-            if mode is OutputMode.JSON:
+            if mode is Format.JSON:
                 write_envelope(cap_envelope(envelope, self.cap), self.out)
                 code = envelope.exit_code
                 continue
-            code = self._emit_plain(envelope, render, fallback=render_event)
+            code = self._emit_text(mode, envelope, render, fallback=render_event)
             if code != envelope.exit_code:
                 # One traceback is enough: later events use the plain fallback
                 render_failed, render = True, None
@@ -1384,20 +1424,22 @@ class _Run:
             return FrameworkCode.GENERAL_ERROR.value
         return code
 
-    def _emit_plain(
+    def _emit_text(
         self,
+        mode: Format,
         envelope: Envelope,
-        render: PlainRenderer | None,
+        render: Renderer | None,
         *,
-        fallback: PlainRenderer = render_plain,
+        fallback: Renderer = render_plain,
     ) -> int:
+        """Data through the renderer on stdout, errors as prose on stderr"""
         code = envelope.exit_code
         if envelope.data is not None and render is not None:
             try:
                 text = render(envelope.data)
-            except Exception as exc:  # noqa: BLE001 - plain= is user code
+            except Exception as exc:  # noqa: BLE001 - a renderer is user code
                 self.err.write("".join(traceback.format_exception(exc)))
-                self.err.write(f"{self.app.name}: HANDLER_CRASHED: the plain renderer failed\n")
+                self.err.write(f"{self.app.name}: HANDLER_CRASHED: the {mode} renderer failed\n")
                 code = FrameworkCode.GENERAL_ERROR.value
             else:
                 # Outside the renderer's try: a closed stdout is not a renderer bug
@@ -1420,7 +1462,7 @@ class _Run:
         self.err.flush()
         return code
 
-    def schema(self, mode: OutputMode, path: CommandPath | None, prefix: tuple[str, ...]) -> int:
+    def schema(self, mode: Format, path: CommandPath | None, prefix: tuple[str, ...]) -> int:
         """``--schema`` is machine output in every mode; the envelope carries it as data"""
         if path is not None:
             data = command_schema(self.app.commands[path], self.app.exits, self.app.commands)
@@ -1428,22 +1470,27 @@ class _Run:
             subtree = {
                 p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
             }
-            data = build_manifest(subtree, self.app.exits, self.app.version)
+            data = build_manifest(subtree, self.app.exits, self.app.version, self.app.formats)
         return self.emit(mode, self._envelope(0, data=data), render=_json_text)
 
-    def help_root(self, mode: OutputMode, prefix: tuple[str, ...]) -> int:
+    def help_root(self, mode: Format, prefix: tuple[str, ...]) -> int:
         text = render_root(
-            self.app.name, self.app.description, self.app.commands, self.app._groups, prefix
+            self.app.name,
+            self.app.description,
+            self.app.commands,
+            self.app._groups,
+            self.app.formats,
+            prefix,
         )
         return self._help(mode, prefix, text)
 
-    def help_command(self, mode: OutputMode, command: Command) -> int:
+    def help_command(self, mode: Format, command: Command) -> int:
         return self._help(mode, command.path.parts, render_command(self.app.name, command))
 
-    def _help(self, mode: OutputMode, parts: tuple[str, ...], text: str) -> int:
+    def _help(self, mode: Format, parts: tuple[str, ...], text: str) -> int:
         """Help text on stdout for a person; in JSON mode it goes to stderr and stdout gets
         only a pointer to ``--schema`` (REQ-F-048)"""
-        if mode is not OutputMode.JSON:
+        if mode is not Format.JSON:
             self.out.write(text)
             return 0
         self.err.write(text)
@@ -1458,7 +1505,7 @@ class _Run:
         """Dispatch each plan line in-process; JSONL envelopes out; 0, 1, or 2"""
         text = self._read_plan(args, stdin)
         if isinstance(text, Envelope):
-            return self.emit(OutputMode.JSON, text)
+            return self.emit(Format.JSON, text)
         # Only \n ends a JSONL line: splitlines() would also break on U+2028, U+2029,
         # and U+0085, which JSON allows raw inside strings
         plan = text.removeprefix("\ufeff").split("\n")
@@ -1485,7 +1532,7 @@ class _Run:
             return received.exit_code
         if not lines_seen:
             return self.emit(
-                OutputMode.JSON,
+                Format.JSON,
                 self._stream_error(
                     "EMPTY_STREAM", "no DispatchRequest lines in the plan", context={"lines": 0}
                 ),
@@ -1615,7 +1662,7 @@ class _Run:
                 yield line_no, self.arg_error(exc, started=started, meta=meta)
                 continue
             if command.streaming:
-                envelopes = self.stream(command, invocation, OutputMode.JSON, meta=meta)
+                envelopes = self.stream(command, invocation, Format.JSON, meta=meta)
                 if invocation.no_stream:
                     yield line_no, buffer_stream(envelopes)
                     continue
@@ -1625,7 +1672,7 @@ class _Run:
                         yield line_no, envelope
                 self.in_flight = None
                 continue
-            yield line_no, self.execute(command, invocation, OutputMode.JSON, meta=meta)
+            yield line_no, self.execute(command, invocation, Format.JSON, meta=meta)
 
     def _exec_invocation(
         self, command: Command, request: DispatchRequest, dry_run: bool, line_no: int

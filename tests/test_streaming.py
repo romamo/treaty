@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from conftest import needs_posix_signals, spec_validator
 
-from treaty import App, Arg, Ctx, Exit, Flag, ParseError, RegistrationError
+from treaty import App, Arg, Ctx, Exit, Flag, Format, ParseError, RegistrationError
 
 SLOWCTL = Path(__file__).resolve().parents[1] / "examples" / "slowctl.py"
 CLOSED: list[str] = []
@@ -43,7 +43,7 @@ def stream_app(*, timeout: float | None | str = "inherit") -> App:
         description="Emit events",
         streaming=True,
         exit_codes=["NO_SPACE"],
-        plain=lambda e: f"[{e['n']}] {e['text']}\n",
+        renderers={Format.PLAIN: lambda e: f"[{e['n']}] {e['text']}\n"},
         **extra,  # type: ignore[arg-type]
     )
     def tail(args: TailArgs, ctx: Ctx) -> Iterator[Event]:

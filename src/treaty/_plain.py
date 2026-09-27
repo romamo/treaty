@@ -1,4 +1,4 @@
-"""The plain fallback: flat lines for a command that registers no ``plain=`` renderer
+"""The plain fallback: flat lines when neither the command nor the app renders plain
 
 Nested values become dotted paths (``release.tag: 1.3.9``), so every line is one item.
 Input is the JSON-ready ``data`` of an envelope, after secret redaction.

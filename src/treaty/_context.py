@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ._mode import OutputMode
+from ._mode import Format
 from ._timeout import Timeout
 
 
@@ -13,7 +13,7 @@ from ._timeout import Timeout
 class Ctx:
     app_name: str
     version: str
-    mode: OutputMode
+    mode: Format
     request_id: str
     env: Mapping[str, str]
     state: Mapping[str, object]
