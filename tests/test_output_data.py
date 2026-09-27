@@ -636,3 +636,19 @@ def test_volatile_data_rule_accepts_declared_fields_and_suggests_out() -> None:
     from fixture_output_app import app as declared
 
     assert findings(declared, "volatile-data") == []
+
+
+def test_o007_a_stable_exec_line_leaves_the_next_lines_unstable() -> None:
+    lines = ({"_cmd": "get", "stable_output": True}, {"_cmd": "get", "bogus": 1}, {"_cmd": "no"})
+    plan = "\n".join(json.dumps(line) for line in lines)
+    out = io.StringIO()
+    tagged_app().run(
+        ["exec", "--ignore-errors"],
+        stdin=io.StringIO(plan + "\n"),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+    )
+    stable, *refused = (json.loads(line) for line in out.getvalue().splitlines())
+    assert "request_id" not in stable["meta"]
+    assert len(refused) == 2 and all("request_id" in e["meta"] for e in refused)

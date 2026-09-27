@@ -3785,6 +3785,7 @@ class _Run:
             # One command per line
             self.warnings, self.token, self.config_file = [], None, None
             self.current, self.pinned, self.retrier = None, None, None
+            self.stable = self.stable_all
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:
