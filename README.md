@@ -132,9 +132,13 @@ In `exec` and MCP, where stdin is taken, such a command needs `input_file`.
 
 ## Flag order
 
-`--format`, `--help`, `--schema`, and `--max-output` are global: they are accepted anywhere
-before `--`, so a command cannot declare a flag with those names or the short `-h`. The
-manifest lists them once, in its root `flags` map (ManifestResponse 3.0). Every other flag,
+`--format`, `--help`, `--schema` (alias `--print-schema`), `--output-schema`,
+`--schema-version`, and `--max-output` are global: they are accepted anywhere before `--`,
+so a command cannot declare a flag with those names or the short `-h`. The manifest lists
+them once, in its root `flags` map (ManifestResponse 3.0). Names treaty keeps for features
+still to come (`--config`, `--quiet`, `--verbose`, `--fields`, and others, listed in
+`RESERVED_GLOBAL` in `_framework.py`) cannot be field names either, and passing one exits
+`2` with `RESERVED_FLAG`. Every other flag,
 including `--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`,
 belongs to a command and goes after the full command path:
 
@@ -643,6 +647,46 @@ written, and the exit is `0` once a complete envelope or event reached the reade
 got what it wanted (REQ-F-014), or `141` (`OUTPUT_CLOSED`) when it left before any. All three
 signal codes appear in every command's `exit_codes` map.
 
+## Response meta
+
+`data` is safe to cache and diff: two runs of the same call with the same state return
+byte-identical `data`. Everything that changes per call lives in `meta`, which is volatile
+by definition and never part of a diff: `request_id`, `duration_ms`, `timestamp` (ISO 8601
+UTC), `command` (the manifest key, or the app name when no command resolved),
+`schema_version`, `tool_version` (the `App(version=)`, which must be semver, and what
+`--version` prints), and `cwd` (as `pwd` prints it). `trace_id`, `project_root`, and
+`retries` appear only when they apply, never as null. `treaty audit` flags output fields
+that break this, such as a `fetched_at` (rule `volatile-data`).
+
+```python
+@app.command(
+    "lint",
+    description="Lint the project",
+    danger_level="safe",
+    exit_codes=("UNAVAILABLE",),
+    schema_version="2.1",           # MAJOR.MINOR of the output contract
+    compat={"1.4": to_v1},          # --schema-version 1 answers in the old shape
+    project_root=(".git",),         # ctx.project_root and meta.project_root
+    retry=Retry(retries=3, delay_ms=500),  # ctx.retry, --retries, --retry-delay
+)
+```
+
+- **Schema versions**: a breaking change to the output bumps the major, an additive one the
+  minor. `treaty schema-lock myapp.cli:app` records every command's version and output
+  schema in `treaty-schema.lock`; the audit's `schema-version` rule then fails a change
+  without the matching bump. `--schema-version MAJOR` selects a `compat=` shim, warns
+  `SCHEMA_DEPRECATED`, and exits 2 with `SCHEMA_VERSION_UNSUPPORTED` for a major the
+  command does not serve; `<cmd> --schema` shows `schema_version` and `min_schema_version`
+- **Trace**: `TOOL_TRACE_ID` becomes `meta.trace_id`, is inherited by every `ctx.run`
+  child, and ends every framework line on stderr (`trace=<id>`, or a `trace_id` key in
+  JSON). A value over 256 characters or with control characters exits 2
+  (`TRACE_ID_INVALID`)
+- **Retries**: `ctx.retry(fn)` calls again on `Retry.on` exceptions, never past the
+  timeout; `meta.retries` counts the retries, and running out exits with
+  `Retry.exhausted` (default `UNAVAILABLE`, which the command declares) with
+  `retryable: false` and `retries_exhausted`, so an agent does not retry on top.
+  `--retries 0` fails on the first error
+
 ## Raw payloads
 
 Declare `supports_raw_payload=True` and the command accepts `--raw-payload '{"name": "x"}'`
@@ -657,7 +701,9 @@ as an alternative to individual flags. The payload is checked against the same f
 dataclass. `tool --schema` prints the same manifest as `tool manifest`: codes every
 command shares sit once in the root `exit_codes`, and each entry lists only its own
 additions (a valid ManifestResponse, so without `parameters` or `raw_payload_schema`);
-`tool <group> --schema` prints one group's subtree. The output is JSON in every mode.
+`tool <group> --schema` prints one group's subtree; `--print-schema` is an alias.
+`tool <cmd> --output-schema` prints only the JSON Schema of the command's `data`. The
+output is JSON in every mode.
 Piped `--help` writes its text to stderr and prints only a pointer on stdout:
 `{"data": null, "meta": {"help": true, "schema_ref": "deploy --schema"}}`.
 
@@ -674,7 +720,8 @@ treaty-mcp deployctl:app
 One tool per command except `exec`, named with dots as underscores (`deploy_rollback`).
 The input schema is the args dataclass schema with field names as declared, secrets
 replaced by `<name>_from_env` and `<name>_from_file`, and the framework keys the command
-declares: `timeout`, `idempotency_key`, and `confirm_destructive`. The output schema is
+declares: `timeout`, `idempotency_key`, `confirm_destructive`, `retries`, `retry_delay`,
+and `schema_version`. The output schema is
 the response envelope around the command's `output_schema`, and every result carries the
 envelope as `structuredContent` and as JSON text; `isError` mirrors `ok`. Calls go through
 `App.call`, the same path as an `exec` line, so an unconfirmed destructive tool call
@@ -733,7 +780,9 @@ mutating commands without their own exit codes, retryable codes on non-idempoten
 untyped outputs, undeclared network I/O, path-like fields not typed `Path`, wide mutating
 commands without `--raw-payload`, missing cleanup hooks, blanket scopes, login commands
 without `auth=`, commands that start work without returning a job, config writes without a
-scope, and a missing conformance profile. `--all` lists
+scope, per-call values in output data, output schema changes without a `schema_version`
+bump, handlers that find a project root or retry by hand, and a missing conformance
+profile. `--all` lists
 everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and
 piping the output gives an envelope an agent can act on. Rules see declarations only; the
 conformance kit covers runtime behaviour.

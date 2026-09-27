@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from jsonschema import Draft7Validator
 
 from treaty import App, Ctx, Exit, Flag, NoArgs, RegistrationError, Retry
 from treaty._audit import LOCK_FILE, audit, schema_change
+from treaty._manifest import payload_schema
 
 METACTL = Path(__file__).resolve().parent / "fixture_meta_app.py"
 
@@ -549,8 +551,6 @@ def test_retry_values_are_checked() -> None:
 
 
 def test_a_hand_rolled_retry_loop_gets_retry_declared_advice() -> None:
-    import time
-
     app = App("t", version="1.0.0")
 
     @app.command("poll", description="Poll", danger_level="safe", exit_codes=())
@@ -667,3 +667,16 @@ def test_compat_keys_are_older_majors_with_typed_shims() -> None:
             )
             def get(args: Get, ctx: Ctx) -> Item:
                 return Item(args.id, "a")
+
+
+def test_the_manifest_lists_the_schema_flags_once_at_the_root() -> None:
+    manifest = make_app().manifest()
+    assert {"output-schema", "print-schema", "schema-version"} <= set(manifest["flags"])
+    assert "schema-version" not in manifest["commands"]["get"]["flags"]
+    assert spec_validator("manifest-response").is_valid(manifest)
+
+
+def test_json_payload_schemas_offer_schema_version_on_compat_commands() -> None:
+    commands = {p.value: c for p, c in make_app().commands.items()}
+    assert "schema_version" in payload_schema(commands["get"])["properties"]
+    assert "schema_version" not in payload_schema(commands["fail"])["properties"]

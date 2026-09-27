@@ -31,7 +31,8 @@ from ._retry import RETRIES_FLAG, RETRY_DELAY_FLAG, parse_delay, parse_retries
 from ._timeout import Timeout
 from ._types import FlagType
 
-SCHEMA_VERSION_FLAG = "schema-version"
+SCHEMA_VERSION_KEY = "schema_version"
+"""``--schema-version`` in a JSON payload; a global flag, so no ``FLAGS`` row"""
 TIMEOUT_FLAG = "timeout"
 CONFIRM_FLAG = "confirm-destructive"
 RAW_PAYLOAD_FLAG = "raw-payload"
@@ -445,21 +446,6 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         from_json=lambda v, c: parse_delay(v),
         metavar="DURATION",
         entry=lambda c: {"default": f"{c.retry.delay_ms}ms" if c.retry else None},
-        json_extra={"type": ["string", "integer"]},
-    ),
-    FrameworkFlag(
-        SCHEMA_VERSION_FLAG,
-        "schema_version",
-        lambda c: bool(c.compat),
-        "string",
-        lambda c: (
-            "Answer in an older output schema, major "
-            f"{', '.join(str(v.version.major) for v in c.compat)}; "
-            f"the current is {c.schema_version}"
-        ),
-        parse=lambda v, c: c.pin(v),
-        from_json=lambda v, c: c.pin(v),
-        metavar="MAJOR",
         json_extra={"type": ["string", "integer"]},
     ),
 )

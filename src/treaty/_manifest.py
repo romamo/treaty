@@ -63,6 +63,24 @@ _FIXED_GLOBAL_FLAGS: dict[str, object] = {
         "default": False,
         "description": "Print the command's input and output schema instead of running it",
     },
+    "print-schema": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Alias of --schema",
+    },
+    "output-schema": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Print the JSON Schema of the command's data instead of running it",
+    },
+    "schema-version": {
+        "type": "integer",
+        "required": False,
+        "description": "Major version of the command's output schema to answer in; exit 2 "
+        "with SCHEMA_VERSION_UNSUPPORTED when the command does not serve it",
+    },
     "help": {
         "type": "boolean",
         "required": False,
@@ -212,6 +230,12 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         for f in framework_flags(command, json=True)
         if stream_key or f.name != NO_STREAM_FLAG
     )
+    if command.compat:
+        majors = [c.version.major for c in command.compat] + [command.schema_version.major]
+        properties["schema_version"] = {
+            "type": ["integer", "string"],
+            "description": f"Major version of the output schema to answer in: {majors}",
+        }
     schema: JsonSchema = {
         "type": "object",
         "properties": properties,

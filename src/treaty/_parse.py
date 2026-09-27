@@ -21,6 +21,7 @@ from ._flags import FieldInfo, apply_scalar
 from ._framework import (
     RAW_PAYLOAD_FLAG,
     RESERVED_GLOBAL,
+    SCHEMA_VERSION_KEY,
     UNIMPLEMENTED,
     flag_named,
     framework_flags,
@@ -534,6 +535,10 @@ def build_from_mapping(
     errors = _Collector()
     for key, value in mapping.items():
         try:
+            if key == SCHEMA_VERSION_KEY:
+                # The global --schema-version, which argv takes anywhere (REQ-O-014)
+                framework["schema_version"] = command.pin(value)
+                continue
             flag = key.replace("_", "-")
             spec = flag_named(command, flag, json=True)
             if spec is not None and spec.from_json is not None:
