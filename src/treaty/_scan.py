@@ -72,6 +72,61 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     return calls
 
 
+_SHELL_CALLS = frozenset(
+    {"os.system", "os.popen", "system", "popen", "getoutput", "getstatusoutput"}
+)
+# Calls whose shell= keyword starts a shell: subprocess's and its lookalikes
+_SHELL_KEYWORD = frozenset({"run", "call", "check_call", "check_output", "Popen"})
+
+
+@dataclass(frozen=True, slots=True)
+class ShellCall:
+    name: str
+    """The call as written, such as ``os.system`` or ``subprocess.run``"""
+    line: int
+
+
+def shell_calls(fn: Callable[..., object]) -> list[ShellCall]:
+    """Calls in the handler's source that hand a string to a shell (REQ-F-044, REQ-C-019):
+    ``os.system``, ``os.popen``, ``subprocess.getoutput``, and ``subprocess.run``,
+    ``Popen``, and the rest with a ``shell=`` that is not a false constant"""
+    tree = _tree(fn)
+    if tree is None:
+        return []
+    found: list[ShellCall] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = dotted(node.func)
+        if name is None:
+            continue
+        last = name.rpartition(".")[2]
+        shell = last in _SHELL_KEYWORD and any(
+            k.arg == "shell" and not (isinstance(k.value, ast.Constant) and not k.value.value)
+            for k in node.keywords
+        )
+        if name in _SHELL_CALLS or last in ("getoutput", "getstatusoutput") or shell:
+            found.append(ShellCall(name, node.lineno))
+    return sorted(found, key=lambda c: c.line)
+
+
+def dotted(node: ast.expr) -> str | None:
+    """``a.b.c`` for a name or attribute chain, else None"""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = dotted(node.value)
+        return None if base is None else f"{base}.{node.attr}"
+    return None
+
+
+def _tree(fn: Callable[..., object]) -> ast.AST | None:
+    try:
+        return ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    except OSError, TypeError:
+        return None  # no source to scan (REPL, exec, C extension)
+
+
 def _text(node: ast.expr) -> bool:
     """A string literal, an f-string, or a concatenation or ``%`` format of one"""
     if isinstance(node, ast.Constant):

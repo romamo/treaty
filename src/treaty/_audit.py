@@ -295,45 +295,6 @@ def _network_timeout(app: App) -> Iterator[Finding]:
             )
 
 
-_SHELL_CALLS = frozenset({"os.system", "os.popen", "system", "popen"})
-
-
-def shell_calls(handler: Callable[..., object]) -> list[str]:
-    """Calls in the handler's source that hand a string to a shell (REQ-F-044)"""
-    try:
-        tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
-    except OSError, TypeError:
-        return []  # no source to scan (REPL, exec, C extension)
-    found: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = _dotted(node.func)
-        if name is None:
-            continue
-        shell = any(
-            k.arg == "shell" and not (isinstance(k.value, ast.Constant) and not k.value.value)
-            for k in node.keywords
-        )
-        if name in _SHELL_CALLS or shell:
-            found.append(name)
-    return found
-
-
-def _no_shell(app: App) -> Iterator[Finding]:
-    for c in user_commands(app):
-        for name in shell_calls(c.handler):
-            yield Finding(
-                "no-shell",
-                Severity.WARNING,
-                c.path.value,
-                f"{name}(...) runs a shell, which splits words, expands globs, and "
-                "executes metacharacters in arguments",
-                "ctx.run(['program', 'arg', ...]), which takes an argument list "
-                "and never starts a shell",
-            )
-
-
 # Whole words, plus the common fused forms; "profile" and "tempo" are not paths
 _PATH_NAME_HINTS = re.compile(
     r"(^|_)(path|dir|directory|file|folder|filepath|dirpath|filename|dirname)($|_)"
@@ -1421,7 +1382,6 @@ RULES: tuple[Rule, ...] = (
         Severity.WARNING,
         _network_timeout,
     ),
-    Rule("no-shell", "Handlers never run a shell", Severity.WARNING, _no_shell),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),
     Rule(

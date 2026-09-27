@@ -18,7 +18,6 @@ import pytest
 from conftest import WINDOWS, needs_posix_signals, spec_validator
 
 from treaty import App, CliExit, Ctx, Flag, NoArgs, RegistrationError, Timeout
-from treaty._audit import audit
 from treaty._mode import is_headless, quiet_children
 from treaty._signals import Cancelled, CancelSignal
 from treaty._subprocess import Processes
@@ -459,21 +458,36 @@ def test_headless_detection(
 # Audit
 
 
-def test_audit_flags_shells_in_handlers(tmp_path: Path) -> None:
+def test_a_command_that_uses_os_system_directly_is_flagged_by_the_registration_linter() -> None:
     app = App("shelly", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"os\.system\(\) on line 3 .*ctx\.run"):
 
-    @app.command("x", description="x", danger_level="safe", exit_codes=())
-    def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
-        os.system("ls")
-        subprocess.run("ls", shell=True, check=False)
+        @app.command("x", description="x", danger_level="safe", exit_codes=())
+        def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+            os.system("ls")
+            return {}
+
+
+def test_os_popen_and_shell_true_fail_registration() -> None:
+    app = App("shelly", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"os\.popen\(\)"):
+
+        @app.command("p", description="x", danger_level="safe", exit_codes=())
+        def p(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+            os.popen("ls")
+            return {}
+
+    with pytest.raises(RegistrationError, match=r"subprocess\.run\(\)"):
+
+        @app.command("s", description="x", danger_level="safe", exit_codes=())
+        def s(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+            subprocess.run("ls", shell=True, check=False)
+            return {}
+
+    @app.command("ok", description="x", danger_level="safe", exit_codes=())
+    def ok(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         subprocess.run(["ls"], shell=False, check=False)
         return {}
-
-    by_rule = {r.id: r for r in audit(app, "shelly", limit=3).rules}
-    assert [f.message.split("(")[0] for f in by_rule["no-shell"].findings] == [
-        "os.system",
-        "subprocess.run",
-    ]
 
 
 # Review fixes: secrets, children after the run, grandchildren, SIGPIPE, messages

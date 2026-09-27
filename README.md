@@ -354,7 +354,8 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   not need to reject shell metacharacters (REQ-F-044, REQ-F-062). A string where the list
   belongs is `SHELL_STRING_PROHIBITED`: a `RegistrationError` when the handler's source
   shows it (`ctx.run("git log")`, an f-string, a concatenation), exit `1` when it happens at run
-  time. The `no-shell` audit rule flags `os.system`, `os.popen`, and `shell=True`
+  time. A handler calling `os.system`, `os.popen`, or anything with `shell=True` fails
+  registration (REQ-C-019)
 - Children read `/dev/null` unless given `input=`, and get `NO_COLOR=1`, `PAGER=cat`,
   `GIT_PAGER=cat`, `MANPAGER=cat`, `LESS=-F -X -R`, and an empty `MORE`; off a terminal
   also `EDITOR`, `VISUAL`, and `GIT_EDITOR` set to `true`, so an editor exits at once

@@ -28,7 +28,7 @@ from ._resources import ResourceSpec, dependency_params, refuse_async, resource_
 from ._retry import Retry
 from ._rules import BoundRule, bind_rules
 from ._scalars import ScalarRegistry
-from ._scan import ctx_calls
+from ._scan import ctx_calls, shell_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
 from ._steps import STEP_KEYS, Rollback, StepName
@@ -772,6 +772,12 @@ def _check_ctx_calls(
     steps: Sequence[StepName] = (),
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
+    for shell in shell_calls(fn):
+        raise RegistrationError(
+            f"{path}: {shell.name}() on line {shell.line} of the handler runs a shell, which "
+            "splits words, expands globs, and executes metacharacters in arguments; use "
+            "ctx.run(['program', 'arg', ...]), which never starts one (REQ-C-019)"
+        )
     for call in ctx_calls(fn):
         where = f"{path}: ctx.{call.method}() on line {call.line} of the handler"
         if call.shell:
