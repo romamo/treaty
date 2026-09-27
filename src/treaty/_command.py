@@ -14,6 +14,7 @@ from typing import Any
 
 from ._auth import AuthKind, check_declaration
 from ._batch import ITEM_KEYS, batch_item, batch_schema
+from ._cache import CachePolicy
 from ._config import ConfigScope
 from ._declare import (
     Background,
@@ -209,6 +210,8 @@ class Command:
     """Starts a process that outlives the run with ``ctx.spawn`` (REQ-C-010)"""
     preserve_locale: bool = False
     """Children keep the user's locale instead of ``LC_ALL=C`` (REQ-F-066)"""
+    cache: CachePolicy | None = None
+    """``ctx.cache`` with ``--no-cache`` and ``--cache-ttl`` (REQ-O-018)"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -332,6 +335,7 @@ def build_command(
     filesystem_side_effects: Sequence[SideEffect] = (),
     background: Background | None = None,
     preserve_locale: bool = False,
+    cache: CachePolicy | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -387,6 +391,15 @@ def build_command(
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
     _check_gui(path, output_type, gui_operations, headless_behavior)
     _check_background(path, output_type, background, streaming)
+    if cache is not None and not isinstance(cache, CachePolicy):
+        raise RegistrationError(f"{path}: cache takes treaty.CachePolicy(ttl_seconds=...)")
+    if cache is not None:
+        # REQ-C-011: where the cache is, for the manifest and the cleanup built-in
+        cached = SideEffect(f"~/.cache/{app_name}/{path}/", "cache", ttl_seconds=cache.ttl_seconds)
+        filesystem_side_effects = (
+            *check_side_effects(str(path), filesystem_side_effects),
+            cached,
+        )
     step_names = _check_steps(path, steps, resumable, rollback, streaming, output_type)
     _check_ctx_calls(
         fn,
@@ -585,6 +598,7 @@ def build_command(
         filesystem_side_effects=check_side_effects(str(path), filesystem_side_effects),
         background=background,
         preserve_locale=preserve_locale,
+        cache=cache,
         batch=batch,
     )
 

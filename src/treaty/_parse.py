@@ -101,6 +101,10 @@ class Invocation:
     """``--resume-from`` of a ``resumable`` command: the step to start at (REQ-O-010)"""
     rollback_on_failure: bool = False
     """``--rollback-on-failure`` of a ``rollback=`` command (REQ-O-011)"""
+    no_cache: bool = False
+    """``--no-cache`` of a ``cache=`` command: ``ctx.cache`` reads and writes nothing"""
+    cache_ttl: int | None = None
+    """``--cache-ttl`` of a ``cache=`` command; None is the declared TTL (REQ-O-018)"""
     given: frozenset[str] = frozenset()
     """The fields the caller supplied, as opposed to defaulted"""
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
 
+from ._cache import Cache
 from ._cap import MARKER, TRUNCATED_CODE
 from ._config import ConfigFile
 from ._errors import RegistrationError
@@ -71,6 +72,17 @@ class Ctx:
     steps: StepTracker | None = field(default=None, repr=False, compare=False)
     session: Session | None = field(default=None, repr=False, compare=False)
     """The run's private temp directory and output files (REQ-F-032, REQ-F-043)"""
+    _cache: Cache | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def cache(self) -> Cache:
+        """The command's cache: ``get(key)`` returns the bytes ``put(key, data)`` stored,
+        or None once they are older than the TTL; with ``--no-cache`` or
+        ``--cache-ttl 0`` every ``get`` misses and ``put`` keeps nothing. Needs
+        ``cache=treaty.CachePolicy(ttl_seconds=...)`` on the command (REQ-O-018)."""
+        if self._cache is None:
+            raise RegistrationError("ctx.cache needs cache=treaty.CachePolicy(...) on the command")
+        return self._cache
 
     @property
     def tmp_dir(self) -> Path:

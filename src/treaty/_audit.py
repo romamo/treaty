@@ -359,6 +359,36 @@ def _fs_side_effects(app: App) -> Iterator[Finding]:
             )
 
 
+_CACHE_HINTS = frozenset({"XDG_CACHE_HOME", ".cache"})
+
+
+def writes_cache(handler: Callable[..., object]) -> bool:
+    """The handler writes to disk and names a cache location (REQ-O-018, heuristic)"""
+    tree = _handler_tree(handler)
+    if tree is None or not disk_writes(handler):
+        return False
+    return any(
+        isinstance(n, ast.Constant)
+        and isinstance(n.value, str)
+        and any(h in n.value for h in _CACHE_HINTS)
+        for n in ast.walk(tree)
+    )
+
+
+def _cache_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.cache is None and writes_cache(c.handler):
+            yield Finding(
+                "cache-declared",
+                Severity.WARNING,
+                c.path.value,
+                "the handler writes a cache by hand, so --no-cache and --cache-ttl cannot "
+                "reach it and agents get stale data they cannot refuse (REQ-O-018, heuristic)",
+                "cache=treaty.CachePolicy(ttl_seconds=3600), then ctx.cache.get(key) and "
+                "ctx.cache.put(key, data)",
+            )
+
+
 def _declared_commands(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         for problem in app.named_commands(c):
@@ -1589,6 +1619,12 @@ RULES: tuple[Rule, ...] = (
         "Commands that write to disk declare it",
         Severity.ADVICE,
         _fs_side_effects,
+    ),
+    Rule(
+        "cache-declared",
+        "Caches are declared with cache=",
+        Severity.WARNING,
+        _cache_declared,
     ),
     Rule(
         "declared-commands",

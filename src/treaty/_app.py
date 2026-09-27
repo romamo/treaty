@@ -51,6 +51,7 @@ from ._auth import (
 )
 from ._batch import Batch, ItemError
 from ._builtins import register_cleanup, register_doctor
+from ._cache import Cache, CachePolicy, cache_dir
 from ._cap import (
     DEFAULT_CAP,
     DEFAULT_STDIN_CAP,
@@ -528,6 +529,7 @@ class App:
         filesystem_side_effects: Sequence[SideEffect] = (),
         background: Background | None = None,
         preserve_locale: bool = False,
+        cache: CachePolicy | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -601,6 +603,9 @@ class App:
         Children of ``ctx.run`` get ``LC_ALL=C`` and ``LC_NUMERIC=C``, so their messages
         are English and their numbers dot-decimal; ``preserve_locale=True`` keeps the
         user's locale for a command whose child output is meant for a person (REQ-F-066).
+        ``cache=CachePolicy(ttl_seconds=3600)`` gives ``ctx.cache``, a store of bytes by
+        key under ``$XDG_CACHE_HOME/<app>/<command>/``, with ``--no-cache`` and
+        ``--cache-ttl``; ``meta.cache_used`` says whether a read hit (REQ-O-018).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
@@ -750,6 +755,7 @@ class App:
                     filesystem_side_effects=filesystem_side_effects,
                     background=background,
                     preserve_locale=preserve_locale,
+                    cache=cache,
                 )
             )
             return fn
@@ -1863,6 +1869,8 @@ class _Run:
         """``--no-injection-protection``: no trust tags on external content (REQ-O-023)"""
         self._roots: dict[tuple[str, ...], Path | None] = {}
         self.session: Session | None = None
+        self.cache: Cache | None = None
+        """The current ``cache=`` command's ``ctx.cache``, for ``meta.cache_used``"""
         """The current command's temp directory and output files (REQ-F-032)"""
         self.pruned = False
         self.cwd_given = False
@@ -2035,7 +2043,20 @@ class _Run:
             teardown=self.teardown,
             steps=self.steps,
             session=self.processes.session,
+            _cache=self.cache_for(command, invocation),
         )
+
+    def cache_for(self, command: Command, invocation: Invocation) -> Cache | None:
+        """``ctx.cache`` of a ``cache=`` command; ``--no-cache`` and ``--cache-ttl 0``
+        turn it off for the run (REQ-O-018)"""
+        policy = command.cache
+        if policy is None:
+            self.cache = None
+            return None
+        ttl = policy.ttl_seconds if invocation.cache_ttl is None else invocation.cache_ttl
+        where = cache_dir(self.app.name, command.path.value, self.env)
+        self.cache = Cache(where, 0 if invocation.no_cache else ttl)
+        return self.cache
 
     def session_for(self) -> Session:
         """A new session for the command about to run; the first also prunes what
@@ -2224,6 +2245,8 @@ class _Run:
         extra |= self.settings.meta()
         if self.update_available is not None:
             extra["update_available"] = self.update_available
+        if self.cache is not None:
+            extra["cache_used"] = self.cache.used
         if self.session is not None and self.session.made is not None:
             extra["session_tmp_dir"] = str(self.session.made)
             pid_file = self.session.pid_file
@@ -4152,7 +4175,7 @@ class _Run:
             # One command per line
             self.warnings, self.token, self.config_file = [], None, None
             self.current, self.pinned, self.retrier = None, None, None
-            self.session, self.processes = None, None
+            self.session, self.processes, self.cache = None, None, None
             self.stable = self.stable_all
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}

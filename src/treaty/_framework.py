@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, is_env_var_name
+from ._cache import CACHE_TTL_FLAG, NO_CACHE_FLAG, parse_ttl
 from ._command import (
     DEFAULT_HEARTBEAT_MS,
     HEARTBEAT_FLAG,
@@ -513,6 +514,24 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         lambda c: c.rollback is not None,
         "When a step fails, undo the completed steps before exiting; data.rollback_status "
         "says how it went",
+    ),
+    _switch(
+        NO_CACHE_FLAG,
+        "no_cache",
+        lambda c: c.cache is not None,
+        "Neither read nor write the command's cache this run",
+    ),
+    FrameworkFlag(
+        CACHE_TTL_FLAG,
+        "cache_ttl",
+        lambda c: c.cache is not None,
+        "integer",
+        "Seconds a cached entry stays fresh; older ones are fetched again, and 0 is --no-cache",
+        parse=lambda v, c: parse_ttl(v),
+        from_json=lambda v, c: parse_ttl(v),
+        metavar="SECONDS",
+        entry=lambda c: {"default": c.cache.ttl_seconds if c.cache else None},
+        json_extra={"minimum": 0},
     ),
     _switch(
         VALIDATE_ONLY_FLAG,

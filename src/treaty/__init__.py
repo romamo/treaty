@@ -5,6 +5,7 @@ from importlib.metadata import version
 from ._app import App, ExecArgs, Group, NoArgs
 from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
+from ._cache import CachePolicy
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
 from ._declare import Background, SideEffect, Subprocess
@@ -48,6 +49,7 @@ __all__ = [
     "Background",
     "Batch",
     "Binary",
+    "CachePolicy",
     "CliExit",
     "CommandPath",
     "DefaultWhenAbsent",

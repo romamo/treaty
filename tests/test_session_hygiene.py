@@ -17,7 +17,7 @@ import pytest
 from conftest import WINDOWS, needs_posix_signals
 from fixture_session_app import app as session_app
 
-from treaty import App, Ctx, NoArgs
+from treaty import App, CachePolicy, Ctx, NoArgs
 from treaty._audit import audit
 
 SESSIONCTL = Path(__file__).resolve().parent / "fixture_session_app.py"
@@ -681,3 +681,126 @@ def test_json_shaped_writes_go_to_stderr_without_a_warning() -> None:
     envelope, err = noisy("json")
     assert [w["context"]["text"] for w in stray(envelope)] == ["initialized"]  # type: ignore[index]
     assert '{"status": "ok"}\n' in err
+
+
+# O-018: cache flags
+
+
+def caching_app() -> App:
+    app = App("cachectl", version="1.0.0")
+    fetches: list[str] = []
+
+    @app.command(
+        "price",
+        description="Fetch a price, cached for an hour",
+        danger_level="safe",
+        exit_codes=(),
+        cache=CachePolicy(ttl_seconds=3600),
+    )
+    def price(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        hit = ctx.cache.get("btc")
+        if hit is not None:
+            return {"price": hit.decode(), "fetched": False}
+        fetches.append("btc")
+        value = f"{100 + len(fetches)}"
+        ctx.cache.put("btc", value.encode())
+        return {"price": value, "fetched": True}
+
+    @app.command("plain", description="No cache", danger_level="safe", exit_codes=())
+    def plain(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    return app
+
+
+def priced(app: App, tmp_path: Path, *flags: str) -> tuple[dict[str, object], dict[str, object]]:
+    status, envelope, _ = run(app, ["price", *flags], env={"XDG_CACHE_HOME": str(tmp_path)})
+    assert status == 0, envelope
+    return data_of(envelope), meta_of(envelope)
+
+
+def entry_of(tmp_path: Path) -> Path:
+    [entry] = (tmp_path / "cachectl" / "price").iterdir()
+    return entry
+
+
+def test_a_second_run_reads_the_cache_and_says_so_in_meta_cache_used(tmp_path: Path) -> None:
+    app = caching_app()
+    first, first_meta = priced(app, tmp_path)
+    second, second_meta = priced(app, tmp_path)
+    assert first == {"price": "101", "fetched": True} and first_meta["cache_used"] is False
+    assert second == {"price": "101", "fetched": False} and second_meta["cache_used"] is True
+
+
+def test_no_cache_causes_the_command_to_bypass_all_declared_cache_files(tmp_path: Path) -> None:
+    app = caching_app()
+    priced(app, tmp_path)
+    data, meta = priced(app, tmp_path, "--no-cache")
+    assert data == {"price": "102", "fetched": True} and meta["cache_used"] is False
+    assert entry_of(tmp_path).read_bytes() == b"101"  # not written either
+
+
+def test_cache_ttl_0_is_equivalent_to_no_cache(tmp_path: Path) -> None:
+    app = caching_app()
+    priced(app, tmp_path)
+    data, meta = priced(app, tmp_path, "--cache-ttl", "0")
+    assert data == {"price": "102", "fetched": True} and meta["cache_used"] is False
+    assert entry_of(tmp_path).read_bytes() == b"101"
+
+
+def test_cache_files_older_than_cache_ttl_seconds_are_treated_as_missing(tmp_path: Path) -> None:
+    app = caching_app()
+    priced(app, tmp_path)
+    minute_ago = time.time() - 60
+    os.utime(entry_of(tmp_path), (minute_ago, minute_ago))
+    assert priced(app, tmp_path, "--cache-ttl", "120")[0]["fetched"] is False
+    assert priced(app, tmp_path, "--cache-ttl", "30")[0] == {"price": "102", "fetched": True}
+
+
+def test_the_cache_flags_are_absent_on_commands_that_declare_no_cache_side_effects(
+    tmp_path: Path,
+) -> None:
+    app = caching_app()
+    flags = {p: set(c["flags"]) for p, c in app.manifest()["commands"].items()}  # type: ignore[attr-defined]
+    assert {"no-cache", "cache-ttl"} <= flags["price"]
+    assert not {"no-cache", "cache-ttl"} & flags["plain"]
+    status, envelope, _ = run(app, ["plain", "--no-cache"])
+    assert status == 2
+
+
+def test_a_cache_command_declares_its_cache_side_effect(tmp_path: Path) -> None:
+    entry = caching_app().manifest()["commands"]["price"]  # type: ignore[index]
+    assert entry["filesystem_side_effects"] == [
+        {"path": "~/.cache/cachectl/price/", "type": "cache", "ttl_seconds": 3600}
+    ]
+
+
+def test_the_cleanup_built_in_removes_the_cache(tmp_path: Path) -> None:
+    app = caching_app()
+    priced(app, tmp_path)
+    status, envelope, _ = run(
+        app, ["cleanup", "--confirm-destructive"], env={"XDG_CACHE_HOME": str(tmp_path)}
+    )
+    assert status == 0 and data_of(envelope)["removed"] == [str(tmp_path / "cachectl" / "price")]
+    assert priced(app, tmp_path)[0]["fetched"] is True
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX permission bits")
+def test_cache_files_are_private(tmp_path: Path) -> None:
+    priced(caching_app(), tmp_path)
+    assert entry_of(tmp_path).stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "cachectl").stat().st_mode & 0o777 == 0o700
+
+
+def test_the_cache_declared_audit_rule_flags_a_hand_written_cache() -> None:
+    app = App("handctl", version="1.0.0")
+
+    @app.command("fetch", description="Fetch", danger_level="safe", exit_codes=())
+    def fetch(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        where = Path(ctx.env["HOME"]) / ".cache" / "handctl"
+        where.mkdir(parents=True, exist_ok=True)
+        return {}
+
+    rule = next(r for r in audit(app, "handctl", limit=5).rules if r.id == "cache-declared")
+    [finding] = rule.findings
+    assert finding.command == "fetch" and "CachePolicy" in finding.fix

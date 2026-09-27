@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ._cache import cache_dir
 from ._context import Ctx
 from ._declare import CLEARED
 from ._deps import Found, Version, dependency_result, find, tool_check
@@ -105,6 +106,12 @@ def register_cleanup(app: App) -> CommandPath:
         if ctx.session is not None:
             # REQ-F-043: ctx.output_file files; running sessions remove their own
             found.update(str(p) for p in outputs(ctx.session.root.path))
+        for command_path, command in app.commands.items():
+            where = (
+                None if command.cache is None else cache_dir(app.name, command_path.value, ctx.env)
+            )
+            if where is not None and where.exists():
+                found.add(str(where))  # REQ-O-018: wherever XDG_CACHE_HOME put it
         paths = sorted(found)
         if args.dry_run:
             summary = f"Removes {len(paths)} temp and cache paths"
