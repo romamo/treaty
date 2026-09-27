@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "tool": "todo 1.0.0",
+  "command": [
+    "./todo"
+  ],
+  "timeout_seconds": 10,
+  "manifest": [
+    "manifest"
+  ],
+  "argument_order": {
+    "command_path": [
+      "purge"
+    ],
+    "local_args": [
+      "--dry-run",
+      "--confirm-destructive"
+    ],
+    "global_flag": "--format",
+    "value": "json",
+    "alternate_value": "plain"
+  },
+  "probes": [
+    {
+      "name": "list",
+      "argv": [
+        "list",
+        "--all"
+      ],
+      "kind": "read"
+    },
+    {
+      "name": "purge",
+      "argv": [
+        "purge"
+      ],
+      "kind": "destructive",
+      "dry_run_flag": "--dry-run"
+    },
+    {
+      "name": "version",
+      "argv": [
+        "version"
+      ],
+      "kind": "read"
+    },
+    {
+      "name": "unknown flag",
+      "argv": [
+        "list",
+        "--all",
+        "--no-such-flag"
+      ],
+      "kind": "invalid"
+    }
+  ]
+}
