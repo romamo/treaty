@@ -22,11 +22,14 @@ from ._framework import (
     RAW_PAYLOAD_FLAG,
     RESERVED_GLOBAL,
     SCHEMA_VERSION_KEY,
+    STABLE_OUTPUT_FLAG,
+    STABLE_OUTPUT_KEY,
     UNIMPLEMENTED,
     flag_named,
     framework_flags,
     reserved_flag,
     reserved_names,
+    switch_value,
 )
 from ._idempotency import IdempotencyKey
 from ._page import Limit, Position
@@ -85,6 +88,8 @@ class Invocation:
     """``--retry-delay`` of a ``retry=`` command, in milliseconds"""
     schema_version: SchemaVersion | None = None
     """The older output schema ``--schema-version`` pinned; None is the current"""
+    stable_output: bool = False
+    """``stable_output`` of an exec line or MCP call: the ``--stable-output`` global"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +100,7 @@ class GlobalOptions:
     max_output: str | None = None
     output_schema: bool = False
     schema_version: str | None = None
+    stable_output: bool = False
 
 
 def without_value(token: str) -> str:
@@ -142,6 +148,7 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
     help_ = False
     schema = False
     output_schema = False
+    stable_output = False
     rest: list[str] = []
     i = 0
     while i < len(argv):
@@ -156,6 +163,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             schema = True  # REQ-O-013: --print-schema is an alias
         elif tok == "--output-schema":
             output_schema = True
+        elif tok == f"--{STABLE_OUTPUT_FLAG}":
+            stable_output = True
         elif name in RESERVED_GLOBAL and name in UNIMPLEMENTED:
             raise reserved_flag(name)
         elif name in VALUED_GLOBALS:
@@ -179,6 +188,7 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             max_output=valued.get("max-output"),
             output_schema=output_schema,
             schema_version=valued.get("schema-version"),
+            stable_output=stable_output,
         ),
         rest,
     )
@@ -481,7 +491,8 @@ def known_flags(command: Command, *, argv: bool = True) -> list[str]:
     """The flags a command accepts; ``argv=False`` leaves out those only argv takes, for
     the unknown-field error of ``exec``, MCP, and ``--raw-payload``"""
     flags = [name for f in command.fields for name in f.exposed_flags()]
-    return flags + [f.name for f in framework_flags(command, json=not argv)]
+    flags += [f.name for f in framework_flags(command, json=not argv)]
+    return flags if argv else [*flags, STABLE_OUTPUT_FLAG]
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
@@ -538,6 +549,9 @@ def build_from_mapping(
             if key == SCHEMA_VERSION_KEY:
                 # The global --schema-version, which argv takes anywhere (REQ-O-014)
                 framework["schema_version"] = command.pin(value)
+                continue
+            if key == STABLE_OUTPUT_KEY:
+                framework["stable_output"] = switch_value(value, key)
                 continue
             flag = key.replace("_", "-")
             spec = flag_named(command, flag, json=True)

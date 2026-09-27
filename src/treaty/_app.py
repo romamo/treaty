@@ -16,6 +16,7 @@ import threading
 import time
 import traceback
 import types
+import typing
 import uuid
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -33,7 +34,15 @@ from ._auth import (
     not_logged_in,
     scope_set,
 )
-from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, Rerun, StdinCap, cap_envelope
+from ._cap import (
+    DEFAULT_CAP,
+    DEFAULT_STDIN_CAP,
+    TRUNCATED_CODE,
+    OutputCap,
+    Rerun,
+    StdinCap,
+    cap_envelope,
+)
 from ._command import (
     DEFAULT_HEARTBEAT_MS,
     Cleanup,
@@ -76,6 +85,7 @@ from ._mode import (
     quiet_children,
     resolve_mode,
 )
+from ._out import NO_ORDER, OutSpec, arrange, sorted_indices
 from ._page import (
     CURSOR_FLAG,
     DEFAULT_LIMIT,
@@ -350,6 +360,8 @@ class App:
         compat: Mapping[str, Shim] | None = None,
         project_root: Sequence[str] = (),
         retry: Retry | None = None,
+        sort_key: str | None = None,
+        ordered: bool = False,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -377,6 +389,9 @@ class App:
         ``project_root=(".git",)`` finds the nearest directory from the cwd up holding a
         marker, as ``ctx.project_root`` and ``meta.project_root``. ``retry=Retry(...)``
         enables ``ctx.retry`` with ``--retries`` and ``--retry-delay``.
+        Arrays in ``data`` are sorted (REQ-F-020): ``sort_key="id"`` orders an output
+        list of objects by that field; ``ordered=True`` keeps the handler's order, for a
+        ranking. ``treaty.Out`` declares the same for a field of an output dataclass.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -473,6 +488,8 @@ class App:
                     compat=compat,
                     project_root=project_root,
                     retry=retry,
+                    sort_key=sort_key,
+                    ordered=ordered,
                 )
             )
             return fn
@@ -522,6 +539,7 @@ class App:
             description="Print the command manifest for agents",
             danger_level="safe",
             exit_codes=(),
+            ordered=True,  # positionals and enum values are in declaration order
         )
         def manifest(args: NoArgs, ctx: Ctx) -> dict[str, object]:
             return self.manifest()
@@ -834,15 +852,21 @@ class App:
         # REQ-F-053: every line reaches a pipe reader as it is written, here and in children
         os.environ["PYTHONUNBUFFERED"] = "1"
         if stdout is None or sys.stderr is None:
+            for stream in (stdout, sys.stderr):
+                if isinstance(stream, io.TextIOWrapper):
+                    stream.reconfigure(newline="\n")
             sys.exit(self.run(sys.argv[1:]))
         # REQ-F-006 below Python: for the run, descriptor 1 is stderr, so a child or C code
         # writing to it cannot corrupt the envelope, which goes to a copy of the original
         stdout.flush()
         saved = os.dup(1)
         os.dup2(sys.stderr.fileno(), 1)
+        # REQ-F-072: LF on every platform; Windows text mode would write CRLF
         envelopes = open(  # noqa: SIM115 - closed below, after descriptor 1 is restored
-            saved, "w", encoding=stdout.encoding, errors=stdout.errors, buffering=1
+            saved, "w", encoding=stdout.encoding, errors=stdout.errors, buffering=1, newline="\n"
         )
+        if isinstance(sys.stderr, io.TextIOWrapper):
+            sys.stderr.reconfigure(newline="\n")
         sys.stdout = envelopes
         try:
             code = self.run(sys.argv[1:])
@@ -899,6 +923,7 @@ class App:
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
+        run.stable = run.stable_all = globals_.stable_output
         if run.trace_error is not None:
             return run.emit(mode, run.arg_error(run.trace_error))
         route = resolve_path(rest, self._commands)
@@ -1258,6 +1283,10 @@ class _Run:
         """The older schema version ``--schema-version`` selected for the current command"""
         self.retrier: Retrier | None = None
         """``ctx.retry`` of the current command, whose count is ``meta.retries``"""
+        self.stable_all = False
+        """``--stable-output`` on argv: every envelope of the run is stable (REQ-O-007)"""
+        self.stable = False
+        """The current envelope leaves out what differs between identical calls"""
         self._roots: dict[tuple[str, ...], Path | None] = {}
 
     @contextlib.contextmanager
@@ -1431,7 +1460,9 @@ class _Run:
     ) -> Envelope:
         origin = self.started if started is None else started
         # REQ-F-057: every response says when no window could have been opened
-        extra = {"headless": True} if self.headless else {}
+        extra: dict[str, object] = {"headless": True} if self.headless else {}
+        if any(w.code == TRUNCATED_CODE for w in self.warnings):
+            extra["truncated"] = True  # ctx.truncated reported a backend's cut (REQ-F-064)
         command = self.current
         if command is None:
             name, version, root = self.app.name, ENVELOPE_SCHEMA_VERSION, None
@@ -1444,16 +1475,18 @@ class _Run:
             data=data,
             error=error,
             meta=Meta(
-                duration_ms=int((time.perf_counter() - origin) * 1000),
-                request_id=self.request_id,
+                # REQ-O-007: what differs between identical calls is left out, and the
+                # required duration_ms is 0
+                duration_ms=0 if self.stable else int((time.perf_counter() - origin) * 1000),
+                request_id=None if self.stable else self.request_id,
                 command=name,
-                timestamp=self.timestamp,
+                timestamp=None if self.stable else self.timestamp,
                 schema_version=version,
                 tool_version=self.app.version,
                 cwd=str(self.cwd),
                 trace_id=self.trace_id,
                 project_root=None if root is None else str(root),
-                retries=0 if self.retrier is None else self.retrier.count,
+                retries=0 if self.retrier is None or self.stable else self.retrier.count,
             ),
             warnings=tuple(self.warnings),
             extra_meta={**extra, **(meta or {})},
@@ -1564,7 +1597,9 @@ class _Run:
 
     def _pin(self, command: Command, invocation: Invocation) -> None:
         """Answer in the schema version ``--schema-version`` selected; an older one is
-        deprecated, which a warning says (REQ-O-014)"""
+        deprecated, which a warning says (REQ-O-014). ``stable_output`` of an exec line
+        or MCP call applies to that call only."""
+        self.stable = self.stable_all or invocation.stable_output
         self.pinned = invocation.schema_version
         if self.pinned is not None:
             self._warn(
@@ -1953,10 +1988,12 @@ class _Run:
         page_meta: dict[str, object] = {}
         try:
             if command.paginated:
+                if isinstance(result, (list, tuple)):
+                    result = self._sorted_list(command, result)
                 result, pagination = take(result, position, limit, command.path)
                 page_meta["pagination"] = pagination.to_json()
                 self.page = (command.path, position)
-            data = self._payload(self._shimmed(command, result))
+            data = self._payload(self._shimmed(command, result), *self._output(command))
         except SchemaError as exc:
             return self._broken(
                 command,
@@ -2085,7 +2122,7 @@ class _Run:
                     self.in_flight = None  # the handler finished; nothing is left to clean up
                     break
                 seq += 1
-                data = self._payload(self._shimmed(command, event))
+                data = self._payload(self._shimmed(command, event), *self._output(command))
                 yield self._envelope(0, data=data, started=started, meta={**full_meta, "seq": seq})
         except CliExit as exc:
             yield self._exit_envelope(command, args, exc, started, partial())
@@ -2157,6 +2194,8 @@ class _Run:
             ms = DEFAULT_HEARTBEAT_MS
         if not command.heartbeat or not ms or mode is not Format.JSON or self.argv is None:
             return None
+        if self.stable:
+            return None  # how many lines come depends on timing (REQ-O-007)
         beating = [True]
 
         def tick() -> None:
@@ -2318,7 +2357,7 @@ class _Run:
             retry_after = max(0, math.ceil(retry_after))
         try:
             data = self._payload(exc.data)
-            context = _redacted(to_jsonable(exc.context, self.app.scalars), redact)
+            context = _redacted(to_jsonable(exc.context, self.app.scalars, base=self.cwd), redact)
         except SchemaError as err:
             message = f"Command {command.path} raised {exc.name} with {err}"
             return self._broken(command, "INVALID_EXIT", message, started, meta)
@@ -2361,7 +2400,7 @@ class _Run:
             self.err.write(redact("".join(traceback.format_exception(outcome.exc))))
             return
         try:
-            data = self._payload(outcome.result)
+            data = self._payload(outcome.result, *self._output(command))
         except SchemaError as exc:
             self.err.write(f"{where}; its result was not recorded: {redact(str(exc))}\n")
             return
@@ -2396,7 +2435,7 @@ class _Run:
                 continue
             forms: list[object] = [value, str(value), repr(value)]
             if not isinstance(value, (str, int, float)):
-                forms.append(to_jsonable(value, self.app.scalars))
+                forms.append(to_jsonable(value, self.app.scalars, base=self.cwd))
             for form in forms:
                 if isinstance(form, str) and len(form) >= MIN_REDACTED:
                     spellings.update({form, repr(form)[1:-1]})
@@ -2409,9 +2448,30 @@ class _Run:
 
         return redact
 
-    def _payload(self, value: object) -> object:
-        """A result or exit ``data`` as envelope data: an object, an array, or null"""
-        data = to_jsonable(value, self.app.scalars)
+    def _output(self, command: Command) -> tuple[object, OutSpec]:
+        """The type the handler's result has in the answered schema, and its order"""
+        if self.pinned is None:
+            return command.output_type, command.order
+        return command.compat_for(self.pinned).output_type, NO_ORDER
+
+    def _sorted_list(self, command: Command, result: Sequence[object]) -> list[object]:
+        """A list command's whole list in output order, so every page is a slice of one
+        order (REQ-F-020)"""
+        items = list(result)
+        if command.order.ordered:
+            return items
+        item_type = (typing.get_args(command.output_type) or (object,))[0]
+        jsonable = [
+            arrange(to_jsonable(i, self.app.scalars, base=self.cwd), item_type) for i in items
+        ]
+        return [items[i] for i in sorted_indices(jsonable, command.order.sort_key)]
+
+    def _payload(self, value: object, tp: object = object, order: OutSpec = NO_ORDER) -> object:
+        """A result or exit ``data`` as envelope data: an object, an array, or null, with
+        relative paths made absolute and arrays sorted as ``tp`` declares"""
+        data = arrange(
+            to_jsonable(value, self.app.scalars, base=self.cwd), tp, order, stable=self.stable
+        )
         if isinstance(value, Job) and isinstance(data, dict):
             data = with_links(data, self.app.name)  # REQ-C-022
         if data is not None and not isinstance(data, (dict, list)):
@@ -2704,6 +2764,7 @@ class _Run:
                         break
         # What follows answers the plan, not its last line
         self.current, self.pinned, self.retrier, self.warnings = plan_command, None, None, []
+        self.stable = self.stable_all
         if (received := self.cancellation.received) is not None:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
             # between lines left no CANCELLED line, so the plan says where it stopped.

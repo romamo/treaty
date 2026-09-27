@@ -44,13 +44,13 @@ def run(argv: list[str], stdin: str = "") -> tuple[int, dict[str, object]]:
     return code, json.loads(out.getvalue())
 
 
-def test_valid_paths_pass_unchanged_and_serialize_as_strings(tmp_path: Path) -> None:
+def test_valid_paths_pass_and_serialize_as_absolute_strings(tmp_path: Path) -> None:
     code, env = run(["copy", "/home/user/file.txt", "--dest", "out/x.txt", "--extra", "a.txt"])
     assert code == 0
     assert env["data"] == {
         "source": str(Path("/home/user/file.txt")),
-        "dest": str(Path("out/x.txt")),
-        "extra": ["a.txt"],
+        "dest": str(Path.cwd() / "out/x.txt"),
+        "extra": [str(Path.cwd() / "a.txt")],
     }
 
 

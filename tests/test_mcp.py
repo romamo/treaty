@@ -80,6 +80,7 @@ def test_input_schema_replaces_secrets_and_adds_framework_keys() -> None:
         "retries",
         "timeout",
         "idempotency_key",
+        "stable_output",
     }
     assert "token" not in schema["properties"]
     assert schema["required"] == ["image"]
@@ -259,7 +260,8 @@ def test_unknown_field_lists_only_flags_a_mapping_accepts() -> None:
     envelope = app.call("dump", {"nope": 1})
     assert envelope.error is not None
     known = envelope.error.context["known"]
-    assert known == ["timeout"]  # not heartbeat-ms or output, which only argv takes
+    # Not heartbeat-ms or output, which only argv takes
+    assert known == ["timeout", "stable-output"]
 
 
 def test_console_script_usage_errors() -> None:

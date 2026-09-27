@@ -117,7 +117,7 @@ def test_argv_values_reach_the_handler_as_instances_and_serialize_back() -> None
         "service": "api",
         "port": 9000,
         "release": "v2",
-        "peers": ["db", "cache"],
+        "peers": ["cache", "db"],
     }
 
 

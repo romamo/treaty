@@ -27,7 +27,12 @@ def make_app(max_output_bytes: int = 1_048_576) -> App:
     app = App("listctl", version="1.0.0", max_output_bytes=max_output_bytes)
 
     @app.command(
-        "items", description="Every item", danger_level="safe", exit_codes=(), paginated=True
+        "items",
+        description="Every item",
+        danger_level="safe",
+        exit_codes=(),
+        paginated=True,
+        ordered=True,
     )
     def items(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
         return ITEMS
@@ -38,6 +43,7 @@ def make_app(max_output_bytes: int = 1_048_576) -> App:
         danger_level="safe",
         exit_codes=(),
         paginated=True,
+        ordered=True,
     )
     def paged(args: NoArgs, ctx: Ctx) -> Page[Item]:
         assert ctx.page is not None
@@ -53,6 +59,7 @@ def make_app(max_output_bytes: int = 1_048_576) -> App:
         danger_level="safe",
         exit_codes=(),
         paginated=True,
+        ordered=True,
         default_limit=7,
     )
     def batches(args: NoArgs, ctx: Ctx) -> Page[Item]:
@@ -67,6 +74,7 @@ def make_app(max_output_bytes: int = 1_048_576) -> App:
         danger_level="safe",
         exit_codes=(),
         paginated=True,
+        ordered=True,
     )
     def many(args: NoArgs, ctx: Ctx) -> list[dict[str, object]]:
         return [{"id": i, "name": f"item-{i}"} for i in range(10_000)]

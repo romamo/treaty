@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
 
+from ._cap import MARKER, TRUNCATED_CODE
 from ._config import ConfigFile
 from ._errors import RegistrationError
 from ._mode import Format
@@ -90,6 +91,16 @@ class Ctx:
     def warn(self, code: str, message: str, **context: object) -> None:
         """Add an entry to the response's ``warnings``; the run still succeeds"""
         self.warn_sink(code, message, context)
+
+    def truncated(self, value: str, *, field: str, original_length: int | None = None) -> str:
+        """A value a backend already cut, such as a column limit: returned with the
+        ``[truncated]`` marker, reported as a ``FIELD_TRUNCATED`` warning on
+        ``data.<field>``, and ``meta.truncated`` is true (REQ-F-064)"""
+        context: dict[str, object] = {"field": f"data.{field}", "truncated_length": len(value)}
+        if original_length is not None:
+            context["original_length"] = original_length
+        self.warn(TRUNCATED_CODE, f"data.{field} was truncated by the backend", **context)
+        return value + MARKER
 
     def run(
         self,

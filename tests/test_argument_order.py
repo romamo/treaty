@@ -70,6 +70,7 @@ def test_manifest_lists_global_options_at_the_root(app: App) -> None:
         "print-schema",
         "output-schema",
         "schema-version",
+        "stable-output",
         "help",
     }
     assert manifest["flags"]["format"]["enum_values"] == ["plain", "json", "jsonl", "tsv"]

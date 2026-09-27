@@ -34,10 +34,17 @@ class FlagSpec:
     pattern: str | None = None
     secret: bool | None = None
     multiline: bool = False
+    max_bytes: int | None = None
 
     def __post_init__(self) -> None:
         if not self.description:
             raise RegistrationError("every flag needs a description")
+        if self.max_bytes is not None and (
+            isinstance(self.max_bytes, bool)
+            or not isinstance(self.max_bytes, int)
+            or self.max_bytes < 1
+        ):
+            raise RegistrationError(f"max_bytes is a positive whole number, not {self.max_bytes!r}")
         if self.short is not None and len(self.short) != 1:
             raise RegistrationError(f"short flag must be one character, got {self.short!r}")
         if self.pattern is not None:
@@ -52,13 +59,23 @@ def Flag(
     pattern: str | None = None,
     secret: bool | None = None,
     multiline: bool = False,
+    max_bytes: int | None = None,
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
     ``secret`` keeps the value out of every error; ``None`` infers it from the name.
     ``multiline`` lets a text field such as a message body contain newlines.
+    ``max_bytes`` is the most UTF-8 bytes a text value may have, such as a backend
+    column's size: a longer one exits 2 with ``FIELD_TOO_LARGE`` before the handler runs.
     """
-    spec = FlagSpec(description, short=short, pattern=pattern, secret=secret, multiline=multiline)
+    spec = FlagSpec(
+        description,
+        short=short,
+        pattern=pattern,
+        secret=secret,
+        multiline=multiline,
+        max_bytes=max_bytes,
+    )
     if isinstance(default, (list, dict, set)):
         raise RegistrationError("mutable defaults are not allowed; use a tuple")
     if default is MISSING:
@@ -150,6 +167,7 @@ class FieldInfo:
         it can end a command line or a log record wherever the value is passed on. A
         ``multiline`` field accepts line breaks; a secret, never echoed or passed as an
         argument, is exempt."""
+        self.check_size(raw)
         if self.secret:
             return
         for char, name in _CONTROL_CHARS.items():
@@ -159,6 +177,20 @@ class FieldInfo:
                     context={"flag": self.flag, "value": raw, "rejected_pattern": name},
                     suggestion=f"pass --{self.flag} as a single line",
                 )
+
+    def check_size(self, raw: str) -> None:
+        """``Flag(max_bytes=)``: the error names the sizes, never the value (REQ-F-064)"""
+        limit = self.spec.max_bytes
+        if limit is None:
+            return
+        size = len(raw.encode("utf-8", "surrogatepass"))
+        if size > limit:
+            raise ParseError(
+                f"value for {self.flag!r} is {size} bytes, over its limit of {limit}",
+                code="FIELD_TOO_LARGE",
+                context={"field": self.flag, "max_bytes": limit, "actual_bytes": size},
+                suggestion=f"shorten --{self.flag} to at most {limit} UTF-8 bytes",
+            )
 
     def check_pattern(self, raw: str) -> None:
         """``Flag(pattern=)`` for argv tokens and JSON strings alike (REQ-C-020)"""
@@ -192,6 +224,8 @@ class FieldInfo:
         if self.spec.multiline:
             # FlagEntry allows no extra keys, so the opt-out is stated in the description
             description = f"{description} (may contain newlines)"
+        if self.spec.max_bytes is not None:
+            description = f"{description} (at most {self.spec.max_bytes} bytes)"
         entry: dict[str, object] = {
             "type": self.flag_type.value,
             "required": self.required,
@@ -503,6 +537,13 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
         if spec.multiline and text.flag_type is not FlagType.STRING:
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: multiline=True is for str fields only"
+            )
+        if spec.max_bytes is not None and (
+            text.flag_type is not FlagType.STRING or text.path or info.secret
+        ):
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: max_bytes is for str fields that are not "
+                "secrets or paths"
             )
         infos.append(info)
     _check_positionals(cls, [i for i in infos if i.positional])

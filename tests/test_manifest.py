@@ -72,6 +72,7 @@ def test_rollback_entry_contents(app: App) -> None:
         "replicas",
         "tags",
         "dry_run",
+        "would_affect",
     ]
     assert entry["examples"] == [
         {

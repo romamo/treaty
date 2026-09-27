@@ -7,20 +7,23 @@ stream purity) are the conformance kit's job; the last rule points there.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import inspect
 import json
 import re
 import textwrap
+import typing
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ._command import Command, DangerLevel
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
-from ._types import FlagType
+from ._out import out_spec
+from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import InvalidValue, SchemaVersion
 
 if TYPE_CHECKING:
@@ -350,6 +353,16 @@ def _path_typed(app: App) -> Iterator[Finding]:
                     "are not rejected (heuristic)",
                     f"{f.name}: Path = ... so the framework rejects '..', %XX and null bytes",
                 )
+        for where, out, hint in output_fields(c.output_type):
+            if resolve_alias(hint) is str and _PATH_NAME_HINTS.search(out.name):
+                yield Finding(
+                    "path-typed",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"output field {where} looks like a path but is a str, so a relative "
+                    "path reaches the caller as given (heuristic, REQ-F-040)",
+                    f"{out.name}: Path, which treaty writes as an absolute path",
+                )
 
 
 _MULTILINE_NAMES = re.compile(r"(^|_)(message|body|description|text)($|_)")
@@ -487,6 +500,8 @@ def _volatile_fields(schema: object, where: str = "") -> Iterator[tuple[str, boo
     if isinstance(properties, dict):
         for name, prop in properties.items():
             path = f"{where}.{name}" if where else name
+            if isinstance(prop, dict) and prop.get("x-volatile"):
+                continue  # declared: --stable-output leaves it out
             if _VOLATILE_NAMES.match(name):
                 yield path, True
             elif isinstance(prop, dict) and prop.get("format") == "date-time":
@@ -508,7 +523,9 @@ def _volatile_data(app: App) -> Iterator[Finding]:
                     c.path.value,
                     f"output field {field_path} changes on every call, so two identical calls "
                     "no longer return identical data (REQ-F-021)",
-                    f"drop {field_path}: meta carries timestamp, request_id, and duration_ms",
+                    f"{field_path.rpartition('.')[2]}: ... = treaty.Out(volatile=True), which "
+                    "--stable-output leaves out; or drop it, since meta carries timestamp, "
+                    "request_id, and duration_ms",
                 )
             else:
                 yield Finding(
@@ -517,8 +534,159 @@ def _volatile_data(app: App) -> Iterator[Finding]:
                     c.path.value,
                     f"output field {field_path} is a datetime; if it is when the response was "
                     "made rather than a fact of the record, it breaks caching (heuristic)",
-                    f"drop {field_path} if it is the time of the call; meta.timestamp has it",
+                    f"if it is the time of the call, drop {field_path} (meta.timestamp has it) "
+                    "or declare it treaty.Out(volatile=True)",
                 )
+
+
+def output_fields(
+    tp: object, where: str = "", seen: frozenset[type] = frozenset()
+) -> Iterator[tuple[str, dataclasses.Field[Any], object]]:
+    """Every field of every dataclass in an output type, with its path and annotation"""
+    base, _ = strip_optional(resolve_alias(tp))
+    for arg in typing.get_args(base):
+        if arg is not Ellipsis:
+            inner = f"{where}[]" if typing.get_origin(base) in (list, tuple) else where
+            yield from output_fields(arg, inner, seen)
+    if not is_dataclass_type(base) or base in seen:
+        return
+    assert isinstance(base, type)
+    hints = typing.get_type_hints(base)
+    for f in dataclasses.fields(base):
+        path = f"{where}.{f.name}" if where else f.name
+        yield path, f, hints[f.name]
+        yield from output_fields(hints[f.name], path, seen | {base})
+
+
+def _object_items(tp: object) -> type | None:
+    """The dataclass items of a ``list[T]`` or ``tuple[T, ...]``, which treaty sorts"""
+    base, _ = strip_optional(resolve_alias(tp))
+    args = typing.get_args(base)
+    origin = typing.get_origin(base)
+    item = None
+    if origin is list and args:
+        item = resolve_alias(args[0])
+    elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
+        item = resolve_alias(args[0])
+    return item if isinstance(item, type) and is_dataclass_type(item) else None
+
+
+def _id_like(cls: type) -> str:
+    """The field an array of ``cls`` is most likely keyed by"""
+    names = [f.name for f in dataclasses.fields(cls)]
+    for pattern in (r"^id$", r"_id$", r"^(key|name|slug)$"):
+        found = next((n for n in names if re.search(pattern, n)), None)
+        if found is not None:
+            return found
+    return names[0] if names else "id"
+
+
+def _stable_order(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        item = _object_items(c.output_type)
+        if item is not None and c.order.sort_key is None and not c.order.ordered:
+            yield Finding(
+                "stable-order",
+                Severity.ADVICE,
+                c.path.value,
+                "returns an array of objects with no declared order, so treaty sorts it by "
+                "each item's JSON text (REQ-F-020)",
+                f'sort_key="{_id_like(item)}", or ordered=True if the order is a ranking',
+            )
+        for where, f, hint in output_fields(c.output_type):
+            spec = out_spec(f)
+            item = _object_items(hint)
+            if item is not None and spec.sort_key is None and not spec.ordered:
+                yield Finding(
+                    "stable-order",
+                    Severity.ADVICE,
+                    c.path.value,
+                    f"output field {where} is an array of objects with no declared order, so "
+                    "treaty sorts it by each item's JSON text (REQ-F-020)",
+                    f'{f.name}: ... = treaty.Out(sort_key="{_id_like(item)}"), or '
+                    "treaty.Out(ordered=True) if the order is a ranking",
+                )
+
+
+_BASE64_CALLS = frozenset(
+    {"base64.b64encode", "b64encode", "base64.standard_b64encode", "base64.encodebytes"}
+)
+
+
+def _binary_output(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        tree = _handler_tree(c.handler)
+        if tree is None:
+            continue
+        if any(
+            isinstance(n, ast.Call) and _dotted(n.func) in _BASE64_CALLS for n in ast.walk(tree)
+        ):
+            yield Finding(
+                "binary-output",
+                Severity.ADVICE,
+                c.path.value,
+                "handler base64-encodes a value itself, so callers get a bare string with "
+                "no size or content type (REQ-F-017)",
+                "return the bytes, or treaty.Binary(data, content_type=...); treaty writes "
+                "the base64 wrapper with size_bytes",
+            )
+
+
+def _len_limits(tree: ast.AST) -> Iterator[str]:
+    """``len(args.x)`` compared with a number: a size limit checked by hand"""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
+            continue
+        sides = [node.left, *node.comparators]
+        if not any(isinstance(s, ast.Constant) and isinstance(s.value, int) for s in sides):
+            continue
+        for side in sides:
+            if (
+                isinstance(side, ast.Call)
+                and _dotted(side.func) == "len"
+                and len(side.args) == 1
+                and isinstance(side.args[0], ast.Attribute)
+                and _dotted(side.args[0]) == f"args.{side.args[0].attr}"
+            ):
+                yield side.args[0].attr
+
+
+def _field_limits(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        tree = _handler_tree(c.handler)
+        if tree is None:
+            continue
+        for name in dict.fromkeys(_len_limits(tree)):
+            yield Finding(
+                "field-limits",
+                Severity.ADVICE,
+                c.path.value,
+                f"handler checks len(args.{name}) itself, after phase 1, so an agent learns "
+                "the limit only by failing (REQ-F-064)",
+                f"{name}: str = Flag(..., max_bytes=N), which the manifest lists and phase 1 "
+                "enforces with FIELD_TOO_LARGE",
+            )
+        cuts = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Subscript)
+            and isinstance(n.value, ast.Attribute)
+            and isinstance(n.slice, ast.Slice)
+            and n.slice.lower is None
+            and n.slice.step is None
+            and isinstance(n.slice.upper, ast.Constant)
+            and isinstance(n.slice.upper.value, int)
+        ]
+        if cuts:
+            yield Finding(
+                "field-limits",
+                Severity.ADVICE,
+                c.path.value,
+                "handler cuts a value to a fixed length, and nothing tells the caller it is "
+                "incomplete (heuristic, REQ-F-064)",
+                'ctx.truncated(value, field="<name>", original_length=len(full)), which '
+                "adds the marker, a FIELD_TRUNCATED warning, and meta.truncated",
+            )
 
 
 LOCK_FILE = Path("treaty-schema.lock")
@@ -777,6 +945,24 @@ RULES: tuple[Rule, ...] = (
         "Output data carries no per-call values",
         Severity.WARNING,
         _volatile_data,
+    ),
+    Rule(
+        "stable-order",
+        "Arrays of objects in output declare their order",
+        Severity.ADVICE,
+        _stable_order,
+    ),
+    Rule(
+        "binary-output",
+        "Binary output is returned as bytes, not encoded by hand",
+        Severity.ADVICE,
+        _binary_output,
+    ),
+    Rule(
+        "field-limits",
+        "Size limits are declared, and backend cuts reported",
+        Severity.ADVICE,
+        _field_limits,
     ),
     Rule(
         "schema-version",

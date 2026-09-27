@@ -18,6 +18,7 @@ from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._mode import Format
+from ._out import NO_ORDER, OutSpec, check_order
 from ._page import DEFAULT_LIMIT, Limit, Page
 from ._resources import ResourceSpec, dependency_params, resource_graph
 from ._retry import Retry
@@ -69,6 +70,7 @@ class Compat:
 
     version: SchemaVersion
     shim: Shim
+    output_type: object
     output_schema: JsonSchema
 
 
@@ -139,6 +141,8 @@ class Command:
     """Marker files whose directory, found walking up from the cwd, is the project root"""
     retry: Retry | None = None
     """How ``ctx.retry`` retries (REQ-F-078); adds ``--retries`` and ``--retry-delay``"""
+    order: OutSpec = NO_ORDER
+    """``sort_key=`` and ``ordered=`` of a command whose output is an array (REQ-F-020)"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -239,6 +243,8 @@ def build_command(
     compat: Mapping[str, Shim] | None = None,
     project_root: Sequence[str] = (),
     retry: Retry | None = None,
+    sort_key: str | None = None,
+    ordered: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -350,7 +356,15 @@ def build_command(
             )
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
-    output_schema = schema_for(output_type, scalars)
+    output_schema = schema_for(output_type, scalars, output=True)
+    if sort_key is not None and ordered:
+        raise RegistrationError(
+            f"{path}: sort_key orders the output array, ordered=True keeps it; pick one"
+        )
+    order = OutSpec(sort_key=sort_key, ordered=ordered)
+    check_order(output_type, str(path), order)
+    if ordered:
+        output_schema = {**output_schema, "x-ordered": True}
     shims = _compat(path, compat or {}, schema_version, output_type, scalars)
     if returns_job:
         output_schema = descriptor_schema(output_schema)
@@ -362,7 +376,7 @@ def build_command(
         args_type=args_type,
         output_type=output_type,
         output_schema=output_schema,
-        args_schema=schema_for(args_type, scalars),
+        args_schema=_with_max_bytes(schema_for(args_type, scalars), fields),
         fields=fields,
         description=description,
         danger_level=danger_level,
@@ -399,7 +413,23 @@ def build_command(
         compat=shims,
         project_root=tuple(project_root),
         retry=retry,
+        order=order,
     )
+
+
+def _with_max_bytes(schema: JsonSchema, fields: Sequence[FieldInfo]) -> JsonSchema:
+    """``Flag(max_bytes=)`` as ``x-max-bytes`` on the property, or on its items"""
+    properties = dict(schema["properties"])
+    for f in fields:
+        if f.spec.max_bytes is None:
+            continue
+        prop = dict(properties[f.name])
+        if f.flag_type is FlagType.ARRAY:
+            prop["items"] = {**prop["items"], "x-max-bytes": f.spec.max_bytes}
+        else:
+            prop["x-max-bytes"] = f.spec.max_bytes
+        properties[f.name] = prop
+    return {**schema, "properties": properties}
 
 
 def _compat(
@@ -437,7 +467,8 @@ def _compat(
                 f"{path}: compat[{key!r}] needs a return annotation that serializes to a JSON "
                 "object, array, or null, for its output schema"
             )
-        out.append(Compat(version, shim, schema_for(returned, scalars)))
+        check_order(returned, f"{path}: compat[{key!r}]")
+        out.append(Compat(version, shim, returned, schema_for(returned, scalars, output=True)))
     return tuple(sorted(out, key=lambda c: c.version.key))
 
 

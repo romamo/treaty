@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from treaty import Affects, App, Arg, Ctx, Exit, Flag, Job
@@ -106,7 +107,7 @@ class Written:
     effect: Literal["updated"]
     name: str
     value: str
-    path: str
+    path: Path
 
 
 config = app.group("config", description="Change settings")
@@ -129,7 +130,7 @@ def set_(args: Setting, ctx: Ctx) -> Written:
     old = ctx.config_path.read_text().splitlines() if ctx.config_path.exists() else []
     kept = [line for line in old if not line.startswith(f"{args.name} =")]
     path = ctx.write_config("\n".join([*kept, f"{args.name} = {json.dumps(args.value)}"]) + "\n")
-    return Written("updated", args.name, args.value, str(path))
+    return Written("updated", args.name, args.value, path)
 
 
 if __name__ == "__main__":

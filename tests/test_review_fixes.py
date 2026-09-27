@@ -283,7 +283,8 @@ def test_array_positional_mixes_values_and_flags() -> None:
         return {"files": list(args.files)}
 
     code, [env] = run(app, ["cat", "a.txt", "--files", "b.txt", "--", "-c.txt"])
-    assert code == 0 and env["data"] == {"files": ["a.txt", "b.txt", "-c.txt"]}
+    # data arrays are sorted (REQ-F-020)
+    assert code == 0 and env["data"] == {"files": ["-c.txt", "a.txt", "b.txt"]}
 
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-Infinity"])
@@ -379,7 +380,7 @@ def test_flag_enums_and_str_subclass_scalars_serialize_as_declared() -> None:
     assert schema_for(Perm, scalars) == {"type": "integer", "minimum": 0}
     app = App("t", version="1.0.0")
     app.scalar(Slug, parse=Slug, serialize=lambda s: f"slug:{s}")
-    assert to_jsonable(Slug("abc"), app.scalars) == "slug:abc"
+    assert to_jsonable(Slug("abc"), app.scalars, base=Path.cwd()) == "slug:abc"
 
 
 def test_argument_order_ignores_example_globals_and_streams() -> None:

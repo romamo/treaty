@@ -13,6 +13,7 @@ from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
 from ._flags import Arg, Flag
 from ._jobs import Job, JobStore
 from ._mode import Format
+from ._out import Binary, Out
 from ._page import Page, PageRequest
 from ._retry import Retry
 from ._scalars import ScalarSpec
@@ -27,6 +28,7 @@ __all__ = [
     "Affects",
     "App",
     "Arg",
+    "Binary",
     "CliExit",
     "CommandPath",
     "Completed",
@@ -48,6 +50,7 @@ __all__ = [
     "JobStore",
     "Meta",
     "NoArgs",
+    "Out",
     "Format",
     "Page",
     "PageRequest",

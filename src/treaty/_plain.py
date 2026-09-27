@@ -6,6 +6,8 @@ Input is the JSON-ready ``data`` of an envelope, after secret redaction.
 
 from __future__ import annotations
 
+from ._out import is_binary
+
 _ESCAPES = str.maketrans({"\n": "\\n", "\r": "\\r", "\t": "\\t"})
 
 
@@ -25,6 +27,10 @@ def render_event(data: object) -> str:
 
 
 def _lines(value: object, path: str) -> list[str]:
+    if is_binary(value):
+        assert isinstance(value, dict)
+        kind = f" {value['content_type']}" if "content_type" in value else ""
+        return [_line(path, f"<binary {value['size_bytes']} bytes{kind}>")]
     if isinstance(value, dict):
         if not value:
             return [_line(path, "{}")] if path else []

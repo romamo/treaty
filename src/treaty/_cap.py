@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from ._envelope import Envelope, WarningDetail, serialize
 from ._errors import ParseError
+from ._out import is_binary
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Position
 from ._secrets import default_env_var
 from ._values import CommandPath, InvalidValue
@@ -32,6 +33,7 @@ from ._values import CommandPath, InvalidValue
 ENV_VAR = "TREATY_MAX_OUTPUT_BYTES"
 MAX_OUTPUT_FLAG = "max-output"
 MARKER = "[truncated]"
+TRUNCATED_CODE = "FIELD_TRUNCATED"
 MIN_BYTES = 4096
 SLACK = 1024
 """Bytes a ``--max-output`` hint adds to the full size, for what varies between runs"""
@@ -160,7 +162,7 @@ class _Cut:
 
     def warning(self) -> WarningDetail:
         return WarningDetail(
-            code="FIELD_TRUNCATED",
+            code=TRUNCATED_CODE,
             message=f"{_render(self.path)} cut from {self.original} to {self.kept}",
             context={
                 "field": _render(self.path),
@@ -274,6 +276,8 @@ def _target(data: object, visited: set[FieldPath]) -> tuple[FieldPath, Node] | N
 
 
 def _children(node: object) -> list[tuple[Key, object]]:
+    if is_binary(node):
+        return []  # a cut base64 value would not decode: a list drops it whole (REQ-F-017)
     if isinstance(node, dict):
         return list(node.items())
     if isinstance(node, list):
@@ -282,6 +286,8 @@ def _children(node: object) -> list[tuple[Key, object]]:
 
 
 def _cuttable(node: object) -> bool:
+    if is_binary(node):
+        return False
     if isinstance(node, (list, dict)):
         return len(node) >= 2
     return isinstance(node, str) and len(node) >= _MIN_STRING

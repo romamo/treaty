@@ -170,11 +170,12 @@ class Meta:
     cache and diff (REQ-F-021). Optional keys are absent, never null."""
 
     duration_ms: int
-    request_id: str
+    request_id: str | None
+    """None under ``--stable-output``, which leaves it out (REQ-O-007)"""
     command: str
     """The command's path as the manifest keys it, or the app name when none resolved"""
-    timestamp: str
-    """ISO 8601 UTC time the invocation started"""
+    timestamp: str | None
+    """ISO 8601 UTC time the invocation started; None under ``--stable-output``"""
     schema_version: str
     """``MAJOR.MINOR`` of the command's output contract, or of the one pinned"""
     tool_version: str
@@ -190,13 +191,15 @@ class Meta:
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {
             "duration_ms": self.duration_ms,
-            "request_id": self.request_id,
             "command": self.command,
-            "timestamp": self.timestamp,
             "schema_version": self.schema_version,
             "tool_version": self.tool_version,
             "cwd": self.cwd,
         }
+        if self.request_id is not None:
+            out["request_id"] = self.request_id
+        if self.timestamp is not None:
+            out["timestamp"] = self.timestamp
         if self.trace_id is not None:
             out["trace_id"] = self.trace_id
         if self.project_root is not None:

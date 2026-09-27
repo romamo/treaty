@@ -42,6 +42,7 @@ def make_app() -> App:
         danger_level="safe",
         exit_codes=(),
         paginated=True,
+        ordered=True,
         supports_raw_payload=True,
         heartbeat=True,
     )

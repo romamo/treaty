@@ -33,6 +33,9 @@ from ._types import FlagType
 
 SCHEMA_VERSION_KEY = "schema_version"
 """``--schema-version`` in a JSON payload; a global flag, so no ``FLAGS`` row"""
+STABLE_OUTPUT_FLAG = "stable-output"
+STABLE_OUTPUT_KEY = "stable_output"
+"""``--stable-output`` in a JSON payload; a global flag, so no ``FLAGS`` row"""
 TIMEOUT_FLAG = "timeout"
 CONFIRM_FLAG = "confirm-destructive"
 RAW_PAYLOAD_FLAG = "raw-payload"
@@ -157,7 +160,14 @@ RESERVED_OPT_IN: Mapping[str, Callable[[Command], bool]] = {
 """Reserved on the commands that opt in to the feature"""
 
 IMPLEMENTED: frozenset[str] = frozenset(
-    {"output-schema", "print-schema", "schema-version", "retries", "retry-delay"}
+    {
+        "output-schema",
+        "print-schema",
+        "schema-version",
+        "stable-output",
+        "retries",
+        "retry-delay",
+    }
 )
 UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED
 """Reserved names whose feature has not landed yet"""

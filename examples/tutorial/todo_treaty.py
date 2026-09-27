@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, Self
 
-from treaty import Affects, App, Arg, Ctx, Exit, Flag, Format
+from treaty import Affects, App, Arg, Ctx, Exit, Flag, Format, Out
 
 Priority = Literal["low", "normal", "high"]
 
@@ -91,6 +91,7 @@ def render_items(data: Sequence[Mapping[str, object]]) -> str:
     "list",
     description="List open items",
     danger_level="safe",
+    sort_key="id",
     renderers={Format.PLAIN: render_items},
     exit_codes=[],
     examples=[("List every item, completed ones too", "todo list --all")],
@@ -135,7 +136,7 @@ class Purge(Common):
 @dataclass(frozen=True, slots=True)
 class Purged:
     effect: str
-    deleted: list[Item]
+    deleted: list[Item] = Out(sort_key="id")
     would_affect: Affects | None = None
 
 

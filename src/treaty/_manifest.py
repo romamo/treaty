@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 
 from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
-from ._framework import NO_STREAM_FLAG, framework_flags
+from ._framework import NO_STREAM_FLAG, STABLE_OUTPUT_KEY, framework_flags
 from ._mode import Format
 from ._schema import JsonSchema
 from ._values import CommandPath, Etag
@@ -80,6 +80,13 @@ _FIXED_GLOBAL_FLAGS: dict[str, object] = {
         "required": False,
         "description": "Major version of the command's output schema to answer in; exit 2 "
         "with SCHEMA_VERSION_UNSUPPORTED when the command does not serve it",
+    },
+    "stable-output": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Byte-identical output for identical calls: meta leaves out "
+        "request_id and timestamp, duration_ms is 0, and volatile data fields are dropped",
     },
     "help": {
         "type": "boolean",
@@ -230,6 +237,11 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         for f in framework_flags(command, json=True)
         if stream_key or f.name != NO_STREAM_FLAG
     )
+    properties[STABLE_OUTPUT_KEY] = {
+        "type": "boolean",
+        "default": False,
+        "description": "Byte-identical output for identical calls (--stable-output)",
+    }
     if command.compat:
         majors = [c.version.major for c in command.compat] + [command.schema_version.major]
         properties["schema_version"] = {

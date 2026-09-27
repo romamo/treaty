@@ -20,6 +20,7 @@ def big_app() -> App:
         danger_level="safe",
         exit_codes=(),
         paginated=False,
+        ordered=True,
     )
     def items(args: NoArgs, ctx: Ctx) -> list[dict[str, object]]:
         return [{"id": i, "name": f"item-{i}"} for i in range(1000)]

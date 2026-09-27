@@ -20,6 +20,7 @@ from ._context import Ctx
 from ._errors import Exit, ParseError
 from ._flags import Arg, Flag
 from ._mode import Format
+from ._out import Out
 from ._profile import (
     SPEC_FALLBACK,
     build_profile,
@@ -97,7 +98,7 @@ class RuleOut:
     title: str
     severity: str
     passed: bool
-    findings: tuple[FindingOut, ...]
+    findings: tuple[FindingOut, ...] = Out(ordered=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,8 +107,10 @@ class AuditOut:
     rules_total: int
     passed: int
     failed: int
-    next_steps: tuple[FindingOut, ...]
-    rules: tuple[RuleOut, ...]
+    next_steps: tuple[FindingOut, ...] = Out(ordered=True)
+    """Most important first"""
+    rules: tuple[RuleOut, ...] = Out(ordered=True)
+    """In the order they are checked"""
 
 
 def load_app(target: str) -> App:
@@ -210,6 +213,7 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     danger_level="safe",
     exit_codes=(),
     default_limit=0,  # a short, fixed list
+    ordered=True,
 )
 def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
     return [{"id": r.id, "title": r.title, "severity": r.severity.value} for r in RULES]
@@ -289,10 +293,10 @@ class InitArgs:
 @dataclass(frozen=True, slots=True)
 class InitOut:
     effect: str
-    directory: str
+    directory: Path
     files: tuple[str, ...]
     written: bool
-    next_steps: tuple[str, ...]
+    next_steps: tuple[str, ...] = Out(ordered=True)
 
 
 def render_init(data: Any) -> str:
@@ -333,7 +337,7 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
                 path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return InitOut(
         effect="would_create" if args.dry_run else "created",
-        directory=str(target),
+        directory=target,
         files=tuple(files),
         written=not args.dry_run,
         next_steps=(
@@ -384,8 +388,9 @@ class ConformanceOut:
     profile: str
     probes: int
     ran: bool
-    levels: dict[str, str] | None
-    checks: tuple[CheckOut, ...]
+    levels: dict[str, str]
+    """Empty until the kit runs"""
+    checks: tuple[CheckOut, ...] = Out(sort_key="id")
 
 
 def render_conformance(data: Any) -> str:
@@ -451,7 +456,7 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
         )
     effect = "updated" if profile_path.exists() else "created"
     write_profile(build_profile(app, command, probes, beside_profile=beside_profile), profile_path)
-    result = ConformanceOut(effect, str(profile_path), len(probes), False, None, ())
+    result = ConformanceOut(effect, str(profile_path), len(probes), False, {}, ())
     if spec_dir is None:
         return result
     # The kit's deadline ends first, so it is killed rather than orphaned by the TIMEOUT path

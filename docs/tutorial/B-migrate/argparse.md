@@ -289,6 +289,10 @@ def render_items(data: Sequence[Mapping[str, object]]) -> str:
 and pass it as `renderers={Format.PLAIN: render_items}` on `list`. The JSON contract does
 not change; the renderer only decides what a person sees.
 
+`list` also passes `sort_key="id"`. treaty sorts every array in `data`, so two identical
+calls return identical bytes; `sort_key` says which field orders an array of objects, and
+`ordered=True` keeps the handler's order instead.
+
 **Check:**
 
 ```bash
