@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 995 passed |
+| `uv run pytest` | 1050 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -265,8 +265,10 @@ The two do not share code.
   `Meta.timestamp` are None under it and left out of `meta`
 - **Settings are read once per run, before routing** (`_Run.load_settings`, from
   `_settings.options` and `resolve`), so every envelope, help and errors included, carries
-  `config_sources` and `effective_config_hash` from `Resolved.meta()`. A bad file answers
-  every path with `CONFIG_INVALID`. The settings class is not a resource: `build_command`
+  `config_sources` and `effective_config_hash` from `Resolved.meta()`. A bad file is held
+  in `_route` as `config_error`: help, `--schema`, `--output-schema`, `version`, and
+  `manifest` (`PURE_PATHS`) still answer, with empty config meta (REQ-F-068); every other
+  command and `--show-config` answer `CONFIG_INVALID`. The settings class is not a resource: `build_command`
   gets it as `provided`, `resource_graph` skips it, and `Resolver` starts with its value
   cached. `App.call` and MCP read `<APP>_CONFIG`, `<APP>_CONTEXT`, `<APP>_INSTANCE_ID`
 - **Every variable treaty reads is `_env.app_var(app, key)`**; `_env.KNOWN` lists the
@@ -276,6 +278,17 @@ The two do not share code.
 - **`App.builtins`** is every path `_register_builtins` added (including `init` under
   `App(init=)`); the audit skips them and the `INIT_REQUIRED` gate in `_invoke` lets them
   through
+- **Error fields only the framework sets ride on `CliExit` subclasses** read in
+  `_Run._exit_envelope`: `RetriesExhausted` (`retries_exhausted`), `_auth.AuthFailure`
+  (`hint`, `refresh_command`, `expires_at`, `required_permission`), and `_locks.LockHeld`
+  (retryable though `PRECONDITION` is not, 03-D1). `CliExit` itself takes only what a
+  handler may set; `network_context` has no keyword at all, for `ctx.http` (10) to fill
+- **`fix_command` is checked twice**: a declared `fix_commands=` value's shape at
+  registration and its target in `App.check_fixes`, which `run`, `call`, and `manifest`
+  call once (reset by every `_register`); a raised one in `_exit_envelope`
+- **`App.redirect`** keeps `_redirects` (old path to `Moved`) and adds the old path to the
+  target's `Command.aliases`; `App.moved` is checked only where a path failed to resolve:
+  `_route`'s unknown-command branch, `_call`, and `_exec_lines`
 - **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
   the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
 
@@ -305,7 +318,10 @@ src/treaty/
   _exit.py       ExitCodeEntry, FrameworkCode, ExitCodeRegistry, signal entries
   _flags.py      Arg/Flag markers, FieldInfo, inspect_fields(), token coercion
   _help.py       plain-mode help renderer (root, group, command)
-  _idempotency.py  IdempotencyKey VO, per-key locked record store, state dir lookup
+  _idempotency.py  IdempotencyKey VO, per-key locked record store, state dir lookup,
+                 session_key for <APP>_SESSION
+  _fix.py        fix_problem(): what makes a fix_command unsafe to run verbatim
+  _locks.py      ctx.lock: named flock under <state>/locks, LockHeld (LOCK_HELD)
   _manifest.py   build_manifest(), command_entry(), command_schema(), etag
   _mode.py       OutputMode resolution (--format, <APP>_FORMAT, CI, tty)
   _env.py        app_var(): the <APP>_ prefix, KNOWN framework variables, UNPREFIXED list

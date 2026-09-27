@@ -125,6 +125,17 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `init-isolated`. Breaking: `TREATY_FORMAT`, `TREATY_MAX_OUTPUT_BYTES`,
   `TREATY_MAX_STDIN_BYTES`, `TREATY_STATE_DIR` are now `<APP>_*` (`<APP>_STATE_DIR` names
   the directory itself), `Ctx.config` is private, and every config write is locked
+- 1.0 plan, error contract (`plans/1.0/03-error-contract.md`): `retry_strategy` and exit
+  code retry defaults, `treaty.already_exists` with `conflict_id`, validated
+  `fix_command` with `fix_commands=` and `App(companions=)`, `treaty.Expired` with
+  `refreshes_auth=`, `treaty.NetworkContext`, `ctx.lock` with `LOCK_HELD`,
+  `<APP>_SESSION` idempotency keys, and `App.redirect` (exit 13, manifest `aliases`);
+  audit rules `retry-hint`, `already-exists`, `delete-not-found`, `fix-declared`,
+  `refresh-declared`, and `lock-declared`. Breaking: `RATE_LIMITED` without
+  `retry_after_ms` and an invalid `fix_command` are `INVALID_EXIT`; a missing login is
+  `UNAUTHENTICATED` and a missing scope at run time `PERMISSION_DENIED`; a read-only
+  command's `TIMEOUT` is retryable. Help, version, schema, and manifest no longer fail on
+  an invalid config file
 
 ## 0.1.x: after the first minor release
 
@@ -158,9 +169,8 @@ landed the same day; what remains under each is follow-up work:
 Every remaining P0 requirement the kit cannot yet check. Each new declaration gets a
 matching audit rule so adoption never requires reading the spec.
 
-- `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028)
-- `REDIRECTED` exit `13` with `error.redirect` for renamed commands and `aliases` in the
-  manifest
+- Done in the 1.0 error contract: `ALREADY_EXISTS` returning the existing resource in
+  `data` (REQ-C-028), and `REDIRECTED` exit `13` with `error.redirect` and manifest `aliases`
 
 ## 0.3.0: richer contracts
 
@@ -170,7 +180,7 @@ matching audit rule so adoption never requires reading the spec.
   forward trailing arguments (REQ-C-027)
 - Multi-step commands with a step manifest and `completed_steps` on timeout and
   cancellation (REQ-C-008)
-- Framework-managed locks with `retry_after_ms` (REQ-F-033)
+- Framework-managed locks with `retry_after_ms` (REQ-F-033): done, `ctx.lock`
 - `--validate-only` (REQ-O-009) and safe-default dry run with `--live` (REQ-O-048)
 - Dependency declarations and a `doctor` built-in (REQ-O-031)
 - Token budget flags `--max-tokens` and `--fields` (REQ-O-049)

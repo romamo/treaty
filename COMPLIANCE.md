@@ -7,8 +7,8 @@ hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declar
 06, pagination; 07, I/O and streams; 08, auth and scopes; 09, async jobs and config
 writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048), and
 re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039), then updated for
-the 1.0 plan's reserved names, response metadata (01), output data contract (05), and
-config layer (02).
+the 1.0 plan's reserved names, response metadata (01), output data contract (05), config
+layer (02), and error contract (03).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -22,14 +22,14 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 87 | 22 | 50 | **62%** |
+| Level 3: full spec | 159 | 93 | 18 | 48 | **64%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 54 | 9 | 16 | **74%** |
-| Command contract (C) | 30 | 15 | 8 | 7 | **63%** |
+| Framework-automatic (F) | 79 | 56 | 9 | 14 | **77%** |
+| Command contract (C) | 30 | 19 | 4 | 7 | **70%** |
 | Opt-in (O) | 50 | 18 | 5 | 27 | **41%** |
 
 ## Open mandatory requirements
@@ -42,7 +42,7 @@ open.
 
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
-| [REQ-F-001](../cli-agent-ergonomics/requirements/f-001-standard-exit-code-table.md) | Standard Exit Code Table | P0 | 1 | Done | FrameworkCode table 0-13 plus signal codes; undeclared exits become UNDECLARED_EXIT_CODE |
+| [REQ-F-001](../cli-agent-ergonomics/requirements/f-001-standard-exit-code-table.md) | Standard Exit Code Table | P0 | 1 | Done | FrameworkCode table 0-13 plus signal codes; undeclared exits become UNDECLARED_EXIT_CODE; `App.redirect` emits 13 with `error.redirect` |
 | [REQ-F-002](../cli-agent-ergonomics/requirements/f-002-exit-code-2-reserved-for-validation-failures.md) | Exit Code 2 Reserved for Validation Failures | P0 | 1 | Done | Exit 2 only from phase 1; a handler's `ParseError` or `Exit.ARG_ERROR` is `VALIDATION_AFTER_START` (exit 1); the confirmation preview runs the handler in dry-run mode only |
 | [REQ-F-003](../cli-agent-ergonomics/requirements/f-003-json-output-mode-auto-activation.md) | JSON Output Mode Auto-Activation | P0 | 1 | Done | Non-TTY stdout or `CI` selects JSON |
 | [REQ-F-004](../cli-agent-ergonomics/requirements/f-004-consistent-json-response-envelope.md) | Consistent JSON Response Envelope | P0 | 1 | Done | Envelope with ok, data, error, warnings, meta on every exit |
@@ -74,11 +74,11 @@ open.
 | [REQ-F-030](../cli-agent-ergonomics/requirements/f-030-child-process-session-tracking.md) | Child Process Session Tracking | P2 | 3 | Partial | `ctx.run` children are tracked and stopped on signal or timeout; no session tracking file |
 | [REQ-F-031](../cli-agent-ergonomics/requirements/f-031-sigterm-forwarding-to-tracked-children.md) | SIGTERM Forwarding to Tracked Children | P2 | 3 | Done | SIGTERM or SIGINT sends SIGTERM to each tracked child's process group, SIGKILL after 2 s, before the `CANCELLED` envelope |
 | [REQ-F-032](../cli-agent-ergonomics/requirements/f-032-session-scoped-temp-directory.md) | Session-Scoped Temp Directory | P2 | 3 | Not started | No session-scoped temp directory |
-| [REQ-F-033](../cli-agent-ergonomics/requirements/f-033-lock-acquisition-with-timeout-and-retry-after-ms.md) | Lock Acquisition with Timeout and retry_after_ms | P2 | 3 | Not started | No public lock API with `retry_after_ms` (ROADMAP 0.3.0) |
+| [REQ-F-033](../cli-agent-ergonomics/requirements/f-033-lock-acquisition-with-timeout-and-retry-after-ms.md) | Lock Acquisition with Timeout and retry_after_ms | P2 | 3 | Done | `ctx.lock(name, wait=, retry_after_ms=)`: `flock` under the state dir's `locks/`, released by the block and by the kernel on exit or SIGTERM; timeout exits 4 `LOCK_HELD`, retryable, with `holder_pid`, `holder_age_ms`; `lock-declared` rule |
 | [REQ-F-034](../cli-agent-ergonomics/requirements/f-034-secret-field-auto-redaction-in-logs.md) | Secret Field Auto-Redaction in Logs | P1 | 3 | Partial | Secret args redacted in errors and tracebacks; response fields are not redacted by name |
 | [REQ-F-035](../cli-agent-ergonomics/requirements/f-035-external-data-trust-tagging.md) | External Data Trust Tagging | P1 | 3 | Not started | No `_trusted` or `_source` tagging |
 | [REQ-F-036](../cli-agent-ergonomics/requirements/f-036-http-client-proxy-environment-variable-compliance.md) | HTTP Client Proxy Environment Variable Compliance | P1 | 3 | Not started | No framework HTTP client, so no proxy or CA handling |
-| [REQ-F-037](../cli-agent-ergonomics/requirements/f-037-network-error-context-block.md) | Network Error Context Block | P1 | 3 | Not started | No `error.network_context` |
+| [REQ-F-037](../cli-agent-ergonomics/requirements/f-037-network-error-context-block.md) | Network Error Context Block | P1 | 3 | Partial | `treaty.NetworkContext` and `error.network_context` frozen (`proxy_used` always written, userinfo redacted, absent on non-network errors, no `CliExit` keyword); the producer, `ctx.http`, lands in workstream 10 (X2) |
 | [REQ-F-038](../cli-agent-ergonomics/requirements/f-038-verbosity-auto-quiet-in-non-tty-context.md) | Verbosity Auto-Quiet in Non-TTY Context | P2 | 3 | Not started | No `progress()`/`log()` API or verbosity flags |
 | [REQ-F-039](../cli-agent-ergonomics/requirements/f-039-duration-tracking-in-response-meta.md) | Duration Tracking in Response Meta | P1 | 3 | Done | `duration_ms` on every envelope, including timeout and cancel |
 | [REQ-F-040](../cli-agent-ergonomics/requirements/f-040-absolute-path-output-enforcement.md) | Absolute Path Output Enforcement | P2 | 3 | Done | Every `Path` in `data` is joined to `meta.cwd` (lexical, no symlink resolution); `path-typed` audit rule covers output fields; `--cwd` (O-017) will change the base |
@@ -104,7 +104,7 @@ open.
 | [REQ-F-060](../cli-agent-ergonomics/requirements/f-060-third-party-stdout-interception.md) | Third-Party Stdout Interception | P1 | 3 | Partial | `sys.stdout` is swapped to stderr during a run with a warning; writes to fd 1 and import-time prints are not caught |
 | [REQ-F-061](../cli-agent-ergonomics/requirements/f-061-symlink-loop-detection-in-traversal-utilities.md) | Symlink Loop Detection in Traversal Utilities | P1 | 3 | Not started | No traversal utilities |
 | [REQ-F-062](../cli-agent-ergonomics/requirements/f-062-glob-expansion-and-word-splitting-prevention.md) | Glob Expansion and Word-Splitting Prevention | P0 | 2 | Done | Argument lists only; string argv is `SHELL_STRING_PROHIBITED` at registration (source scan) or run time. Debug-mode argv logging not applicable: treaty has no debug mode; argv is a JSON array in error context |
-| [REQ-F-063](../cli-agent-ergonomics/requirements/f-063-credential-expiry-structured-error.md) | Credential Expiry Structured Error | P1 | 3 | Partial | PERMISSION_DENIED and AUTH_REQUIRED codes exist; no `refresh_command`/`required_permission` |
+| [REQ-F-063](../cli-agent-ergonomics/requirements/f-063-credential-expiry-structured-error.md) | Credential Expiry Structured Error | P1 | 3 | Done | Exit 8 `UNAUTHENTICATED` with `hint`; `treaty.Expired(at=)` gives exit 8 `CREDENTIALS_EXPIRED` with `expires_at` and `refresh_command` from `refreshes_auth=True`; exit 7 `PERMISSION_DENIED` with `required_permission`; HTTP 401/403 mapping comes with `ctx.http` (10) |
 | [REQ-F-064](../cli-agent-ergonomics/requirements/f-064-output-truncation-detection-and-warning.md) | Output Truncation Detection and Warning | P1 | 3 | Done | `Flag(max_bytes=N)` exits 2 with `FIELD_TOO_LARGE` on every input route, joined into `error.errors`, published as `x-max-bytes`; `ctx.truncated()` adds the marker, a `FIELD_TRUNCATED` warning on `data.<field>`, and `meta.truncated`; `field-limits` audit rule. The byte cap still names fields as `$.x` |
 | [REQ-F-065](../cli-agent-ergonomics/requirements/f-065-pipeline-exit-code-propagation.md) | Pipeline Exit Code Propagation | P0 | 2 | Done | `ctx.pipeline` checks every stage; the first failing stage raises `SUBPROCESS_FAILED` with `stage`. The parent-shell `pipefail` warning is not applicable: a child cannot observe its parent shell's options |
 | [REQ-F-066](../cli-agent-ergonomics/requirements/f-066-subprocess-locale-normalization.md) | Subprocess Locale Normalization | P1 | 3 | Not started | No `LC_ALL` injection |
@@ -132,14 +132,14 @@ open.
 | [REQ-C-004](../cli-agent-ergonomics/requirements/c-004-destructive-commands-must-support-dry-run.md) | Destructive Commands Must Support --dry-run | P0 | 1 | Done | Destructive commands require `dry_run` and a `would_affect` field; dry runs must return `would_*` and `treaty.Affects`, else `INVALID_EFFECT` |
 | [REQ-C-005](../cli-agent-ergonomics/requirements/c-005-interactive-commands-must-support-yes-non-interact.md) | Interactive Commands Must Support --yes / --non-interactive | P0 | 2 | Done | `interactive=True` adds `--yes` and `--non-interactive` and `interactive: true` in the manifest and `--schema`; a prompt that cannot be shown exits 4 |
 | [REQ-C-006](../cli-agent-ergonomics/requirements/c-006-all-args-validated-in-phase-1.md) | All Args Validated in Phase 1 | P0 | 2 | Done | All phase-1 errors in `error.errors` with field and value |
-| [REQ-C-007](../cli-agent-ergonomics/requirements/c-007-mutating-commands-accept-idempotency-key.md) | Mutating Commands Accept --idempotency-key | P1 | 3 | Partial | `--idempotency-key` with replay as `noop`; no auto-generated key |
+| [REQ-C-007](../cli-agent-ergonomics/requirements/c-007-mutating-commands-accept-idempotency-key.md) | Mutating Commands Accept --idempotency-key | P1 | 3 | Done | `--idempotency-key` with replay as `noop`; with `<APP>_SESSION` set, a key derived from session, command, and arguments, in `meta.idempotency_key` |
 | [REQ-C-008](../cli-agent-ergonomics/requirements/c-008-multi-step-commands-emit-step-manifest.md) | Multi-Step Commands Emit Step Manifest | P1 | 3 | Not started | No step manifest (ROADMAP 0.3.0) |
 | [REQ-C-009](../cli-agent-ergonomics/requirements/c-009-multi-step-commands-report-completed-failed-skippe.md) | Multi-Step Commands Report completed/failed/skipped | P1 | 3 | Not started | No batch summary contract |
 | [REQ-C-010](../cli-agent-ergonomics/requirements/c-010-background-process-commands-declare-metadata.md) | Background-Process Commands Declare Metadata | P2 | 3 | Not started | No background-process metadata |
 | [REQ-C-011](../cli-agent-ergonomics/requirements/c-011-commands-declare-filesystem-side-effects.md) | Commands Declare Filesystem Side Effects | P3 | 3 | Not started | No filesystem side-effect declaration |
 | [REQ-C-012](../cli-agent-ergonomics/requirements/c-012-commands-with-network-i-o-support-timeout.md) | Commands with Network I/O Support --timeout | P0 | 2 | Done | `has_network_io` adds `--timeout` (`0` disables it); `ctx.timeout` for handlers; `network-timeout` audit rule flags calls without `timeout=` |
 | [REQ-C-013](../cli-agent-ergonomics/requirements/c-013-error-responses-include-code-and-message.md) | Error Responses Include Code and Message | P0 | 1 | Done | Every `error.message` is normalized to a sentence; recoverable errors always carry `suggestion`; `exit-code-suggestion` audit rule |
-| [REQ-C-014](../cli-agent-ergonomics/requirements/c-014-error-responses-include-retryable-and-retry-after-.md) | Error Responses Include retryable and retry_after_ms | P1 | 3 | Partial | `retryable` always present; RATE_LIMITED allowed without `retry_after_ms` |
+| [REQ-C-014](../cli-agent-ergonomics/requirements/c-014-error-responses-include-retryable-and-retry-after-.md) | Error Responses Include retryable and retry_after_ms | P1 | 3 | Done | `retryable` always present; `RATE_LIMITED` without `retry_after_ms` is `INVALID_EXIT`; `retry_strategy` and exit code defaults; a read-only command's `TIMEOUT` is side_effects none and retryable; `retry-hint` rule |
 | [REQ-C-015](../cli-agent-ergonomics/requirements/c-015-commands-declare-input-and-output-schema.md) | Commands Declare Input and Output Schema | P1 | 3 | Done | `--schema` has parameters and output schema, derived from the dataclass |
 | [REQ-C-016](../cli-agent-ergonomics/requirements/c-016-secrets-accepted-only-via-env-var-or-file.md) | Secrets Accepted Only via Env Var or File | P1 | 3 | Done | Secrets only via `--x-from-env`, `--x-from-file`, or `<APP>_<X>` |
 | [REQ-C-017](../cli-agent-ergonomics/requirements/c-017-commands-register-cleanup-hook.md) | Commands Register cleanup() Hook | P1 | 3 | Partial | `cleanup=` runs on signals only, not on normal exit or timeout; no resource `release` |
@@ -153,9 +153,9 @@ open.
 | [REQ-C-025](../cli-agent-ergonomics/requirements/c-025-config-writing-commands-declare-write-scope.md) | Config-Writing Commands Declare Write Scope | P0 | 2 | Done | `config_write_scope="local"` writes `./.<app>.toml`, `--global` the XDG user file with `GLOBAL_CONFIG_MODIFIED`; `ctx.write_config` is atomic and locks global writes; `config-write-scope` audit warning |
 | [REQ-C-026](../cli-agent-ergonomics/requirements/c-026-commands-declare-conditional-argument-dependencies.md) | Commands Declare Conditional Argument Dependencies | P1 | 3 | Not started | No conditional argument rules (ROADMAP 0.3.0) |
 | [REQ-C-027](../cli-agent-ergonomics/requirements/c-027-commands-declare-option-placement.md) | Commands Declare Option Placement Convention | P1 | 3 | Not started | No `option_placement`; tokens after `--` are rejected, not forwarded |
-| [REQ-C-028](../cli-agent-ergonomics/requirements/c-028-already-exists-response-pattern.md) | ALREADY_EXISTS Response Pattern | P1 | 3 | Partial | `Exit.CONFLICT(code="ALREADY_EXISTS", data=...)` works; not a prescribed pattern |
+| [REQ-C-028](../cli-agent-ergonomics/requirements/c-028-already-exists-response-pattern.md) | ALREADY_EXISTS Response Pattern | P1 | 3 | Done | `treaty.already_exists(existing, conflict_id=)`: exit 6, `ALREADY_EXISTS`, `conflict_id`, the resource in `data`; `already-exists` and `delete-not-found` rules; the scaffold follows both |
 | [REQ-C-029](../cli-agent-ergonomics/requirements/c-029-command-declares-required-scopes.md) | Command Declares Required Scopes | P0 | 2 | Done | `requires_auth=True` refuses registration without `required_scopes`; `required_scopes` in every schema, `[]` by default; `broad-scope` audit rule for blanket scopes |
-| [REQ-C-030](../cli-agent-ergonomics/requirements/c-030-error-responses-include-fix-command.md) | Error Responses Include Executable fix_command | P1 | 3 | Partial | `fix_command` emitted but not validated |
+| [REQ-C-030](../cli-agent-ergonomics/requirements/c-030-error-responses-include-fix-command.md) | Error Responses Include Executable fix_command | P1 | 3 | Done | `fix_commands=` checked before the first run, raised ones when raised: no `<`, `>`, `$`, shell syntax, or unbalanced quotes; the app or `App(companions=)`; never destructive; `fix-declared` rule |
 
 ## Opt-in
 

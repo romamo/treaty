@@ -138,13 +138,36 @@ redirect onto a missing target, or from a live path, is a `RegistrationError`.
 
 ## Tasks
 
-- [ ] `RetryStrategy`, entry defaults, `RATE_LIMITED` check, `retry-hint` audit rule
-- [ ] `ErrorDetail` new fields and `to_json`; envelope schema tests
-- [ ] `already_exists` helper, `conflict_id`, `already-exists` and not-found audit rules
-- [ ] `check_fix`, `fix_commands=`, `companions=`; runtime check on raises; tutorial update
-- [ ] `UNAUTHENTICATED`, `Expired`, `refreshes_auth=`, `required_permission`
-- [ ] `NetworkContext` type (producer lands in 10)
-- [ ] `ctx.lock`, `LOCK_HELD`, release on exit and SIGTERM, `lock-declared` rule
-- [ ] `<APP>_SESSION` auto key and `meta.idempotency_key`
-- [ ] `App.redirect`, exit 13 on argv and `exec`, manifest `aliases`, conformance probe
-- [ ] Update COMPLIANCE.md rows (C-007, C-014, C-028, C-030, F-033, F-037, F-063), README, HANDOFF, ROADMAP
+- [x] `RetryStrategy`, entry defaults, `RATE_LIMITED` check, `retry-hint` audit rule:
+  A `RATE_LIMITED` delay at or below 0 (a reset time already past) becomes 1 ms instead of
+  `INVALID_EXIT`; only a missing delay fails. Added for the `TIMEOUT` criterion: a
+  read-only (`safe`) command's `TIMEOUT` entry is side_effects none and retryable
+  (`ExitCodeRegistry.timeout`), in its manifest entry and its errors
+- [x] `ErrorDetail` new fields and `to_json`; envelope schema tests
+- [x] `already_exists` helper, `conflict_id`, `already-exists` and not-found audit rules:
+  `already-exists` is advice, not a warning: without a `Literal` effect it falls back to
+  the command name, and a todo `add` creates a new item every time. The not-found rule is
+  `delete-not-found`
+- [x] `check_fix`, `fix_commands=`, `companions=`; runtime check on raises; tutorial update:
+  `_fix.fix_problem`; a declared fix's shape is checked at registration and its target by
+  `App.check_fixes` on the first `run`, `call`, or `manifest`. Added rule `fix-declared`
+  for a literal `fix_command=` in a raise
+- [x] `UNAUTHENTICATED`, `Expired`, `refreshes_auth=`, `required_permission`:
+  The gate raises `_auth.AuthFailure`, a `CliExit` carrying the fields `CliExit` has no
+  keyword for. `check-permissions` keeps `INSUFFICIENT_SCOPES` under exit 8. Added rule
+  `refresh-declared`
+- [x] `NetworkContext` type (producer lands in 10)
+- [x] `ctx.lock`, `LOCK_HELD`, release on exit and SIGTERM, `lock-declared` rule:
+  Simplified: the lock file is not unlinked (holder pid and start go in `<name>.holder`),
+  since the `flock` is the lock and the kernel drops it on any exit; the block releases it
+  in a `finally` until 06's run-scoped teardown lands. `PRECONDITION` is implicit on every
+  command, so `lock-declared` instead flags handlers that lock a file by hand
+- [x] `<APP>_SESSION` auto key and `meta.idempotency_key`:
+  The key is `session-<sha256(session, fingerprint)[:32]>`; `meta.idempotency_key`
+  appears only for a derived key
+- [x] `App.redirect`, exit 13 on argv and `exec`, manifest `aliases`, conformance probe:
+  `error.code` is `REDIRECTED`; in `exec` and `App.call` the replacement is the new path.
+  No conformance probe: the spec's profile has no redirect probe kind (spec gap). No audit
+  rule: a removed command leaves nothing to scan
+- [x] Update COMPLIANCE.md rows (C-007, C-014, C-028, C-030, F-033, F-037, F-063), README, HANDOFF, ROADMAP:
+  F-037 stays Partial until `ctx.http` (10) fills the block; no changelog file yet (15)
