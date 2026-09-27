@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import sys
 from collections.abc import Mapping
 from typing import Any, TextIO, cast
@@ -31,6 +32,7 @@ from ._tools import (
     output_schema,
     tool_description,
     tool_entries,
+    tool_list,
     tool_name,
 )
 
@@ -42,6 +44,7 @@ __all__ = [
     "output_schema",
     "tool_description",
     "tool_entries",
+    "tool_list",
     "tool_name",
 ]
 
@@ -146,18 +149,23 @@ async def serve(app: App) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``treaty-mcp module:app``: serve that app's commands as MCP tools over stdio"""
+    """``treaty-mcp module:app``: serve that app's commands as MCP tools over stdio;
+    ``--list-tools`` prints them as JSON and exits, for ``mcp-validate`` (REQ-O-035)"""
     from ._cli import load_app
 
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 1 or args[0].startswith("-"):
-        sys.stderr.write("usage: treaty-mcp module:app\n")
+    listing = args[1:] == ["--list-tools"]
+    if not (len(args) == 1 or listing) or args[0].startswith("-"):
+        sys.stderr.write("usage: treaty-mcp module:app [--list-tools]\n")
         return 2
     try:
         app = load_app(args[0])
     except CliExit as exc:
         sys.stderr.write(f"treaty-mcp: {exc.code}: {exc.message}\n")
         return 2
+    if listing:
+        sys.stdout.write(json.dumps(tool_list(app), indent=2, sort_keys=True) + "\n")
+        return 0
     try:
         import mcp  # noqa: F401 - probe for the optional dependency
     except ModuleNotFoundError:

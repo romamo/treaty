@@ -56,6 +56,8 @@ from ._builtins import (
     register_changelog,
     register_cleanup,
     register_doctor,
+    register_generate_skills,
+    register_mcp_validate,
     register_status,
 )
 from ._cache import Cache, CachePolicy, cache_dir
@@ -354,9 +356,10 @@ class App:
         changelog-add`` writes, shipped with the package; it adds the ``changelog``
         built-in (REQ-O-029).
 
-        ``doctor``, ``cleanup``, ``status``, ``changelog``, and ``audit-log`` are built-ins
-        that yield: an app command or group of the same name replaces it (13-D1).
-        ``manifest``, ``version``, and ``exec`` are reserved."""
+        ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
+        ``mcp-validate``, and ``audit-log`` are built-ins that yield: an app command or
+        group of the same name replaces it (13-D1). ``manifest``, ``version``, and ``exec``
+        are reserved."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -1049,6 +1052,8 @@ class App:
         self._yielding.add(register_doctor(self))
         self._yielding.add(register_cleanup(self))
         self._yielding.add(register_status(self))
+        self._yielding.add(register_generate_skills(self))
+        self._yielding.add(register_mcp_validate(self))
         if self.schema_changelog is not None:
             self._yielding.add(register_changelog(self, self.changelog))
         if self.audit_log is not None:

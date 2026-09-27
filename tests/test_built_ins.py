@@ -4,6 +4,7 @@ REQ-O-041, and the ``status --show-side-effects`` half of REQ-C-011."""
 import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -14,10 +15,12 @@ import pytest
 from conftest import needs_posix_permissions, spec_validator
 from test_network_and_fs import Origin, Proxy, serving
 
+from examples.deployctl import app as deployctl
 from treaty import App, Check, Ctx, NoArgs, RegistrationError, SideEffect, endpoint
 from treaty._audit import audit
 from treaty._changelog import diff
 from treaty._deps import CheckFn
+from treaty._tools import tool_list
 
 
 def run(
@@ -638,3 +641,202 @@ def test_changelog_add_records_the_manifest_diff_and_the_changelog_serves_it(
     )
     entries = json.loads(done.stdout)["data"]["entries"]
     assert [e["version"] for e in entries] == ["2.0.0"]
+
+
+# REQ-O-034
+
+SKILL_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+
+
+def frontmatter(text: str) -> dict[str, object]:
+    """Every value is JSON, which is valid YAML: parse it without a YAML library"""
+    assert text.startswith("---\n")
+    block, sep, _ = text[4:].partition("\n---\n")
+    assert sep
+    fields: dict[str, object] = {}
+    for line in block.splitlines():
+        key, colon, value = line.partition(": ")
+        assert colon and re.fullmatch(r"[a-z_]+", key)
+        fields[key] = json.loads(value)
+    return fields
+
+
+def usage(text: str) -> list[str]:
+    block = text.partition("## Usage\n\n```bash\n")[2].partition("```")[0]
+    return block.splitlines()
+
+
+def generated(tmp_path: Path, app: App) -> dict[str, str]:
+    code, envelope = run(app, ["generate-skills", "--output-dir", str(tmp_path / "skills")])
+    assert code == 0 and data_of(envelope)["effect"] == "created"
+    return {p.name: p.read_text() for p in (tmp_path / "skills").iterdir()}
+
+
+def test_tool_generate_skills_output_dir_skills_creates_context_md_and_one_skill_md_per_command(
+    tmp_path: Path,
+) -> None:
+    app = deployctl
+    files = generated(tmp_path, app)
+    user = sorted(p.value for p in app.commands if p not in app.builtins)
+    assert sorted(files) == sorted(
+        ["CONTEXT.md", *(f"SKILL-{p.replace('.', '-')}.md" for p in user)]
+    )
+    _, envelope = run(app, ["generate-skills", "--output-dir", str(tmp_path / "skills")])
+    skills = data_of(envelope)["skills"]
+    assert data_of(envelope)["effect"] == "noop" and isinstance(skills, list)
+    assert {s["type"] for s in skills} == {"context", "skill"}
+    assert all(Path(s["path"]).is_absolute() for s in skills)
+
+
+def test_each_skill_file_includes_a_yaml_frontmatter_block_with_name_description_and_args(
+    tmp_path: Path,
+) -> None:
+    app = deployctl
+    for name, text in generated(tmp_path, app).items():
+        if name == "CONTEXT.md":
+            continue
+        front = frontmatter(text)
+        assert set(front) == {"name", "description", "version", "command", "args"}
+        assert front["version"] == app.version
+        args = front["args"]
+        assert isinstance(args, dict) and args["type"] == "object"
+
+
+def test_each_skill_file_includes_at_least_three_example_invocations(tmp_path: Path) -> None:
+    app = deployctl
+    for name, text in generated(tmp_path, app).items():
+        if name == "CONTEXT.md":
+            continue
+        command = str(frontmatter(text)["command"])
+        lines = usage(text)
+        assert len(lines) >= 3 and all(line.startswith(command) for line in lines)
+        assert f"{command} --schema" in lines
+
+
+def test_the_generated_files_pass_validation_by_an_openclaw_compatible_skill_loader(
+    tmp_path: Path,
+) -> None:
+    for name, text in generated(tmp_path, deployctl).items():
+        if name == "CONTEXT.md":
+            assert text.startswith("# ") and "## Exit codes" in text
+            continue
+        front = frontmatter(text)
+        assert isinstance(front["name"], str) and len(front["name"]) <= 64
+        assert SKILL_NAME.fullmatch(front["name"])
+        assert isinstance(front["description"], str) and 0 < len(front["description"]) <= 1024
+        body = text.partition("\n---\n")[2]
+        assert body.lstrip().startswith("# ") and "## Guardrails" in body
+
+
+# REQ-O-035
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def listed_tools(path: Path) -> dict[str, object]:
+    """``treaty-mcp examples.deployctl:app --list-tools``, as a CI step runs it"""
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from treaty._mcp import main; sys.exit(main())",
+            "examples.deployctl:app",
+            "--list-tools",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    path.write_text(done.stdout)
+    listing = json.loads(done.stdout)
+    assert isinstance(listing, dict)
+    return listing
+
+
+def drift_of(envelope: dict[str, object]) -> dict[str, object]:
+    drift = data_of(envelope)["drift"]
+    assert isinstance(drift, dict)
+    return drift
+
+
+def test_tool_mcp_validate_mcp_schema_file_exits_0_if_schemas_match_non_zero_if_drift_is_detected(
+    tmp_path: Path,
+) -> None:
+    listing = listed_tools(tmp_path / "mcp.json")
+    assert listing["cli_version"] == deployctl.version
+    code, envelope = run(
+        deployctl, ["mcp-validate", "--mcp-schema-file", str(tmp_path / "mcp.json")]
+    )
+    assert code == 0
+    assert drift_of(envelope) == {"added": [], "removed": [], "changed": [], "missing_from_mcp": []}
+    tools = listing["tools"]
+    assert isinstance(tools, list)
+    (tmp_path / "stale.json").write_text(json.dumps({"tools": tools[1:]}))
+    code, envelope = run(
+        deployctl, ["mcp-validate", "--mcp-schema-file", str(tmp_path / "stale.json")]
+    )
+    error = envelope["error"]
+    assert code == 1 and isinstance(error, dict) and error["code"] == "SCHEMA_DRIFT_DETECTED"
+
+
+def test_drift_is_reported_as_a_structured_json_diff_with_added_removed_and_changed_fields(
+    tmp_path: Path,
+) -> None:
+    listing = listed_tools(tmp_path / "mcp.json")
+    tools = {t["name"]: t for t in listing["tools"]}  # type: ignore[union-attr]
+    props = tools["deploy_rollback"]["inputSchema"]["properties"]
+    del props["strategy"]
+    props["region"] = {"type": "string"}
+    props["to"] = {"type": "null"}
+    (tmp_path / "mcp.json").write_text(json.dumps({"tools": list(tools.values())}))
+    code, envelope = run(
+        deployctl, ["mcp-validate", "--mcp-schema-file", str(tmp_path / "mcp.json")]
+    )
+    assert code == 1
+    assert drift_of(envelope) == {
+        "added": [{"command": "deploy.rollback", "field": "input.strategy"}],
+        "removed": [{"command": "deploy.rollback", "field": "input.region"}],
+        "changed": [
+            {
+                "command": "deploy.rollback",
+                "field": "input.to",
+                "cli_type": "string|null",
+                "mcp_type": "null",
+            }
+        ],
+        "missing_from_mcp": [],
+    }
+
+
+def test_a_new_cli_command_not_present_in_the_mcp_schema_is_reported_as_missing_from_mcp(
+    tmp_path: Path,
+) -> None:
+    app = plain_app()
+    (tmp_path / "mcp.json").write_text(json.dumps(tool_list(app)))
+
+    @app.command("bye", description="Say bye", danger_level="safe", exit_codes=())
+    def bye(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["mcp-validate", "--mcp-schema-file", str(tmp_path / "mcp.json")])
+    assert code == 1 and drift_of(envelope)["missing_from_mcp"] == ["bye"]
+
+
+def test_the_command_can_be_run_in_ci_to_detect_schema_staleness_before_deployment(
+    tmp_path: Path,
+) -> None:
+    listed_tools(tmp_path / "mcp.json")
+    check = [
+        sys.executable,
+        "-c",
+        "from examples.deployctl import app; app.main()",
+        "mcp-validate",
+        "--mcp-schema-file",
+        str(tmp_path / "mcp.json"),
+    ]
+    assert subprocess.run(check, cwd=ROOT, capture_output=True, check=False).returncode == 0
+    (tmp_path / "mcp.json").write_text('{"tools": []}')
+    assert subprocess.run(check, cwd=ROOT, capture_output=True, check=False).returncode == 1
+    (tmp_path / "mcp.json").write_text("[]")
+    assert subprocess.run(check, cwd=ROOT, capture_output=True, check=False).returncode == 4

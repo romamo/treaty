@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 import glob
+import json
 import os
 import shlex
 import shutil
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from ._atomic import write_atomic
 from ._auth import Expired
 from ._cache import cache_dir
 from ._changelog import ChangelogEntry, version_key
@@ -41,6 +43,8 @@ from ._journal import AuditLog, entry_time, log_path, parse_since, read_entries
 from ._out import Out
 from ._redact import scrub
 from ._session import outputs
+from ._skills import render, skill_file
+from ._tools import tool_entries, tool_fields
 from ._values import CommandPath, ExitCodeName
 
 if TYPE_CHECKING:
@@ -415,6 +419,193 @@ def register_changelog(app: App, entries: tuple[ChangelogEntry, ...]) -> Command
         return Changelog([e for e in entries if version_key(e.version) > since])
 
     return CHANGELOG_PATH
+
+
+GENERATE_SKILLS_PATH = CommandPath("generate-skills")
+
+
+@dataclass(frozen=True, slots=True)
+class GenerateSkillsArgs:
+    output_dir: Path = Flag(
+        default=Path("skills"), description="Directory to write the skill files to"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SkillFile:
+    path: str
+    type: str
+    """``context`` for CONTEXT.md, ``skill`` for a command's file"""
+    command: str | None
+    format: str = "markdown"
+
+
+@dataclass(frozen=True, slots=True)
+class Skills:
+    effect: str
+    skills: list[SkillFile] = Out(sort_key="path")
+
+
+def register_generate_skills(app: App) -> CommandPath:
+    @app.command(
+        GENERATE_SKILLS_PATH.value,
+        description="Write agent skill files from the command schemas: CONTEXT.md and one "
+        "SKILL-<command>.md per command, each with YAML frontmatter",
+        danger_level="mutating",
+        exit_codes=(),
+        examples=[
+            ("Write ./skills", f"{app.name} generate-skills"),
+            (
+                "Write them where Claude Code finds them",
+                f"{app.name} generate-skills --output-dir .claude/skills/{app.name}",
+            ),
+        ],
+    )
+    def generate_skills(args: GenerateSkillsArgs, ctx: Ctx) -> Skills:
+        where = (ctx.cwd / args.output_dir).resolve()
+        where.mkdir(parents=True, exist_ok=True)
+        files: list[SkillFile] = []
+        changed = existed = 0
+        paths = {skill_file(p): p for p in app.commands}
+        for name, text in render(app).items():
+            target = where / name
+            old = target.read_text(encoding="utf-8") if target.is_file() else None
+            existed += old is not None
+            if old != text:
+                write_atomic(target, text, new_mode=0o644)
+                changed += 1
+            path = paths.get(name)
+            kind = "context" if path is None else "skill"
+            files.append(SkillFile(str(target), kind, None if path is None else path.value))
+        effect = "noop" if not changed else "updated" if existed else "created"
+        return Skills(effect, files)
+
+    return GENERATE_SKILLS_PATH
+
+
+MCP_VALIDATE_PATH = CommandPath("mcp-validate")
+SCHEMA_DRIFT_DETECTED = "SCHEMA_DRIFT_DETECTED"
+
+
+@dataclass(frozen=True, slots=True)
+class McpValidateArgs:
+    mcp_schema_file: Path = Flag(
+        description="The MCP tool list to compare, as treaty-mcp module:app --list-tools writes it"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FieldDrift:
+    command: str
+    field: str | None
+    """``input.<flag>`` or ``data.<field>``; None for a whole tool the CLI no longer has"""
+
+
+@dataclass(frozen=True, slots=True)
+class TypeDrift:
+    command: str
+    field: str
+    cli_type: str
+    mcp_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class Drift:
+    added: list[FieldDrift]
+    """In the CLI schema, not the MCP one"""
+    removed: list[FieldDrift]
+    """In the MCP schema, not the CLI one"""
+    changed: list[TypeDrift]
+    missing_from_mcp: list[str]
+    """CLI commands the MCP schema has no tool for"""
+
+
+@dataclass(frozen=True, slots=True)
+class McpValidation:
+    drift: Drift
+
+
+def register_mcp_validate(app: App) -> CommandPath:
+    @app.command(
+        MCP_VALIDATE_PATH.value,
+        description="Compare a saved MCP tool list with the current command schemas; drift "
+        "exits 1 with SCHEMA_DRIFT_DETECTED and the diff in data",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            (
+                "Check the committed tool list in CI",
+                f"{app.name} mcp-validate --mcp-schema-file mcp.json",
+            )
+        ],
+    )
+    def mcp_validate(args: McpValidateArgs, ctx: Ctx) -> McpValidation:
+        listed = _read_tools(ctx.cwd / args.mcp_schema_file)
+        live = {e.name: e for e in tool_entries(app)}
+        drift = Drift([], [], [], [])
+        for name, entry in live.items():
+            tool = listed.get(name)
+            if tool is None:
+                drift.missing_from_mcp.append(entry.path.value)
+                continue
+            cli = tool_fields(
+                {"inputSchema": entry.input_schema, "outputSchema": entry.output_schema}
+            )
+            mcp = tool_fields(tool)
+            where = entry.path.value
+            drift.added.extend(FieldDrift(where, f) for f in sorted(set(cli) - set(mcp)))
+            drift.removed.extend(FieldDrift(where, f) for f in sorted(set(mcp) - set(cli)))
+            drift.changed.extend(
+                TypeDrift(where, f, cli[f], mcp[f])
+                for f in sorted(set(cli) & set(mcp))
+                if cli[f] != mcp[f]
+            )
+        drift.removed.extend(FieldDrift(name, None) for name in sorted(set(listed) - set(live)))
+        result = McpValidation(drift)
+        if drift.added or drift.removed or drift.changed or drift.missing_from_mcp:
+            raise CliExit(
+                ExitCodeName("GENERAL_ERROR"),
+                "the MCP tool list differs from the CLI's command schemas",
+                code=SCHEMA_DRIFT_DETECTED,
+                context={"mcp_schema_file": str(args.mcp_schema_file)},
+                fix_required=f"regenerate it: treaty-mcp <module>:app --list-tools > "
+                f"{args.mcp_schema_file}",
+                data=result,
+            )
+        return result
+
+    return MCP_VALIDATE_PATH
+
+
+def _read_tools(path: Path) -> dict[str, dict[str, object]]:
+    """The tools of an MCP ``tools/list`` result or ``treaty-mcp --list-tools`` file"""
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise CliExit(
+            ExitCodeName("NOT_FOUND"),
+            f"no MCP schema file at {path}",
+            context={"mcp_schema_file": str(path)},
+        ) from None
+    except (OSError, ValueError) as exc:
+        raise CliExit(
+            ExitCodeName("PRECONDITION"),
+            f"{path} cannot be read as JSON: {exc}",
+            code="MCP_SCHEMA_INVALID",
+            context={"mcp_schema_file": str(path)},
+        ) from None
+    tools = loaded.get("tools") if isinstance(loaded, dict) else None
+    if not isinstance(tools, list) or not all(
+        isinstance(t, dict) and isinstance(t.get("name"), str) for t in tools
+    ):
+        raise CliExit(
+            ExitCodeName("PRECONDITION"),
+            f"{path} has no tools list of named tools",
+            code="MCP_SCHEMA_INVALID",
+            context={"mcp_schema_file": str(path)},
+            fix_required="write it with treaty-mcp <module>:app --list-tools",
+        )
+    return {t["name"]: t for t in tools}
 
 
 AUDIT_LOG_PATH = CommandPath("audit-log")

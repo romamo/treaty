@@ -5,6 +5,7 @@ and no ``App`` import, so ``_builtins`` can compare an app against a saved tool 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -118,3 +119,59 @@ def tool_entries(app: App) -> list[ToolEntry]:
             )
         )
     return entries
+
+
+def tool_list(app: App) -> dict[str, object]:
+    """``treaty-mcp module:app --list-tools``: the tools as MCP's ``tools/list`` names
+    them, with the CLI version, to commit and compare with ``mcp-validate`` (REQ-O-035)"""
+    return {
+        "cli_version": app.version,
+        "tools": [
+            {
+                "name": e.name,
+                "description": e.description,
+                "inputSchema": e.input_schema,
+                "outputSchema": e.output_schema,
+                "annotations": {
+                    "readOnlyHint": e.read_only,
+                    "destructiveHint": e.destructive,
+                    "idempotentHint": e.read_only,
+                    "openWorldHint": e.open_world,
+                },
+            }
+            for e in tool_entries(app)
+        ],
+    }
+
+
+def _type(schema: object) -> str:
+    if not isinstance(schema, dict):
+        return "any"
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        return "|".join(str(k) for k in kind)
+    if isinstance(kind, str):
+        return kind
+    members = schema.get("anyOf") or schema.get("oneOf")
+    if isinstance(members, list):
+        return "|".join(_type(m) for m in members)
+    return "enum" if "enum" in schema else "any"
+
+
+def tool_fields(tool: Mapping[str, object]) -> dict[str, str]:
+    """``input.<flag>`` and ``data.<field>`` of one listed tool, each with its JSON type"""
+    fields: dict[str, str] = {}
+    inputs = tool.get("inputSchema")
+    properties = inputs.get("properties") if isinstance(inputs, dict) else None
+    for name, schema in (properties or {}).items():
+        fields[f"input.{name}"] = _type(schema)
+    data: object = tool.get("outputSchema")
+    for key in ("else", "then", "properties", "data", "anyOf"):
+        data = data.get(key) if isinstance(data, dict) else None
+    data = data[0] if isinstance(data, list) and data else None
+    if isinstance(data, dict) and data.get("type") == "array":
+        data = data.get("items")
+    properties = data.get("properties") if isinstance(data, dict) else None
+    for name, schema in (properties or {}).items():
+        fields[f"data.{name}"] = _type(schema)
+    return fields
