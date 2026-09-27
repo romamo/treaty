@@ -835,7 +835,13 @@ def test_a_later_spawn_stops_processes_past_their_max_lifetime(tmp_path: Path) -
     app = watcher_app(tmp_path, lifetime=1)
     _, first = run(app, ["start-watcher"])
     old = first["data"]["background_pid"]  # type: ignore[index]
-    time.sleep(1.2)
+    [entry] = (tmp_path / "background" / "start-watcher.pids").read_text().splitlines()
+    expires = int(entry.split()[1])
+    assert expires <= time.time() + 2  # one second's lifetime, rounded to a whole second
+    wait_until = time.monotonic() + 10
+    while time.time() < expires:  # the recorded deadline, not a guess at it
+        assert time.monotonic() < wait_until
+        time.sleep(0.05)
     _, second = run(app, ["start-watcher"])
     new = second["data"]["background_pid"]  # type: ignore[index]
     try:
