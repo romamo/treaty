@@ -267,21 +267,23 @@ _CODE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 def sentence_app() -> App:
     demo = App("democtl", version="1.0.0", default_timeout=0.2)
 
-    @demo.command("crash", description="Raise a bug")
+    @demo.command("crash", description="Raise a bug", danger_level="safe", exit_codes=())
     def crash(args: NoArgs, ctx: Ctx) -> None:
         raise ValueError("boom")
 
-    @demo.command("slow", description="Outlive the deadline")
+    @demo.command("slow", description="Outlive the deadline", danger_level="safe", exit_codes=())
     def slow(args: NoArgs, ctx: Ctx) -> None:
         import time
 
         time.sleep(1)
 
-    @demo.command("reject", description="Reject its own input")
+    @demo.command("reject", description="Reject its own input", danger_level="safe", exit_codes=())
     def reject(args: NoArgs, ctx: Ctx) -> None:
         raise ParseError("region xx is unknown")
 
-    @demo.command("missing", description="Fail with a lowercase message")
+    @demo.command(
+        "missing", description="Fail with a lowercase message", danger_level="safe", exit_codes=()
+    )
     def missing(args: NoArgs, ctx: Ctx) -> None:
         raise Exit.NOT_FOUND("no such release", context={"tag": "9.9"})
 

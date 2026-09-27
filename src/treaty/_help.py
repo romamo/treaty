@@ -81,7 +81,10 @@ def _under(commands: Mapping[CommandPath, Command], parts: tuple[str, ...]) -> l
 def _framework_rows(command: Command) -> list[tuple[str, str]]:
     """The flags treaty adds to this command, so a person can find how to apply it"""
     rows: list[tuple[str, str]] = []
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
+    if command.safe_default:
+        rows.append(("--live", "Apply; without it the command runs as a dry run"))
+        rows.append(("--confirm-destructive", "Required with --live"))
+    elif command.danger_level is DangerLevel.DESTRUCTIVE:
         rows.append(("--confirm-destructive", "Apply; without it the command only previews"))
     if command.danger_level is not DangerLevel.SAFE:
         rows.append(("--idempotency-key KEY", "Repeat calls with KEY replay the first result"))

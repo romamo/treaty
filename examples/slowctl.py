@@ -33,6 +33,8 @@ _cleanup_seconds = [0.0]
     description="Pretend to call a slow upstream",
     has_network_io=True,
     cleanup=release_resources,
+    danger_level="safe",
+    exit_codes=(),
 )
 def fetch(args: Fetch, ctx: Ctx) -> dict[str, object]:
     _cleanup_seconds[0] = args.cleanup_seconds
@@ -45,7 +47,13 @@ class Serve:
     interval: float = Flag(default=0.2, description="Seconds between heartbeats")
 
 
-@app.command("serve", description="Announce a URL, then heartbeat until stopped", streaming=True)
+@app.command(
+    "serve",
+    description="Announce a URL, then heartbeat until stopped",
+    streaming=True,
+    danger_level="safe",
+    exit_codes=(),
+)
 def serve(args: Serve, ctx: Ctx) -> Iterator[dict[str, object]]:
     yield {"event": "listening", "url": "http://127.0.0.1:0/"}
     try:

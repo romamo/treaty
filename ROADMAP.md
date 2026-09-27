@@ -66,6 +66,15 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   cleaning in JSON, `ctx.color`, `PAGER=cat` and `NO_COLOR=1` for children under
   `App.main()`, ISO 8601 dates and `Decimal` text, sentence-form error messages, and
   `suggestion=` on exit codes with the `exit-code-suggestion` audit rule
+- Required declarations (REQ-C-001, REQ-C-002, breaking): `exit_codes=` and
+  `danger_level=` have no default; `exit_codes=()` is the explicit empty declaration
+- `treaty.Affects` as `would_affect` on destructive dry runs, checked at registration and
+  per run, and quoted by `CONFIRMATION_REQUIRED` (REQ-C-004); `requires_confirmation: true`
+  in `--schema` (REQ-O-021)
+- `safe_default=True` destructive commands: dry run by default with exit 0, `--live` with
+  `--confirm-destructive` to apply, `meta.dry_run` on every response (REQ-O-048)
+- `network-timeout` audit rule: network calls without `timeout=` in network commands
+  (REQ-C-012)
 
 ## 0.1.0: first release
 
@@ -107,8 +116,7 @@ matching audit rule so adoption never requires reading the spec.
   exit `4` when a prompt would block
 - Pagination metadata on list commands: `--limit`, `--cursor`, `meta.pagination`
   (REQ-F-018)
-- `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028) and a
-  `would_affect` object on dry runs (REQ-C-004)
+- `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028)
 - `REDIRECTED` exit `13` with `error.redirect` for renamed commands and `aliases` in the
   manifest
 

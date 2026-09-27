@@ -93,7 +93,7 @@ testpaths = ["tests"]
 
 from dataclasses import dataclass
 
-from treaty import App, Arg, Ctx, Exit, Flag
+from treaty import Affects, App, Arg, Ctx, Exit, Flag
 
 app = App("{n}", version="0.1.0", description="Describe what {n} does")
 app.exit_code(
@@ -148,11 +148,14 @@ class Creation:
 class Deletion:
     effect: str
     name: str
+    would_affect: Affects | None = None
 
 
 @app.command(
     "status",
     description="Report whether an item exists",
+    danger_level="safe",
+    exit_codes=(),
     examples=[("Check an item", "{n} status widget")],
 )
 def status(args: ItemArgs, ctx: Ctx) -> Item:
@@ -184,7 +187,10 @@ def create(args: CreateArgs, ctx: Ctx) -> Creation:
 def delete(args: DeleteArgs, ctx: Ctx) -> Deletion:
     if args.name == "missing":
         raise Exit.ITEM_NOT_FOUND("no such item", context={{"name": args.name}})
-    return Deletion(effect="would_delete" if args.dry_run else "deleted", name=args.name)
+    if args.dry_run:
+        affects = Affects(f"Deletes item {{args.name}}", (f"item/{{args.name}}",), 1)
+        return Deletion(effect="would_delete", name=args.name, would_affect=affects)
+    return Deletion(effect="deleted", name=args.name)
 
 
 def main() -> None:

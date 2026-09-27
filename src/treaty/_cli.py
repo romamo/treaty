@@ -184,6 +184,7 @@ def render_audit(data: Any) -> str:
         ("Fail a CI step on warnings", "treaty audit myapp.cli:app --strict"),
     ],
     renderers={Format.PLAIN: render_audit},
+    danger_level="safe",
 )
 def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     app = load_app(args.target)
@@ -201,7 +202,12 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     return out
 
 
-@cli.command("rules", description="List the audit rules in the order they are checked")
+@cli.command(
+    "rules",
+    description="List the audit rules in the order they are checked",
+    danger_level="safe",
+    exit_codes=(),
+)
 def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
     return [{"id": r.id, "title": r.title, "severity": r.severity.value} for r in RULES]
 

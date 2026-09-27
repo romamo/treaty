@@ -35,7 +35,13 @@ class Window:
 def make_app() -> App:
     app = App("sched", version="1")
 
-    @app.command("book", description="Book a window", supports_raw_payload=True, exit_codes=())
+    @app.command(
+        "book",
+        description="Book a window",
+        supports_raw_payload=True,
+        exit_codes=(),
+        danger_level="safe",
+    )
     def book(args: Window, ctx: Ctx) -> dict[str, object]:
         SIDE_EFFECTS.append("book")
         if args.out is not None:
@@ -110,7 +116,7 @@ def test_two_post_init_errors_in_one_run() -> None:
 
     app = App("x", version="1")
 
-    @app.command("pair", description="Pair", exit_codes=())
+    @app.command("pair", description="Pair", exit_codes=(), danger_level="safe")
     def pair(args: Pair, ctx: Ctx) -> dict[str, int]:
         return {"a": args.a}
 
@@ -188,7 +194,7 @@ def test_multiline_on_a_non_text_field_fails_registration() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="multiline"):
 
-        @app.command("bad", description="Bad", exit_codes=())
+        @app.command("bad", description="Bad", exit_codes=(), danger_level="safe")
         def bad(args: Bad, ctx: Ctx) -> None:
             return None
 
@@ -201,7 +207,7 @@ def test_audit_suggests_multiline_for_free_text_fields() -> None:
 
     app = App("x", version="1")
 
-    @app.command("post", description="Post", exit_codes=())
+    @app.command("post", description="Post", exit_codes=(), danger_level="safe")
     def post(args: Post, ctx: Ctx) -> None:
         return None
 

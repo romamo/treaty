@@ -71,12 +71,32 @@ additive: plain destructive commands keep the exit-2 confirmation gate that O-02
 
 ## Tasks
 
-- [ ] `Affects`; output-type check; `effect_problem` rule; message in `CONFIRMATION_REQUIRED`
-- [ ] Required `exit_codes=` and `danger_level=`; migrate every call site
-- [ ] Audit rule `network-timeout`; `Timeout.seconds_left()`
-- [ ] `requires_confirmation` in manifest and `--schema`
-- [ ] `safe_default=`, `--live`, `meta.dry_run`
-- [ ] Conformance profile: `treaty conformance` derives probes for `--live`
+- [x] `Affects`; output-type check; `effect_problem` rule; message in `CONFIRMATION_REQUIRED`
+- [x] Required `exit_codes=` and `danger_level=`; migrate every call site
+- [x] Audit rule `network-timeout`; `Timeout.seconds_left()`
+- [x] `requires_confirmation` in manifest and `--schema`
+- [x] `safe_default=`, `--live`, `meta.dry_run`
+- [x] Conformance profile: `treaty conformance` derives probes for `--live`
+
+## Deviations as built
+
+- No `Timeout.seconds_left()`: C-012 asks that the configured timeout reach every network
+  call, which `ctx.timeout.seconds` does; the audit fix suggests it. A remaining-budget
+  helper had no requirement behind it
+- `requires_confirmation` is only in `--schema`: `CommandEntry` in `manifest-response.json`
+  has `additionalProperties: false`, and O-021 names `--schema`. The manifest already lists
+  the `confirm-destructive` flag
+- `Affects.resources` is a `tuple[str, ...]`, like every other frozen value in treaty
+- `--dry-run` wins over `--live` instead of being a contradiction: the kit previews a
+  destructive probe by appending `--dry-run` to its argv, and the probe for a
+  `safe_default` command is `argv + --live`, so that preview must exit 0
+- `meta.dry_run` is true on every response that applied nothing, `--live` without
+  confirmation included (it still only previews), and on argument errors; `meta.confirmed`
+  appears only on an applied live run
+- The `exit-codes` audit rule stays: an explicit `exit_codes=()` on a non-safe command is
+  still worth a warning
+- Migration touched `benchmark/cli/treaty/democli.py` too; its filter check moved from a
+  handler-raised `Exit.ARG_ERROR` into `__post_init__`, so a bad filter still exits 2
 
 ## Tests
 

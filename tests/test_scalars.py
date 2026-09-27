@@ -76,7 +76,11 @@ def scalar_app() -> App:
     app.scalar(Release, parse=Release.parse, serialize=lambda r: r.tag)
 
     @app.command(
-        "deploy", description="Deploy a service", danger_level="mutating", supports_raw_payload=True
+        "deploy",
+        description="Deploy a service",
+        danger_level="mutating",
+        supports_raw_payload=True,
+        exit_codes=(),
     )
     def deploy(args: DeployArgs, ctx: Ctx) -> Receipt:
         assert isinstance(args.service, ResourceId)
@@ -267,7 +271,7 @@ def test_pattern_type_preset_reaches_manifest_and_schema() -> None:
     app = App("runs", version="1")
     app.scalar(RunId, parse=RunId, pattern_type="uuid")
 
-    @app.command("show", description="Show a run")
+    @app.command("show", description="Show a run", danger_level="safe", exit_codes=())
     def show(args: ShowArgs, ctx: Ctx) -> dict[str, RunId]:
         return {"run": args.run}
 
@@ -292,7 +296,7 @@ def test_unregistered_class_is_a_registration_time_schema_error() -> None:
     app = App("fleet", version="1")
     with pytest.raises(SchemaError, match="register a class with app.scalar"):
 
-        @app.command("deploy", description="Deploy")
+        @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
         def deploy(args: Args, ctx: Ctx) -> None:
             return None
 
@@ -308,7 +312,7 @@ def test_unregistered_dataclass_in_output_stays_a_nested_object() -> None:
 
     app = App("fleet", version="1")
 
-    @app.command("deploy", description="Deploy")
+    @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
     def deploy(args: Args, ctx: Ctx) -> Out:
         return Out(ResourceId(args.name))
 
@@ -328,7 +332,7 @@ def test_field_pattern_is_refused_on_a_scalar_field() -> None:
     app.scalar(ResourceId, parse=ResourceId.from_boundary)
     with pytest.raises(RegistrationError, match="pattern= is not allowed"):
 
-        @app.command("deploy", description="Deploy")
+        @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
         def deploy(args: Args, ctx: Ctx) -> None:
             return None
 

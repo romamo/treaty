@@ -6,8 +6,10 @@ stream purity) are the conformance kit's job; the last rule points there.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import re
+import textwrap
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -213,6 +215,56 @@ def _network_io(app: App) -> Iterator[Finding]:
             )
 
 
+# Calls that open a connection and take timeout=; requests and httpx by module prefix
+_NETWORK_CALLS = frozenset({"urlopen", "create_connection", "HTTPConnection", "HTTPSConnection"})
+_NETWORK_MODULES = frozenset({"requests", "httpx"})
+
+
+def _dotted(node: ast.expr) -> str | None:
+    """``a.b.c`` for a name or attribute chain, else None"""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return None if base is None else f"{base}.{node.attr}"
+    return None
+
+
+def untimed_network_calls(handler: Callable[..., object]) -> list[str]:
+    """Network calls in the handler's source without ``timeout=`` (REQ-C-012)"""
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
+    except OSError, TypeError:
+        return []  # no source to scan (REPL, exec, C extension)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted(node.func)
+        if name is None:
+            continue
+        parts = name.split(".")
+        network = parts[-1] in _NETWORK_CALLS or (len(parts) > 1 and parts[0] in _NETWORK_MODULES)
+        has_timeout = any(k.arg == "timeout" or k.arg is None for k in node.keywords)
+        if network and not has_timeout:
+            found.append(name)
+    return found
+
+
+def _network_timeout(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if not c.has_network_io:
+            continue
+        for name in untimed_network_calls(c.handler):
+            yield Finding(
+                "network-timeout",
+                Severity.WARNING,
+                c.path.value,
+                f"{name}(...) has no timeout=, so it can outlive --timeout",
+                f"{name}(..., timeout=ctx.timeout.seconds)",
+            )
+
+
 # Whole words, plus the common fused forms; "profile" and "tempo" are not paths
 _PATH_NAME_HINTS = re.compile(
     r"(^|_)(path|dir|directory|file|folder|filepath|dirpath|filename|dirname)($|_)"
@@ -324,6 +376,12 @@ RULES: tuple[Rule, ...] = (
         _typed_output,
     ),
     Rule("network-io", "Network commands declare has_network_io", Severity.WARNING, _network_io),
+    Rule(
+        "network-timeout",
+        "Network calls pass the command timeout",
+        Severity.WARNING,
+        _network_timeout,
+    ),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule(
         "multiline-flag",

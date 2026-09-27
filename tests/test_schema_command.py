@@ -41,7 +41,13 @@ def test_raw_payload_schema_only_when_supported(app: App) -> None:
         name: str = Arg(description="Name")
         count: int = Flag(default=1, description="How many")
 
-    @app.command("create", description="Create", danger_level="mutating", supports_raw_payload=True)
+    @app.command(
+        "create",
+        description="Create",
+        danger_level="mutating",
+        supports_raw_payload=True,
+        exit_codes=(),
+    )
     def create(args: CreateArgs, ctx: Ctx) -> dict[str, object]:
         return {}
 

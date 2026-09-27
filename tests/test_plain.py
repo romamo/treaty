@@ -74,7 +74,7 @@ class NoArgs:
 def plain_app() -> App:
     app = App("showctl", version="1")
 
-    @app.command("show", description="Show a release")
+    @app.command("show", description="Show a release", danger_level="safe", exit_codes=())
     def show(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"service": "api", "release": {"tag": "1.3.9"}}
 

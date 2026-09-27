@@ -32,7 +32,7 @@ from ._command import (
 )
 from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
-from ._effect import effect_problem
+from ._effect import affects_summary, effect_problem
 from ._envelope import Envelope, ErrorDetail, WarningDetail, clean, json_safe, write_envelope
 from ._errors import CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
@@ -71,6 +71,13 @@ class _Inherit:
 
 
 INHERIT = _Inherit()
+
+
+class _Unset:
+    """Sentinel: a required declaration was left out, reported as a ``RegistrationError``"""
+
+
+UNSET = _Unset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,9 +238,9 @@ class App:
         path: str,
         *,
         description: str,
-        danger_level: str = "safe",
+        danger_level: str | _Unset = UNSET,
         required_scopes: Sequence[str] = (),
-        exit_codes: Sequence[str] = (),
+        exit_codes: Sequence[str] | _Unset = UNSET,
         examples: Sequence[tuple[str, str]] = (),
         has_network_io: bool = False,
         timeout: float | None | _Inherit = INHERIT,
@@ -241,8 +248,22 @@ class App:
         cleanup: Cleanup | None = None,
         renderers: Mapping[Format, Renderer] | None = None,
         streaming: bool = False,
+        safe_default: bool = False,
     ) -> Callable[[Handler], Handler]:
+        """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
+        ``exit_codes=()`` declares that the command raises only the implicit codes"""
         cmd_path = CommandPath(path)
+        missing = [
+            fix
+            for value, fix in ((exit_codes, "exit_codes=()"), (danger_level, 'danger_level="safe"'))
+            if isinstance(value, _Unset)
+        ]
+        if missing:
+            raise RegistrationError(
+                f"{cmd_path}: every command declares its exit codes and danger level "
+                f"(REQ-C-001, REQ-C-002); add {' and '.join(missing)}, or the values it has"
+            )
+        assert not isinstance(danger_level, _Unset) and not isinstance(exit_codes, _Unset)
         overrides = dict(renderers or {})
         for mode, render in overrides.items():
             _check_renderer(f"{cmd_path}: renderers", mode, render)
@@ -275,6 +296,7 @@ class App:
                     renderers=overrides,
                     scalars=self.scalars,
                     streaming=streaming,
+                    safe_default=safe_default,
                 )
             )
             return fn
@@ -305,11 +327,21 @@ class App:
                 )
 
     def _register_builtins(self, enable_exec: bool) -> None:
-        @self.command(MANIFEST_PATH.value, description="Print the command manifest for agents")
+        @self.command(
+            MANIFEST_PATH.value,
+            description="Print the command manifest for agents",
+            danger_level="safe",
+            exit_codes=(),
+        )
         def manifest(args: NoArgs, ctx: Ctx) -> dict[str, object]:
             return self.manifest()
 
-        @self.command(VERSION_PATH.value, description="Print the tool name and version")
+        @self.command(
+            VERSION_PATH.value,
+            description="Print the tool name and version",
+            danger_level="safe",
+            exit_codes=(),
+        )
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {"name": self.name, "version": self.version}
 
@@ -318,6 +350,8 @@ class App:
             @self.command(
                 EXEC_PATH.value,
                 description="Dispatch JSONL DispatchRequest lines from stdin in-process",
+                danger_level="safe",
+                exit_codes=(),
                 examples=[("Run a plan", f"cat ops.jsonl | {self.name} exec --ignore-errors")],
             )
             def exec_(args: ExecArgs, ctx: Ctx) -> None:
@@ -417,7 +451,7 @@ class App:
         try:
             invocation = build_from_mapping(command, arguments, environ)
         except ParseError as exc:
-            return run.arg_error(exc, meta=meta)
+            return run.arg_error(exc, meta={**meta, **_mode_meta(command)})
         if command.streaming:
             # Buffered in-process, a stream returns only when it ends, so it always gets a
             # deadline: the caller's, else the app default, even over a command's None
@@ -512,7 +546,7 @@ class App:
         try:
             invocation = parse_command_args(command, route.tokens, environ)
         except ParseError as exc:
-            return run.emit(mode, run.arg_error(exc))
+            return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
             if command.path == EXEC_PATH:
@@ -666,6 +700,11 @@ def _each(render: Renderer | None) -> Renderer | None:
 def _still_running(running: Sequence[Pending]) -> Pending | None:
     """The handler's worker when an interrupted wait left it running"""
     return next((p for p in running if p.worker.is_alive()), None)
+
+
+def _mode_meta(command: Command) -> dict[str, object]:
+    """``meta.dry_run`` on a safe_default command's argument error: nothing was applied"""
+    return {"dry_run": True} if command.safe_default else {}
 
 
 def _previewing(command: Command, invocation: Invocation) -> bool:
@@ -866,6 +905,32 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen"""
+        if not command.safe_default:
+            return self._keyed(command, invocation, mode, meta=meta)
+        # REQ-O-048: a dry run unless --live; --dry-run still wins, as a preview is safe
+        dry_run = not invocation.live or _dry_run_requested(invocation.args)
+        if dry_run:
+            args = invocation.args
+            assert dataclasses.is_dataclass(args) and not isinstance(args, type)
+            invocation = dataclasses.replace(
+                invocation, args=dataclasses.replace(args, dry_run=True)
+            )
+        envelope = self._keyed(command, invocation, mode, meta=meta)
+        # --live without --confirm-destructive still only previews
+        applied = not dry_run and invocation.confirmed
+        extra: dict[str, object] = {"dry_run": not applied}
+        if applied:
+            extra["confirmed"] = True
+        return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+
+    def _keyed(
+        self,
+        command: Command,
+        invocation: Invocation,
+        mode: Format,
+        *,
+        meta: Mapping[str, object] | None = None,
+    ) -> Envelope:
         key = invocation.idempotency_key
         if key is None or _previewing(command, invocation) or _dry_run_requested(invocation.args):
             return self._execute(command, invocation, mode, meta=meta)
@@ -1111,7 +1176,11 @@ class _Run:
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, exc, started, full_meta)
         if command.danger_level is not DangerLevel.SAFE:
-            problem = effect_problem(data, preview=_dry_run_requested(args))
+            problem = effect_problem(
+                data,
+                preview=_dry_run_requested(args),
+                destructive=command.danger_level is DangerLevel.DESTRUCTIVE,
+            )
             if problem is not None:
                 entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
                 return self._envelope(
@@ -1133,7 +1202,8 @@ class _Run:
                 data=data,
                 error=ErrorDetail(
                     code="CONFIRMATION_REQUIRED",
-                    message=f"Command {command.path} is destructive; nothing was applied",
+                    message=f"Command {command.path} is destructive and was not applied; "
+                    f"it would: {affects_summary(data)}",
                     retryable=False,
                     context={"command": command.path.value, "flag": "confirm-destructive"},
                     phase="validation",
@@ -1797,7 +1867,8 @@ class _Run:
             try:
                 invocation = self._exec_invocation(command, request, args.dry_run, line_no)
             except ParseError as exc:
-                yield line_no, self.arg_error(exc, started=started, meta=meta)
+                failed = {**meta, **_mode_meta(command)}
+                yield line_no, self.arg_error(exc, started=started, meta=failed)
                 continue
             if command.streaming:
                 envelopes = self.stream(command, invocation, Format.JSON, meta=meta)

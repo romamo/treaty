@@ -9,7 +9,7 @@ entries are its clauses.
 
 ```python
 from dataclasses import dataclass
-from treaty import App, Arg, Ctx, Exit, Flag
+from treaty import Affects, App, Arg, Ctx, Exit, Flag
 
 app = App("deployctl", version="1.4.0")
 app.exit_code("DEPLOY_CONFLICT", 79, description="Target already has a deployment in progress",
@@ -26,6 +26,7 @@ class Plan:
     effect: str
     service: str
     release: str
+    would_affect: Affects | None = None
 
 deploy = app.group("deploy", description="Manage deployments")
 
@@ -34,8 +35,10 @@ deploy = app.group("deploy", description="Manage deployments")
 def rollback(args: Rollback, ctx: Ctx) -> Plan:
     if args.to is None:
         raise Exit.DEPLOY_CONFLICT("No previous release recorded", context={"service": args.service})
-    effect = "would_update" if args.dry_run else "updated"
-    return Plan(effect=effect, service=args.service, release=args.to)
+    if args.dry_run:
+        affects = Affects(f"Rolls {args.service} back to {args.to}", (f"service/{args.service}",), 1)
+        return Plan("would_update", args.service, args.to, affects)
+    return Plan("updated", args.service, args.to)
 
 if __name__ == "__main__":
     app.main()
@@ -44,6 +47,11 @@ if __name__ == "__main__":
 Design decisions: zero runtime dependencies in core, handlers are plain functions
 over a frozen dataclass of arguments, and every command lives in one flat registry
 keyed by dot-path.
+
+Every command declares `danger_level=` (`safe`, `mutating`, or `destructive`) and
+`exit_codes=`; leaving either out is a `RegistrationError` naming the fix, and
+`exit_codes=()` is the explicit "only the implicit codes" (REQ-C-001, REQ-C-002). `SUCCESS`
+is always part of the map. Breaking after 0.0.6: both used to default to `safe` and `()`.
 
 A handler raises only the exit codes its manifest entry lists: the ones in `exit_codes=`,
 plus `GENERAL_ERROR`, `ARG_ERROR`, and `TIMEOUT` everywhere and `CONFLICT` and
@@ -155,7 +163,13 @@ app = App("hello", version="0.1")
 app.format(Format.CSV, render=render_csv)  # offers --format csv to every command
 
 
-@app.command("greet", description="Say hello", renderers={Format.PLAIN: render_greet})
+@app.command(
+    "greet",
+    description="Say hello",
+    danger_level="safe",
+    exit_codes=(),
+    renderers={Format.PLAIN: render_greet},
+)
 ```
 
 A command's `renderers=` overrides the app's renderer for that format. `app.format()` must
@@ -184,7 +198,10 @@ Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
 caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
-response. Handlers read `ctx.timeout` to pass the same deadline to their network calls. An
+response. Handlers read `ctx.timeout` to pass the same deadline to their network calls;
+the `network-timeout` audit rule flags `urlopen`, `http.client` connections,
+`socket.create_connection`, `requests`, and `httpx` calls without `timeout=` in network
+commands (REQ-C-012). An
 idempotency key stays locked until a timed-out or cancelled handler really finishes, so a
 retry never runs beside it: it waits up to its own timeout, then replays the recorded
 result or exits `10` with `IDEMPOTENCY_KEY_BUSY`. An unusable state directory or a damaged
@@ -318,7 +335,8 @@ class Config:
     @classmethod
     def acquire(cls, args: ProjectArgs, ctx: Ctx, project: Project) -> Self: ...
 
-@app.command("deploy", description="Deploy a component", exit_codes=["NO_PROJECT"])
+@app.command("deploy", description="Deploy a component", danger_level="mutating",
+             exit_codes=["NO_PROJECT"])
 def deploy(args: DeployArgs, ctx: Ctx, config: Config, project: Project) -> Receipt: ...
 ```
 
@@ -342,7 +360,7 @@ agent can tell a clean end from a killed process:
 
 ```python
 @app.command("dashboard.serve", description="Serve the dashboard", streaming=True,
-             cleanup=stop_server)
+             danger_level="safe", exit_codes=(), cleanup=stop_server)
 def serve(args: ServeArgs, ctx: Ctx) -> Iterator[ServeEvent]:
     server = start(args.port)
     yield Listening(url=server.url)
@@ -366,9 +384,18 @@ contracts describe one response. In a text format the renderer gets one event pe
 
 ## Destructive commands
 
-A command with `danger_level="destructive"` must declare a boolean `dry_run` field. Without
+A command with `danger_level="destructive"` must declare a boolean `dry_run` field, and its
+output type a `would_affect` field (`would_affect: Affects | None = None`). A dry run returns
+`treaty.Affects(summary, resources, count)` there: a line for a person and the identifiers
+for a program; a dry run without it exits `1` with `INVALID_EFFECT` (REQ-C-004). Without
 `--confirm-destructive` the framework runs it in dry-run mode and exits `2` with error code
-`CONFIRMATION_REQUIRED`, so the `data` payload shows what would be affected without applying it.
+`CONFIRMATION_REQUIRED`, whose message carries the summary and whose `data` is the preview.
+`--schema` of a destructive command has `requires_confirmation: true` (REQ-O-021).
+
+`safe_default=True` makes the dry run the default instead (REQ-O-048): without `--live` the
+command previews and exits `0`, and `--live --confirm-destructive` applies it (`--live`
+alone still exits `2`). Every response of such a command carries `meta.dry_run`, and a
+live one `meta.confirmed`; the manifest shows `safe_default: true` and the `--live` flag.
 
 ## Effects and idempotency keys
 

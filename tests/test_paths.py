@@ -28,7 +28,7 @@ class CopyOut:
 def path_app() -> App:
     app = App("cpctl", version="1")
 
-    @app.command("copy", description="Copy a file")
+    @app.command("copy", description="Copy a file", danger_level="safe", exit_codes=())
     def copy(args: CopyArgs, ctx: Ctx) -> CopyOut:
         assert isinstance(args.source, Path)
         return CopyOut(args.source, args.dest, args.extra)
@@ -122,6 +122,6 @@ def test_pattern_is_refused_on_path_fields() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="filepath preset"):
 
-        @app.command("go", description="Go")
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: Bad, ctx: Ctx) -> None:
             return None

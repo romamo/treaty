@@ -17,7 +17,13 @@ class CreateArgs:
 def make_app() -> App:
     app = App("tool", version="1")
 
-    @app.command("create", description="Create", danger_level="mutating", supports_raw_payload=True)
+    @app.command(
+        "create",
+        description="Create",
+        danger_level="mutating",
+        supports_raw_payload=True,
+        exit_codes=(),
+    )
     def create(args: CreateArgs, ctx: Ctx) -> dict[str, object]:
         return {
             "effect": "created",
@@ -26,7 +32,7 @@ def make_app() -> App:
             "tags": list(args.tags),
         }
 
-    @app.command("plain", description="No raw payload")
+    @app.command("plain", description="No raw payload", danger_level="safe", exit_codes=())
     def plain(args: CreateArgs, ctx: Ctx) -> dict[str, object]:
         return {}
 

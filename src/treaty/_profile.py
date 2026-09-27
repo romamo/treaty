@@ -19,7 +19,7 @@ from ._parse import VALUED_GLOBALS
 if TYPE_CHECKING:
     from ._app import App
 
-PREVIEW_FLAGS = ("--dry-run", "--confirm-destructive")
+PREVIEW_FLAGS = ("--dry-run", "--confirm-destructive", "--live")
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +60,10 @@ def probes_for(app: App) -> list[Probe]:
             argv = command.path.parts
         label = " ".join(command.path.parts)
         if command.danger_level is DangerLevel.DESTRUCTIVE:
-            probes.append(Probe(label, argv, "destructive", dry_run_flag="--dry-run"))
+            # A safe_default command previews and exits 0 on its own; --live is what the
+            # confirmation gate refuses
+            live = ("--live",) if command.safe_default else ()
+            probes.append(Probe(label, (*argv, *live), "destructive", dry_run_flag="--dry-run"))
         elif command.danger_level is DangerLevel.SAFE:
             probes.append(Probe(label, argv, "read"))
     probes.append(Probe("version", ("version",), "read"))

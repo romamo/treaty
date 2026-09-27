@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from treaty import App, Arg, Ctx, Exit, Flag
+from treaty import Affects, App, Arg, Ctx, Exit, Flag
 
 app = App("deployctl", version="1.4.0", description="Manage deployments")
 app.exit_code(
@@ -29,6 +29,7 @@ class Plan:
     service: str
     release: str
     strategy: str
+    would_affect: Affects | None = None
 
 
 deploy = app.group("deploy", description="Manage deployments")
@@ -46,8 +47,13 @@ deploy = app.group("deploy", description="Manage deployments")
 def rollback(args: Rollback, ctx: Ctx) -> Plan:
     if args.service == "locked":
         raise Exit.DEPLOY_CONFLICT("deployment in progress", context={"service": args.service})
-    effect: Literal["would_update", "updated"] = "would_update" if args.dry_run else "updated"
-    return Plan(effect, args.service, args.to or "previous", args.strategy)
+    release = args.to or "previous"
+    if args.dry_run:
+        affects = Affects(
+            f"Rolls {args.service} back to {release}", (f"service/{args.service}",), 1
+        )
+        return Plan("would_update", args.service, release, args.strategy, affects)
+    return Plan("updated", args.service, release, args.strategy)
 
 
 if __name__ == "__main__":

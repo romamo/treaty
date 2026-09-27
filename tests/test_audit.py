@@ -43,7 +43,13 @@ def test_audit_passes_a_clean_app(monkeypatch, tmp_path) -> None:
 
     app = App("clean", version="1")
 
-    @app.command("ping", description="Ping", examples=[("Ping", "clean ping")])
+    @app.command(
+        "ping",
+        description="Ping",
+        examples=[("Ping", "clean ping")],
+        danger_level="safe",
+        exit_codes=(),
+    )
     def ping(args: NoArgs, ctx: Ctx) -> NoArgs:
         return args
 
@@ -131,7 +137,13 @@ def test_heuristics_skip_words_that_only_start_like_a_verb_or_end_like_a_path() 
 
     app = App("prefs", version="1")
 
-    @app.command("settings", description="Show settings", examples=[("x", "prefs settings")])
+    @app.command(
+        "settings",
+        description="Show settings",
+        examples=[("x", "prefs settings")],
+        danger_level="safe",
+        exit_codes=(),
+    )
     def settings(args: Prefs, ctx: Ctx) -> dict[str, str]:
         return {}
 

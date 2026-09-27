@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from ._command import Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._mode import Format
-from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG, NO_STREAM_FLAG, TIMEOUT_FLAG
+from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG, LIVE_FLAG, NO_STREAM_FLAG, TIMEOUT_FLAG
 from ._schema import JsonSchema
 from ._values import CommandPath, Etag
 
@@ -134,6 +134,14 @@ def command_entry(
             "default": False,
             "description": "Required to apply; without it the command previews and exits 2",
         }
+    if command.safe_default:
+        flags[LIVE_FLAG] = {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Apply, with --confirm-destructive; without it the command runs "
+            "as a dry run and exits 0",
+        }
     out: dict[str, object] = {
         "description": command.description,
         "danger_level": command.danger_level.value,
@@ -154,6 +162,8 @@ def command_entry(
         out["has_network_io"] = True
     if command.streaming:
         out["streaming_default"] = True
+    if command.safe_default:
+        out["safe_default"] = True
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret
@@ -167,6 +177,8 @@ def command_schema(
     """``--schema`` output for one command (REQ-C-015, REQ-O-032)"""
     entry = command_entry(command, exits, all_paths)
     entry["parameters"] = entry["flags"]
+    if command.danger_level is DangerLevel.DESTRUCTIVE:
+        entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
     if command.supports_raw_payload:
         entry["raw_payload_schema"] = payload_schema(command)
     return entry
@@ -212,6 +224,13 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
             "default": False,
             "description": "Required to apply; without it the command previews and fails "
             "with CONFIRMATION_REQUIRED",
+        }
+    if command.safe_default:
+        properties[LIVE_FLAG] = {
+            "type": "boolean",
+            "default": False,
+            "description": "Apply, with confirm_destructive; without it the command runs "
+            "as a dry run",
         }
     if command.streaming and stream_key:
         properties[NO_STREAM_KEY] = {

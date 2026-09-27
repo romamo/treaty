@@ -103,14 +103,14 @@ def test_protocol_typed_resources_register_and_check_members() -> None:
 
     app = App("proto", version="1")
 
-    @app.command("where", description="Where")
+    @app.command("where", description="Where", danger_level="safe", exit_codes=())
     def where(args: Where, ctx: Ctx, client: Client) -> dict[str, str]:
         return {"region": client.region}
 
     assert app.call("where", {}, env={}).data == {"region": "eu"}
     with pytest.raises(RegistrationError, match="lack \\['region'\\]"):
 
-        @app.command("nowhere", description="Nowhere")
+        @app.command("nowhere", description="Nowhere", danger_level="safe", exit_codes=())
         def nowhere(args: Nowhere, ctx: Ctx, client: Client) -> dict[str, str]:
             return {}
 
@@ -130,12 +130,23 @@ def test_closed_reader_on_builtins_and_errors_exits_141(argv: list[str]) -> None
 def plain_app(events: list[str]) -> App:
     app = App("hum", version="1")
 
-    @app.command("show", description="Show", renderers={Format.PLAIN: lambda d: f"{d['n']}\n"})
+    @app.command(
+        "show",
+        description="Show",
+        renderers={Format.PLAIN: lambda d: f"{d['n']}\n"},
+        danger_level="safe",
+        exit_codes=(),
+    )
     def show(args: NoArgs, ctx: Ctx) -> dict[str, int]:
         return {"n": 1}
 
     @app.command(
-        "tick", description="Tick", streaming=True, cleanup=lambda: events.append("cleanup")
+        "tick",
+        description="Tick",
+        streaming=True,
+        cleanup=lambda: events.append("cleanup"),
+        danger_level="safe",
+        exit_codes=(),
     )
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         try:
@@ -165,7 +176,7 @@ def test_closed_stdout_during_exec_closes_and_cleans_up_the_step() -> None:
 def test_closed_stderr_keeps_the_crash_envelope() -> None:
     app = App("err", version="1")
 
-    @app.command("boom", description="Crashes")
+    @app.command("boom", description="Crashes", danger_level="safe", exit_codes=())
     def boom(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise RuntimeError("bug")
 
@@ -178,7 +189,7 @@ def test_oversized_error_still_bounds_data() -> None:
     app = App("cap", version="1", max_output_bytes=4096)
     app.exit_code("PART", 80, description="Part", retryable=False, side_effects="none")
 
-    @app.command("batch", description="Batch", exit_codes=["PART"])
+    @app.command("batch", description="Batch", exit_codes=["PART"], danger_level="safe")
     def batch(args: NoArgs, ctx: Ctx) -> dict[str, list[int]]:
         raise Exit.PART("partial", detail="x" * 6000, data={"rows": list(range(100_000))})
 
@@ -199,7 +210,7 @@ def test_exit_fields_are_checked_or_normalized(kwargs: dict, expected: object) -
     app = App("q", version="1")
     app.exit_code("QUOTA", 80, description="Quota", retryable=True, side_effects="none")
 
-    @app.command("q", description="Q", exit_codes=["QUOTA"])
+    @app.command("q", description="Q", exit_codes=["QUOTA"], danger_level="safe")
     def q(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise Exit.QUOTA("over quota", **kwargs)
 
@@ -213,7 +224,7 @@ def test_exit_fields_are_checked_or_normalized(kwargs: dict, expected: object) -
 def test_buffered_stream_refuses_timeout_zero_in_process() -> None:
     app = App("st", version="1")
 
-    @app.command("ev", description="Events", streaming=True)
+    @app.command("ev", description="Events", streaming=True, danger_level="safe", exit_codes=())
     def ev(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
 
@@ -233,7 +244,7 @@ type Vec[T] = list[T]
 def test_stream_return_type_may_be_an_alias() -> None:
     app = App("al", version="1")
 
-    @app.command("rows", description="Rows", streaming=True)
+    @app.command("rows", description="Rows", streaming=True, danger_level="safe", exit_codes=())
     def rows(args: NoArgs, ctx: Ctx) -> Events:
         yield Row(1)
 
@@ -245,13 +256,13 @@ def test_stream_return_type_may_be_an_alias() -> None:
 def test_a_command_cannot_also_be_a_group() -> None:
     app = App("nest", version="1")
 
-    @app.command("db", description="DB")
+    @app.command("db", description="DB", danger_level="safe", exit_codes=())
     def db(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         return {}
 
     with pytest.raises(RegistrationError, match="overlap"):
 
-        @app.command("db.migrate.up", description="Up")
+        @app.command("db.migrate.up", description="Up", danger_level="safe", exit_codes=())
         def up(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {}
 
@@ -271,7 +282,7 @@ def test_generic_alias_resolves_for_a_positional() -> None:
     class Many:
         items: Vec[str] = Arg(description="Items")
 
-    @app.command("many", description="Many")
+    @app.command("many", description="Many", danger_level="safe", exit_codes=())
     def many(args: Many, ctx: Ctx) -> dict[str, int]:
         return {"n": len(args.items)}
 

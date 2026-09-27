@@ -37,19 +37,23 @@ class Report:
     at: dt.time
 
 
-@app.command("chatty", description="Print to stdout and log to stderr")
+@app.command(
+    "chatty", description="Print to stdout and log to stderr", danger_level="safe", exit_codes=()
+)
 def chatty(args: NoArgs, ctx: Ctx) -> dict[str, str]:
     print("initialized")
     ctx.log("connecting", host="db.example.com")
     return {"status": "ok"}
 
 
-@app.command("colored", description="Return text a library colored")
+@app.command(
+    "colored", description="Return text a library colored", danger_level="safe", exit_codes=()
+)
 def colored(args: NoArgs, ctx: Ctx) -> dict[str, str]:
     return {"text": "\x1b[31mred\x1b[0m", "progress": "50%\r100%", "raw": "a\x00b\udcff"}
 
 
-@app.command("login", description="Log in to the upstream")
+@app.command("login", description="Log in to the upstream", danger_level="safe", exit_codes=())
 def login(args: Login, ctx: Ctx) -> dict[str, bool]:
     ctx.log(
         f"sending {args.api_token}",
@@ -60,7 +64,9 @@ def login(args: Login, ctx: Ctx) -> dict[str, bool]:
     return {"logged_in": True}
 
 
-@app.command("children", description="Show what a child process inherits")
+@app.command(
+    "children", description="Show what a child process inherits", danger_level="safe", exit_codes=()
+)
 def children(args: NoArgs, ctx: Ctx) -> dict[str, str]:
     shown = subprocess.run(
         ["sh", "-c", 'echo "$PAGER $GIT_PAGER $NO_COLOR"'],
@@ -71,12 +77,16 @@ def children(args: NoArgs, ctx: Ctx) -> dict[str, str]:
     return {"child": shown.stdout.strip()}
 
 
-@app.command("color", description="Report whether a renderer may color")
+@app.command(
+    "color", description="Report whether a renderer may color", danger_level="safe", exit_codes=()
+)
 def color(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
     return {"color": ctx.color}
 
 
-@app.command("report", description="Numbers, dates, and booleans")
+@app.command(
+    "report", description="Numbers, dates, and booleans", danger_level="safe", exit_codes=()
+)
 def report(args: NoArgs, ctx: Ctx) -> Report:
     return Report(
         price=1234.56,
@@ -89,18 +99,25 @@ def report(args: NoArgs, ctx: Ctx) -> Report:
     )
 
 
-@app.command("naive", description="Return a datetime without a zone")
+@app.command(
+    "naive", description="Return a datetime without a zone", danger_level="safe", exit_codes=()
+)
 def naive(args: NoArgs, ctx: Ctx) -> dict[str, dt.datetime]:
     return {"at": dt.datetime(2026, 9, 27, 10, 0)}
 
 
-@app.command("offset", description="Return a datetime in a fixed zone")
+@app.command(
+    "offset", description="Return a datetime in a fixed zone", danger_level="safe", exit_codes=()
+)
 def offset(args: NoArgs, ctx: Ctx) -> dict[str, dt.datetime]:
     return {"at": dt.datetime(2026, 9, 27, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=2)))}
 
 
 @app.command(
-    "busy", description="Fail in a retryable way", exit_codes=["UPSTREAM_BUSY", "UPSTREAM_DOWN"]
+    "busy",
+    description="Fail in a retryable way",
+    exit_codes=["UPSTREAM_BUSY", "UPSTREAM_DOWN"],
+    danger_level="safe",
 )
 def busy(args: NoArgs, ctx: Ctx) -> None:
     if ctx.env.get("DOWN"):

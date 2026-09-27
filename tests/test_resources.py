@@ -9,7 +9,7 @@ from typing import Self
 
 import pytest
 
-from treaty import App, Arg, Ctx, Exit, Flag, ParseError, RegistrationError
+from treaty import Affects, App, Arg, Ctx, Exit, Flag, ParseError, RegistrationError
 
 ACQUIRED: list[str] = []
 
@@ -65,6 +65,7 @@ class Out:
     directory: str
     component: str
     same_project: bool
+    would_affect: Affects | None = None
 
 
 def resource_app() -> App:
@@ -76,9 +77,14 @@ def resource_app() -> App:
     )
     def deploy(args: Args, ctx: Ctx, config: Config, project: Project) -> Out:
         effect = "would_update" if args.dry_run else "updated"
-        return Out(effect, str(project.directory), config.component, config.project is project)
+        affects = Affects("Deploys it", (config.component,), 1) if args.dry_run else None
+        return Out(
+            effect, str(project.directory), config.component, config.project is project, affects
+        )
 
-    @app.command("slow", description="Slow resource", timeout=0.05)
+    @app.command(
+        "slow", description="Slow resource", timeout=0.05, danger_level="safe", exit_codes=()
+    )
     def slow(args: Args, ctx: Ctx, slow: Slow) -> None:
         return None
 
@@ -109,6 +115,7 @@ def test_resources_are_acquired_once_in_dependency_order_and_shared() -> None:
         "directory": str(Path("/srv/app")),
         "component": "api",
         "same_project": True,
+        "would_affect": None,
     }
     assert ACQUIRED == ["project", "config"]
 
@@ -207,7 +214,7 @@ class Right:
 def register(fn: object, match: str) -> None:
     app = App("fleet", version="1")
     with pytest.raises(RegistrationError, match=match):
-        app.command("x", description="x")(fn)  # type: ignore[arg-type]
+        app.command("x", description="x", danger_level="safe", exit_codes=())(fn)  # type: ignore[arg-type]
 
 
 def test_resource_without_classmethod_acquire_is_refused() -> None:

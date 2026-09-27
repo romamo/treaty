@@ -47,11 +47,11 @@ def counting_app(state: Path) -> tuple[App, list[str]]:
         effect = "would_create" if args.dry_run else "created"
         return Created(effect, args.name, len(calls), ctx.idempotency_key)
 
-    @app.command("broken", description="Forgets its effect", danger_level="mutating")
+    @app.command("broken", description="Forgets its effect", danger_level="mutating", exit_codes=())
     def broken(args: CreateArgs, ctx: Ctx) -> dict[str, object]:
         return {"effect": "created" if args.dry_run else "made"}
 
-    @app.command("show", description="Read only")
+    @app.command("show", description="Read only", danger_level="safe", exit_codes=())
     def show(args: CreateArgs, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -152,7 +152,7 @@ def test_registration_requires_an_effect_field_and_reserves_the_key() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="'effect' field"):
 
-        @app.command("make", description="Make", danger_level="mutating")
+        @app.command("make", description="Make", danger_level="mutating", exit_codes=())
         def make(args: CreateArgs, ctx: Ctx) -> list[str]:
             return []
 
@@ -162,7 +162,7 @@ def test_registration_requires_an_effect_field_and_reserves_the_key() -> None:
 
     with pytest.raises(RegistrationError, match="ctx.idempotency_key"):
 
-        @app.command("keyed", description="Keyed", danger_level="mutating")
+        @app.command("keyed", description="Keyed", danger_level="mutating", exit_codes=())
         def keyed(args: Keyed, ctx: Ctx) -> dict[str, object]:
             return {}
 
@@ -201,7 +201,7 @@ def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> No
     release = threading.Event()
     app = App("slowctl", version="1", state_dir=tmp_path, default_timeout=0.2)
 
-    @app.command("create", description="Slow create", danger_level="mutating")
+    @app.command("create", description="Slow create", danger_level="mutating", exit_codes=())
     def create(args: CreateArgs, ctx: Ctx) -> Created:
         started.append(time.monotonic())
         release.wait(10)  # held until the test has seen the retry refused

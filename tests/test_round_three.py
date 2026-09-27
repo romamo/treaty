@@ -64,7 +64,9 @@ def limits_app() -> App:
     app = App("lim", version="1")
     app.scalar(Weird, parse=weird_parse)
 
-    @app.command("num", description="Numbers", supports_raw_payload=True)
+    @app.command(
+        "num", description="Numbers", supports_raw_payload=True, danger_level="safe", exit_codes=()
+    )
     def num(args: Numbers, ctx: Ctx) -> dict[str, float]:
         return {"count": args.count, "ratio": args.ratio}
 
@@ -72,7 +74,7 @@ def limits_app() -> App:
     class WeirdArgs:
         w: Weird = Flag(description="Weird")
 
-    @app.command("weird", description="Parser raises KeyError")
+    @app.command("weird", description="Parser raises KeyError", danger_level="safe", exit_codes=())
     def weird(args: WeirdArgs, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -128,7 +130,7 @@ def test_scalar_pattern_type_is_enforced() -> None:
         run: RunId = Flag(description="Run")
         ver: Version = Flag(description="Version")
 
-    @app.command("go", description="Go")
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
     def go(args: Go, ctx: Ctx) -> dict[str, str]:
         return {"run": args.run.value}
 
@@ -145,7 +147,7 @@ def test_secret_path_is_not_rebuilt_in_the_suggestion() -> None:
     class KeyFile:
         key_file: Path = Flag(description="Key file")
 
-    @app.command("use", description="Use a key file")
+    @app.command("use", description="Use a key file", danger_level="safe", exit_codes=())
     def use(args: KeyFile, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -162,7 +164,9 @@ def hooks_app(cleanup_fails: bool = False) -> App:
         if cleanup_fails:
             raise FileNotFoundError("gone")
 
-    @app.command("kill", description="Signals itself", cleanup=cleanup)
+    @app.command(
+        "kill", description="Signals itself", cleanup=cleanup, danger_level="safe", exit_codes=()
+    )
     def kill(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         signal.raise_signal(signal.SIGTERM)
         return {}
@@ -172,12 +176,20 @@ def hooks_app(cleanup_fails: bool = False) -> App:
         description="Events",
         streaming=True,
         renderers={Format.PLAIN: lambda e: f"n={e['n']}\n"},
+        danger_level="safe",
+        exit_codes=(),
     )
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         yield {"n": 2}
 
-    @app.command("closing", description="Its finally raises", streaming=True)
+    @app.command(
+        "closing",
+        description="Its finally raises",
+        streaming=True,
+        danger_level="safe",
+        exit_codes=(),
+    )
     def closing(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, object]]:
         try:
             yield {"x": object()}
@@ -188,7 +200,12 @@ def hooks_app(cleanup_fails: bool = False) -> App:
         def __str__(self) -> str:
             raise RuntimeError("no str")
 
-    @app.command("unprintable", description="Raises an unprintable exception")
+    @app.command(
+        "unprintable",
+        description="Raises an unprintable exception",
+        danger_level="safe",
+        exit_codes=(),
+    )
     def unprintable(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise Unprintable()
 
@@ -230,7 +247,9 @@ def test_signal_between_exec_lines_writes_a_cancelled_line() -> None:
 
     app.scalar(Loud, parse=Loud, serialize=loud)
 
-    @app.command("mk", description="Result signals while serialized")
+    @app.command(
+        "mk", description="Result signals while serialized", danger_level="safe", exit_codes=()
+    )
     def mk(args: NoArgs, ctx: Ctx) -> dict[str, Loud]:
         return {"v": Loud("x")}
 
@@ -265,7 +284,7 @@ def test_crash_redaction_skips_defaults_and_short_values() -> None:
     class Gen:
         max_tokens: int = Flag(default=1, description="Tokens")
 
-    @app.command("gen", description="Generate")
+    @app.command("gen", description="Generate", danger_level="safe", exit_codes=())
     def gen(args: Gen, ctx: Ctx) -> dict[str, str]:
         raise RuntimeError("upstream returned 413 after 10 retries")
 
@@ -321,7 +340,7 @@ def test_registration_rejects_what_would_break_later() -> None:
             register(app, args_type)
     with pytest.raises(SchemaError, match="refers to itself"):
 
-        @app.command("tree", description="Tree")
+        @app.command("tree", description="Tree", danger_level="safe", exit_codes=())
         def tree(args: NoArgs, ctx: Ctx) -> Node:
             return Node(())
 
@@ -334,7 +353,13 @@ def test_confirm_given_on_argv_conflicts_with_false_in_the_payload() -> None:
         target: str = Arg(description="Target")
         dry_run: bool = Flag(default=False, description="Preview")
 
-    @app.command("rm", description="Remove", danger_level="destructive", supports_raw_payload=True)
+    @app.command(
+        "rm",
+        description="Remove",
+        danger_level="destructive",
+        supports_raw_payload=True,
+        exit_codes=(),
+    )
     def rm(args: Rm, ctx: Ctx) -> dict[str, str]:
         return {"effect": "deleted"}
 
@@ -354,7 +379,13 @@ def test_probes_drop_global_options_from_examples() -> None:
     class Show:
         item: str = Arg(description="Item")
 
-    @app.command("show", description="Show", examples=[("x", "t --format plain show widget")])
+    @app.command(
+        "show",
+        description="Show",
+        examples=[("x", "t --format plain show widget")],
+        danger_level="safe",
+        exit_codes=(),
+    )
     def show(args: Show, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -388,7 +419,7 @@ def test_scalar_parser_parse_error_keeps_its_message_and_suggestion() -> None:
     class Go:
         region: Region = Flag(description="Region")
 
-    @app.command("go", description="Go")
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
     def go(args: Go, ctx: Ctx) -> dict[str, str]:
         return {"region": args.region.value}
 
@@ -403,7 +434,14 @@ def test_failing_plain_renderer_on_a_stream_exits_1_with_one_traceback() -> None
     def broken(event: object) -> str:
         raise KeyError("renderer bug")
 
-    @app.command("tick", description="Events", streaming=True, renderers={Format.PLAIN: broken})
+    @app.command(
+        "tick",
+        description="Events",
+        streaming=True,
+        renderers={Format.PLAIN: broken},
+        danger_level="safe",
+        exit_codes=(),
+    )
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         yield {"n": 2}
@@ -430,7 +468,13 @@ def test_signal_held_before_the_handler_skips_cleanup() -> None:
     class Args:
         v: Loud = Flag(description="V")
 
-    @app.command("go", description="Go", cleanup=lambda: ran.append("cleanup"))
+    @app.command(
+        "go",
+        description="Go",
+        cleanup=lambda: ran.append("cleanup"),
+        danger_level="safe",
+        exit_codes=(),
+    )
     def go(args: Args, ctx: Ctx) -> dict[str, str]:
         ran.append("handler")
         return {}
@@ -458,7 +502,7 @@ def test_malformed_url_preset_input_is_an_arg_error() -> None:
     class Fetch:
         url: Url = Arg(description="URL")
 
-    @app.command("fetch", description="Fetch")
+    @app.command("fetch", description="Fetch", danger_level="safe", exit_codes=())
     def fetch(args: Fetch, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -475,7 +519,9 @@ def test_optional_positional_is_not_required_in_the_payload_schema() -> None:
     class Hello:
         name: str | None = Arg(description="Name")
 
-    @app.command("hi", description="Hi", supports_raw_payload=True)
+    @app.command(
+        "hi", description="Hi", supports_raw_payload=True, danger_level="safe", exit_codes=()
+    )
     def hi(args: Hello, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -488,7 +534,7 @@ def test_undeclared_framework_exit_is_rejected_like_a_custom_one() -> None:
 
     app = App("nf", version="1")
 
-    @app.command("get", description="Get")
+    @app.command("get", description="Get", danger_level="safe", exit_codes=())
     def get(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise Exit.NOT_FOUND("missing")
 
@@ -529,7 +575,7 @@ def test_huge_ints_are_errors_not_crashes_in_process_and_in_output() -> None:
     class Size:
         size: int = Flag(default=1, pattern=r"\d+", description="Size")
 
-    @app.command("size", description="Size")
+    @app.command("size", description="Size", danger_level="safe", exit_codes=())
     def size(args: Size, ctx: Ctx) -> dict[str, int]:
         return {"n": 10**5000}
 
@@ -568,13 +614,19 @@ def echo_app() -> App:
     class Text:
         text: str = Flag(description="Text")
 
-    @app.command("echo", description="Echo", supports_raw_payload=True, exit_codes=["NOT_FOUND"])
+    @app.command(
+        "echo",
+        description="Echo",
+        supports_raw_payload=True,
+        exit_codes=["NOT_FOUND"],
+        danger_level="safe",
+    )
     def echo(args: Text, ctx: Ctx) -> dict[str, str]:
         if args.text == "where":
             raise ParseError("bad place", context={"path": Path("/srv"), "n": Decimal("1.5")})
         return {"text": args.text}
 
-    @app.command("items", description="Items", streaming=True)
+    @app.command("items", description="Items", streaming=True, danger_level="safe", exit_codes=())
     def items(args: NoArgs, ctx: Ctx) -> Iterable[dict[str, int]]:
         return [{"a": 1}, {"a": 2}]
 
@@ -696,7 +748,7 @@ def test_idempotency_key_works_when_args_serialize_to_non_json(tmp_path: Path) -
     class Charge:
         amount: Money = Arg(description="Amount")
 
-    @app.command("charge", description="Charge", danger_level="mutating")
+    @app.command("charge", description="Charge", danger_level="mutating", exit_codes=())
     def charge(args: Charge, ctx: Ctx) -> dict[str, str]:
         return {"effect": "created"}
 

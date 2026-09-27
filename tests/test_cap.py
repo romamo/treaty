@@ -12,19 +12,26 @@ from treaty._cap import MARKER, MIN_BYTES
 def big_app() -> App:
     app = App("bigctl", version="1", max_output_bytes=MIN_BYTES)
 
-    @app.command("items", description="Many small items")
+    @app.command("items", description="Many small items", danger_level="safe", exit_codes=())
     def items(args: NoArgs, ctx: Ctx) -> list[dict[str, object]]:
         return [{"id": i, "name": f"item-{i}"} for i in range(1000)]
 
-    @app.command("log", description="One record with a huge field")
+    @app.command(
+        "log", description="One record with a huge field", danger_level="safe", exit_codes=()
+    )
     def log(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"records": [{"id": 1, "log": "x" * 50_000}], "source": "api"}
 
-    @app.command("table", description="A wide object with no list or long string")
+    @app.command(
+        "table",
+        description="A wide object with no list or long string",
+        danger_level="safe",
+        exit_codes=(),
+    )
     def table(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"name": "t", "rows": {f"k{i}": {"v": i} for i in range(2000)}}
 
-    @app.command("small", description="Fits easily")
+    @app.command("small", description="Fits easily", danger_level="safe", exit_codes=())
     def small(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"ok": True}
 
@@ -149,7 +156,7 @@ def test_command_flag_named_like_a_global_is_rejected() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="max-output"):
 
-        @app.command("go", description="Go")
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: Args, ctx: Ctx) -> dict[str, str]:
             return {}
 

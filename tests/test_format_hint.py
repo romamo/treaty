@@ -22,11 +22,11 @@ class ExportArgs:
 def hint_app() -> App:
     app = App("listctl", version="1")
 
-    @app.command("list", description="List items")
+    @app.command("list", description="List items", danger_level="safe", exit_codes=())
     def list_(args: ListArgs, ctx: Ctx) -> dict[str, int]:
         return {"limit": args.limit}
 
-    @app.command("export", description="Export items")
+    @app.command("export", description="Export items", danger_level="safe", exit_codes=())
     def export(args: ExportArgs, ctx: Ctx) -> dict[str, str]:
         return {"output": args.output}
 

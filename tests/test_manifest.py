@@ -86,7 +86,7 @@ def test_etag_is_stable_and_changes_with_registrations(app: App) -> None:
 
     from treaty import Ctx, NoArgs
 
-    @app.command("ping", description="Reply")
+    @app.command("ping", description="Reply", danger_level="safe", exit_codes=())
     def ping(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         return {"pong": "yes"}
 

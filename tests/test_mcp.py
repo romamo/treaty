@@ -38,11 +38,19 @@ class TailArgs:
 def adapter_app() -> App:
     app = App("regctl", version="2", description="Registry control")
 
-    @app.command("push", description="Push an image", danger_level="mutating", has_network_io=True)
+    @app.command(
+        "push",
+        description="Push an image",
+        danger_level="mutating",
+        has_network_io=True,
+        exit_codes=(),
+    )
     def push(args: PushArgs, ctx: Ctx) -> Pushed:
         return Pushed("created", args.image, len(args.token))
 
-    @app.command("log.tail", description="Tail the log", streaming=True)
+    @app.command(
+        "log.tail", description="Tail the log", streaming=True, danger_level="safe", exit_codes=()
+    )
     def tail(args: TailArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         for n in range(args.count):
             yield {"n": n}
@@ -223,7 +231,7 @@ def test_capped_and_tuple_outputs_validate_like_an_mcp_client() -> None:
 
     app = App("wide", version="1", max_output_bytes=4096)
 
-    @app.command("wide", description="Big output")
+    @app.command("wide", description="Big output", danger_level="safe", exit_codes=())
     def wide(args: NoArgs, ctx: Ctx) -> Wide:
         return Wide((1, "a"), {f"k{i}": "x" * 300 for i in range(20)})
 
@@ -248,7 +256,7 @@ def test_replayed_noop_matches_a_closed_effect_enum() -> None:
 
     app = App("mk", version="1", state_dir=None)
 
-    @app.command("mk", description="Make", danger_level="mutating")
+    @app.command("mk", description="Make", danger_level="mutating", exit_codes=())
     def mk(args: NoArgs, ctx: Ctx) -> Made:
         return Made("created", "x")
 

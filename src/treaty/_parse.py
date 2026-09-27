@@ -35,6 +35,7 @@ CONFIRM_FLAG = "confirm-destructive"
 RAW_PAYLOAD_FLAG = "raw-payload"
 IDEMPOTENCY_FLAG = "idempotency-key"
 NO_STREAM_FLAG = "no-stream"
+LIVE_FLAG = "live"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,8 @@ class Invocation:
     idempotency_key: IdempotencyKey | None = None
     no_stream: bool = False
     """A streaming command asked for one buffered envelope instead of JSONL"""
+    live: bool = False
+    """A ``safe_default`` command asked to apply instead of its default dry run"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +213,7 @@ def parse_command_args(
     raw_payload: str | None = None
     key: IdempotencyKey | None = None
     no_stream = False
+    live = False
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -320,6 +324,14 @@ def parse_command_args(
                     no_stream = True
                     i += 1
                     continue
+                if name == LIVE_FLAG and command.safe_default:
+                    if has_eq:
+                        raise ParseError(
+                            f"'{LIVE_FLAG}' takes no value", context={"flag": LIVE_FLAG}
+                        )
+                    live = True
+                    i += 1
+                    continue
                 found = command.field_by_flag(name)
                 if found is not None and found.secret:
                     errors.add(direct_secret_error(found.flag))
@@ -392,7 +404,11 @@ def parse_command_args(
             raise _repeated(TIMEOUT_FLAG)
         if key is not None and built.idempotency_key not in (None, key):
             raise _repeated(IDEMPOTENCY_FLAG)
-        for flag, given in ((CONFIRM_FLAG, confirmed), (NO_STREAM_FLAG, no_stream)):
+        for flag, given in (
+            (CONFIRM_FLAG, confirmed),
+            (NO_STREAM_FLAG, no_stream),
+            (LIVE_FLAG, live),
+        ):
             spellings = (flag, flag.replace("-", "_"))
             if given and any(mapping.get(k) is False for k in spellings):
                 raise _repeated(flag)
@@ -402,6 +418,7 @@ def parse_command_args(
             confirmed=confirmed or built.confirmed,
             idempotency_key=key or built.idempotency_key,
             no_stream=no_stream or built.no_stream,
+            live=live or built.live,
         )
     _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
@@ -410,6 +427,7 @@ def parse_command_args(
         confirmed=confirmed,
         idempotency_key=key,
         no_stream=no_stream,
+        live=live,
     )
 
 
@@ -476,6 +494,8 @@ def known_flags(command: Command) -> list[str]:
         flags.append(IDEMPOTENCY_FLAG)
     if command.streaming:
         flags.append(NO_STREAM_FLAG)
+    if command.safe_default:
+        flags.append(LIVE_FLAG)
     return flags
 
 
@@ -525,6 +545,7 @@ def build_from_mapping(
     confirmed = False
     idempotency_key: IdempotencyKey | None = None
     no_stream = False
+    live = False
     errors = _Collector()
     for key, value in mapping.items():
         try:
@@ -550,6 +571,13 @@ def build_from_mapping(
                         f"{key!r} expects a boolean", context={"field": key, "value": value}
                     )
                 no_stream = value
+                continue
+            if flag == LIVE_FLAG and command.safe_default:
+                if not isinstance(value, bool):
+                    raise ParseError(
+                        f"{key!r} expects a boolean", context={"field": key, "value": value}
+                    )
+                live = value
                 continue
             found = command.field_by_flag(flag)
             if found is not None and found.secret:
@@ -586,6 +614,7 @@ def build_from_mapping(
         confirmed=confirmed,
         idempotency_key=idempotency_key,
         no_stream=no_stream,
+        live=live,
     )
 
 

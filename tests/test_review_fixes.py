@@ -42,11 +42,17 @@ class Login:
 def review_app() -> App:
     app = App("revctl", version="1")
 
-    @app.command("name", description="Echo a name", supports_raw_payload=True)
+    @app.command(
+        "name",
+        description="Echo a name",
+        supports_raw_payload=True,
+        danger_level="safe",
+        exit_codes=(),
+    )
     def name(args: Name, ctx: Ctx) -> dict[str, str]:
         return {"name": args.name}
 
-    @app.command("shift", description="Echo an offset")
+    @app.command("shift", description="Echo an offset", danger_level="safe", exit_codes=())
     def shift(args: Shift, ctx: Ctx) -> dict[str, int]:
         return {"n": args.n}
 
@@ -56,12 +62,15 @@ def review_app() -> App:
         danger_level="destructive",
         supports_raw_payload=True,
         has_network_io=True,
+        exit_codes=(),
     )
     def rm(args: Remove, ctx: Ctx) -> dict[str, object]:
-        effect = "would_delete" if args.dry_run else "deleted"
-        return {"effect": effect, "timeout_ms": ctx.timeout.milliseconds}
+        if not args.dry_run:
+            return {"effect": "deleted", "timeout_ms": ctx.timeout.milliseconds}
+        affects = {"summary": "Deletes it", "resources": [args.target], "count": 1}
+        return {"effect": "would_delete", "timeout_ms": 0, "would_affect": affects}
 
-    @app.command("login", description="Log in")
+    @app.command("login", description="Log in", danger_level="safe", exit_codes=())
     def login(args: Login, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -126,19 +135,21 @@ def test_field_shadowed_by_a_framework_flag_is_rejected() -> None:
     app = App("t", version="1")
     with pytest.raises(RegistrationError, match="supplied by the framework"):
 
-        @app.command("a", description="A", has_network_io=True)
+        @app.command("a", description="A", has_network_io=True, danger_level="safe", exit_codes=())
         def a(args: TimeoutField, ctx: Ctx) -> dict[str, int]:
             return {}
 
     with pytest.raises(RegistrationError, match="supplied by the framework"):
 
-        @app.command("b", description="B", supports_raw_payload=True)
+        @app.command(
+            "b", description="B", supports_raw_payload=True, danger_level="safe", exit_codes=()
+        )
         def b(args: RawPayloadField, ctx: Ctx) -> dict[str, int]:
             return {}
 
     with pytest.raises(RegistrationError, match="supplied by the framework"):
 
-        @app.command("c", description="C", streaming=True)
+        @app.command("c", description="C", streaming=True, danger_level="safe", exit_codes=())
         def c(args: NoStreamField, ctx: Ctx) -> Iterator[dict[str, int]]:
             yield {}
 
@@ -200,27 +211,27 @@ def round_two_app() -> App:
     class Out:
         out: Path = Flag(default=Path("out.json"), description="Output file")
 
-    @app.command("write", description="Path default")
+    @app.command("write", description="Path default", danger_level="safe", exit_codes=())
     def write(args: Out, ctx: Ctx) -> dict[str, str]:
         return {"out": str(args.out)}
 
-    @app.command("cp", description="Copy")
+    @app.command("cp", description="Copy", danger_level="safe", exit_codes=())
     def cp(args: Copy, ctx: Ctx) -> dict[str, str]:
         return {"src": args.src, "dst": args.dst}
 
-    @app.command("ratio", description="Ratio")
+    @app.command("ratio", description="Ratio", danger_level="safe", exit_codes=())
     def ratio(args: Ratio, ctx: Ctx) -> dict[str, float]:
         return {"r": args.r}
 
-    @app.command("nan", description="Returns NaN")
+    @app.command("nan", description="Returns NaN", danger_level="safe", exit_codes=())
     def nan(args: Ratio, ctx: Ctx) -> dict[str, float]:
         return {"r": float("nan")}
 
-    @app.command("quit", description="Calls sys.exit")
+    @app.command("quit", description="Calls sys.exit", danger_level="safe", exit_codes=())
     def quit_(args: Ratio, ctx: Ctx) -> dict[str, float]:
         raise SystemExit(3)
 
-    @app.command("count", description="Count")
+    @app.command("count", description="Count", danger_level="safe", exit_codes=())
     def count(args: Count, ctx: Ctx) -> dict[str, int]:
         return {"n": args.n}
 
@@ -243,7 +254,7 @@ def test_unlistable_default_fails_registration() -> None:
 
     with pytest.raises(RegistrationError, match="finite"):
 
-        @app.command("odd", description="Odd")
+        @app.command("odd", description="Odd", danger_level="safe", exit_codes=())
         def odd(args: Odd, ctx: Ctx) -> dict[str, str]:
             return {}
 
@@ -267,7 +278,7 @@ def test_positionals_fill_in_argv_order_skipping_slots_set_by_flag() -> None:
 def test_array_positional_mixes_values_and_flags() -> None:
     app = App("t", version="1")
 
-    @app.command("cat", description="Cat")
+    @app.command("cat", description="Cat", danger_level="safe", exit_codes=())
     def cat(args: Cat, ctx: Ctx) -> dict[str, list[str]]:
         return {"files": list(args.files)}
 
@@ -318,7 +329,7 @@ def test_registration_rejects_positional_layouts_the_parser_cannot_serve() -> No
     app = App("t", version="1")
     for args_type, match in ((Greedy, "only the last positional"), (Capital, "lowercase")):
         with pytest.raises(RegistrationError, match=match):
-            app.command(f"c{len(match)}", description="C")(
+            app.command(f"c{len(match)}", description="C", danger_level="safe", exit_codes=())(
                 _handler_for(args_type)  # type: ignore[arg-type]
             )
 
@@ -338,7 +349,7 @@ def test_boolean_named_stream_is_rejected_on_streaming_commands() -> None:
     app = App("t", version="1")
     with pytest.raises(RegistrationError, match="supplied by the framework"):
 
-        @app.command("tail", description="Tail", streaming=True)
+        @app.command("tail", description="Tail", streaming=True, danger_level="safe", exit_codes=())
         def tail(args: Tail, ctx: Ctx) -> Iterator[dict[str, int]]:
             yield {}
 
@@ -380,7 +391,11 @@ def test_argument_order_ignores_example_globals_and_streams() -> None:
         limit: int = Flag(default=1, description="Limit")
 
     @app.command(
-        "show", description="Show", examples=[("x", "fmtapp show x --format json --limit 3")]
+        "show",
+        description="Show",
+        examples=[("x", "fmtapp show x --format json --limit 3")],
+        danger_level="safe",
+        exit_codes=(),
     )
     def show(args: Show, ctx: Ctx) -> dict[str, str]:
         return {}

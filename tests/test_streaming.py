@@ -42,6 +42,7 @@ def stream_app(*, timeout: float | None | str = "inherit") -> App:
         "tail",
         description="Emit events",
         streaming=True,
+        danger_level="safe",
         exit_codes=["NO_SPACE"],
         renderers={Format.PLAIN: lambda e: f"[{e['n']}] {e['text']}\n"},
         **extra,  # type: ignore[arg-type]
@@ -271,7 +272,7 @@ def register(match: str, **meta: object) -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match=match):
 
-        @app.command("x", description="x", streaming=True, **meta)  # type: ignore[arg-type]
+        @app.command("x", description="x", streaming=True, exit_codes=(), **meta)  # type: ignore[arg-type]
         def handler(args: TailArgs, ctx: Ctx) -> Iterator[Event]:
             yield Event(1, "x")
 
@@ -280,7 +281,7 @@ def test_streaming_requires_an_iterator_annotation() -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match=r"annotated Iterator\[T\]"):
 
-        @app.command("x", description="x", streaming=True)
+        @app.command("x", description="x", streaming=True, danger_level="safe", exit_codes=())
         def handler(args: TailArgs, ctx: Ctx) -> Event:
             return Event(1, "x")
 
@@ -289,7 +290,7 @@ def test_streaming_events_must_be_payloads() -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match="each yielded event must serialize"):
 
-        @app.command("x", description="x", streaming=True)
+        @app.command("x", description="x", streaming=True, danger_level="safe", exit_codes=())
         def handler(args: TailArgs, ctx: Ctx) -> Iterator[int]:
             yield 1
 
@@ -302,6 +303,6 @@ def test_iterator_annotation_without_streaming_is_refused() -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match="return type must serialize"):
 
-        @app.command("x", description="x")
+        @app.command("x", description="x", danger_level="safe", exit_codes=())
         def handler(args: TailArgs, ctx: Ctx) -> Iterator[Event]:
             yield Event(1, "x")

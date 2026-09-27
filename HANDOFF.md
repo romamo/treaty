@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 526 passed |
+| `uv run pytest` | 547 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -55,7 +55,20 @@ The two do not share code.
   allows line breaks. `FlagEntry` admits no extra keys, so the manifest states the opt-out
   in the flag's description instead of a `multiline` field
 - **Unconfirmed destructive commands exit 2**, running the handler in dry-run mode and
-  returning the preview as `data` with error code `CONFIRMATION_REQUIRED` (REQ-O-021)
+  returning the preview as `data` with error code `CONFIRMATION_REQUIRED` (REQ-O-021),
+  whose message quotes `would_affect.summary`
+- **Declarations are required (D3).** `App.command` raises `RegistrationError` when
+  `exit_codes=` or `danger_level=` is left out (an `_Unset` sentinel, so the error names the
+  command and the fix instead of a `TypeError`). The built-ins declare `safe` and `()`
+- **Destructive outputs carry `would_affect`.** Registration requires the field on the
+  output type (dict outputs are checked per run); `effect_problem` fails a destructive dry
+  run whose `would_affect.summary` is missing. Mutating dry runs (from `exec --dry-run`)
+  need no `would_affect`
+- **`safe_default=True` is decided in `_Run.execute`**, before the idempotency path: no
+  `--live`, or `--dry-run`, turns `dry_run` on, so the rest of the pipeline sees an
+  ordinary dry run. `--dry-run` wins over `--live` because the kit previews a destructive
+  probe by appending `--dry-run` to its argv. `meta.dry_run` is added to every envelope of
+  the command, argument errors included; `meta.confirmed` only to an applied live run
 - **Timeouts use a daemon thread**, not `SIGALRM`, so they work on Windows, off the main
   thread, and inside blocking C calls. A timed-out handler is abandoned, not killed
 - **`--format` is `json` or `plain`**, named for the representation, not the reader
@@ -187,14 +200,14 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
-F-011, F-012, F-013, F-015, F-016, F-034, F-044 (newlines), F-045 (paths), F-048, F-051, F-069, C-001, C-002,
-C-003, C-004, C-007, C-012, C-013, C-015, C-016, C-020 (all presets), O-021, O-022, O-032,
-O-039, O-041, O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
+F-011, F-012, F-013, F-015, F-016, F-034, F-044 (newlines), F-045 (paths), F-048, F-051,
+F-069, C-001, C-002, C-003, C-004, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
+O-021, O-022, O-032, O-039, O-041, O-048, O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
-`--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), and
-`--<name>-from-env` / `--<name>-from-file` for each secret field.
+`--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
+(`safe_default`), and `--<name>-from-env` / `--<name>-from-file` for each secret field.
 
 ## Gotchas
 

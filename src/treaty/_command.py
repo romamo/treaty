@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ._effect import can_carry_effect, with_replay_effect
+from ._effect import can_carry, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._mode import Format
@@ -82,6 +82,8 @@ class Command:
     """Resource classes the handler takes after ``ctx``, in parameter order"""
     resource_graph: Mapping[type, ResourceSpec]
     """Every resource reachable from ``resources``, validated at registration"""
+    safe_default: bool = False
+    """A destructive command that runs as a dry run unless ``--live`` (REQ-O-048)"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -123,6 +125,7 @@ def build_command(
     renderers: Mapping[Format, Renderer],
     scalars: ScalarRegistry,
     streaming: bool = False,
+    safe_default: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -148,6 +151,11 @@ def build_command(
             f"{path}: {'; '.join(shadowed)}: global options, which would never reach "
             "the handler (REQ-F-079)"
         )
+    if safe_default and danger_level is not DangerLevel.DESTRUCTIVE:
+        raise RegistrationError(
+            f"{path}: safe_default=True is for destructive commands, whose dry run it makes "
+            "the default (REQ-O-048)"
+        )
     for f in fields:
         f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
     framework_flags = {
@@ -155,6 +163,7 @@ def build_command(
         "raw-payload": supports_raw_payload,
         "confirm-destructive": danger_level is DangerLevel.DESTRUCTIVE,
         "no-stream": streaming,
+        "live": safe_default,
     }
     taken = sorted(
         f.flag
@@ -169,7 +178,7 @@ def build_command(
             "would never reach the handler; rename the fields"
         )
     if danger_level is not DangerLevel.SAFE:
-        if not can_carry_effect(output_type):
+        if not can_carry(output_type, "effect"):
             raise RegistrationError(
                 f"{path}: {danger_level.value} commands must return an object with an "
                 "'effect' field (REQ-C-003)"
@@ -184,6 +193,12 @@ def build_command(
         if dry_run is None or dry_run.flag_type is not FlagType.BOOLEAN:
             raise RegistrationError(
                 f"{path}: destructive commands must declare a boolean 'dry_run' flag (REQ-C-004)"
+            )
+        if not can_carry(output_type, "would_affect"):
+            raise RegistrationError(
+                f"{path}: destructive commands must return an object with a 'would_affect' "
+                "field for dry runs, such as would_affect: treaty.Affects | None = None "
+                "(REQ-C-004)"
             )
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
@@ -212,6 +227,7 @@ def build_command(
         streaming=streaming,
         resources=resources,
         resource_graph=resource_graph(resources, str(path), args_type),
+        safe_default=safe_default,
     )
 
 

@@ -22,7 +22,7 @@ class DeployArgs:
 def make_app() -> App:
     app = App("deployctl", version="1")
 
-    @app.command("deploy", description="Deploy")
+    @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
     def deploy(args: DeployArgs, ctx: Ctx) -> dict[str, object]:
         return {"service": args.service, "env": args.env, "replicas": args.replicas}
 
@@ -95,7 +95,7 @@ def test_a_field_that_failed_is_not_also_reported_missing() -> None:
 
     app = App("x", version="1")
 
-    @app.command("go", description="Go")
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
     def go(args: Strict, ctx: Ctx) -> None:
         return None
 
