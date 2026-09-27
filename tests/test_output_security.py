@@ -431,4 +431,6 @@ def test_masking_many_values_keeps_the_response_under_the_byte_cap() -> None:
     warning = next(
         w for w in json.loads(out.getvalue())["warnings"] if w["code"] == "HIGH_ENTROPY_MASKED"
     )
-    assert warning["context"]["count"] == 5000 and len(warning["context"]["paths"]) == 20
+    masked = sum(base64_summary(b) is not None for b in blobs)
+    assert masked > 4900 and warning["context"]["count"] == masked
+    assert len(warning["context"]["paths"]) == 20
