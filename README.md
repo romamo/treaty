@@ -701,6 +701,22 @@ for the first call, and records expire after 24 hours. Records live in
 else `~/.local/state/treaty/<app>`. Handlers read the key as `ctx.idempotency_key` to pass
 it on to an upstream API.
 
+## Locks
+
+`ctx.lock(name)` holds a lock shared by every run of the app for a `with` block:
+
+```python
+with ctx.lock("deploy", wait=10, retry_after_ms=2000):
+    push(release)
+```
+
+A run that cannot take it within `wait` seconds (default: what is left of the timeout)
+exits `4` with `LOCK_HELD`, `retryable: true`, `retry_after_ms`, and the holder's
+`holder_pid`, `holder_age_ms`, and `lock_file` in `context` (REQ-F-033). The lock is an
+advisory file lock under `locks/` of the state directory, so the operating system releases
+it when the holder exits, even on SIGTERM or SIGKILL. The `lock-declared` audit rule flags
+handlers that call `fcntl.flock` or a `FileLock` themselves.
+
 ## Cancellation
 
 SIGINT and SIGTERM produce a `CANCELLED` envelope with exit `130` or `143`, run the

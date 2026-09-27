@@ -2,13 +2,19 @@
 
 import io
 import json
+import os
 import shlex
+import subprocess
+import sys
+import tempfile
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+import fixture_lock_app
 import pytest
 from conftest import spec_validator
 
@@ -601,4 +607,102 @@ def test_audit_asks_for_a_refresh_command() -> None:
     assert [f.command for f in rule.findings] == ["login"]
     assert "refreshes_auth=True" in rule.findings[0].fix
     [rule] = [r for r in audit(gated_app(None), "gh", limit=3).rules if r.id == "refresh-declared"]
+    assert rule.passed
+
+
+# REQ-F-033
+
+LOCKCTL = Path(__file__).resolve().parent / "fixture_lock_app.py"
+
+
+def holding(state: Path, seconds: float) -> subprocess.Popen[str]:
+    """A process holding the lock, once it says so"""
+    env = {**os.environ, "LOCKCTL_STATE_DIR": str(state)}
+    proc = subprocess.Popen(
+        [sys.executable, str(LOCKCTL), "hold", "--seconds", str(seconds)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    holder = state / "locks" / "deploy.holder"
+    deadline = time.monotonic() + 30
+    while not holder.exists():
+        assert proc.poll() is None and time.monotonic() < deadline, proc.communicate()
+        time.sleep(0.02)
+    return proc
+
+
+def grab(state: Path, wait: float = 0.2) -> tuple[int, dict[str, Any]]:
+    return run(
+        fixture_lock_app.app, ["hold", "--wait", str(wait)], {"LOCKCTL_STATE_DIR": str(state)}
+    )
+
+
+def test_a_command_waiting_for_a_held_lock_exits_with_lock_held_after_the_timeout(
+    tmp_path: Path,
+) -> None:
+    proc = holding(tmp_path, 30)
+    try:
+        started = time.monotonic()
+        code, envelope = grab(tmp_path, wait=0.3)
+        assert time.monotonic() - started >= 0.3
+    finally:
+        proc.kill()
+        proc.communicate()
+    error = envelope["error"]
+    assert code == 4 and error["code"] == "LOCK_HELD" and error["retryable"] is True
+    assert error["context"]["holder_pid"] == proc.pid
+    assert error["context"]["holder_age_ms"] >= 0
+    assert error["context"]["lock_file"] == str(tmp_path / "locks" / "deploy.lock")
+
+
+def test_the_lock_held_error_includes_retry_after_ms(tmp_path: Path) -> None:
+    proc = holding(tmp_path, 30)
+    try:
+        _, envelope = grab(tmp_path)
+    finally:
+        proc.kill()
+        proc.communicate()
+    assert envelope["error"]["retry_after_ms"] == 250
+
+
+def test_the_lock_is_released_when_the_holding_process_exits_normally(tmp_path: Path) -> None:
+    proc = holding(tmp_path, 0.3)
+    out, _ = proc.communicate(timeout=30)
+    assert proc.returncode == 0 and json.loads(out)["ok"] is True
+    code, _ = grab(tmp_path, wait=0)
+    assert code == 0
+
+
+def test_the_lock_is_released_when_the_holding_process_receives_sigterm(tmp_path: Path) -> None:
+    proc = holding(tmp_path, 30)
+    proc.terminate()
+    proc.communicate(timeout=30)
+    code, _ = grab(tmp_path, wait=0)
+    assert code == 0
+
+
+def test_a_lock_within_one_process_is_released_by_the_block() -> None:
+    with tempfile.TemporaryDirectory() as state:
+        assert grab(Path(state), wait=0)[0] == 0
+        assert grab(Path(state), wait=0)[0] == 0
+    code, envelope = run(fixture_lock_app.app, ["hold"], {})
+    assert code == 4 and envelope["error"]["code"] == "STATE_DIR_UNKNOWN"
+
+
+def test_audit_flags_a_handler_that_locks_a_file_by_hand() -> None:
+    app = App("lk", version="1.0.0")
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        import fcntl
+
+        with open("x.lock", "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        return {}
+
+    [rule] = [r for r in audit(app, "lk", limit=3).rules if r.id == "lock-declared"]
+    assert [f.command for f in rule.findings] == ["go"] and "ctx.lock(" in rule.findings[0].fix
+    [rule] = [r for r in audit(fixture_lock_app.app, "l", limit=3).rules if r.id == "lock-declared"]
     assert rule.passed

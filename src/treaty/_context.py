@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
@@ -10,6 +11,7 @@ from typing import TypeVar
 from ._cap import MARKER, TRUNCATED_CODE
 from ._config import ConfigFile
 from ._errors import RegistrationError
+from ._locks import Locks
 from ._mode import Format
 from ._page import PageRequest
 from ._prompt import Prompter
@@ -56,6 +58,7 @@ class Ctx:
     project_root: Path | None = None
     """The nearest directory, from the cwd up, holding a ``project_root=`` marker"""
     retrier: Retrier | None = field(default=None, repr=False, compare=False)
+    locks: Locks | None = field(default=None, repr=False, compare=False)
 
     def retry(self, fn: Callable[[], T]) -> T:
         """Call ``fn``, and again after ``--retry-delay`` while it raises one of the
@@ -65,6 +68,16 @@ class Ctx:
         if self.retrier is None:
             raise RegistrationError("ctx.retry needs retry=treaty.Retry(...) on the command")
         return self.retrier.call(fn)
+
+    def lock(
+        self, name: str, *, wait: float | None = None, retry_after_ms: int = 1000
+    ) -> AbstractContextManager[None]:
+        """Hold the named lock, shared by every run of the app, for a ``with`` block. A run
+        that cannot take it within ``wait`` seconds (default: what is left of the
+        timeout) exits 4 with ``LOCK_HELD``, the holder's pid and age, and
+        ``retry_after_ms`` (REQ-F-033). A holder that exits or is killed releases it."""
+        locks = self.locks if self.locks is not None else Locks(None, None)
+        return locks.hold(name, wait=wait, retry_after_ms=retry_after_ms)
 
     @property
     def config_path(self) -> Path | None:

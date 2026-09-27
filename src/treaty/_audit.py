@@ -1056,6 +1056,36 @@ def _fix_declared(app: App) -> Iterator[Finding]:
             )
 
 
+_LOCK_CALLS = frozenset({"flock", "lockf", "locking", "FileLock", "SoftFileLock"})
+
+
+def locks_by_hand(handler: Callable[..., object]) -> str | None:
+    """The first file-lock call in the handler's source, such as ``fcntl.flock``"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = _dotted(node.func)
+            if name is not None and name.rsplit(".", 1)[-1] in _LOCK_CALLS:
+                return name
+    return None
+
+
+def _lock_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        call = locks_by_hand(c.handler)
+        if call is not None:
+            yield Finding(
+                "lock-declared",
+                Severity.WARNING,
+                c.path.value,
+                f"handler locks a file with {call}(...), so a waiting run blocks with no "
+                "LOCK_HELD error or retry_after_ms (REQ-F-033, heuristic)",
+                'with ctx.lock("<name>", retry_after_ms=1000): in place of the file lock',
+            )
+
+
 def _effects(schema: object) -> set[str] | None:
     """The ``effect`` values an output schema admits; None when it is open or absent"""
     if not isinstance(schema, dict):
@@ -1254,6 +1284,12 @@ RULES: tuple[Rule, ...] = (
         _env_prefix,
     ),
     Rule("retry-hint", "Rate-limit errors say how long to wait", Severity.WARNING, _retry_hint),
+    Rule(
+        "lock-declared",
+        "Handlers lock through ctx.lock",
+        Severity.WARNING,
+        _lock_declared,
+    ),
     Rule(
         "fix-declared",
         "Fixed fix commands are declared, so startup checks them",

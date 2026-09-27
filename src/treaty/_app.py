@@ -83,6 +83,7 @@ from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerpri
 from ._init import INIT_COMMAND, Init, Initialized, run_init
 from ._init import required as init_required
 from ._jobs import Job, JobStore, with_links
+from ._locks import LockHeld, Locks
 from ._manifest import (
     build_manifest,
     command_schema,
@@ -1582,7 +1583,15 @@ class _Run:
             trace_id=self.trace_id,
             project_root=self.project_root(command),
             retrier=self.retrier,
+            locks=Locks(self.locks_dir(), deadline),
         )
+
+    def locks_dir(self) -> Path | None:
+        """``locks/`` of the state directory, for ``ctx.lock`` (REQ-F-033)"""
+        base = state_dir(
+            self.app.name, self.app.state_dir, self.env, self.settings.options.instance_id
+        )
+        return None if base is None else base / "locks"
 
     def load_settings(self, options: ConfigOptions) -> None:
         """Read the settings layers once for the run; ``CONFIG_INVALID`` stops it"""
@@ -2612,7 +2621,8 @@ class _Run:
         assert isinstance(context, dict)
         # REQ-F-078: after the tool's own retries, an agent retrying on top would double them
         retried = exc.retried if isinstance(exc, RetriesExhausted) else None
-        retrying = entry.retryable and not retried
+        # 03-D1: PRECONDITION is not retryable, but nothing ran behind a held lock
+        retrying = (entry.retryable or isinstance(exc, LockHeld)) and not retried
         auth = exc if isinstance(exc, AuthFailure) else None  # REQ-F-063: the gate's fields
         return self._envelope(
             entry.code.value,
