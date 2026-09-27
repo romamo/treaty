@@ -88,6 +88,9 @@ context, because it can end a command line or log record wherever the value goes
 `Flag(multiline=True)` accepts line breaks for message bodies, and the manifest adds
 "(may contain newlines)" to its description; the `multiline-flag` audit rule suggests it
 for fields named like `message`, `body`, `description`, or `text`. Secrets are exempt.
+`Flag(max_bytes=255)` bounds a text value in UTF-8 bytes, such as a backend column: a
+longer one exits 2 with `FIELD_TOO_LARGE` and `max_bytes` and `actual_bytes` in the
+context, never the value (rule `field-limits`).
 
 ## Install
 
@@ -133,7 +136,7 @@ In `exec` and MCP, where stdin is taken, such a command needs `input_file`.
 ## Flag order
 
 `--format`, `--help`, `--schema` (alias `--print-schema`), `--output-schema`,
-`--schema-version`, and `--max-output` are global: they are accepted anywhere before `--`,
+`--schema-version`, `--stable-output`, and `--max-output` are global: they are accepted anywhere before `--`,
 so a command cannot declare a flag with those names or the short `-h`. The manifest lists
 them once, in its root `flags` map (ManifestResponse 3.0). Names treaty keeps for features
 still to come (`--config`, `--quiet`, `--verbose`, `--fields`, and others, listed in
@@ -365,7 +368,9 @@ is the next page, `--limit <kept> --cursor <token>`, and `meta.pagination` point
 too; otherwise it is the same command with a `--max-output` 1 KiB above the full size,
 since a rerun's `meta` can be a few bytes longer. `--limit` and `--cursor` on the command
 line win over the same keys in a `--raw-payload`, so a hint appended to such a call runs.
-Plain mode is not capped.
+Plain mode is not capped. A value a backend already cut goes through
+`ctx.truncated(text, field="body", original_length=4200)`, which appends the marker, adds
+a `FIELD_TRUNCATED` warning on `data.body`, and sets `meta.truncated`.
 
 ## Lists
 
@@ -503,7 +508,9 @@ patterns of REQ-F-045 with exit `2`: any `..` segment, a percent-encoded sequenc
 `%2e%2e` or `%2f`, and null bytes. The error carries `rejected_pattern` in `context` and a
 `suggestion` with the decoded or absolute form, so `../out.json` is refused but
 `/abs/out.json` passes unchanged. `pattern=` is not allowed on `Path` fields. The audit rule
-`path-typed` warns about `str` fields whose name looks like a path.
+`path-typed` warns about `str` fields whose name looks like a path. On the way out, every
+`Path` in `data` is absolute: a relative one is joined to `meta.cwd`, without resolving
+symlinks, so `Path("./src/.toolrc")` is written `/project/src/.toolrc`.
 
 ## Custom scalars
 
@@ -686,6 +693,40 @@ that break this, such as a `fetched_at` (rule `volatile-data`).
   `Retry.exhausted` (default `UNAVAILABLE`, which the command declares) with
   `retryable: false` and `retries_exhausted`, so an agent does not retry on top.
   `--retries 0` fails on the first error
+
+## Output data
+
+`data` is written the same way for the same result, so it can be hashed and diffed:
+
+- **Arrays are sorted**: strings by code point, numbers ascending, arrays of objects by a
+  declared key, else by each item's JSON text. `sort_key="id"` on a command orders its
+  output list (and a list command sorts before paging, so pages follow one order);
+  `treaty.Out(sort_key="id")` does the same for a field. `ordered=True` and
+  `Out(ordered=True)` keep the handler's order, for a ranking; the schema says
+  `"x-ordered": true`. Fixed tuples keep their order. Rule `stable-order`
+- **Every key, every time**: an output dataclass writes all its fields, so the output
+  schema lists each as `required`; `X | None` is nullable. An empty collection is `[]` or
+  `{}`, never `null`, so `list[T] | None` in an output type fails registration; write
+  `tags: list[str] = treaty.Out(default_factory=list)`. A key that exists only in some
+  versions belongs to a new `schema_version`. `""` means empty and `null` means unset;
+  treaty cannot tell which you meant, so keep them apart
+- **Binary**: `bytes`, or `treaty.Binary(data, content_type="image/png")`, becomes
+  `{"type": "binary", "encoding": "base64", "value": ..., "size_bytes": N,
+  "content_type": ...}`; plain mode prints `<binary N bytes image/png>`. Rule
+  `binary-output`
+- **`--stable-output`** (`stable_output: true` in `exec` and MCP) makes stdout
+  byte-identical for identical calls: `meta` leaves out `request_id`, `timestamp`, and
+  `retries`, `duration_ms` is 0, fields declared `Out(volatile=True)` are dropped, and no
+  heartbeat lines are written
+- **LF only**: `App.main` writes `\n` line endings on every platform, Windows included
+
+```python
+@dataclass(frozen=True, slots=True)
+class Report:
+    users: list[User] = Out(sort_key="id")
+    top: list[str] = Out(ordered=True)
+    fetched_at: str = Out(default="", volatile=True)
+```
 
 ## Raw payloads
 

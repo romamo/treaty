@@ -7,7 +7,7 @@ hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declar
 06, pagination; 07, I/O and streams; 08, auth and scopes; 09, async jobs and config
 writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048), and
 re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039), then updated for
-the 1.0 plan's reserved names and response metadata (01).
+the 1.0 plan's reserved names, response metadata (01), and output data contract (05).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -21,15 +21,15 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 73 | 28 | 58 | **55%** |
+| Level 3: full spec | 159 | 80 | 24 | 55 | **58%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 46 | 14 | 19 | **67%** |
+| Framework-automatic (F) | 79 | 52 | 10 | 17 | **72%** |
 | Command contract (C) | 30 | 15 | 8 | 7 | **63%** |
-| Opt-in (O) | 50 | 12 | 6 | 32 | **30%** |
+| Opt-in (O) | 50 | 13 | 6 | 31 | **32%** |
 
 ## Open mandatory requirements
 
@@ -56,11 +56,11 @@ open.
 | [REQ-F-013](../cli-agent-ergonomics/requirements/f-013-sigterm-handler-installation.md) | SIGTERM Handler Installation | P0 | 2 | Done | SIGTERM gives a CANCELLED envelope, exit 143, cleanup runs |
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Done | No traceback or stderr text on a closed stdout; exit 0 once a complete envelope or event reached the reader, 141 (`OUTPUT_CLOSED`) before any (decision D1) |
 | [REQ-F-015](../cli-agent-ergonomics/requirements/f-015-validate-before-execute-phase-order.md) | Validate-Before-Execute Phase Order | P0 | 2 | Done | Field errors and the args `__post_init__` (cross-field) errors collected in one run before the handler, exit 2 with `phase: validation`; an `InvalidValue` there is a validation error and any other exception `HANDLER_CRASHED` (exit 1), never a traceback. The cursor digest and `cursor_check` run as a second pass, still before the handler; no hooks to misorder |
-| [REQ-F-016](../cli-agent-ergonomics/requirements/f-016-utf-8-sanitization-before-serialization.md) | UTF-8 Sanitization Before Serialization | P1 | 3 | Done | JSON strings: null bytes and lone surrogates become U+FFFD; bytes output is refused as INVALID_OUTPUT |
-| [REQ-F-017](../cli-agent-ergonomics/requirements/f-017-binary-field-base64-encoding.md) | Binary Field Base64 Encoding | P1 | 3 | Not started | Returning `bytes` gives INVALID_OUTPUT; no base64 wrapper with `size_bytes` |
+| [REQ-F-016](../cli-agent-ergonomics/requirements/f-016-utf-8-sanitization-before-serialization.md) | UTF-8 Sanitization Before Serialization | P1 | 3 | Done | JSON strings: null bytes and lone surrogates become U+FFFD; `bytes` output becomes the base64 wrapper of F-017, before sanitization |
+| [REQ-F-017](../cli-agent-ergonomics/requirements/f-017-binary-field-base64-encoding.md) | Binary Field Base64 Encoding | P1 | 3 | Done | `bytes` and `treaty.Binary(data, content_type=)` become `{type, encoding, value, size_bytes, content_type}`; the output schema declares the wrapper; the byte cap drops a wrapper whole; `binary-output` audit rule |
 | [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Done | Automatic: every non-streaming `list[T]` or `Page[T]` output is a list command (`paginated=False` opts out, flagged by the `paginated-list` advice rule); `meta.pagination` (total, returned, truncated, has_more, next_cursor) on every successful response; `next_cursor` as `--cursor` returns the next page |
 | [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Done | Default limit 20 on every list command, `default_limit=` per command, `--limit N`, `--limit 0` for all; the default is in `--schema` and the flag entry |
-| [REQ-F-020](../cli-agent-ergonomics/requirements/f-020-stable-array-sorting-in-json-output.md) | Stable Array Sorting in JSON Output | P2 | 3 | Partial | Object keys sorted; arrays are not |
+| [REQ-F-020](../cli-agent-ergonomics/requirements/f-020-stable-array-sorting-in-json-output.md) | Stable Array Sorting in JSON Output | P2 | 3 | Done | Arrays in `data` sorted by default: strings by code point, numbers ascending, objects by `sort_key=` (command) or `Out(sort_key=)` (field), else canonical JSON; `ordered=True` keeps a ranking; list commands sort before paging; `stable-order` audit rule |
 | [REQ-F-021](../cli-agent-ergonomics/requirements/f-021-data-meta-separation-in-response-envelope.md) | Data/Meta Separation in Response Envelope | P1 | 3 | Done | Framework values live only in `meta`, which the README documents as volatile and `data` as safe to cache and diff; the registration-time warning is the `volatile-data` audit rule (no warning channel at registration) |
 | [REQ-F-022](../cli-agent-ergonomics/requirements/f-022-schema-version-in-every-response.md) | Schema Version in Every Response | P1 | 3 | Done | `meta.schema_version` on every response: the command's `schema_version=` (`MAJOR.MINOR`), else `1.0`; `treaty schema-lock` plus the `schema-version` audit rule fail a breaking change without a major bump and an additive one without a minor bump |
 | [REQ-F-023](../cli-agent-ergonomics/requirements/f-023-tool-version-in-every-response.md) | Tool Version in Every Response | P1 | 3 | Done | `meta.tool_version` is `App(version=)`, validated as semver, the value `--version` prints; no update check exists, so `update_available` is always absent (01-D3) |
@@ -80,7 +80,7 @@ open.
 | [REQ-F-037](../cli-agent-ergonomics/requirements/f-037-network-error-context-block.md) | Network Error Context Block | P1 | 3 | Not started | No `error.network_context` |
 | [REQ-F-038](../cli-agent-ergonomics/requirements/f-038-verbosity-auto-quiet-in-non-tty-context.md) | Verbosity Auto-Quiet in Non-TTY Context | P2 | 3 | Not started | No `progress()`/`log()` API or verbosity flags |
 | [REQ-F-039](../cli-agent-ergonomics/requirements/f-039-duration-tracking-in-response-meta.md) | Duration Tracking in Response Meta | P1 | 3 | Done | `duration_ms` on every envelope, including timeout and cancel |
-| [REQ-F-040](../cli-agent-ergonomics/requirements/f-040-absolute-path-output-enforcement.md) | Absolute Path Output Enforcement | P2 | 3 | Not started | Output paths are not made absolute |
+| [REQ-F-040](../cli-agent-ergonomics/requirements/f-040-absolute-path-output-enforcement.md) | Absolute Path Output Enforcement | P2 | 3 | Done | Every `Path` in `data` is joined to `meta.cwd` (lexical, no symlink resolution); `path-typed` audit rule covers output fields; `--cwd` (O-017) will change the base |
 | [REQ-F-041](../cli-agent-ergonomics/requirements/f-041-process-cwd-immutability.md) | Process CWD Immutability | P2 | 3 | Not started | Handler `os.chdir` is neither restored nor flagged |
 | [REQ-F-042](../cli-agent-ergonomics/requirements/f-042-log-rotation-in-framework-logger.md) | Log Rotation in Framework Logger | P3 | 3 | Not started | No framework logger |
 | [REQ-F-043](../cli-agent-ergonomics/requirements/f-043-temp-file-session-scoped-auto-cleanup.md) | Temp File Session-Scoped Auto-Cleanup | P2 | 3 | Not started | No session temp cleanup |
@@ -104,7 +104,7 @@ open.
 | [REQ-F-061](../cli-agent-ergonomics/requirements/f-061-symlink-loop-detection-in-traversal-utilities.md) | Symlink Loop Detection in Traversal Utilities | P1 | 3 | Not started | No traversal utilities |
 | [REQ-F-062](../cli-agent-ergonomics/requirements/f-062-glob-expansion-and-word-splitting-prevention.md) | Glob Expansion and Word-Splitting Prevention | P0 | 2 | Done | Argument lists only; string argv is `SHELL_STRING_PROHIBITED` at registration (source scan) or run time. Debug-mode argv logging not applicable: treaty has no debug mode; argv is a JSON array in error context |
 | [REQ-F-063](../cli-agent-ergonomics/requirements/f-063-credential-expiry-structured-error.md) | Credential Expiry Structured Error | P1 | 3 | Partial | PERMISSION_DENIED and AUTH_REQUIRED codes exist; no `refresh_command`/`required_permission` |
-| [REQ-F-064](../cli-agent-ergonomics/requirements/f-064-output-truncation-detection-and-warning.md) | Output Truncation Detection and Warning | P1 | 3 | Partial | FIELD_TRUNCATED warnings on cap; no `max_bytes` field declaration |
+| [REQ-F-064](../cli-agent-ergonomics/requirements/f-064-output-truncation-detection-and-warning.md) | Output Truncation Detection and Warning | P1 | 3 | Done | `Flag(max_bytes=N)` exits 2 with `FIELD_TOO_LARGE` on every input route, joined into `error.errors`, published as `x-max-bytes`; `ctx.truncated()` adds the marker, a `FIELD_TRUNCATED` warning on `data.<field>`, and `meta.truncated`; `field-limits` audit rule. The byte cap still names fields as `$.x` |
 | [REQ-F-065](../cli-agent-ergonomics/requirements/f-065-pipeline-exit-code-propagation.md) | Pipeline Exit Code Propagation | P0 | 2 | Done | `ctx.pipeline` checks every stage; the first failing stage raises `SUBPROCESS_FAILED` with `stage`. The parent-shell `pipefail` warning is not applicable: a child cannot observe its parent shell's options |
 | [REQ-F-066](../cli-agent-ergonomics/requirements/f-066-subprocess-locale-normalization.md) | Subprocess Locale Normalization | P1 | 3 | Not started | No `LC_ALL` injection |
 | [REQ-F-067](../cli-agent-ergonomics/requirements/f-067-interspersed-option-parsing.md) | Interspersed Option Parsing | P1 | 3 | Partial | Globals accepted anywhere before `--`; no `option_placement: strict` |
@@ -112,9 +112,9 @@ open.
 | [REQ-F-069](../cli-agent-ergonomics/requirements/f-069-sigint-handler-installation.md) | SIGINT Handler Installation | P0 | 2 | Done | SIGINT exits 130; second signal exits immediately |
 | [REQ-F-070](../cli-agent-ergonomics/requirements/f-070-atomic-write-via-rename.md) | Atomic Write via Rename | P1 | 3 | Done | `write_atomic` (temp file in the target's directory, fsync, rename, cleanup on failure) for idempotency records, config writes, and `--output` |
 | [REQ-F-071](../cli-agent-ergonomics/requirements/f-071-file-descriptor-leak-prevention.md) | File Descriptor Leak Prevention | P1 | 3 | Done | File descriptors are non-inheritable (PEP 446); `ctx.run` children inherit only stdin, stdout, and stderr (`close_fds` default) |
-| [REQ-F-072](../cli-agent-ergonomics/requirements/f-072-lf-line-ending-enforcement.md) | LF Line Ending Enforcement | P1 | 3 | Partial | Writes `\n`; stdout not forced to `\n` on Windows |
+| [REQ-F-072](../cli-agent-ergonomics/requirements/f-072-lf-line-ending-enforcement.md) | LF Line Ending Enforcement | P1 | 3 | Done | `App.main` opens stdout with `newline="\n"` and reconfigures stderr the same way; a subprocess test (run on Windows CI) finds no `\r` in results, help, errors, or logs |
 | [REQ-F-073](../cli-agent-ergonomics/requirements/f-073-env-var-namespace-prefix.md) | Environment Variable Namespace Prefix | P1 | 3 | Partial | Env vars prefixed `TREATY_`, not per tool; unprefixed `CI` is read |
-| [REQ-F-074](../cli-agent-ergonomics/requirements/f-074-json-null-absent-empty-convention.md) | JSON Null/Absent/Empty Convention | P1 | 3 | Partial | Dataclass outputs emit every key; no `[]` vs `null` enforcement |
+| [REQ-F-074](../cli-agent-ergonomics/requirements/f-074-json-null-absent-empty-convention.md) | JSON Null/Absent/Empty Convention | P1 | 3 | Done | Output schemas list every dataclass key as `required` (nullable as `anyOf` null); `list`/`tuple`/`dict` `\| None` in an output type is a `RegistrationError`; `""` versus `null` is a documented convention, not checked |
 | [REQ-F-075](../cli-agent-ergonomics/requirements/f-075-subcommand-additive-stability.md) | Subcommand Additive Stability | P1 | 3 | Not started | No deprecation metadata |
 | [REQ-F-076](../cli-agent-ergonomics/requirements/f-076-first-run-init-isolation.md) | First-Run Init Isolation | P1 | 3 | Partial | No first-run work; no `init` built-in or INIT_REQUIRED helper |
 | [REQ-F-077](../cli-agent-ergonomics/requirements/f-077-telemetry-non-blocking.md) | Telemetry Non-Blocking | P2 | 3 | Done | No network code or telemetry |
@@ -166,7 +166,7 @@ open.
 | [REQ-O-004](../cli-agent-ergonomics/requirements/o-004-output-jsonl-stream-flag.md) | --format jsonl / --stream Flag | P2 | 3 | Partial | Streaming handlers with `--no-stream`; no `--stream` opt-in |
 | [REQ-O-005](../cli-agent-ergonomics/requirements/o-005-output-id-extraction-mode.md) | --format id Extraction Mode | P3 | 3 | Not started | No `--format id` |
 | [REQ-O-006](../cli-agent-ergonomics/requirements/o-006-stdin-as-id-source.md) | Stdin as ID Source (-) | P3 | 3 | Not started | No `-` for stdin arguments |
-| [REQ-O-007](../cli-agent-ergonomics/requirements/o-007-stable-output-flag.md) | --stable-output Flag | P3 | 3 | Not started | No `--stable-output` |
+| [REQ-O-007](../cli-agent-ergonomics/requirements/o-007-stable-output-flag.md) | --stable-output Flag | P3 | 3 | Done | Global `--stable-output` (`stable_output` in exec and MCP): no `request_id`, `timestamp`, or `retries`, `duration_ms` 0, `Out(volatile=True)` fields dropped, no heartbeats; byte-identical stdout tested |
 | [REQ-O-008](../cli-agent-ergonomics/requirements/o-008-quiet-verbose-debug-verbosity-flags.md) | --quiet / --verbose / --debug Verbosity Flags | P1 | 3 | Not started | No verbosity flags |
 | [REQ-O-009](../cli-agent-ergonomics/requirements/o-009-validate-only-flag.md) | --validate-only Flag | P1 | 3 | Not started | No `--validate-only` (ROADMAP 0.3.0) |
 | [REQ-O-010](../cli-agent-ergonomics/requirements/o-010-resume-from-flag-for-multi-step-commands.md) | --resume-from Flag for Multi-Step Commands | P2 | 3 | Not started | No `--resume-from` |

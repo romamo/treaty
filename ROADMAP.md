@@ -111,6 +111,12 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `meta`; `schema_version=`, `compat=` with `--schema-version`, `--output-schema`,
   `--print-schema`, `project_root=`, `Retry` with `ctx.retry`, `treaty schema-lock`, and
   four audit rules. Breaking: `Envelope` takes a `treaty.Meta`; `App(version=)` is semver
+- 1.0 plan, output data (`plans/1.0/05-output-data.md`): `treaty.Out` and `treaty.Binary`,
+  arrays in `data` sorted (`sort_key=`, `ordered=`), absolute output paths, every output
+  key required, `Flag(max_bytes=)` with `FIELD_TOO_LARGE`, `ctx.truncated`, LF-only
+  streams, and `--stable-output`; audit rules `stable-order`, `binary-output`, and
+  `field-limits`. Breaking: array order, relative `Path` output, `list[T] | None` in
+  outputs, `Meta.request_id` and `timestamp` optional
 
 ## 0.1.x: after the first minor release
 

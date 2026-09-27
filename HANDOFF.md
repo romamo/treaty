@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 903 passed |
+| `uv run pytest` | 952 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -247,6 +247,22 @@ The two do not share code.
 - **`--schema-version` is global in argv and the key `schema_version` in JSON**, never a
   `FLAGS` row, because a `CommandEntry.flags` map may not repeat a root flag;
   `Command.pin` turns the major into the compat version, or refuses it
+- **`data` goes through one pipeline, `_Run._payload`**: `to_jsonable` (bytes and
+  `Binary` to the base64 wrapper, a relative `Path` joined to `meta.cwd`), then
+  `_out.arrange`, which walks the output annotation beside the JSON value to sort arrays
+  (`Command.order` for the top level, `Out` metadata per field, untyped content sorted by
+  kind unless an enclosing declaration is `ordered`) and, under `--stable-output`, drop
+  `Out(volatile=True)` fields. A list command sorts its whole list in `_sorted_list`
+  before `take` slices it. The manifest command is `ordered=True`: positional order is
+  meaning
+- **Output schemas are built with `schema_for(..., output=True)`**: every dataclass key
+  is `required` except a volatile one, and a nullable collection is a
+  `RegistrationError`. Args schemas keep `output=False`, where a default makes a key
+  optional
+- **`--stable-output` is a global, not a `FLAGS` row**, like `--schema-version`;
+  `_Run.stable_all` holds the argv flag and `_Run.stable` the current envelope's (an exec
+  line or MCP call may set `stable_output` for itself). `Meta.request_id` and
+  `Meta.timestamp` are None under it and left out of `meta`
 - **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
   the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
 
@@ -321,16 +337,17 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
-F-011, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024,
-F-025 (not the audit log), F-027, F-031, F-034, F-044, F-045 (paths),
-F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-065, F-069, F-070, F-078,
+F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-022, F-023, F-024,
+F-025 (not the audit log), F-027, F-031, F-034, F-040, F-044, F-045 (paths),
+F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-064, F-065, F-069,
+F-070, F-072, F-074, F-078,
 C-001, C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
-C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-013, O-014, O-021, O-022, O-032, O-033, O-039, O-041,
+C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-007, O-013, O-014, O-021, O-022, O-032, O-033, O-039, O-041,
 O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),
-`--output-schema`, `--schema-version`, `--max-output`, and per
+`--output-schema`, `--schema-version`, `--stable-output`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and

@@ -8,13 +8,13 @@ any of these changed after 1.0 would break them; this workstream makes the choic
 
 | Requirement | Priority | Now | Gap | API change |
 |-------------|----------|-----|-----|------------|
-| F-017 Binary as base64 | P1 | Not started | `bytes` output is `INVALID_OUTPUT` | Yes: `bytes` and `treaty.Binary` serialize to a wrapper object |
-| F-020 Stable array sorting | P2 | Partial | Object keys sorted; arrays are not | Yes: arrays sorted by default; `sort_key=`, `ordered=`, `treaty.Out` |
-| F-040 Absolute output paths | P2 | Not started | `Path` output is written as given | Yes: every `Path` in `data` becomes absolute |
-| F-064 Truncation and `max_bytes` | P1 | Partial | No `max_bytes`; no way to report a backend cut | Yes: `Flag(max_bytes=)`, `FIELD_TOO_LARGE`, `ctx.truncated()` |
-| F-072 LF line endings | P1 | Partial | Windows stdout and stderr translate `\n` | No: behavior on Windows only |
-| F-074 Null/absent/empty | P1 | Partial | Nullable collections allowed; output schema marks defaulted fields optional | Yes: output schemas list every key as required; `list[T] \| None` refused |
-| O-007 `--stable-output` | P3 | Not started | No flag | Yes: reserved global flag, `Out(volatile=True)` |
+| F-017 Binary as base64 | P1 | Done | `bytes` output is `INVALID_OUTPUT` | Yes: `bytes` and `treaty.Binary` serialize to a wrapper object |
+| F-020 Stable array sorting | P2 | Done | Object keys sorted; arrays are not | Yes: arrays sorted by default; `sort_key=`, `ordered=`, `treaty.Out` |
+| F-040 Absolute output paths | P2 | Done | `Path` output is written as given | Yes: every `Path` in `data` becomes absolute |
+| F-064 Truncation and `max_bytes` | P1 | Done | No `max_bytes`; no way to report a backend cut | Yes: `Flag(max_bytes=)`, `FIELD_TOO_LARGE`, `ctx.truncated()` |
+| F-072 LF line endings | P1 | Done | Windows stdout and stderr translate `\n` | No: behavior on Windows only |
+| F-074 Null/absent/empty | P1 | Done | Nullable collections allowed; output schema marks defaulted fields optional | Yes: output schemas list every key as required; `list[T] \| None` refused |
+| O-007 `--stable-output` | P3 | Done | No flag | Yes: reserved global flag, `Out(volatile=True)` |
 
 ## API impact
 
@@ -132,12 +132,25 @@ needs no switch; it is always on.
 
 ## Tasks
 
-- [ ] `Out`; output-mode dataclass schemas with every key required; nullable collections refused
-- [ ] `bytes` and `Binary` wrapper, schema, atomic in the cap, plain rendering, `binary-output` rule
-- [ ] `stable_order`, `sort_key=`, `ordered=`, sort before `take`, `stable-order` rule
-- [ ] Absolute `Path` output against `meta.cwd`; `path-typed` covers output types
-- [ ] `Flag(max_bytes=)`, `FIELD_TOO_LARGE`, `ctx.truncated`, `field-limits` rule
-- [ ] LF streams in `App.main`; Windows CI byte test
-- [ ] `--stable-output` with `Out(volatile=True)`; exec and MCP keys; conformance probe
-- [ ] Migrate `examples/`, scaffold, and the treaty CLI; regenerate their schemas
-- [ ] Update COMPLIANCE.md rows (and the F-016 note on `bytes`), README, HANDOFF, ROADMAP, CHANGELOG
+- [x] `Out`; output-mode dataclass schemas with every key required; nullable collections refused
+- [x] `bytes` and `Binary` wrapper, schema, atomic in the cap, plain rendering, `binary-output` rule
+- [x] `stable_order`, `sort_key=`, `ordered=`, sort before `take`, `stable-order` rule.
+  Landed as `_out.arrange`. `ordered=True` also covers arrays inside untyped content
+  (the manifest command uses it, since positional order is meaning), and is allowed on
+  untyped outputs as well as arrays. `sort_key` is checked against dataclass items only;
+  an array of `dict` items uses `ordered=True` or canonical-JSON order
+- [x] Absolute `Path` output against `meta.cwd`; `path-typed` covers output types
+- [x] `Flag(max_bytes=)`, `FIELD_TOO_LARGE`, `ctx.truncated`, `field-limits` rule.
+  `--schema` shows the limit as `x-max-bytes` in `raw_payload_schema` and the manifest
+  description says "(at most N bytes)"; no separate `max_bytes` map. `max_bytes` is refused
+  on secrets and paths. `field-limits` flags `len(args.x)` compared with a number, and a
+  slice `obj.attr[:N]`. The byte cap still names fields `$.x` while `ctx.truncated` uses
+  `data.x` as the spec shows; unifying them is left for 07, which owns `_present`
+- [x] LF streams in `App.main`; Windows CI byte test (a subprocess test that runs on every
+  platform)
+- [x] `--stable-output` with `Out(volatile=True)`; exec and MCP keys. No conformance
+  probe: the kit lives in the spec repo; the byte-identity test runs the fixture app twice
+- [x] Migrate `examples/`, scaffold, and the treaty CLI; regenerate their schemas (no
+  committed schemas to regenerate; the scaffold needed no change)
+- [x] Update COMPLIANCE.md rows (and the F-016 note on `bytes`), README, HANDOFF, ROADMAP.
+  No `CHANGELOG.md` exists yet (15 creates it); the breaking changes are listed in ROADMAP

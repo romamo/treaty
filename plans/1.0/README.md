@@ -137,6 +137,9 @@ Workstream-local questions are in each file's Decisions table. These span files:
 | X5 | F-078 `retries_exhausted` sits in 01 but is an `error` field | Agree the field in 03's frozen `ErrorDetail`; `ctx.http` in 10 calls `ctx.retry` |
 | X6 | Spec gaps block some criteria: `introduced_in` and `deprecated_in` not in `CommandEntry` (F-075), no `environment` key in the manifest (F-073), O-009 exit 2 or 3, F-061 and O-040 disagree on `--max-depth`, O-019 and F-037 disagree on where network context goes | Emit the fields in `--schema` now and open spec PRs; follow acceptance criteria over schema text where they conflict |
 
+X1 landed with 05: `treaty.Out` (`_out.OutSpec`: `sort_key`, `ordered`, `volatile`); 07
+adds its keywords to the same spec.
+
 ## Definition of done, per workstream
 
 - Every acceptance criterion of every listed requirement has a test named after it
