@@ -104,10 +104,10 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   idempotency records, and `--output`; `async-job` and `config-write-scope` audit rules.
   Level 2 is complete
 
-## 0.1.0: first release
+## 0.1.x: after the first minor release
 
-- Reserve `treaty` on PyPI with the 0.0.1 wheel
-- GitHub Actions: pytest, mypy, ruff, and the conformance kit against a spec checkout
+0.1.0 shipped Level 1 and Level 2 of the spec (see `COMPLIANCE.md`). Still open:
+
 - `meta.schema_version` on every response (REQ-F-022), derived from a per-command
   `schema_version=` declaration
 - `CHANGELOG.md`
