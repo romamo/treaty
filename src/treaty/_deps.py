@@ -11,11 +11,15 @@ from __future__ import annotations
 import re
 import shlex
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
+from ._envelope import NetworkContext, without_userinfo
 from ._errors import RegistrationError
+from ._http import NetworkFailure
+from ._resources import refuse_async
 from ._values import InvalidValue
 
 if TYPE_CHECKING:
@@ -205,3 +209,101 @@ def tool_check(
         entry["fix"] = fix or f"install {tool} {minimum.value} or newer"
         entry["error"] = found.error or f"{tool} {entry['version']} is older than {minimum.value}"
     return entry
+
+
+@dataclass(frozen=True, slots=True)
+class Check:
+    """One result of an ``App(checks=)`` callable, listed in ``doctor``'s ``data.checks``
+    (REQ-O-026)
+
+    A failing check (``ok=False``) carries ``fix``, the shell command that resolves it;
+    one without fails ``doctor`` with ``INVALID_OUTPUT`` rather than leave an agent stuck.
+    ``version`` is what was found and ``required`` what is needed, when they apply;
+    ``network`` is how a failed network check went out (REQ-F-037).
+    """
+
+    name: str
+    ok: bool
+    fix: str | None = None
+    version: str | None = None
+    required: str | None = None
+    error: str | None = None
+    network: NetworkContext | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise RegistrationError("Check(name=) is what the check looks at, such as 'api'")
+        if not isinstance(self.ok, bool):
+            raise RegistrationError(f"Check({self.name!r}): ok is True or False")
+
+    def to_json(self) -> dict[str, object]:
+        entry: dict[str, object] = {
+            "name": self.name,
+            "ok": self.ok,
+            "version": self.version,
+            "required": self.required,
+        }
+        if self.error is not None:
+            entry["error"] = self.error
+        if self.fix is not None:
+            entry["fix"] = self.fix
+        if self.network is not None:
+            entry["network_context"] = self.network.to_json()
+        return entry
+
+
+CheckFn = Callable[["Ctx"], Check]
+
+
+@dataclass(frozen=True, slots=True)
+class Endpoint:
+    """A ``doctor`` check that ``url`` answers, made by ``treaty.endpoint``"""
+
+    url: str
+    fix: str
+    name: str
+
+    def __call__(self, ctx: Ctx) -> Check:
+        try:
+            reply = ctx.http.get(self.url)
+        except NetworkFailure as exc:
+            return Check(self.name, False, self.fix, error=exc.message, network=exc.network)
+        if reply.status < 400:
+            return Check(self.name, True)
+        route = ctx.http.proxies.route(self.url)
+        network = NetworkContext(
+            url=self.url,
+            proxy_used=route.proxy,
+            proxy_source=route.source,
+            no_proxy=ctx.http.proxies.no_proxy,
+            ssl_verify=True,
+            suggestion=shlex.join(["curl", "-v", without_userinfo(self.url)]),
+            status_code=reply.status,
+        )
+        error = f"{without_userinfo(self.url)} answered HTTP {reply.status}"
+        return Check(self.name, False, self.fix, error=error, network=network)
+
+
+def endpoint(url: str, *, fix: str, name: str | None = None) -> Endpoint:
+    """A ``doctor`` check that a GET of ``url`` answers below 400, through ``ctx.http``
+    so the proxy variables apply (REQ-F-036); a failure's ``error`` and
+    ``network_context`` say how it went out (REQ-F-037). ``fix`` is the shell command to
+    run when it fails; ``name`` defaults to the URL's host."""
+    parts = urlsplit(url) if isinstance(url, str) else None
+    if parts is None or parts.scheme not in ("http", "https") or not parts.hostname:
+        raise RegistrationError(f"endpoint({url!r}): the URL is http:// or https:// with a host")
+    if not isinstance(fix, str) or not fix.strip():
+        raise RegistrationError(f"endpoint({url!r}): fix is the shell command that resolves it")
+    return Endpoint(url, fix, parts.hostname if name is None else name)
+
+
+def check_checks(checks: Sequence[object], app_name: str) -> tuple[CheckFn, ...]:
+    """``App(checks=)``: callables of the ctx returning a ``treaty.Check``"""
+    if isinstance(checks, (str, bytes)) or not all(callable(c) for c in checks):
+        raise RegistrationError(
+            f"App {app_name}: checks is a list of functions of the ctx returning a "
+            "treaty.Check, or treaty.endpoint(url, fix=...)"
+        )
+    for check in checks:
+        refuse_async(check, f"App {app_name}: checks")
+    return tuple(checks)  # type: ignore[arg-type]  # each is callable, checked above

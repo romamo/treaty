@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import datetime as dt
 import glob
+import os
+import shlex
 import shutil
 from collections import deque
 from collections.abc import Iterator
@@ -14,12 +16,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ._cache import cache_dir
+from ._config import user_config
 from ._context import Ctx
 from ._declare import CLEARED
-from ._deps import Found, Version, dependency_result, find, tool_check
+from ._deps import (
+    Check,
+    CheckFn,
+    Endpoint,
+    Found,
+    Version,
+    dependency_result,
+    find,
+    tool_check,
+)
 from ._effect import Affects
 from ._errors import CliExit, ParseError
 from ._flags import Flag
+from ._idempotency import state_dir
 from ._journal import AuditLog, entry_time, log_path, parse_since, read_entries
 from ._redact import scrub
 from ._session import outputs
@@ -41,11 +54,13 @@ class DoctorArgs:
 def register_doctor(app: App) -> CommandPath:
     @app.command(
         DOCTOR_PATH.value,
-        description="Check the tool's dependencies and the programs its commands run; "
-        "exit 4 with DOCTOR_CHECKS_FAILED lists a fix for each failure",
+        description="Check the tool's dependencies, the programs its commands run, its state "
+        "and config directories, and the app's own checks; exit 4 with "
+        "DOCTOR_CHECKS_FAILED lists a fix for each failure",
         danger_level="safe",
         exit_codes=(),
         ordered=True,  # dependencies and checks are sorted by name here
+        has_network_io=any(isinstance(c, Endpoint) for c in app.checks),
         examples=[("Check the environment before first use", f"{app.name} doctor")],
     )
     def doctor(args: DoctorArgs, ctx: Ctx) -> dict[str, object]:
@@ -57,13 +72,15 @@ def register_doctor(app: App) -> CommandPath:
             for tool, minimum in command.required_tools.items():
                 current, users = needed.get(tool, (minimum, []))
                 needed[tool] = (max(current, minimum, key=lambda v: v.key), [*users, path.value])
-        checks: list[dict[str, object]] = []
+        checks = _framework_checks(app, ctx)
         for tool in sorted(needed):
             minimum, users = needed[tool]
             dep = declared.get(tool)
             seen: Found = found[tool] if dep else find((tool, "--version"), _ANY_VERSION, ctx)
             fix = None if dep is None else dep.fix_command
             checks.append(tool_check(tool, minimum, seen, fix, users))
+        checks += [_app_check(check, ctx) for check in app.checks]
+        checks.sort(key=lambda c: str(c["name"]))
         report: dict[str, object] = {"checks": checks, "dependencies": dependencies}
         failed = [e for e in (*checks, *dependencies) if not e["ok"]]
         if failed:
@@ -80,6 +97,52 @@ def register_doctor(app: App) -> CommandPath:
         return report
 
     return DOCTOR_PATH
+
+
+def _app_check(check: CheckFn, ctx: Ctx) -> dict[str, object]:
+    """One ``App(checks=)`` result; a failure without a fix would leave an agent stuck"""
+    result = check(ctx)
+    name = getattr(check, "__qualname__", type(check).__name__)
+    if not isinstance(result, Check):
+        raise CliExit(
+            ExitCodeName("GENERAL_ERROR"),
+            f"the doctor check {name} returned {type(result).__name__}, not a treaty.Check",
+            code="INVALID_OUTPUT",
+            context={"check": name},
+        )
+    if not result.ok and result.fix is None:
+        raise CliExit(
+            ExitCodeName("GENERAL_ERROR"),
+            f"the doctor check {result.name!r} failed without a fix",
+            code="INVALID_OUTPUT",
+            context={"check": result.name},
+            fix_required="give the failing treaty.Check a fix=, the shell command that resolves it",
+        )
+    return result.to_json()
+
+
+def _framework_checks(app: App, ctx: Ctx) -> list[dict[str, object]]:
+    """The state directory and the user config directory can be written (REQ-O-026)"""
+    config = user_config(app.name, ctx.env)
+    wanted = (
+        ("state-dir", state_dir(app.name, app.state_dir, ctx.env)),
+        ("config-dir", None if config is None else config.parent),
+    )
+    return [_writable(name, where).to_json() for name, where in wanted if where is not None]
+
+
+def _writable(name: str, where: Path) -> Check:
+    """``where`` can be made and written: its nearest existing ancestor is a writable
+    directory"""
+    found = where.absolute()
+    while not found.exists() and found != found.parent:
+        found = found.parent
+    quoted = shlex.quote(str(found))
+    if not found.is_dir():
+        return Check(name, False, f"mv {quoted} {quoted}.bak", error=f"{found} is not a directory")
+    if not os.access(found, os.W_OK):
+        return Check(name, False, f"chmod u+w {quoted}", error=f"{found} is not writable")
+    return Check(name, True)
 
 
 CLEANUP_PATH = CommandPath("cleanup")

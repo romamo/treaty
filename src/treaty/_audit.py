@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._command import Command, DangerLevel, OptionPlacement
+from ._deps import Endpoint
 from ._env import UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
@@ -539,6 +540,41 @@ def _builtin_shadowed(app: App) -> Iterator[Finding]:
             "which agents look for on every treaty app (13-D1)",
             f"rename the app's {path.value}, such as {app.name}-{path.value}, to keep the built-in",
         )
+
+
+def unfixed_checks(check: Callable[..., object]) -> list[int]:
+    """Lines of ``Check(...)`` calls in a doctor check's source that may fail (``ok`` is
+    not the literal True) and pass no ``fix=`` (REQ-O-026)"""
+    tree = _handler_tree(check)
+    if tree is None:
+        return []
+    found: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _dotted(node.func) not in ("Check", "treaty.Check"):
+            continue
+        ok = node.args[1] if len(node.args) > 1 else None
+        ok = next((k.value for k in node.keywords if k.arg == "ok"), ok)
+        passes = isinstance(ok, ast.Constant) and ok.value is True
+        has_fix = len(node.args) > 2 or any(k.arg in ("fix", None) for k in node.keywords)
+        if not passes and not has_fix:
+            found.append(node.lineno)
+    return found
+
+
+def _doctor_fix(app: App) -> Iterator[Finding]:
+    for check in app.checks:
+        if isinstance(check, Endpoint):
+            continue  # endpoint() requires fix=
+        name = getattr(check, "__qualname__", type(check).__name__)
+        for line in unfixed_checks(check):
+            yield Finding(
+                "doctor-fix",
+                Severity.ADVICE,
+                None,
+                f"the doctor check {name} builds a Check that may fail without fix= (line "
+                f"{line}), so doctor would answer INVALID_OUTPUT instead of a fix (REQ-O-026)",
+                'Check(name, ok, fix="<the shell command that resolves it>")',
+            )
 
 
 def _required_tools(app: App) -> Iterator[Finding]:
@@ -1797,6 +1833,12 @@ RULES: tuple[Rule, ...] = (
         "App commands keep the yielding built-ins' names free",
         Severity.ADVICE,
         _builtin_shadowed,
+    ),
+    Rule(
+        "doctor-fix",
+        "Every doctor check that can fail gives a fix",
+        Severity.ADVICE,
+        _doctor_fix,
     ),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),

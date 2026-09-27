@@ -78,7 +78,7 @@ from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
 from ._declare import UNSUPPORTED_PLATFORM, Background, SideEffect, Subprocess, supports
 from ._deprecation import Deprecated
-from ._deps import Dependency, check_dependencies
+from ._deps import CheckFn, Dependency, check_checks, check_dependencies
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
 from ._env import KNOWN, SESSION, STATE_DIR, app_var
@@ -319,6 +319,7 @@ class App:
         init: Init | None = None,
         companions: Sequence[str] = (),
         dependencies: Sequence[Dependency] = (),
+        checks: Sequence[CheckFn] = (),
         update_check: UpdateCheck | None = None,
         audit_log: AuditLog | None = DEFAULT_AUDIT_LOG,
     ) -> None:
@@ -332,7 +333,9 @@ class App:
         until it has run (REQ-F-076). ``companions`` names the other programs a
         ``fix_command`` may run, such as ``("mkdir",)`` (REQ-C-030). ``dependencies``
         lists the external tools the app needs, each a ``treaty.Dependency`` that the
-        ``doctor`` built-in checks and the manifest lists (REQ-O-031).
+        ``doctor`` built-in checks and the manifest lists (REQ-O-031). ``checks`` adds
+        ``doctor`` checks: functions of the ctx returning a ``treaty.Check``, such as
+        ``treaty.endpoint(url, fix=...)`` (REQ-O-026).
         ``update_check`` has a ``latest(current, timeout)`` method returning the newest
         release: for a person at a terminal, ``meta.update_available`` names it when it is
         newer, read from a cache a daemon thread refreshes daily, so no run waits on it.
@@ -381,6 +384,7 @@ class App:
         self._fixes_checked = False
         self._redirects: dict[CommandPath, Moved] = {}
         self.dependencies = check_dependencies(dependencies, name)
+        self.checks = check_checks(checks, name)
         if update_check is not None and not callable(getattr(update_check, "latest", None)):
             raise RegistrationError(
                 f"App {name}: update_check has a latest(current, timeout) method returning "
