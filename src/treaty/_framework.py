@@ -308,7 +308,8 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         "string",
         (
             "Repeat calls with the same key return the original result with effect noop "
-            "instead of running again"
+            "instead of running again; without a key, repeats are deduplicated only within "
+            "an agent session ($<APP>_SESSION)"
         ),
         parse=lambda v, c: IdempotencyKey(str(v)),
         from_json=_text(IdempotencyKey, "idempotency_key"),

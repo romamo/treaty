@@ -62,7 +62,7 @@ from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
-from ._env import KNOWN, STATE_DIR, app_var
+from ._env import KNOWN, SESSION, STATE_DIR, app_var
 from ._envelope import (
     ENVELOPE_SCHEMA_VERSION,
     Envelope,
@@ -79,7 +79,16 @@ from ._fix import fix_problem
 from ._flags import REDACTED, Arg, Flag
 from ._framework import framework_collisions
 from ._help import global_rows, render_command, render_root
-from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
+from ._idempotency import (
+    KeyBusy,
+    Record,
+    RecordCorrupt,
+    Slot,
+    claim,
+    fingerprint,
+    session_key,
+    state_dir,
+)
 from ._init import INIT_COMMAND, Init, Initialized, run_init
 from ._init import required as init_required
 from ._jobs import Job, JobStore, with_links
@@ -1932,7 +1941,15 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         key = invocation.idempotency_key
-        if key is None or _previewing(command, invocation) or _dry_run_requested(invocation.args):
+        # REQ-C-007: within an agent session, a repeat without a key is still deduplicated
+        session = (
+            self.env.get(app_var(self.app.name, SESSION.key))
+            if key is None and command.danger_level is not DangerLevel.SAFE
+            else None
+        )
+        if key is None and not session:
+            return self._execute(command, invocation, mode, meta=meta)
+        if _previewing(command, invocation) or _dry_run_requested(invocation.args):
             return self._execute(command, invocation, mode, meta=meta)
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
@@ -1961,6 +1978,12 @@ class _Run:
             return self._broken(command, "INVALID_ARGS", message, started, full_meta)
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
             return self._crashed(command, invocation.args, exc, started, full_meta)
+        if key is None:
+            assert session
+            key = session_key(session, call)
+            invocation = dataclasses.replace(invocation, idempotency_key=key)
+            full_meta["idempotency_key"] = key.value
+            meta = {**(meta or {}), "idempotency_key": key.value}
         with contextlib.ExitStack() as held:
             # Only acquiring the key is guarded here: the call itself reports its own errors
             try:

@@ -87,6 +87,13 @@ def fingerprint(command: CommandPath, args: object, scalars: ScalarRegistry) -> 
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def session_key(session: str, call: str) -> IdempotencyKey:
+    """The key ``<APP>_SESSION`` gives a call without ``--idempotency-key`` (REQ-C-007):
+    the same in every process of the session for the same command and arguments"""
+    digest = hashlib.sha256(f"{session}\0{call}".encode()).hexdigest()[:32]
+    return IdempotencyKey(f"session-{digest}")
+
+
 def _canonical(value: object, scalars: ScalarRegistry, depth: int) -> object:
     """A stable, JSON-ready identity for an argument value; SchemaError when there is none"""
     if depth > 64:

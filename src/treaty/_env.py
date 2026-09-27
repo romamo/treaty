@@ -60,6 +60,7 @@ STATE_DIR = EnvVar("state_dir", "Directory for idempotency records")
 CONFIG = EnvVar("config", "Config file to read instead of the project and user files")
 CONTEXT = EnvVar("context", "Named context of the config files to apply")
 INSTANCE_ID = EnvVar("instance_id", "Instance namespace for the user config file and state")
+SESSION = EnvVar("session", "Agent session id: repeats of a mutating call in it are deduplicated")
 
 KNOWN: tuple[EnvVar, ...] = (
     FORMAT,
@@ -69,5 +70,6 @@ KNOWN: tuple[EnvVar, ...] = (
     CONFIG,
     CONTEXT,
     INSTANCE_ID,
+    SESSION,
 )
 """Every variable treaty itself reads for an app; settings fields add their own"""

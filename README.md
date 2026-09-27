@@ -701,6 +701,10 @@ for the first call, and records expire after 24 hours. Records live in
 else `~/.local/state/treaty/<app>`. Handlers read the key as `ctx.idempotency_key` to pass
 it on to an upstream API.
 
+Without a key, repeats run again, unless `$<APP>_SESSION` names an agent session: then
+the key is derived from the session, the command, and its arguments, reported in
+`meta.idempotency_key`, and a repeat in the same session is a `noop` (REQ-C-007).
+
 ## Locks
 
 `ctx.lock(name)` holds a lock shared by every run of the app for a `with` block:

@@ -706,3 +706,60 @@ def test_audit_flags_a_handler_that_locks_a_file_by_hand() -> None:
     assert [f.command for f in rule.findings] == ["go"] and "ctx.lock(" in rule.findings[0].fix
     [rule] = [r for r in audit(fixture_lock_app.app, "l", limit=3).rules if r.id == "lock-declared"]
     assert rule.passed
+
+
+# REQ-C-007
+
+
+@dataclass(frozen=True, slots=True)
+class Tag:
+    effect: str
+    name: str
+    n: int
+
+
+def tag_app(state: Path) -> tuple[App, list[str]]:
+    calls: list[str] = []
+    app = App("tagger", version="1.0.0", state_dir=state)
+
+    @app.command("tag", description="Tag", danger_level="mutating", exit_codes=())
+    def tag(args: NameArgs, ctx: Ctx) -> Tag:
+        calls.append(args.name)
+        return Tag("created", args.name, len(calls))
+
+    return app, calls
+
+
+def test_a_mutating_command_twice_with_the_same_idempotency_key_is_noop(tmp_path: Path) -> None:
+    app, calls = tag_app(tmp_path)
+    _, first = run(app, ["tag", "a", "--idempotency-key", "k1"])
+    _, second = run(app, ["tag", "a", "--idempotency-key", "k1"])
+    assert first["data"]["effect"] == "created" and second["data"]["effect"] == "noop"
+    assert calls == ["a"]
+
+
+def test_the_second_calls_data_matches_the_first_calls_data(tmp_path: Path) -> None:
+    app, _ = tag_app(tmp_path)
+    _, first = run(app, ["tag", "a", "--idempotency-key", "k1"])
+    _, second = run(app, ["tag", "a", "--idempotency-key", "k1"])
+    assert {**first["data"], "effect": "noop"} == second["data"]
+
+
+def test_an_auto_generated_idempotency_key_is_deterministic_within_a_session(
+    tmp_path: Path,
+) -> None:
+    app, calls = tag_app(tmp_path)
+    session = {"TAGGER_SESSION": "agent-run-1"}
+    _, first = run(app, ["tag", "a"], session)
+    _, second = run(app, ["tag", "a"], session)
+    key = first["meta"]["idempotency_key"]
+    assert key == second["meta"]["idempotency_key"] and key.startswith("session-")
+    assert second["data"]["effect"] == "noop" and calls == ["a"]
+    # Other arguments, or another session, are another call
+    _, other = run(app, ["tag", "b"], session)
+    _, fresh = run(app, ["tag", "a"], {"TAGGER_SESSION": "agent-run-2"})
+    assert other["meta"]["idempotency_key"] != key != fresh["meta"]["idempotency_key"]
+    assert calls == ["a", "b", "a"]
+    # Without the variable nothing is deduplicated, and nothing is reported
+    _, plain = run(app, ["tag", "a"])
+    assert "idempotency_key" not in plain["meta"] and calls == ["a", "b", "a", "a"]
