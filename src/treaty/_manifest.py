@@ -173,8 +173,13 @@ def command_entry(
     for f in command.fields:
         flags.update(f.to_flag_entries())
     flags.update((f.name, f.to_entry(command)) for f in framework_flags(command))
+    description = command.description
+    if (old := command.deprecated) is not None:
+        # CommandEntry has no deprecation keys (04-D2); a baseline audit reads this marker
+        instead = "" if old.replacement is None else f"; use {old.replacement}"
+        description = f"{description} (deprecated since {old.since}{instead})"
     out: dict[str, object] = {
-        "description": command.description,
+        "description": description,
         "danger_level": command.danger_level.value,
         "required_scopes": [s.value for s in command.required_scopes],
         "option_placement": command.option_placement.value,  # REQ-C-027: on every entry
@@ -234,6 +239,11 @@ def command_schema(
     # REQ-O-014; not ManifestResponse keys
     entry["schema_version"] = command.schema_version.value
     entry["min_schema_version"] = command.min_schema_version.value
+    # REQ-F-075; not ManifestResponse keys (04-D2), so only here
+    if command.introduced_in is not None:
+        entry["introduced_in"] = command.introduced_in.value
+    if command.deprecated is not None:
+        entry.update(command.deprecated.to_json())
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
     if command.supports_raw_payload:

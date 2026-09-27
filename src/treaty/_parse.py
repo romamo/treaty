@@ -93,6 +93,8 @@ class Invocation:
     """``stable_output`` of an exec line or MCP call: the ``--stable-output`` global"""
     validate_only: bool = False
     """``--validate-only``: answer once phase 1 passes, without running (REQ-O-009)"""
+    given: frozenset[str] = frozenset()
+    """The fields the caller supplied, as opposed to defaulted"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,7 +546,8 @@ def parse_command_args(
                     raise _repeated(spec.name)
         return replace(built, **framework)
     _apply_secrets(command, values, secrets, env, errors)
-    return Invocation(args=_finish(command, values, errors), **framework)
+    given = frozenset(values)
+    return Invocation(args=_finish(command, values, errors), given=given, **framework)
 
 
 def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
@@ -700,7 +703,8 @@ def build_from_mapping(
         except ParseError as exc:
             errors.add(exc)
     _apply_secrets(command, values, secrets, env, errors)
-    return Invocation(args=_finish(command, values, errors), **framework)
+    given = frozenset(values)
+    return Invocation(args=_finish(command, values, errors), given=given, **framework)
 
 
 def _check_json_value(field: FieldInfo, value: object) -> object:

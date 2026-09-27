@@ -62,6 +62,7 @@ from ._command import (
 )
 from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
+from ._deprecation import Deprecated
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem
 from ._env import KNOWN, SESSION, STATE_DIR, app_var
@@ -433,6 +434,8 @@ class App:
         refreshes_auth: bool = False,
         requires: Sequence[RequiredWhen | Excludes | DefaultWhenAbsent] = (),
         option_placement: str = "any",
+        introduced_in: str | None = None,
+        deprecated: Deprecated | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -473,6 +476,10 @@ class App:
         ``option_placement="strict"`` is for a command that forwards the rest of argv to a
         child: options go before the first positional, and it and every token after it
         reach the positionals verbatim, the last a ``tuple[str, ...]`` (REQ-C-027).
+        ``introduced_in="1.2.0"`` records the tool version that added the command, and
+        ``deprecated=Deprecated("2.0.0", replacement="deploy.rollback", removed_in="3.0.0")``
+        keeps a retiring command working with a warning on every run; both are in
+        ``--schema`` (REQ-F-075). Once it is removed, ``redirect`` keeps its path answering.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -510,6 +517,12 @@ class App:
                 f"{cmd_path}: async_job=True needs App(jobs=...), which answers job status and "
                 "job cancel for the jobs it starts"
             )
+        added: ToolVersion | None = None
+        if introduced_in is not None:
+            try:
+                added = ToolVersion(introduced_in)
+            except InvalidValue as exc:
+                raise RegistrationError(f"{cmd_path}: introduced_in: {exc}") from None
         if option_placement not in OptionPlacement:
             placements = ", ".join(p.value for p in OptionPlacement)
             raise RegistrationError(
@@ -593,6 +606,8 @@ class App:
                     refreshes_auth=refreshes_auth,
                     requires=requires,
                     option_placement=OptionPlacement(option_placement),
+                    introduced_in=added,
+                    deprecated=deprecated,
                 )
             )
             return fn
@@ -683,10 +698,18 @@ class App:
 
     def check_fixes(self) -> None:
         """Every declared ``fix_commands`` value names a command that exists and is not
-        destructive; run once the table is in use, since a target may register late"""
+        destructive, and every ``Deprecated(replacement=)`` a command; run once the table
+        is in use, since a target may register late"""
         if self._fixes_checked:
             return
         for path, command in self._commands.items():
+            old = command.deprecated
+            if old is not None and old.replacement is not None:
+                if CommandPath(old.replacement) not in self._commands:
+                    raise RegistrationError(
+                        f"{path}: Deprecated(replacement={old.replacement!r}) is not a "
+                        "registered command"
+                    )
             for error_code, fix in command.fix_commands.items():
                 problem = self.fix_problem(fix)
                 if problem is not None:
@@ -1944,11 +1967,42 @@ class _Run:
         credential gate, the idempotency store, and the handler never do"""
         return self._envelope(0, meta={**(meta or {}), "validation_only": True})
 
+    def _deprecations(self, command: Command, invocation: Invocation) -> None:
+        """REQ-F-075: a deprecated command, or a deprecated flag the caller passed, still
+        runs; stderr gets one structured line and ``warnings`` an entry, each naming the
+        replacement"""
+        found: list[tuple[str, str, Deprecated, str | None]] = []
+        if (old := command.deprecated) is not None:
+            instead = old.replacement and shlex.join(
+                [self.app.name, *CommandPath(old.replacement).parts]
+            )
+            what = shlex.join([self.app.name, *command.path.parts])
+            found.append(("DEPRECATED", what, old, instead))
+        for f in command.fields:
+            if (old := f.spec.deprecated) is not None and f.name in invocation.given:
+                instead = old.replacement and f"--{old.replacement}"
+                found.append(("DEPRECATED_FLAG", f"--{f.flag}", old, instead))
+        for code, what, old, instead in found:
+            message = f"{what} is deprecated since {old.since}"
+            if instead:
+                message += f"; use {instead} instead"
+            context: dict[str, object] = {"since": old.since}
+            if instead:
+                context["replacement"] = instead
+            if old.removed_in is not None:
+                context["removed_in"] = old.removed_in
+            self._warn(code, message, context)
+            line: dict[str, object] = {"level": "warn", "code": code, "message": message}
+            line |= {k: v for k, v in context.items() if k != "since"}
+            self.err.write(json.dumps(line, separators=(",", ":")) + "\n")
+            self.err.flush()
+
     def _pin(self, command: Command, invocation: Invocation) -> None:
         """Answer in the schema version ``--schema-version`` selected; an older one is
         deprecated, which a warning says (REQ-O-014). ``stable_output`` of an exec line
         or MCP call applies to that call only."""
         self.stable = self.stable_all or invocation.stable_output
+        self._deprecations(command, invocation)
         self.pinned = invocation.schema_version
         if self.pinned is not None:
             self._warn(

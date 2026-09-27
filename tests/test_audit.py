@@ -3,7 +3,7 @@ import json
 
 import fixture_audit_app
 
-from treaty._audit import RULES, audit
+from treaty._audit import ADDITIVE, RULES, audit
 from treaty._cli import cli
 
 
@@ -88,7 +88,8 @@ def test_cli_audit_bad_targets() -> None:
 
 def test_cli_rules_and_own_audit(monkeypatch, tmp_path) -> None:
     code, out = run_cli(["rules"], isatty=False)
-    assert code == 0 and [r["id"] for r in json.loads(out)["data"]] == [r.id for r in RULES]
+    ids = [r["id"] for r in json.loads(out)["data"]]
+    assert code == 0 and ids == [r.id for r in (*RULES, ADDITIVE)]
     monkeypatch.chdir(tmp_path)
     code, out = run_cli(["audit", "treaty._cli:cli", "--all"], isatty=False)
     assert code == 0

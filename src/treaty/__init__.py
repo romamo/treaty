@@ -6,6 +6,7 @@ from ._app import App, ExecArgs, Group, NoArgs
 from ._auth import Credentials, Expired
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
+from ._deprecation import Deprecated
 from ._effect import Affects
 from ._envelope import Envelope, ErrorDetail, Meta, NetworkContext, Redirect, WarningDetail
 from ._errors import (
@@ -42,6 +43,7 @@ __all__ = [
     "CliExit",
     "CommandPath",
     "DefaultWhenAbsent",
+    "Deprecated",
     "Completed",
     "Credentials",
     "Ctx",

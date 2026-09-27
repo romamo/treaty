@@ -13,6 +13,7 @@ from typing import Any
 
 from ._auth import AuthKind, check_declaration
 from ._config import ConfigScope
+from ._deprecation import Deprecated
 from ._effect import can_carry, with_replay_effect
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, inspect_fields
@@ -30,7 +31,7 @@ from ._secrets import default_env_var
 from ._subprocess import BROWSER_OPEN
 from ._timeout import Timeout
 from ._types import FlagType, is_dataclass_type, resolve_alias
-from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope
+from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope, ToolVersion
 
 Handler = Callable[..., Any]
 """``(args, ctx, *resources)``: extra parameters are annotated with resource classes"""
@@ -164,6 +165,10 @@ class Command:
     option_placement: OptionPlacement = OptionPlacement.ANY
     """``strict``: options end at the first positional, for a command that forwards the
     rest of argv to a child verbatim (REQ-C-027)"""
+    introduced_in: ToolVersion | None = None
+    """The tool version that added the command, in ``--schema`` (REQ-F-075)"""
+    deprecated: Deprecated | None = None
+    """Retiring: runs warn and name ``replacement``, a command path (REQ-F-075)"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -271,9 +276,21 @@ def build_command(
     refreshes_auth: bool = False,
     requires: Sequence[object] = (),
     option_placement: OptionPlacement = OptionPlacement.ANY,
+    introduced_in: ToolVersion | None = None,
+    deprecated: Deprecated | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
+    if deprecated is not None and not isinstance(deprecated, Deprecated):
+        raise RegistrationError(f"{path}: deprecated takes treaty.Deprecated(since=...)")
+    if deprecated is not None and deprecated.replacement is not None:
+        try:
+            CommandPath(deprecated.replacement)
+        except InvalidValue as exc:
+            raise RegistrationError(
+                f"{path}: Deprecated(replacement=...) is a command path such as deploy.rollback: "
+                f"{exc}"
+            ) from None
     check_declaration(
         str(path),
         requires_auth=requires_auth,
@@ -454,6 +471,8 @@ def build_command(
         refreshes_auth=refreshes_auth,
         requires=rules,
         option_placement=option_placement,
+        introduced_in=introduced_in,
+        deprecated=deprecated,
     )
 
 

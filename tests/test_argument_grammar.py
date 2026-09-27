@@ -16,6 +16,7 @@ from treaty import (
     Arg,
     Ctx,
     DefaultWhenAbsent,
+    Deprecated,
     Excludes,
     Flag,
     NoArgs,
@@ -25,6 +26,7 @@ from treaty import (
     RequiredWhen,
 )
 from treaty._audit import audit
+from treaty._cli import cli
 
 
 def run(
@@ -720,3 +722,173 @@ def test_the_validate_only_flag_is_present_in_every_commands_help_output() -> No
         out = io.StringIO()
         app.run([*path.split("."), "--help"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
         assert "--validate-only" in out.getvalue(), path
+
+
+# REQ-F-075
+
+
+@dataclass(frozen=True, slots=True)
+class SubArgs:
+    name: str = Flag(default="x", description="Name", pattern_type="alphanumeric_id")
+    label: str | None = Flag(
+        default=None,
+        description="Old spelling of --name",
+        deprecated=Deprecated("1.1.0", replacement="name", removed_in="2.0.0"),
+    )
+
+
+def versioned_app(version: str, *, stage: str) -> App:
+    """``stage``: ``both`` commands, ``old`` ``deprecated``, or ``old`` ``redirected``"""
+    app = App("tool", version=version)
+
+    @app.command(
+        "new-sub",
+        description="The current way",
+        danger_level="safe",
+        exit_codes=(),
+        introduced_in="1.1.0",
+    )
+    def new_sub(args: SubArgs, ctx: Ctx) -> dict[str, str]:
+        return {"name": args.name}
+
+    if stage in ("both", "deprecated"):
+        old = (
+            Deprecated("1.1.0", replacement="new-sub", removed_in="2.0.0")
+            if stage == "deprecated"
+            else None
+        )
+
+        @app.command(
+            "old-sub",
+            description="The first way",
+            danger_level="safe",
+            exit_codes=(),
+            introduced_in="1.0.0",
+            deprecated=old,
+        )
+        def old_sub(args: SubArgs, ctx: Ctx) -> dict[str, str]:
+            return {"name": args.name}
+
+    if stage == "redirected":
+        app.redirect("old-sub", to="new-sub")
+    return app
+
+
+def run_err(app: App, argv: list[str]) -> tuple[int, dict[str, Any], str]:
+    out, err = io.StringIO(), io.StringIO()
+    code = app.run(argv, stdout=out, stderr=err, env={}, isatty=False)
+    return code, json.loads(out.getvalue()), err.getvalue()
+
+
+def test_removing_a_subcommand_without_a_prior_deprecation_release_fails_the_audit(
+    tmp_path: Any,
+) -> None:
+    released = versioned_app("1.0.0", stage="both").manifest()
+    removed = versioned_app("1.1.0", stage="gone")
+    [finding] = [
+        f
+        for r in audit(removed, "t", limit=3, baseline=released).rules
+        for f in r.findings
+        if r.id == "additive"
+    ]
+    assert finding.command == "old-sub" and "redirect" in finding.fix
+    assert all(
+        r.passed
+        for r in audit(
+            versioned_app("1.1.0", stage="redirected"), "t", limit=3, baseline=released
+        ).rules
+        if r.id == "additive"
+    )
+    deprecated = versioned_app("1.1.0", stage="deprecated").manifest()
+    assert all(
+        r.passed
+        for r in audit(removed, "t", limit=3, baseline=deprecated).rules
+        if r.id == "additive"
+    )
+    assert all(
+        r.passed
+        for r in audit(versioned_app("2.0.0", stage="gone"), "t", limit=3, baseline=released).rules
+        if r.id == "additive"
+    )
+    baseline = tmp_path / "manifest.json"
+    manifest = cli.manifest()
+    manifest["commands"]["retired"] = {"description": "Gone", "flags": {}}  # type: ignore[index]
+    baseline.write_text(json.dumps({"data": manifest}))
+    out = io.StringIO()
+    code = cli.run(
+        ["audit", "treaty._cli:cli", "--baseline", str(baseline), "--strict"],
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    envelope = json.loads(out.getvalue())
+    assert code == 79 and "additive" in envelope["error"]["context"]["rules"]
+
+
+def test_a_deprecated_subcommand_executes_normally_and_emits_deprecated_to_stderr() -> None:
+    code, envelope, err = run_err(versioned_app("1.1.0", stage="deprecated"), ["old-sub"])
+    assert code == 0 and envelope["data"] == {"name": "x"}
+    assert json.loads(err.splitlines()[-1]) == {
+        "level": "warn",
+        "code": "DEPRECATED",
+        "message": "tool old-sub is deprecated since 1.1.0; use tool new-sub instead",
+        "replacement": "tool new-sub",
+        "removed_in": "2.0.0",
+    }
+    [warning] = envelope["warnings"]
+    assert warning["code"] == "DEPRECATED"
+    assert warning["context"]["replacement"] == "tool new-sub"
+
+
+def test_a_deprecated_flag_warns_only_when_it_is_passed() -> None:
+    app = versioned_app("1.1.0", stage="both")
+    code, envelope, err = run_err(app, ["new-sub", "--label", "y"])
+    assert code == 0 and envelope["warnings"][0]["code"] == "DEPRECATED_FLAG"
+    assert json.loads(err.splitlines()[-1])["replacement"] == "--name"
+    code, envelope, err = run_err(app, ["new-sub", "--name", "y"])
+    assert envelope["warnings"] == [] and err == ""
+    flag = app.manifest()["commands"]["new-sub"]["flags"]["label"]
+    assert flag["description"].endswith("(deprecated since 1.1.0; use --name)")
+
+
+def test_the_schema_lists_introduced_in_and_deprecated_in_for_each_subcommand() -> None:
+    app = versioned_app("1.1.0", stage="deprecated")
+    code, envelope, _ = run_err(app, ["old-sub", "--schema"])
+    data = envelope["data"]
+    assert data["introduced_in"] == "1.0.0" and data["deprecated_in"] == "1.1.0"
+    assert data["replacement"] == "new-sub" and data["removed_in"] == "2.0.0"
+    code, envelope, _ = run_err(app, ["new-sub", "--schema"])
+    assert envelope["data"]["introduced_in"] == "1.1.0" and "deprecated_in" not in envelope["data"]
+    spec_validator("manifest-response").validate(app.manifest())
+
+
+def test_upgrading_never_turns_a_working_invocation_into_unknown_command_without_warning() -> None:
+    releases = [
+        versioned_app("1.0.0", stage="both"),
+        versioned_app("1.1.0", stage="deprecated"),
+        versioned_app("1.2.0", stage="redirected"),
+    ]
+    answers = [run_err(app, ["old-sub", "--name", "a"]) for app in releases]
+    assert [code for code, _, _ in answers] == [0, 0, 13]
+    assert answers[1][1]["warnings"][0]["code"] == "DEPRECATED"
+    assert answers[2][1]["error"]["redirect"]["command"] == "tool new-sub --name a"
+
+
+def test_a_deprecated_replacement_must_be_a_registered_command() -> None:
+    app = App("tool", version="1.0.0")
+
+    @app.command(
+        "a",
+        description="A",
+        danger_level="safe",
+        exit_codes=(),
+        deprecated=Deprecated("1.0.0", replacement="missing"),
+    )
+    def a(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    with pytest.raises(RegistrationError, match="not a registered command"):
+        app.run(["a"], stdout=io.StringIO(), stderr=io.StringIO(), env={})
+    with pytest.raises(RegistrationError, match="tool version"):
+        Deprecated("soon")

@@ -15,7 +15,7 @@ from typing import Any
 from . import __version__
 from ._app import App, NoArgs
 from ._atomic import write_atomic
-from ._audit import LOCK_FILE, RULES, AuditReport, Severity, audit, schema_lock
+from ._audit import ADDITIVE, LOCK_FILE, RULES, AuditReport, Severity, audit, schema_lock
 from ._context import Ctx
 from ._errors import Exit, ParseError
 from ._flags import Arg, Flag
@@ -66,6 +66,11 @@ class AuditArgs:
     all: bool = Flag(default=False, description="List every finding instead of the next few")
     limit: int = Flag(default=3, description="How many next steps to show")
     strict: bool = Flag(default=False, description="Exit with AUDIT_FAILED on any warning or error")
+    baseline: Path | None = Flag(
+        default=None,
+        description="The last release's manifest (tool manifest --format json); anything it "
+        "lists that is gone without deprecation is an error",
+    )
 
     def __post_init__(self) -> None:
         errors = []
@@ -141,6 +146,28 @@ def load_app(target: str) -> App:
     return obj
 
 
+def read_baseline(path: Path) -> dict[str, object]:
+    """A saved ``tool manifest`` response, or its ``data``"""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise Exit.NOT_FOUND(f"no baseline at {path}", context={"baseline": str(path)}) from None
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise Exit.PRECONDITION(
+            f"baseline {path} is not JSON: {exc.msg}", context={"baseline": str(path)}
+        ) from None
+    manifest = loaded.get("data", loaded) if isinstance(loaded, dict) else None
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("commands"), dict):
+        raise Exit.PRECONDITION(
+            f"baseline {path} is not a manifest",
+            context={"baseline": str(path)},
+            suggestion="save one with: tool manifest --format json > manifest.json",
+        )
+    return manifest
+
+
 def _to_out(report: AuditReport, show_all: bool) -> AuditOut:
     def conv(f: Any) -> FindingOut:
         return FindingOut(f.rule, f.severity.value, f.command, f.message, f.fix)
@@ -187,13 +214,18 @@ def render_audit(data: Any) -> str:
         ("Show the next steps", "treaty audit myapp.cli:app"),
         ("List every finding as JSON", "treaty audit myapp.cli:app --all --format json"),
         ("Fail a CI step on warnings", "treaty audit myapp.cli:app --strict"),
+        (
+            "Check nothing released was removed",
+            "treaty audit myapp.cli:app --baseline manifest.json --strict",
+        ),
     ],
     renderers={Format.PLAIN: render_audit},
     danger_level="safe",
 )
 def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     app = load_app(args.target)
-    report = audit(app, args.target, limit=args.limit)
+    baseline = None if args.baseline is None else read_baseline(args.baseline)
+    report = audit(app, args.target, limit=args.limit, baseline=baseline)
     out = _to_out(report, args.all)
     if args.strict:
         blocking = [f for r in report.rules for f in r.findings if f.severity in BLOCKING]
@@ -216,7 +248,9 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     ordered=True,
 )
 def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
-    return [{"id": r.id, "title": r.title, "severity": r.severity.value} for r in RULES]
+    return [
+        {"id": r.id, "title": r.title, "severity": r.severity.value} for r in (*RULES, ADDITIVE)
+    ]
 
 
 # schema-lock

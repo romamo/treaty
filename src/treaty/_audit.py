@@ -13,7 +13,7 @@ import json
 import re
 import textwrap
 import typing
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -1445,9 +1445,83 @@ RULES: tuple[Rule, ...] = (
 )
 
 
-def audit(app: App, target: str, *, limit: int) -> AuditReport:
+_DEPRECATED_MARK = re.compile(r"\(deprecated since [^)]*\)$")
+
+
+def removals(app: App, baseline: Mapping[str, object]) -> Iterator[Finding]:
+    """REQ-F-075 (04-D3): what the released manifest ``baseline`` lists that the app no
+    longer has. A command may go once redirected, or once the baseline showed it
+    deprecated; a flag once the baseline showed it deprecated; anything at a new major."""
+    old_version = baseline.get("framework_version")
+    if isinstance(old_version, str) and _major(app.version) > _major(old_version):
+        return
+    new = app.manifest()
+    old_commands = baseline["commands"]
+    new_commands = new["commands"]
+    assert isinstance(old_commands, dict) and isinstance(new_commands, dict)
+    for path, entry in sorted(old_commands.items()):
+        current = new_commands.get(path)
+        if current is None:
+            if app.moved(tuple(path.split("."))) is None and not _deprecated(entry):
+                yield Finding(
+                    "additive",
+                    Severity.ERROR,
+                    path,
+                    "the command is gone without a redirect or a release that deprecated it, "
+                    "so an agent's saved invocation now fails as an unknown command",
+                    f'app.redirect("{path}", to="<its replacement>"), or restore it with '
+                    'deprecated=treaty.Deprecated("<this version>", replacement=...) for a release',
+                )
+            continue
+        for flag, flag_entry in sorted(entry.get("flags", {}).items()):
+            if flag not in current["flags"] and not _deprecated(flag_entry):
+                yield Finding(
+                    "additive",
+                    Severity.ERROR,
+                    path,
+                    f"--{flag} is gone without a release that deprecated it",
+                    f'restore --{flag} with Flag(..., deprecated=treaty.Deprecated("<this '
+                    'version>", replacement=...)) for a release before removing it',
+                )
+        was = {**baseline.get("exit_codes", {}), **entry.get("exit_codes", {})}  # type: ignore[dict-item]
+        now = {**new["exit_codes"], **current.get("exit_codes", {})}  # type: ignore[dict-item]
+        for code in sorted(set(was) - set(now), key=int):
+            yield Finding(
+                "additive",
+                Severity.ERROR,
+                path,
+                f"exit code {code} ({was[code]['name']}) is no longer declared, so an agent "
+                "that handles it is now wrong",
+                f'exit_codes=[..., "{was[code]["name"]}"] until the next major version',
+            )
+
+
+def _major(version: str) -> int:
+    return int(version.partition(".")[0])
+
+
+def _deprecated(entry: object) -> bool:
+    description = entry.get("description") if isinstance(entry, dict) else None
+    return isinstance(description, str) and bool(_DEPRECATED_MARK.search(description))
+
+
+ADDITIVE = Rule(
+    "additive",
+    "Nothing the baseline manifest lists was removed without deprecation (--baseline)",
+    Severity.ERROR,
+    lambda app: iter(()),
+)
+"""Listed by ``treaty rules``; ``audit(baseline=...)`` runs it against the baseline"""
+
+
+def audit(
+    app: App, target: str, *, limit: int, baseline: Mapping[str, object] | None = None
+) -> AuditReport:
     results: list[RuleResult] = []
-    for rule in RULES:
+    rules = list(RULES)
+    if baseline is not None:
+        rules.append(dataclasses.replace(ADDITIVE, check=lambda a: removals(a, baseline)))
+    for rule in rules:
         findings = tuple(rule.check(app))
         results.append(RuleResult(rule.id, rule.title, rule.severity.value, not findings, findings))
     pending = [f for r in results for f in r.findings]

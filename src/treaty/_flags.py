@@ -12,6 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from ._deprecation import Deprecated
 from ._errors import ParseError, RegistrationError
 from ._paths import PATTERN_TYPE, check_path
 from ._scalars import (
@@ -47,6 +48,8 @@ class FlagSpec:
     """A REQ-C-020 preset such as ``alphanumeric_id``, without registering a scalar"""
     from_stdin: bool = False
     """The literal ``-`` reads the value from stdin (REQ-O-006)"""
+    deprecated: Deprecated | None = None
+    """Still accepted, with a ``DEPRECATED_FLAG`` warning naming the replacement (REQ-F-075)"""
 
     def __post_init__(self) -> None:
         if not self.description:
@@ -58,6 +61,8 @@ class FlagSpec:
             )
         if self.pattern is not None and self.pattern_type is not None:
             raise RegistrationError("pattern and pattern_type are mutually exclusive")
+        if self.deprecated is not None and not isinstance(self.deprecated, Deprecated):
+            raise RegistrationError("deprecated takes treaty.Deprecated(since=...)")
         if self.max_bytes is not None and (
             isinstance(self.max_bytes, bool)
             or not isinstance(self.max_bytes, int)
@@ -81,6 +86,7 @@ def Flag(
     max_bytes: int | None = None,
     pattern_type: str | None = None,
     from_stdin: bool = False,
+    deprecated: Deprecated | None = None,
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
@@ -92,6 +98,8 @@ def Flag(
     column's size: a longer one exits 2 with ``FIELD_TOO_LARGE`` before the handler runs.
     ``from_stdin=True`` makes ``--flag -`` read the value from stdin, one item per line
     for an array, as in ``tool get --format id | tool delete --id -``.
+    ``deprecated=Deprecated("1.4.0", replacement="new-flag")`` keeps the flag working
+    with a warning on every run that passes it.
     """
     spec = FlagSpec(
         description,
@@ -102,6 +110,7 @@ def Flag(
         max_bytes=max_bytes,
         pattern_type=pattern_type,
         from_stdin=from_stdin,
+        deprecated=deprecated,
     )
     if isinstance(default, (list, dict, set)):
         raise RegistrationError("mutable defaults are not allowed; use a tuple")
@@ -281,6 +290,9 @@ class FieldInfo:
             description = f"{description} (at most {self.spec.max_bytes} bytes)"
         if self.spec.from_stdin:
             description = f"{description} (- reads it from stdin)"
+        if (old := self.spec.deprecated) is not None:
+            instead = "" if old.replacement is None else f"; use --{old.replacement}"
+            description = f"{description} (deprecated since {old.since}{instead})"
         entry: dict[str, object] = {
             "type": self.flag_type.value,
             "required": self.required,
@@ -632,6 +644,14 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             f"{cls.__qualname__}: from_stdin=True on {stdin_fields}; stdin holds one value, "
             "so at most one field reads it"
         )
+    flags = {i.flag for i in infos}
+    for info in infos:
+        old = info.spec.deprecated
+        if old is not None and old.replacement is not None and old.replacement not in flags:
+            raise RegistrationError(
+                f"{cls.__qualname__}.{info.name}: Deprecated(replacement={old.replacement!r}) "
+                f"is not a flag of the same arguments; name one of {sorted(flags)}"
+            )
     _check_positionals(cls, [i for i in infos if i.positional])
     _check_flag_names(cls, infos)
     shorts = [i.spec.short for i in infos if i.spec.short is not None]
