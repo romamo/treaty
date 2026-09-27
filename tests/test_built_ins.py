@@ -4,7 +4,6 @@ REQ-O-041, and the ``status --show-side-effects`` half of REQ-C-011."""
 import io
 import json
 import os
-from pathlib import Path
 
 from conftest import spec_validator
 
@@ -44,9 +43,7 @@ def plain_app() -> App:
 # REQ-O-041
 
 
-def test_tool_manifest_etag_hash_returns_meta_not_modified_true_when_the_manifest_is_unchanged() -> (
-    None
-):
+def test_tool_manifest_etag_hash_returns_meta_not_modified_true_when_unchanged() -> None:
     app = plain_app()
     _, envelope = run(app, ["manifest"])
     etag = data_of(envelope)["etag"]
