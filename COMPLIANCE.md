@@ -23,13 +23,13 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 109 | 16 | 34 | **74%** |
+| Level 3: full spec | 159 | 108 | 17 | 34 | **73%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 61 | 8 | 10 | **82%** |
+| Framework-automatic (F) | 79 | 60 | 9 | 10 | **82%** |
 | Command contract (C) | 30 | 25 | 2 | 3 | **87%** |
 | Opt-in (O) | 50 | 23 | 6 | 21 | **52%** |
 
@@ -91,7 +91,7 @@ open.
 | [REQ-F-046](../cli-agent-ergonomics/requirements/f-046-pager-environment-variable-suppression.md) | Pager Environment Variable Suppression | P0 | 2 | Done | `ctx.run` children get `PAGER`, `GIT_PAGER`, `MANPAGER`=`cat`, `LESS=-F -X -R`, empty `MORE`, inherited by grandchildren; `App.main()` sets them process-wide |
 | [REQ-F-047](../cli-agent-ergonomics/requirements/f-047-repl-mode-prohibition-in-non-tty-context.md) | REPL Mode Prohibition in Non-TTY Context | P0 | 2 | Done | Off a TTY, `input()`/`readline()` in a handler exits 4 `INTERACTIVE_BLOCKED` (`read()` of piped data still works); no arguments print help and exit 0. The REPL criterion is not applicable: treaty has no REPL |
 | [REQ-F-048](../cli-agent-ergonomics/requirements/f-048-help-output-routing-to-stderr-in-non-tty-mode.md) | Help Output Routing to Stderr in Non-TTY Mode | P0 | 1 | Done | Help text to stderr, JSON envelope with `meta.help` on stdout |
-| [REQ-F-049](../cli-agent-ergonomics/requirements/f-049-async-command-handler-enforcement.md) | Async Command Handler Enforcement | P1 | 3 | Done | Inverted by design (04-D4): treaty runs sync handlers without an event loop, so `async def` handlers, `cleanup=`, `cursor_check=`, and resource `acquire` are a `RegistrationError`; a decorated coroutine that slips past is closed and reported as `HANDLER_CRASHED`; `cleanup=` runs before the envelope is written |
+| [REQ-F-049](../cli-agent-ergonomics/requirements/f-049-async-command-handler-enforcement.md) | Async Command Handler Enforcement | P1 | 3 | Partial | Inverted by design (04-D4): the spec requires async handlers and rejects sync ones; treaty is sync-only and refuses the opposite way. `async def` handlers, `cleanup=`, `cursor_check=`, and resource `acquire` are a `RegistrationError`, and a decorated coroutine that slips past is closed and reported as `HANDLER_CRASHED`, so no work is left un-awaited; the spec's own model (async handlers awaited before the envelope) is not offered |
 | [REQ-F-050](../cli-agent-ergonomics/requirements/f-050-update-notifier-side-channel-suppression.md) | Update Notifier Side-Channel Suppression | P1 | 3 | Not started | No `CI=1`/`NO_UPDATE_NOTIFIER` for children |
 | [REQ-F-051](../cli-agent-ergonomics/requirements/f-051-debug-and-trace-mode-secret-redaction.md) | Debug and Trace Mode Secret Redaction | P0 | 2 | Done | Secrets redacted in errors, tracebacks, and `ctx.log`, including credential-named fields, env dumps, and headers; no audit log exists yet |
 | [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Done | 1 MiB cap, `--max-output`, `<APP>_MAX_OUTPUT_BYTES`; `truncation_hint` is a runnable command: the next page (`--limit`/`--cursor`, which override a `--raw-payload`'s) for a cut list page, else `--max-output` 1 KiB above the full size. `exec` and MCP have no argv, so their hint is prose. A list over the default limit is cut by pagination (`meta.pagination.truncated`) before the byte cap applies |
