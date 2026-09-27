@@ -24,6 +24,9 @@ from ._values import ExitCodeName
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 _POLL_SECONDS = 0.05
+_DEADLINE_MARGIN = 0.25
+"""A wait bounded by the timeout gives up this much before it, so the run answers
+``LOCK_HELD``, retryable, rather than ``TIMEOUT``"""
 LOCK_HELD = "LOCK_HELD"
 
 
@@ -106,7 +109,7 @@ class Locks:
         path = self.directory / f"{name}.lock"
         limit = wait
         if limit is None and self.deadline is not None:
-            limit = max(0.0, self.deadline - time.monotonic())
+            limit = max(0.0, self.deadline - time.monotonic() - _DEADLINE_MARGIN)
         handle = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600), "w")
         try:
             started = time.monotonic()

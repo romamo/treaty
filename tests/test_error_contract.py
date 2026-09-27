@@ -657,6 +657,25 @@ def test_a_command_waiting_for_a_held_lock_exits_with_lock_held_after_the_timeou
     assert error["context"]["lock_file"] == str(tmp_path / "locks" / "deploy.lock")
 
 
+def test_a_lock_wait_bounded_by_the_timeout_answers_lock_held_not_timeout(
+    tmp_path: Path,
+) -> None:
+    app = App("lockctl", version="1.0.0")
+
+    @app.command("grab", description="Grab", danger_level="safe", exit_codes=(), timeout=1.0)
+    def grab(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        with ctx.lock("deploy"):
+            return {"held": 1}
+
+    proc = holding(tmp_path, 30)
+    try:
+        code, envelope = run(app, ["grab"], {"LOCKCTL_STATE_DIR": str(tmp_path)})
+    finally:
+        proc.kill()
+        proc.communicate()
+    assert code == 4 and envelope["error"]["code"] == "LOCK_HELD"
+
+
 def test_the_lock_held_error_includes_retry_after_ms(tmp_path: Path) -> None:
     proc = holding(tmp_path, 30)
     try:
