@@ -45,6 +45,8 @@ class FlagSpec:
     max_bytes: int | None = None
     pattern_type: str | None = None
     """A REQ-C-020 preset such as ``alphanumeric_id``, without registering a scalar"""
+    from_stdin: bool = False
+    """The literal ``-`` reads the value from stdin (REQ-O-006)"""
 
     def __post_init__(self) -> None:
         if not self.description:
@@ -78,6 +80,7 @@ def Flag(
     multiline: bool = False,
     max_bytes: int | None = None,
     pattern_type: str | None = None,
+    from_stdin: bool = False,
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
@@ -87,6 +90,8 @@ def Flag(
     ``multiline`` lets a text field such as a message body contain newlines.
     ``max_bytes`` is the most UTF-8 bytes a text value may have, such as a backend
     column's size: a longer one exits 2 with ``FIELD_TOO_LARGE`` before the handler runs.
+    ``from_stdin=True`` makes ``--flag -`` read the value from stdin, one item per line
+    for an array, as in ``tool get --format id | tool delete --id -``.
     """
     spec = FlagSpec(
         description,
@@ -96,6 +101,7 @@ def Flag(
         multiline=multiline,
         max_bytes=max_bytes,
         pattern_type=pattern_type,
+        from_stdin=from_stdin,
     )
     if isinstance(default, (list, dict, set)):
         raise RegistrationError("mutable defaults are not allowed; use a tuple")
@@ -110,10 +116,17 @@ def Arg(
     pattern: str | None = None,
     secret: bool | None = None,
     pattern_type: str | None = None,
+    from_stdin: bool = False,
 ) -> Any:
-    """Declare a positional argument on an arguments dataclass"""
+    """Declare a positional argument on an arguments dataclass; ``from_stdin=True`` makes
+    the literal ``-`` read it from stdin"""
     spec = FlagSpec(
-        description, positional=True, pattern=pattern, secret=secret, pattern_type=pattern_type
+        description,
+        positional=True,
+        pattern=pattern,
+        secret=secret,
+        pattern_type=pattern_type,
+        from_stdin=from_stdin,
     )
     return field(metadata={_META: spec})
 
@@ -266,6 +279,8 @@ class FieldInfo:
             description = f"{description} (may contain newlines)"
         if self.spec.max_bytes is not None:
             description = f"{description} (at most {self.spec.max_bytes} bytes)"
+        if self.spec.from_stdin:
+            description = f"{description} (- reads it from stdin)"
         entry: dict[str, object] = {
             "type": self.flag_type.value,
             "required": self.required,
@@ -299,7 +314,8 @@ class FieldInfo:
             "name": self.name,
             "type": target.flag_type.value,
             "required": self.required,
-            "description": self.spec.description,
+            "description": self.spec.description
+            + (" (- reads it from stdin)" if self.spec.from_stdin else ""),
         }
         if target.flag_type is FlagType.ENUM:
             entry["enum_values"] = list(target.enum_values)
@@ -604,7 +620,18 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
                 f"{cls.__qualname__}.{f.name}: max_bytes is for str fields that are not "
                 "secrets or paths"
             )
+        if spec.from_stdin and (info.flag_type is FlagType.BOOLEAN or info.secret):
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: from_stdin=True is for value fields; a boolean "
+                "takes no value, and a secret comes from --x-from-env or --x-from-file"
+            )
         infos.append(info)
+    stdin_fields = [i.name for i in infos if i.spec.from_stdin]
+    if len(stdin_fields) > 1:
+        raise RegistrationError(
+            f"{cls.__qualname__}: from_stdin=True on {stdin_fields}; stdin holds one value, "
+            "so at most one field reads it"
+        )
     _check_positionals(cls, [i for i in infos if i.positional])
     _check_flag_names(cls, infos)
     shorts = [i.spec.short for i in infos if i.spec.short is not None]

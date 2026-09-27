@@ -325,6 +325,11 @@ def build_command(
             f'{path}: a command that writes config is mutating; set danger_level="mutating"'
         )
     fields = inspect_fields(args_type, scalars)
+    if stdin_input and any(f.spec.from_stdin for f in fields):
+        raise RegistrationError(
+            f"{path}: stdin_input=True reads the payload from stdin, so no field can also "
+            "take from_stdin=True"
+        )
     rules = bind_rules(requires, fields, f"{path}")
     if option_placement is OptionPlacement.STRICT:
         _check_strict(path, fields)

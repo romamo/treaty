@@ -1230,7 +1230,9 @@ class App:
         if config_error is not None and command.path not in PURE_PATHS:
             return run.emit(mode, run.arg_error(config_error, meta=_mode_meta(command)))
         try:
-            invocation = parse_command_args(command, route.tokens, environ)
+            invocation = parse_command_args(
+                command, route.tokens, environ, read_stdin=run.stdin_value
+            )
         except ParseError as exc:
             return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
         except ArgsCrashed as exc:
@@ -3289,6 +3291,40 @@ class _Run:
                 fix_required="write the input to a file and pass --input-file <path>",
                 hint="--input-file <path> reads the input from a file, with no size limit",
                 meta=meta,
+            )
+        return text
+
+    def stdin_value(self, flag: str) -> str:
+        """All of stdin for ``--flag -`` (REQ-O-006), capped like a payload; every failure
+        is phase 1, exit 2"""
+        stdin = self.payload_stdin
+        if stdin is None:
+            raise ParseError(
+                f"'-' for {flag!r} reads stdin, which is closed",
+                code="EMPTY_STDIN",
+                context={"flag": flag},
+            )
+        if stdin.isatty():
+            raise ParseError(
+                f"'-' for {flag!r} reads stdin, not a terminal",
+                code="STDIN_IS_TTY",
+                context={"flag": flag},
+                suggestion=f"pipe the value into stdin, or pass --{flag} <value>",
+            )
+        cap = StdinCap.resolve(self.env, self.app.max_stdin, self.app.name)
+        try:
+            text = stdin.read(cap.bytes + 1)
+        except (UnicodeDecodeError, UnicodeEncodeError) as exc:
+            raise ParseError(
+                f"stdin is not valid UTF-8: {exc.reason}",
+                code="STDIN_NOT_UTF8",
+                context={"flag": flag},
+            ) from None
+        if len(text.encode("utf-8")) > cap.bytes:
+            raise ParseError(
+                f"stdin exceeds the {cap.bytes}-byte limit",
+                code="STDIN_TOO_LARGE",
+                context={"flag": flag, "limit_bytes": cap.bytes},
             )
         return text
 

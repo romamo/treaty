@@ -581,3 +581,83 @@ def test_a_conflicting_global_repeat_exits_2_naming_format_and_a_same_repeat_suc
 def test_a_command_that_cannot_intersperse_declares_strict_in_its_manifest() -> None:
     code, envelope = run(placement_app(), ["run", "--schema"])
     assert code == 0 and envelope["data"]["option_placement"] == "strict"
+
+
+# REQ-O-006
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteUserArgs:
+    id: str = Flag(description="User id", pattern_type="alphanumeric_id", from_stdin=True)
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteManyArgs:
+    ids: tuple[str, ...] = Arg(description="User ids", from_stdin=True)
+
+
+@dataclass(frozen=True, slots=True)
+class Deleted:
+    effect: str
+    ids: tuple[str, ...] = Out(ordered=True)
+
+
+def users_app() -> App:
+    app = App("tool", version="1.0.0")
+
+    @app.command("delete-user", description="Delete", danger_level="mutating", exit_codes=())
+    def delete_user(args: DeleteUserArgs, ctx: Ctx) -> Deleted:
+        return Deleted("deleted", (args.id,))
+
+    @app.command("delete-users", description="Delete", danger_level="mutating", exit_codes=())
+    def delete_users(args: DeleteManyArgs, ctx: Ctx) -> Deleted:
+        return Deleted("deleted", args.ids)
+
+    return app
+
+
+def test_echo_42_piped_to_id_dash_is_equivalent_to_id_42() -> None:
+    piped = run(users_app(), ["delete-user", "--id", "-", "--stable-output"], stdin="42\n")
+    direct = run(users_app(), ["delete-user", "--id", "42", "--stable-output"], stdin="")
+    assert piped == direct and piped[1]["data"]["ids"] == ["42"]
+    code, envelope = run(users_app(), ["delete-users", "-"], stdin="a\n\nb\n")
+    assert code == 0 and envelope["data"]["ids"] == ["a", "b"]
+    code, envelope = run(users_app(), ["delete-user", "--id", "-"], stdin="a\nb\n")
+    assert code == 2 and envelope["error"]["context"]["lines"] == 2
+    code, envelope = run(users_app(), ["delete-user", "--id", "-"], stdin="a/b\n")
+    assert code == 2 and envelope["error"]["context"]["pattern_type"] == "alphanumeric_id"
+
+
+def test_reading_dash_works_from_a_pipe_and_from_a_file_redirect(tmp_path: Any) -> None:
+    source = tmp_path / "ids.txt"
+    source.write_text("7\n")
+    out = io.StringIO()
+    with source.open() as redirected:
+        code = users_app().run(
+            ["delete-user", "--id", "-"], stdin=redirected, stdout=out, stderr=io.StringIO(), env={}
+        )
+    assert code == 0 and json.loads(out.getvalue())["data"]["ids"] == ["7"]
+    assert run(users_app(), ["delete-user", "--id", "-"], stdin="7\n")[0] == 0
+
+
+def test_an_error_is_raised_if_dash_is_passed_but_stdin_is_empty() -> None:
+    code, envelope = run(users_app(), ["delete-user", "--id", "-"], stdin="")
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "EMPTY_STDIN" and error["phase"] == "validation"
+
+
+def test_from_stdin_is_described_in_the_manifest_and_limited_to_one_field() -> None:
+    entry = users_app().manifest()["commands"]["delete-user"]["flags"]["id"]
+    assert "(- reads it from stdin)" in entry["description"]
+
+    @dataclass(frozen=True, slots=True)
+    class Two:
+        a: str = Flag(description="A", from_stdin=True)
+        b: str = Flag(description="B", from_stdin=True)
+
+    app = App("two", version="1.0.0")
+    with pytest.raises(RegistrationError, match="at most one field"):
+
+        @app.command("x", description="X", danger_level="safe", exit_codes=())
+        def x(args: Two, ctx: Ctx) -> dict[str, str]:
+            return {}

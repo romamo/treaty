@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import MISSING, dataclass, replace
 from pathlib import Path
 from typing import Any, NoReturn
@@ -322,8 +322,39 @@ class _Collector:
             self.fail()
 
 
+def stdin_values(field: FieldInfo, text: str) -> list[str]:
+    """What ``-`` stands for (REQ-O-006): one value less its trailing newline, or one
+    array item per non-empty line"""
+    if not text.strip():
+        raise ParseError(
+            f"expected {field.flag} from stdin but stdin was empty",
+            code="EMPTY_STDIN",
+            context={"flag": field.flag},
+            suggestion=f"pipe the value into stdin, or pass --{field.flag} <value>",
+        )
+    if field.flag_type is FlagType.ARRAY:
+        return [line.removesuffix("\r") for line in text.split("\n") if line.strip()]
+    value = text.removesuffix("\n").removesuffix("\r")
+    lines = value.count("\n") + 1
+    if lines > 1 and not field.spec.multiline:
+        raise ParseError(
+            f"stdin holds {lines} lines, but {field.flag!r} takes one value",
+            context={"flag": field.flag, "lines": lines},
+            suggestion="pipe a single line, such as with --format id | head -n 1",
+        )
+    return [value]
+
+
+StdinReader = Callable[[str], str]
+"""Reads the whole of stdin for the flag named; raises ``ParseError`` when it cannot"""
+
+
 def parse_command_args(
-    command: Command, tokens: tuple[str, ...], env: Mapping[str, str]
+    command: Command,
+    tokens: tuple[str, ...],
+    env: Mapping[str, str],
+    *,
+    read_stdin: StdinReader | None = None,
 ) -> Invocation:
     values: dict[str, object] = {}
     secrets: dict[str, SecretRef] = {}
@@ -346,6 +377,18 @@ def parse_command_args(
             values[field.name] = parsed
 
     def assign(field: FieldInfo, raw: str, *, negated: bool = False) -> None:
+        if raw == "-" and field.spec.from_stdin:
+            try:
+                if read_stdin is None:
+                    raise ParseError(
+                        f"'-' for {field.flag!r} reads stdin, which carries something else here",
+                        context={"flag": field.flag},
+                    )
+                for value in stdin_values(field, read_stdin(field.flag)):
+                    store(field, field.parse(value))
+            except ParseError as exc:
+                errors.add(exc)
+            return
         try:
             parsed = field.parse(raw)
         except ParseError as exc:
