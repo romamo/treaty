@@ -165,6 +165,16 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `os.popen`, and `shell=True` in a handler fail registration (the `no-shell` rule is
   gone); `gui_operations` requires `headless_behavior=`, and `"emit_in_output"` keeps
   today's behavior; every app lists `doctor` and `cleanup`, so every etag changes once
+- 1.0 plan, session and process hygiene (`plans/1.0/09-session-hygiene.md`): children of
+  `ctx.run` get `CI=1` and the update-notifier variables off a terminal and `LC_ALL=C`
+  unless `preserve_locale=True`; `app.suppress_update_notifier`; `App(update_check=)`
+  with `meta.update_available`, `--no-update-check`, and `<APP>_NO_UPDATE`; `--cwd`,
+  `ctx.cwd`, and `CWD_CHANGED`; `ctx.tmp_dir`, `ctx.temp_file()`, `ctx.output_file()`
+  with `data.cleanup`, `children.pids`, and `meta.session_tmp_dir`; descriptor 1 as a pipe
+  with `context.text` and `treaty.intercept_stdout()`; `cache=treaty.CachePolicy(...)`
+  with `ctx.cache`, `--no-cache`, and `--cache-ttl`; audit rules `preserve-locale`,
+  `no-chdir`, and `cache-declared`. Behavior changes: children see `LC_ALL=C` and, off a
+  terminal, `CI=1`; the scaffold's console script starts in `entry.py`
 
 ## 0.1.x: after the first minor release
 

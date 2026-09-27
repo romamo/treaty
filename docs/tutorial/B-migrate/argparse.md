@@ -318,6 +318,11 @@ If the CLI is installed as a console script, point the script at the same call:
 todo = "todo.cli:app.main"
 ```
 
+If a library the CLI imports prints on import, that text reaches stdout before `app.main()`
+can guard it. Point the script at a small entry module that calls
+`treaty.intercept_stdout()` and only then imports the app, as the `entry.py` of
+`treaty init` does; the text then goes to stderr and into a `THIRD_PARTY_STDOUT` warning.
+
 **Check:** `todo manifest` prints every command, and `todo --version` prints the version
 
 ## Step 9: Test through the envelope

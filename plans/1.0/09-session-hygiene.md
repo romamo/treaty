@@ -144,15 +144,30 @@ Audit rule `cache-declared` warns when a handler writes under `XDG_CACHE_HOME` o
 
 ## Tasks
 
-- [ ] Reserve `cwd` and `no-update-check` global names (09-D1)
-- [ ] Notifier variables in `child_settings`; `suppress_update_notifier`
-- [ ] `UpdateCheck`, cached daily refresh, `meta.update_available`, `--no-update-check`, `<APP>_NO_UPDATE`
-- [ ] `LC_ALL` and `LC_NUMERIC` for children; `preserve_locale=`; audit rule `preserve-locale`
-- [ ] Pipe-based fd 1 capture with marker sync; `context.text`; `intercept_stdout()`; scaffold entry
-- [ ] `_session.py`: root, session dir, `ctx.tmp_dir`, `ctx.temp_file()`, child `TMPDIR`, removal on every exit path
-- [ ] `ctx.output_file()`, `data.cleanup`, pruning at run start
-- [ ] `children.pids`, `atexit` terminate, `meta.session_pid_file`
-- [ ] `--cwd`, `ctx.cwd`, `meta.cwd`, relative `Path` resolution, `ctx.run` default
-- [ ] CWD restore with `CWD_CHANGED`; audit rule `no-chdir`
-- [ ] `CachePolicy`, `ctx.cache`, `--no-cache`, `--cache-ttl`, `meta.cache_used`, audit rule `cache-declared`
-- [ ] Update COMPLIANCE rows, README, HANDOFF, ROADMAP
+- [x] Reserve `cwd` and `no-update-check` global names (09-D1); now in `IMPLEMENTED`
+- [x] Notifier variables in `child_settings`; `suppress_update_notifier`. `App.main()`
+  passes the run `CI` as it was started, so `CI=1` for libraries never turns a
+  terminal's plain output into JSON
+- [x] `UpdateCheck`, cached daily refresh, `meta.update_available`, `--no-update-check`,
+  `<APP>_NO_UPDATE`. `latest(current, timeout)` takes the timeout as float seconds, not
+  `Timeout`, so a checker hands it straight to its HTTP call
+- [x] `LC_ALL` and `LC_NUMERIC` for children; `preserve_locale=`; audit rule `preserve-locale`
+- [x] Pipe-based fd 1 capture with marker sync; `context.text`; `intercept_stdout()`;
+  scaffold entry (`entry.py`, which imports `cli.py` after the interception). Lines of
+  JSON are left out of `context.text` rather than the whole write; F-060 stays Partial
+  until `--debug` (11) can attribute the text
+- [x] `_session.py`: root, session dir, `ctx.tmp_dir`, `ctx.temp_file()`, child `TMPDIR`,
+  removal on every exit path, through a `last=True` hook on 06's `Teardown`, so
+  `cleanup=` can still use the directory. A symlinked or foreign root exits 4 with
+  `TEMP_DIR_UNSAFE`
+- [x] `ctx.output_file()`, `data.cleanup`, pruning at run start (on the first command of a
+  run, not on help). Output files live in `out/<expiry>-<request_id>/`; the `cleanup`
+  built-in from 08 removes them instead of a new command
+- [x] `children.pids`, `meta.session_pid_file`. No `atexit` hook: every exit path already
+  stops the tracked children (pipeline's own handler, timeout, signals)
+- [x] `--cwd`, `ctx.cwd`, `meta.cwd`, relative `Path` resolution, `ctx.run` default
+- [x] CWD restore with `CWD_CHANGED`; audit rule `no-chdir` (warning)
+- [x] `CachePolicy`, `ctx.cache`, `--no-cache`, `--cache-ttl`, `meta.cache_used`, audit rule
+  `cache-declared`. A `cache=` command also declares its cache in
+  `filesystem_side_effects`, and `cleanup` removes it wherever `XDG_CACHE_HOME` put it
+- [x] Update COMPLIANCE rows, README, HANDOFF, ROADMAP

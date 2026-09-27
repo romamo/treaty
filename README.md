@@ -313,9 +313,12 @@ while its handler runs, in JSON mode from argv; the envelope is still the last l
 
 Stdout carries only envelopes (REQ-F-006). While a command runs, `sys.stdout` points at
 stderr, so a stray `print()` from the handler or a library lands there and the envelope
-gets a `THIRD_PARTY_STDOUT` warning with the byte count. Under `App.main()` file
-descriptor 1 points at stderr too, so a child process, `os.system`, or a C extension
-cannot write ahead of the envelope; `App.run()` swaps only `sys.stdout`. Under
+gets a `THIRD_PARTY_STDOUT` warning with the text (first 4 KiB) and the byte count; lines
+of JSON go to stderr unreported. Under `App.main()` file descriptor 1 is a pipe to
+stderr, so a child process or a C extension cannot write ahead of the envelope and its
+text is in the warning too; `App.run()` swaps only `sys.stdout`. A library that prints on
+import is caught when the entry module calls `treaty.intercept_stdout()` before importing
+the app, as the `entry.py` of `treaty init` does (REQ-F-060). Under
 `treaty-mcp` the swap lasts the whole process. Handlers log with
 `ctx.log("connecting", host=host)`: one line on stderr, a JSON object with `level`,
 `message`, and `fields` in JSON mode and `message key=value` otherwise. Declared secrets
@@ -361,7 +364,14 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
 - Children read `/dev/null` unless given `input=`, and get `NO_COLOR=1`, `PAGER=cat`,
   `GIT_PAGER=cat`, `MANPAGER=cat`, `LESS=-F -X -R`, and an empty `MORE`; off a terminal
   also `EDITOR`, `VISUAL`, and `GIT_EDITOR` set to `true`, so an editor exits at once
-  (REQ-F-046, REQ-F-055). Grandchildren inherit them; `env=` overrides single variables
+  (REQ-F-046, REQ-F-055). Off a terminal or under `CI` they also get `CI=1`,
+  `NO_UPDATE_NOTIFIER=1`, and the npm, Homebrew, pip, and gh notifier switches, and
+  `app.suppress_update_notifier(fn)` adds an app's own (REQ-F-050). Every child gets
+  `LC_ALL=C` and `LC_NUMERIC=C`, so messages are English and numbers dot-decimal,
+  unless the command has `preserve_locale=True` (REQ-F-066). Grandchildren inherit them;
+  `env=` overrides single variables
+- Children get the run's own temp directory as `TMPDIR`, `TEMP`, and `TMP`, and are
+  listed in its `children.pids` while they run (REQ-F-030, REQ-F-032)
 - A non-zero exit raises `SUBPROCESS_FAILED` (exit `1`) with `argv`, `returncode`,
   `stage`, and the last 4 KiB of stderr in `context`, with secret argument values and
   `ctx.token` redacted; `check=False` returns a `Completed` instead. In a pipeline any
@@ -376,8 +386,33 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   starts after that
 - On Windows only the child itself is stopped, not its grandchildren
 
-`App.main()` writes the same pager and, off a terminal, editor settings into
-`os.environ`, so programs started without `ctx.run` inherit them too.
+`App.main()` writes the same pager and, off a terminal, editor and update-notifier
+settings into `os.environ` before any command runs, so programs and libraries started
+without `ctx.run` inherit them too; treaty's own mode still reads `CI` as it was.
+
+## Session hygiene
+
+- `ctx.tmp_dir` is the run's private directory, `<temp>/<app>-<uid>/<request_id>/`
+  (under `instances/<id>/` with `--instance-id`), `0700` whatever the umask, made on first
+  use and removed when the run ends, signals included; `ctx.temp_file(".json")` makes a
+  `0600` file in it, and `meta.session_tmp_dir` names it (REQ-F-032)
+- `ctx.output_file("report.json", keep_seconds=300)` is a `0600` file for the caller that
+  outlives the run; an object `data` gets `cleanup` with the shell `command` that deletes
+  it and `auto_cleanup_after_seconds`, after which the next run of the tool deletes it,
+  as does the `cleanup` built-in (REQ-F-043)
+- `--cwd PATH` resolves relative `Path` arguments, `--input-file`, `--output`, the project
+  config file, and `ctx.run` children under `PATH`, reported as `ctx.cwd` and `meta.cwd`;
+  a missing directory exits `2` before anything runs. The process never changes
+  directory: a handler that calls `os.chdir` is changed back with a `CWD_CHANGED`
+  warning, and the `no-chdir` audit rule flags it (REQ-O-017, REQ-F-041)
+- `App(update_check=checker)`, an object with `latest(current, timeout)`, sets
+  `meta.update_available` when a newer release exists, from a cache a daemon thread
+  refreshes daily, so no run waits. It runs only for a person at a terminal: never under
+  `CI`, with `<APP>_NO_UPDATE`, or with `--no-update-check` (REQ-F-029, REQ-O-020)
+- `cache=treaty.CachePolicy(ttl_seconds=3600)` gives `ctx.cache.get(key)` and
+  `ctx.cache.put(key, data)`, bytes under `$XDG_CACHE_HOME/<app>/<command>/`, plus
+  `--no-cache` and `--cache-ttl SECONDS` on that command only; `meta.cache_used` says
+  whether a read hit (REQ-O-018)
 
 A command that opens a browser declares `gui_operations=["browser_open"]` and
 `headless_behavior=`, which registration requires (REQ-C-024). `ctx.open_url(url)` opens

@@ -346,6 +346,18 @@ The two do not share code.
 - **Commands a declaration names are checked late** (08-D2): `clearable_with` and
   `Background.cleanup_command` go through `App.named_commands` in `check_fixes`, when the
   manifest is built or the first run starts, and in the `declared-commands` audit rule
+- **Session temp dir** (`_session.py`): `_Run.session_for` makes one `Session` per
+  command (the first prunes expired output files and day-old session dirs); the
+  directory is made on first use and removed by a `last=True` teardown hook, after
+  `cleanup=`. `Processes` gives children its `TMPDIR` and rewrites `children.pids` on
+  each start and exit; `Teardown.pending` ignores `last` hooks so a timeout does not wait
+  on them
+- **Descriptor 1 is a pipe under `App.main()`** (`_stdout.py`): a daemon thread tees it
+  to stderr and `_Run._write` calls `take()`, which writes a marker and waits for the
+  reader to pass it, before each envelope. `App.run()` swaps only `sys.stdout`
+- **`App.main()` runs with `CI` as it was started**: it sets `CI=1` in `os.environ` off a
+  terminal for libraries and children, but passes the run an env with the original, so
+  a terminal's plain output never turns into JSON
 - **`ctx.spawn` children are not in `Processes._live`**, so the run's teardown leaves
   them; their pid and deadline go to `<state>/background/<command>.pids`, and each later
   spawn of the command SIGTERMs expired entries whose pid still leads its process group
@@ -366,6 +378,10 @@ src/treaty/
   _steps.py      StepName, StepTracker, Rollback: steps=, ctx.step, resume and rollback
   _batch.py      Batch, Item, ItemError, batch_schema(): per-item results (REQ-C-009)
   _declare.py    Subprocess, SideEffect, Background, platform=: 08's declarations
+  _session.py    SessionRoot, Session: ctx.tmp_dir, output files, children.pids (09)
+  _stdout.py     Interceptor, intercept_stdout(): descriptor 1 as a pipe (REQ-F-060)
+  _update.py     UpdateCheck, the cached daily check behind meta.update_available
+  _cache.py      CachePolicy, Cache: ctx.cache, --no-cache, --cache-ttl (REQ-O-018)
   _deps.py       Version, Dependency, doctor's dependency and required-tool checks
   _builtins.py   doctor and cleanup: built-ins that yield to an app command (13-D1)
   _redact.py     SECRET_NAME, secret_field(), scrub(): what a secret name is (REQ-F-034)
@@ -441,26 +457,28 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
 F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-022, F-023, F-024,
-F-025 (not the audit log), F-027, F-028, F-031, F-034 (not the audit log), F-035, F-040, F-044, F-045 (paths),
-F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-062, F-064, F-065, F-069,
+F-025 (not the audit log), F-027, F-028, F-029, F-030, F-031, F-032, F-034 (not the audit log), F-035, F-040, F-041, F-043, F-044, F-045 (paths),
+F-046, F-047, F-048, F-050, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-060 (not `--debug`), F-062, F-064, F-065, F-066, F-069,
 F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
 C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-010, C-011 (not `status`), C-012,
 C-013, C-015, C-016, C-017, C-018, C-019,
-C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-003, O-007, O-010, O-011, O-013, O-014, O-015, O-016, O-021, O-022,
+C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-003, O-007, O-010, O-011, O-013, O-014, O-015, O-016, O-017, O-018, O-020, O-021, O-022,
 O-023 (not the audit log), O-024, O-031, O-032, O-033, O-036, O-037, O-039, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),
 `--output-schema`, `--schema-version`, `--stable-output`, `--unmask`,
 `--no-injection-protection`, `--max-output`, `--config`,
-`--context`, `--no-config`, `--show-config`, `--instance-id`, and per
+`--context`, `--no-config`, `--show-config`, `--instance-id`, `--cwd`, `--no-update-check`,
+and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
 `--cursor` (list outputs), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
 (`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
 (`auth=`), `--global` (`config_write_scope=`), `--retries` and `--retry-delay` (`retry=`),
-`--resume-from` (`resumable=True`), `--rollback-on-failure` (`rollback=`), and
+`--resume-from` (`resumable=True`), `--rollback-on-failure` (`rollback=`), `--no-cache` and
+`--cache-ttl` (`cache=`), and
 `--<name>-from-env` / `--<name>-from-file` for each secret field. The per-command ones are
 rows of `_framework.FLAGS`: argv parsing, the JSON routes, the `--raw-payload` merge (one
 "given twice with different values" check; `--limit` and `--cursor` from argv win),
