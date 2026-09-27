@@ -5,7 +5,8 @@ Status of treaty against the 159 requirements of the
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
 hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations;
 06, pagination; 07, I/O and streams; 08, auth and scopes; 09, async jobs and config
-writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048).
+writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048), and
+re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -19,15 +20,15 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 63 | 30 | 66 | **49%** |
+| Level 3: full spec | 159 | 65 | 30 | 64 | **50%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Framework-automatic (F) | 79 | 40 | 15 | 24 | **60%** |
-| Command contract (C) | 30 | 15 | 7 | 8 | **62%** |
-| Opt-in (O) | 50 | 8 | 8 | 34 | **24%** |
+| Command contract (C) | 30 | 15 | 8 | 7 | **63%** |
+| Opt-in (O) | 50 | 10 | 7 | 33 | **27%** |
 
 ## Open mandatory requirements
 
@@ -109,7 +110,7 @@ open.
 | [REQ-F-068](../cli-agent-ergonomics/requirements/f-068-help-and-version-flag-purity.md) | Help and Version Flag Purity | P0 | 2 | Done | Help, schema, and version resolve before parsing and resources |
 | [REQ-F-069](../cli-agent-ergonomics/requirements/f-069-sigint-handler-installation.md) | SIGINT Handler Installation | P0 | 2 | Done | SIGINT exits 130; second signal exits immediately |
 | [REQ-F-070](../cli-agent-ergonomics/requirements/f-070-atomic-write-via-rename.md) | Atomic Write via Rename | P1 | 3 | Done | `write_atomic` (temp file in the target's directory, fsync, rename, cleanup on failure) for idempotency records, config writes, and `--output` |
-| [REQ-F-071](../cli-agent-ergonomics/requirements/f-071-file-descriptor-leak-prevention.md) | File Descriptor Leak Prevention | P1 | 3 | Done | File descriptors are non-inheritable (PEP 446); no children spawned |
+| [REQ-F-071](../cli-agent-ergonomics/requirements/f-071-file-descriptor-leak-prevention.md) | File Descriptor Leak Prevention | P1 | 3 | Done | File descriptors are non-inheritable (PEP 446); `ctx.run` children inherit only stdin, stdout, and stderr (`close_fds` default) |
 | [REQ-F-072](../cli-agent-ergonomics/requirements/f-072-lf-line-ending-enforcement.md) | LF Line Ending Enforcement | P1 | 3 | Partial | Writes `\n`; stdout not forced to `\n` on Windows |
 | [REQ-F-073](../cli-agent-ergonomics/requirements/f-073-env-var-namespace-prefix.md) | Environment Variable Namespace Prefix | P1 | 3 | Partial | Env vars prefixed `TREATY_`, not per tool; unprefixed `CI` is read |
 | [REQ-F-074](../cli-agent-ergonomics/requirements/f-074-json-null-absent-empty-convention.md) | JSON Null/Absent/Empty Convention | P1 | 3 | Partial | Dataclass outputs emit every key; no `[]` vs `null` enforcement |
@@ -141,7 +142,7 @@ open.
 | [REQ-C-016](../cli-agent-ergonomics/requirements/c-016-secrets-accepted-only-via-env-var-or-file.md) | Secrets Accepted Only via Env Var or File | P1 | 3 | Done | Secrets only via `--x-from-env`, `--x-from-file`, or `<APP>_<X>` |
 | [REQ-C-017](../cli-agent-ergonomics/requirements/c-017-commands-register-cleanup-hook.md) | Commands Register cleanup() Hook | P1 | 3 | Partial | `cleanup=` runs on signals only, not on normal exit or timeout; no resource `release` |
 | [REQ-C-018](../cli-agent-ergonomics/requirements/c-018-commands-declare-platform-requirements.md) | Commands Declare Platform Requirements | P3 | 3 | Not started | No platform or required-tools declaration |
-| [REQ-C-019](../cli-agent-ergonomics/requirements/c-019-subprocess-invoking-commands-declare-argument-sche.md) | Subprocess-Invoking Commands Declare Argument Schema | P1 | 3 | Not started | No subprocess API |
+| [REQ-C-019](../cli-agent-ergonomics/requirements/c-019-subprocess-invoking-commands-declare-argument-sche.md) | Subprocess-Invoking Commands Declare Argument Schema | P1 | 3 | Partial | `ctx.run`/`ctx.pipeline` take argument lists, so REQ-F-044 applies; `os.system` is not flagged and `--schema` has no `subprocess` section |
 | [REQ-C-020](../cli-agent-ergonomics/requirements/c-020-resource-id-fields-declare-validation-pattern.md) | Resource ID Fields Declare Validation Pattern | P1 | 3 | Partial | Presets and `pattern=` checked in phase 1; no warning for ID fields without a pattern |
 | [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Done | `auth="browser"` or `"device"` declares a login command; `--schema` and the manifest carry `headless_supported` and `token_env_vars`; a headless browser login without a token exits 4 with `TOKEN_REQUIRED` |
 | [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Done | `async_job=True` requires a `treaty.Job` output and `App(jobs=)`; `data` carries all seven descriptor fields; `--schema` has `async` and `job_descriptor_schema`; `job status` exits 0, 3, 4, 5 |
@@ -195,8 +196,8 @@ open.
 | [REQ-O-035](../cli-agent-ergonomics/requirements/o-035-tool-mcp-validate-built-in-command.md) | tool mcp-validate Built-In Command | P2 | 3 | Not started | No MCP drift check |
 | [REQ-O-036](../cli-agent-ergonomics/requirements/o-036-instance-id-flag-for-agent-state-namespacing.md) | --instance-id Flag for Agent State Namespacing | P1 | 3 | Not started | No `--instance-id` |
 | [REQ-O-037](../cli-agent-ergonomics/requirements/o-037-unmask-flag-for-high-entropy-fields.md) | --unmask Flag for High-Entropy Fields | P2 | 3 | Not started | No entropy masking |
-| [REQ-O-038](../cli-agent-ergonomics/requirements/o-038-heartbeat-ms-flag-for-long-running-commands.md) | --heartbeat-ms Flag for Long-Running Commands | P1 | 3 | Not started | No `--heartbeat-ms` |
-| [REQ-O-039](../cli-agent-ergonomics/requirements/o-039-input-file-flag-for-stdin-commands.md) | --input-file Flag for Stdin Commands | P1 | 3 | Partial | `--input-file` on `exec` only |
+| [REQ-O-038](../cli-agent-ergonomics/requirements/o-038-heartbeat-ms-flag-for-long-running-commands.md) | --heartbeat-ms Flag for Long-Running Commands | P1 | 3 | Done | `heartbeat=True` adds `--heartbeat-ms` (10 s default, `0` off); lines are `{"status":"running","heartbeat":true,"elapsed_ms":...}`, the final envelope has no `heartbeat` field |
+| [REQ-O-039](../cli-agent-ergonomics/requirements/o-039-input-file-flag-for-stdin-commands.md) | --input-file Flag for Stdin Commands | P1 | 3 | Done | `stdin_input=True` adds `--input-file` (any size, `-` for stdin); over-cap stdin exits 2 with `STDIN_TOO_LARGE` and a `hint`; `exec` has it too |
 | [REQ-O-040](../cli-agent-ergonomics/requirements/o-040-no-follow-symlinks-flag-for-traversal-commands.md) | --no-follow-symlinks Flag for Traversal Commands | P1 | 3 | Not started | No `--no-follow-symlinks`/`--max-depth` |
 | [REQ-O-041](../cli-agent-ergonomics/requirements/o-041-tool-manifest-built-in-command.md) | tool manifest Built-In Command | P1 | 3 | Partial | `manifest` built-in with etag; no `manifest --etag` or `meta.not_modified` |
 | [REQ-O-042](../cli-agent-ergonomics/requirements/o-042-output-format-env-var-default.md) | Output Format Environment Variable Default | P2 | 3 | Partial | `TREATY_FORMAT` honored; not tool-prefixed or listed in help |
