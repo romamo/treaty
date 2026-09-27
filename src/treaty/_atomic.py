@@ -59,7 +59,9 @@ else:
 def write_atomic(path: Path, text: str, *, new_mode: int = 0o600) -> None:
     """Replace ``path`` with ``text``: a new file gets ``new_mode``, owner-only by default,
     and an existing one keeps its mode. Any failure before the rename leaves the old file
-    as it was, and the temporary file is removed."""
+    as it was, and the temporary file is removed. A symlink stays a symlink: its target
+    is what gets replaced."""
+    path = path.resolve()
     mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else new_mode
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     tmp = Path(name)

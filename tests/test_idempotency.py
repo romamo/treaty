@@ -11,7 +11,7 @@ import pytest
 from conftest import needs_posix_permissions, spec_validator
 
 from treaty import App, Arg, Ctx, Exit, Flag, RegistrationError
-from treaty._idempotency import TTL_SECONDS, IdempotencyKey, Record, claim
+from treaty._idempotency import TTL_SECONDS, IdempotencyKey, Record, claim, state_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +251,22 @@ def test_prune_removes_an_idle_expired_lock(tmp_path: Path) -> None:
         slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
         slot.prune(time.time())
     assert not lock.exists()
+
+
+def test_prune_removes_a_stale_temporary_file(tmp_path: Path) -> None:
+    stale_tmp, fresh_tmp = tmp_path / ".abc.json.x1.tmp", tmp_path / ".abc.json.x2.tmp"
+    stale_tmp.write_text("{")
+    fresh_tmp.write_text("{")
+    stale = time.time() - TTL_SECONDS - 3600
+    os.utime(stale_tmp, (stale, stale))
+    with claim(tmp_path, IdempotencyKey("other")) as slot:
+        slot.prune(time.time())
+    assert not stale_tmp.exists() and fresh_tmp.exists()
+
+
+def test_a_relative_xdg_state_home_is_ignored() -> None:
+    env = {"HOME": "/home/u", "XDG_STATE_HOME": "relative"}
+    assert state_dir("app", None, env) == Path("/home/u/.local/state/treaty/app")
 
 
 def test_signal_interrupts_a_retry_waiting_for_the_key(tmp_path: Path) -> None:

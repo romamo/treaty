@@ -21,7 +21,7 @@ class CtxCall:
     line: int
     """Line in the handler's source, 1 for the ``def`` or its first decorator"""
     shell: bool
-    """A shell string where an argument list belongs, or a ``shell=`` keyword"""
+    """A shell string where ``ctx.run`` or ``ctx.pipeline`` takes an argument list"""
 
 
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
@@ -43,11 +43,11 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
         ):
             continue
         method = node.func.attr
-        shell = any(k.arg == "shell" for k in node.keywords)
+        shell = False
         if method in ("run", "pipeline") and node.args:
             first = node.args[0]
             stages = first.elts if method == "pipeline" and isinstance(first, ast.List) else [first]
-            shell = shell or any(_text(stage) for stage in stages)
+            shell = any(_text(stage) for stage in stages)
         calls.append(CtxCall(method, node.lineno, shell))
     return calls
 

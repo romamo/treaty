@@ -127,7 +127,8 @@ def state_dir(app_name: str, explicit: Path | None, env: Mapping[str, str]) -> P
         return explicit
     if root := env.get(STATE_ENV):
         return Path(root) / app_name
-    if xdg := env.get("XDG_STATE_HOME"):
+    xdg = env.get("XDG_STATE_HOME")
+    if xdg and Path(xdg).is_absolute():  # a relative one is ignored, as the XDG spec says
         return Path(xdg) / "treaty" / app_name
     if home := env.get("HOME"):
         return Path(home) / ".local" / "state" / "treaty" / app_name
@@ -264,14 +265,16 @@ def _load(path: Path, now: float) -> Record | None:
 
 
 def _prune(directory: Path, now: float) -> None:
-    """Remove expired records and idle lock files; the saving key's own lock is held
-    by the caller, so its fresh record is never touched"""
+    """Remove expired records, idle lock files, and temporary files a crashed write left;
+    the saving key's own lock is held by the caller, so its fresh record is never touched"""
     failure: OSError | None = None
     for path in directory.iterdir():
-        if path.suffix not in (".json", ".lock") or not path.is_file():
+        if path.suffix not in (".json", ".lock", ".tmp") or not path.is_file():
             continue  # not treaty's: a directory or other entry someone left here
         try:
-            if path.suffix == ".json" and _expired(path, now):
+            if path.suffix == ".tmp" and _expired(path, now):
+                path.unlink(missing_ok=True)  # no write takes as long as a record lives
+            elif path.suffix == ".json" and _expired(path, now):
                 _prune_record(path, now)
             elif path.suffix == ".lock" and _expired(path, now):
                 _unlink_idle_lock(path)

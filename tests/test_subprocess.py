@@ -1,5 +1,6 @@
 """Subprocess API: REQ-F-044, F-046, F-055, F-057, F-062, F-065, F-030, F-031."""
 
+import gc
 import io
 import json
 import os
@@ -7,16 +8,21 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from conftest import WINDOWS, needs_posix_signals, spec_validator
 
-from treaty import App, Ctx, Flag, NoArgs, RegistrationError, Timeout
+from treaty import App, CliExit, Ctx, Flag, NoArgs, RegistrationError, Timeout
 from treaty._audit import audit
 from treaty._mode import is_headless, quiet_children
+from treaty._signals import Cancelled, CancelSignal
+from treaty._subprocess import Processes
+from treaty._values import CommandPath
 
 pytestmark = pytest.mark.skipif(WINDOWS, reason="the children are /bin/sh commands")
 
@@ -153,17 +159,23 @@ def stage_string(args: NoArgs, ctx: Ctx) -> dict[str, object]:
     return {}
 
 
-def shell_keyword(args: NoArgs, ctx: Ctx) -> dict[str, object]:
-    ctx.run(["ls"], shell=True)  # type: ignore[call-arg]
-    return {}
-
-
-@pytest.mark.parametrize("handler", [literal, formatted, concatenated, stage_string, shell_keyword])
+@pytest.mark.parametrize("handler", [literal, formatted, concatenated, stage_string])
 def test_a_shell_string_in_the_source_fails_registration(handler: object) -> None:
     app = App("shells", version="1")
     register = app.command("x", description="x", danger_level="safe", exit_codes=())
     with pytest.raises(RegistrationError, match="SHELL_STRING_PROHIBITED"):
         register(handler)  # type: ignore[arg-type]
+
+
+def test_a_shell_keyword_elsewhere_registers() -> None:
+    app = App("shells", version="1")
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        ctx.log("started", shell="bash")
+        return {}
+
+    assert CommandPath("x") in app.commands
 
 
 # F-008, F-010, F-046, F-055: the child's environment
@@ -462,3 +474,116 @@ def test_audit_flags_shells_in_handlers(tmp_path: Path) -> None:
         "os.system",
         "subprocess.run",
     ]
+
+
+# Review fixes: secrets, children after the run, grandchildren, SIGPIPE, messages
+
+
+@dataclass(frozen=True, slots=True)
+class SecretArg:
+    token: str = Flag(description="A credential the child receives")
+
+
+def test_a_failed_child_never_echoes_a_secret_to_stdout() -> None:
+    app = App("leaky", version="1")
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: SecretArg, ctx: Ctx) -> dict[str, object]:
+        ctx.run(["sh", "-c", 'echo "bad token $1" >&2; exit 3', "_", args.token])
+        return {}
+
+    out = io.StringIO()
+    code = app.run(
+        ["x", "--token-from-env", "LEAKY_TOKEN", "--format", "json"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={**BASE_ENV, "LEAKY_TOKEN": "hunter2-secret"},
+    )
+    assert code == 1 and "hunter2-secret" not in out.getvalue()
+    context = error_of(json.loads(out.getvalue()))["context"]
+    assert context["argv"][-1] == "[REDACTED]"  # type: ignore[index]
+    assert context["stderr"] == "bad token [REDACTED]\n"  # type: ignore[index]
+
+
+def processes(deadline: float | None = None) -> Processes:
+    return Processes(BASE_ENV, deadline=deadline, headless=True, browser_open=False)
+
+
+def test_no_child_starts_after_terminate(tmp_path: Path) -> None:
+    timed_out = processes()
+    timed_out.terminate()
+    with pytest.raises(CliExit) as caught:
+        timed_out.run(["sh", "-c", f'touch "{tmp_path / "ran"}"'])
+    assert caught.value.name.value == "TIMEOUT"
+    cancelled = processes()
+    cancelled.terminate(CancelSignal("SIGTERM", 143))
+    with pytest.raises(Cancelled):
+        cancelled.run(["sh", "-c", f'touch "{tmp_path / "ran"}"'])
+    assert not (tmp_path / "ran").exists()
+
+
+def test_an_abandoned_handler_starts_no_child(tmp_path: Path) -> None:
+    app = App("late", version="1", default_timeout=0.3)
+    refused: list[BaseException] = []
+    done = threading.Event()
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        try:
+            ctx.run(["sleep", "30"])
+        except CliExit:
+            pass  # stopped by the command timeout
+        try:
+            ctx.run(["sh", "-c", f'touch "{tmp_path / "ran"}"; exec sleep 30'])
+        except CliExit as exc:
+            refused.append(exc)
+        finally:
+            done.set()
+        return {}
+
+    code, env = call(["x"], app=app)
+    assert code == 10 and error_of(env)["code"] == "TIMEOUT"
+    assert done.wait(10)
+    assert len(refused) == 1 and not (tmp_path / "ran").exists()
+
+
+def test_an_explicit_timeout_is_capped_by_the_command_deadline() -> None:
+    started = time.monotonic()
+    with pytest.raises(CliExit) as caught:
+        processes(time.monotonic() + 0.3).run(["sleep", "30"], timeout=Timeout(30))
+    assert caught.value.name.value == "TIMEOUT" and time.monotonic() - started < 5
+
+
+def test_a_background_grandchild_is_stopped_with_its_group(tmp_path: Path) -> None:
+    pidfile = tmp_path / "pid"
+    script = f'sleep 30 & echo $! > "{pidfile}"; echo hi'
+    started = time.monotonic()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(CliExit) as stopped:
+            processes().run(["sh", "-c", script], timeout=Timeout(0.5))
+        gc.collect()
+    assert stopped.value.name.value == "TIMEOUT" and time.monotonic() - started < 5
+    assert stopped.value.message.startswith("`sh` ran past")
+    assert_gone(int(pidfile.read_text()))
+    assert not [w for w in caught if issubclass(w.category, ResourceWarning)]
+
+
+def test_a_pipeline_names_the_stage_that_hung() -> None:
+    with pytest.raises(CliExit) as caught:
+        processes().pipeline([["sleep", "30"], ["cat"]], timeout=Timeout(0.3))
+    assert caught.value.context["stage"] == 0
+    assert caught.value.message.startswith("`sleep` (stage 0) ran past")
+
+
+def test_sigpipe_of_an_upstream_stage_is_not_a_failure() -> None:
+    code, env = call(["pipe", *flags(["yes", "|", "head", "-1"])])
+    assert code == 0 and stdout_of(env) == "y\n"
+    code, env = call(["pipe", *flags(["yes", "|", "false"])])
+    assert code == 1 and error_of(env)["code"] == "SUBPROCESS_FAILED"
+
+
+def test_a_program_name_keeps_its_case_in_the_message() -> None:
+    code, env = run_argv("sh", "-c", "exit 3")
+    assert error_of(env)["message"] == "`sh` exited with 3."

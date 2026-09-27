@@ -16,6 +16,7 @@ from examples.deployctl import app as deployctl
 from treaty import App, Arg, Ctx, Flag, Job, NoArgs, RegistrationError
 from treaty._atomic import write_atomic
 from treaty._audit import audit
+from treaty._config import user_config
 
 DEPLOYCTL = Path(__file__).resolve().parents[1] / "examples" / "deployctl.py"
 DESCRIPTOR = {
@@ -279,6 +280,25 @@ def test_write_atomic_keeps_the_mode_of_an_existing_file(tmp_path: Path) -> None
     path.chmod(0o640)
     write_atomic(path, "b")
     assert path.read_text() == "b" and path.stat().st_mode & 0o777 == 0o640
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_write_atomic_replaces_the_target_of_a_symlink(tmp_path: Path) -> None:
+    (tmp_path / "dotfiles").mkdir()
+    target = tmp_path / "dotfiles" / "c.toml"
+    target.write_text("a")
+    link = tmp_path / "c.toml"
+    link.symlink_to(target)
+    write_atomic(link, "b")
+    assert link.is_symlink() and target.read_text() == "b"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["c.toml", "dotfiles"]
+
+
+def test_a_relative_xdg_config_home_is_ignored(tmp_path: Path) -> None:
+    env = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": "relative"}
+    assert user_config("tool", env) == tmp_path / ".config" / "tool" / "config.toml"
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
+    assert user_config("tool", env) == tmp_path / "xdg" / "tool" / "config.toml"
 
 
 def test_schema_declares_the_write_scope_and_global_flag() -> None:

@@ -4,6 +4,7 @@ import io
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import IO
 
 import pytest
@@ -377,3 +378,27 @@ def test_a_broad_scope_explained_in_the_description_passes() -> None:
 
     rules = {r.id: r for r in audit(app, "x", limit=10).rules}
     assert rules["broad-scope"].passed
+
+
+def test_an_idempotent_replay_still_checks_the_credential(tmp_path: Path) -> None:
+    credentials = Fixed(["repo:write"])
+    app = App("gated", version="1", credentials=credentials, state_dir=tmp_path)
+
+    @app.command(
+        "push",
+        description="Push",
+        danger_level="mutating",
+        exit_codes=(),
+        requires_auth=True,
+        required_scopes=["repo:write"],
+    )
+    def push(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"effect": "created"}
+
+    argv = ["push", "--idempotency-key", "k1"]
+    assert run(app, argv)[0] == 0
+    code, env, _ = run(app, argv)
+    assert code == 0 and env["meta"]["idempotency_hit"] is True  # type: ignore[index]
+    credentials.scopes = None
+    code, env, _ = run(app, argv)
+    assert code == 8 and error_of(env)["code"] == "AUTH_REQUIRED"

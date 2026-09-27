@@ -6,8 +6,9 @@ text (REQ-F-044, REQ-F-062). Every child reads ``/dev/null`` unless given ``inpu
 an environment without pagers, color, or (off a terminal) editors (REQ-F-046,
 REQ-F-055), and starts in its own session, so it cannot open the terminal and its whole
 process group can be signaled. A non-zero exit in any stage raises ``SUBPROCESS_FAILED``
-(REQ-F-065); a cancelled or timed-out run terminates every child it still tracks
-(REQ-F-030, REQ-F-031).
+(REQ-F-065); a cancelled or timed-out run terminates every child it still tracks, with
+its background grandchildren, and starts no new one (REQ-F-030, REQ-F-031). On Windows
+only the child itself is stopped: its grandchildren are not killed.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import IO
 
 from ._errors import CliExit, RegistrationError
+from ._signals import Cancelled, CancelSignal
 from ._timeout import Timeout
 from ._values import ExitCodeName
 
@@ -104,6 +106,9 @@ class Processes:
         """The URL ``open_url`` did not open because the run is headless (REQ-F-057)"""
         self._live: set[subprocess.Popen[bytes]] = set()
         self._lock = threading.Lock()
+        self._closed = False
+        """Set by ``terminate``: the run's response is decided, so no child may start"""
+        self._signal: CancelSignal | None = None
 
     def run(
         self,
@@ -135,6 +140,7 @@ class Processes:
         if not argvs:
             raise TypeError("a pipeline needs at least one stage")
         seconds = self._seconds(timeout, argvs[0])
+        pipeline = len(argvs) > 1
         end = None if seconds is None else time.monotonic() + seconds
         started = time.perf_counter()
         procs: list[subprocess.Popen[bytes]] = []
@@ -160,23 +166,34 @@ class Processes:
                 for proc in procs[:-1]:
                     proc.wait(timeout=_left(end, floor=0.1))
             except subprocess.TimeoutExpired:
+                # The first stage still running; else the last, whose output a background
+                # grandchild holds open
+                hung = next((i for i, p in enumerate(procs) if p.poll() is None), len(procs) - 1)
                 self._stop(procs)
                 assert seconds is not None
                 raise CliExit(
                     ExitCodeName("TIMEOUT"),
-                    f"{argvs[0][0]} ran past its {seconds:g}s timeout and was stopped",
-                    context={"argv": list(argvs[0]), "timeout_ms": int(seconds * 1000)},
+                    f"{_name(argvs[hung], hung, pipeline)} ran past its {seconds:g}s timeout "
+                    "and was stopped",
+                    context={
+                        "argv": list(argvs[hung]),
+                        "stage": hung,
+                        "timeout_ms": int(seconds * 1000),
+                    },
                 ) from None
             except BaseException:
                 # A signal (Cancelled), or a spawn that failed after earlier stages started
                 self._stop(procs)
                 raise
             finally:
+                for proc in procs:
+                    if proc.stdout is not None:
+                        proc.stdout.close()
                 with self._lock:
                     self._live.difference_update(procs)
             stderrs = [_read(err) for err in errs]
         codes = [proc.returncode for proc in procs]
-        stage = next((i for i, code in enumerate(codes) if code != 0), len(codes) - 1)
+        stage = next((i for i in range(len(codes)) if _failed(codes, i)), len(codes) - 1)
         done = Completed(
             argv=argvs[stage],
             returncode=codes[stage],
@@ -188,7 +205,7 @@ class Processes:
         if check and done.returncode != 0:
             raise CliExit(
                 ExitCodeName("GENERAL_ERROR"),
-                f"{done.argv[0]} exited with {done.returncode}",
+                f"{_name(done.argv, stage, pipeline)} exited with {done.returncode}",
                 code="SUBPROCESS_FAILED",
                 context={
                     "argv": list(done.argv),
@@ -210,26 +227,39 @@ class Processes:
             return False
         return webbrowser.open(url)
 
-    def terminate(self) -> None:
-        """SIGTERM every tracked child's process group, SIGKILL what outlives the grace"""
+    def terminate(self, cancelled: CancelSignal | None = None) -> None:
+        """SIGTERM every tracked child's process group, SIGKILL what outlives the grace;
+        from now on no child starts. ``cancelled`` is the signal that ended the run, None
+        for a timeout; an abandoned handler that tries another child gets the same."""
         with self._lock:
+            self._closed = True
+            self._signal = cancelled
             live = list(self._live)
         self._stop(live)
 
     def _seconds(self, timeout: Timeout | None, argv: tuple[str, ...]) -> float | None:
-        """The child's time limit: the one given, else what is left of the command's"""
-        if timeout is not None:
-            return timeout.seconds
+        """The child's time limit: the one given, capped by what is left of the command's"""
+        given = None if timeout is None else timeout.seconds
         if self.deadline is None:
-            return None
+            return given
         left = self.deadline - time.monotonic()
         if left <= 0:
             raise CliExit(
                 ExitCodeName("TIMEOUT"),
-                f"No time is left on the command's deadline to run {argv[0]}",
+                f"No time is left on the command's deadline to run `{argv[0]}`",
                 context={"argv": list(argv)},
             )
-        return left
+        return left if given is None else min(given, left)
+
+    def _refusal(self, argv: tuple[str, ...]) -> BaseException:
+        """Why a child cannot start after ``terminate``: the run's own ending"""
+        if self._signal is not None:
+            return Cancelled(self._signal)
+        return CliExit(
+            ExitCodeName("TIMEOUT"),
+            f"`{argv[0]}` was not started: the command already timed out",
+            context={"argv": list(argv)},
+        )
 
     def _spawn(
         self,
@@ -240,6 +270,9 @@ class Processes:
         cwd: Path | None,
         env: Mapping[str, str] | None,
     ) -> subprocess.Popen[bytes]:
+        with self._lock:
+            if self._closed:
+                raise self._refusal(argv)
         try:
             proc = subprocess.Popen(
                 argv,
@@ -253,31 +286,44 @@ class Processes:
         except OSError as exc:
             raise CliExit(
                 ExitCodeName("GENERAL_ERROR"),
-                f"Cannot start {argv[0]}: {exc.strerror}",
+                f"Cannot start `{argv[0]}`: {exc.strerror}",
                 code="SUBPROCESS_FAILED",
                 context={"argv": list(argv), "stage": index, "cause": exc.strerror},
             ) from None
         with self._lock:
-            self._live.add(proc)
+            closed = self._closed
+            if not closed:
+                self._live.add(proc)
+        if closed:
+            # terminate() ran while Popen did: this child is not tracked, so stop it here
+            _signal(proc, kill=True)
+            proc.wait()
+            assert proc.stdout is not None
+            proc.stdout.close()
+            raise self._refusal(argv)
         return proc
 
     @staticmethod
     def _stop(procs: Sequence[subprocess.Popen[bytes]]) -> None:
-        running = [p for p in procs if p.poll() is None]
-        for proc in running:
+        """Every group, its leader exited or not: a background grandchild outlives it"""
+        for proc in procs:
+            proc.poll()  # reap an exited leader; macOS refuses to signal a zombie's group
             _signal(proc, kill=False)
         end = time.monotonic() + GRACE_SECONDS
-        for proc in running:
-            try:
-                proc.wait(timeout=max(end - time.monotonic(), 0))
-            except subprocess.TimeoutExpired:
+        while any(_alive(p) for p in procs) and time.monotonic() < end:
+            time.sleep(0.02)
+        for proc in procs:
+            if _alive(proc):
                 _signal(proc, kill=True)
-                proc.wait()
+            proc.wait()
 
 
 def _signal(proc: subprocess.Popen[bytes], *, kill: bool) -> None:
-    """Signal the child's whole process group: grandchildren share it"""
+    """Signal the child's whole process group: grandchildren share it. Windows has no
+    groups here, so only the child is stopped there."""
     if sys.platform == "win32":
+        if proc.poll() is not None:
+            return
         if kill:
             proc.kill()
         else:
@@ -288,6 +334,35 @@ def _signal(proc: subprocess.Popen[bytes], *, kill: bool) -> None:
     except ProcessLookupError, PermissionError:
         # Gone already; macOS answers EPERM for a group whose leader is a zombie
         pass
+
+
+def _alive(proc: subprocess.Popen[bytes]) -> bool:
+    """The child, or on POSIX anything left in its process group, still runs"""
+    if proc.poll() is None:
+        return True
+    if sys.platform == "win32":
+        return False
+    try:
+        os.killpg(proc.pid, 0)
+    except ProcessLookupError, PermissionError:
+        return False
+    return True
+
+
+def _failed(codes: Sequence[int], index: int) -> bool:
+    """A stage failed, unless SIGPIPE ended a writer whose reader stopped early and
+    succeeded, as ``head`` does in ``yes | head -1``"""
+    code = codes[index]
+    if code == 0:
+        return False
+    if sys.platform != "win32" and code == -signal.SIGPIPE:
+        return not any(c == 0 for c in codes[index + 1 :])
+    return True
+
+
+def _name(argv: tuple[str, ...], stage: int, pipeline: bool) -> str:
+    """The program in backticks, so a message never capitalizes it, and its stage"""
+    return f"`{argv[0]}` (stage {stage})" if pipeline else f"`{argv[0]}`"
 
 
 def _left(end: float | None, *, floor: float = 0.0) -> float | None:

@@ -398,7 +398,7 @@ def _check_ctx_calls(
         where = f"{path}: ctx.{call.method}() on line {call.line} of the handler"
         if call.shell:
             raise RegistrationError(
-                f"{where} gets a shell string or shell= (SHELL_STRING_PROHIBITED); treaty never "
+                f"{where} gets a shell string (SHELL_STRING_PROHIBITED); treaty never "
                 "runs a shell, so pass an argument list such as ['git', 'log', '-1'] (REQ-F-062)"
             )
         if call.method == "open_url" and BROWSER_OPEN not in gui_operations:

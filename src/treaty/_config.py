@@ -27,8 +27,10 @@ class ConfigScope(StrEnum):
 
 
 def user_config(app_name: str, env: Mapping[str, str]) -> Path | None:
-    """The user's config file, or None without ``XDG_CONFIG_HOME`` or ``HOME``"""
-    if xdg := env.get("XDG_CONFIG_HOME"):
+    """The user's config file, or None without ``XDG_CONFIG_HOME`` or ``HOME``; a relative
+    ``XDG_CONFIG_HOME`` is ignored, as the XDG spec says"""
+    xdg = env.get("XDG_CONFIG_HOME")
+    if xdg and Path(xdg).is_absolute():
         return Path(xdg) / app_name / "config.toml"
     if home := env.get("HOME"):
         return Path(home) / ".config" / app_name / "config.toml"

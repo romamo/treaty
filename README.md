@@ -281,21 +281,25 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   `"; rm -rf /"` are one argument each, never split, expanded, or executed, so treaty does
   not need to reject shell metacharacters (REQ-F-044, REQ-F-062). A string where the list
   belongs is `SHELL_STRING_PROHIBITED`: a `RegistrationError` when the handler's source
-  shows it (`ctx.run("git log")`, an f-string, `shell=`), exit `1` when it happens at run
+  shows it (`ctx.run("git log")`, an f-string, a concatenation), exit `1` when it happens at run
   time. The `no-shell` audit rule flags `os.system`, `os.popen`, and `shell=True`
 - Children read `/dev/null` unless given `input=`, and get `NO_COLOR=1`, `PAGER=cat`,
   `GIT_PAGER=cat`, `MANPAGER=cat`, `LESS=-F -X -R`, and an empty `MORE`; off a terminal
   also `EDITOR`, `VISUAL`, and `GIT_EDITOR` set to `true`, so an editor exits at once
   (REQ-F-046, REQ-F-055). Grandchildren inherit them; `env=` overrides single variables
 - A non-zero exit raises `SUBPROCESS_FAILED` (exit `1`) with `argv`, `returncode`,
-  `stage`, and the last 4 KiB of stderr in `context`; `check=False` returns a `Completed`
-  instead. In a pipeline any failing stage fails the whole, the first one named
-  (REQ-F-065). `ctx.pipeline` checks each stage like `set -o pipefail`, so a stage killed
-  by SIGPIPE (`yes | head -1`) fails too
-- `timeout=` defaults to what is left of the command's timeout; running out stops the
-  child and raises `TIMEOUT`. Each child starts in its own session, so it cannot open the
-  terminal, and a signal or timeout sends SIGTERM to its process group, then SIGKILL
-  after 2 seconds, before the `CANCELLED` or `TIMEOUT` envelope is written (REQ-F-031)
+  `stage`, and the last 4 KiB of stderr in `context`, with secret argument values and
+  `ctx.token` redacted; `check=False` returns a `Completed` instead. In a pipeline any
+  failing stage fails the whole, the first one named (REQ-F-065). `ctx.pipeline` checks
+  each stage like `set -o pipefail`, except that a stage ended by SIGPIPE is not a failure
+  when a later stage succeeded, so `yes | head -1` exits `0`
+- `timeout=` defaults to what is left of the command's timeout and never exceeds it;
+  running out stops the child and raises `TIMEOUT` naming the stage that hung. Each child
+  starts in its own session, so it cannot open the terminal, and a signal or timeout sends
+  SIGTERM to its process group, background grandchildren included, then SIGKILL after 2
+  seconds, before the `CANCELLED` or `TIMEOUT` envelope is written (REQ-F-031); no child
+  starts after that
+- On Windows only the child itself is stopped, not its grandchildren
 
 `App.main()` writes the same pager and, off a terminal, editor settings into
 `os.environ`, so programs started without `ctx.run` inherit them too.

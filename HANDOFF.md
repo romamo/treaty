@@ -148,12 +148,15 @@ The two do not share code.
   built per handler run in `_Run._ctx` with the hardened env (`_mode.child_settings`), the
   command's deadline, and the headless flag; `_Run.processes` points at the current one so
   `_cancelled` and both `TimeoutExpired` paths call `terminate()` (SIGTERM to each process
-  group, SIGKILL after 2 s) before the envelope is built. A failing child is a `CliExit`
-  on `GENERAL_ERROR` with code `SUBPROCESS_FAILED`, so no new exit code and no
-  declaration; its deadline expiry is a `CliExit` on the implicit `TIMEOUT`. Stage stderr
-  goes to anonymous temp files, so a pipeline needs no reader threads
+  group, exited leader or not, SIGKILL after 2 s) before the envelope is built; after it
+  `_spawn` refuses new children, so an abandoned handler starts none. A failing child is
+  a `CliExit` on `GENERAL_ERROR` with code `SUBPROCESS_FAILED`, so no new exit code and no
+  declaration; its deadline expiry is a `CliExit` on the implicit `TIMEOUT`, and an
+  explicit `timeout=` is capped by the deadline. `_exit_envelope` runs the redactor over
+  every `CliExit` message and context string. Stage stderr goes to anonymous temp files,
+  so a pipeline needs no reader threads. Windows stops only the child, not grandchildren
 - **Registration scans handler source.** `_scan.ctx_calls` parses the handler and lists
-  calls on its second parameter; `build_command` refuses a shell string or `shell=` in
+  calls on its second parameter; `build_command` refuses a shell string in
   `ctx.run`/`ctx.pipeline` (REQ-F-062 asks for registration time) and an undeclared
   `ctx.open_url`. Handlers without source are skipped; the same checks run at call time
 - **Headless is decided once per run** (`_mode.is_headless`) and adds `meta.headless:

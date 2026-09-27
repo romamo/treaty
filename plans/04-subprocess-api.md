@@ -77,8 +77,8 @@ child process; record it as not applicable in `COMPLIANCE.md` with that reason.
   new to declare
 - F-062's "registration time" is a real registration check, not only an audit rule:
   `_scan.ctx_calls` parses the handler source and `build_command` refuses a string literal,
-  f-string, or concatenation where `ctx.run`/`ctx.pipeline` take an argument list, and any
-  `shell=` keyword (F-044's "registration error if `shell=True`"). A string that only
+  f-string, or concatenation where `ctx.run`/`ctx.pipeline` take an argument list. They
+  have no `shell=` parameter, so `shell=True` fails as a `TypeError`. A string that only
   exists at run time raises `SHELL_STRING_PROHIBITED` then. The audit rule is `no-shell`
   and covers what the API cannot see: `os.system`, `os.popen`, `shell=True` anywhere
 - Environment: `EDITOR`, `VISUAL`, and `GIT_EDITOR` are `true`, as F-055 says, not
@@ -91,9 +91,10 @@ child process; record it as not applicable in `COMPLIANCE.md` with that reason.
 - `Completed` has a `stage` field; for a pipeline `argv`, `returncode`, and `stage` name
   the first failing stage, else the last, and `stderr` joins every stage's. Stage stderr
   goes to anonymous temp files, so no reader threads
-- `timeout=` given explicitly is used as is; only the default is the time left on the
-  command deadline. A command timeout or signal terminates tracked children from the main
-  thread, so the abandoned handler's child never outlives the run
+- `timeout=` given explicitly is capped by the time left on the command deadline, which is
+  also the default. A command timeout or signal terminates tracked children, exited group
+  leaders included, from the main thread, and no child starts after it, so the abandoned
+  handler's children never outlive the run
 - Headless (F-057) is: stdin or stdout not a terminal, `CI`, or no `DISPLAY` and no
   `WAYLAND_DISPLAY` where a display is needed (not macOS or Windows, or over `SSH_TTY`).
   `meta.headless` is on every envelope of such a run, argument errors and help included

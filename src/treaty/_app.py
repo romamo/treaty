@@ -864,6 +864,17 @@ _SECRET_KEY = re.compile(
 )
 
 
+def _redacted(value: object, redact: Callable[[str], str]) -> object:
+    """Every string of a JSON value with the run's secrets replaced"""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: _redacted(v, redact) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redacted(v, redact) for v in value]
+    return value
+
+
 def _scrub(key: str, value: object, redact: Callable[[str], str]) -> object:
     """A ``ctx.log`` field as JSON values, with credentials replaced at any depth"""
     if _SECRET_KEY.search(key):
@@ -1512,13 +1523,21 @@ class _Run:
                 meta=full_meta,
             )
         if slot.record is not None:
-            assert isinstance(slot.record.data, dict)
-            return self._envelope(
-                0,
-                data={**slot.record.data, "effect": "noop"},
-                started=started,
-                meta={**full_meta, "idempotency_hit": True},
-            )
+            data = slot.record.data
+            assert isinstance(data, dict)
+
+            def replay() -> Envelope:
+                return self._envelope(
+                    0,
+                    data={**data, "effect": "noop"},
+                    started=started,
+                    meta={**full_meta, "idempotency_hit": True},
+                )
+
+            if not command.requires_auth:
+                return replay()
+            # A stored result is still the command's output: the credential must cover it
+            return self._execute(command, invocation, mode, meta=meta, replay=replay)
         envelope = self._execute(command, invocation, mode, meta=meta)
         pending = self.abandoned
         if pending is not None:
@@ -1557,8 +1576,10 @@ class _Run:
         mode: Format,
         *,
         meta: Mapping[str, object] | None = None,
+        replay: Callable[[], Envelope] | None = None,
     ) -> Envelope:
-        """Run one handler under its timeout and turn the outcome into an envelope"""
+        """Run one handler under its timeout and turn the outcome into an envelope;
+        with ``replay``, run only the credential gate there and answer with ``replay()``"""
         self.abandoned = None
         self.page = None
         started = time.perf_counter()
@@ -1585,7 +1606,9 @@ class _Run:
         try:
             self.cancellation.check()
             result = call_with_timeout(
-                lambda: _invoke(self.app, command, args, ctx),
+                (lambda: self.app._gate(command, ctx))
+                if replay is not None
+                else (lambda: _invoke(self.app, command, args, ctx)),
                 timeout,
                 running.append,
                 self.cancellation.armed,
@@ -1626,6 +1649,8 @@ class _Run:
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
             # asyncio.CancelledError, SystemExit, trio.Cancelled: user code, not a signal
             return self._crashed(command, args, exc, started, full_meta)
+        if replay is not None:
+            return replay()
         page_meta: dict[str, object] = {}
         try:
             if command.paginated:
@@ -1875,10 +1900,11 @@ class _Run:
             meta=meta,
         )
 
-    def _stop_children(self) -> None:
-        """Terminate what the interrupted or abandoned handler still runs (REQ-F-030)"""
+    def _stop_children(self, cancelled: CancelSignal | None = None) -> None:
+        """Terminate what the interrupted or abandoned handler still runs (REQ-F-030);
+        ``cancelled`` is the signal, None for a timeout"""
         if self.processes is not None:
-            self.processes.terminate()
+            self.processes.terminate(cancelled)
 
     def _with_open_url(self, data: object) -> object:
         """A headless ``ctx.open_url`` leaves its URL in ``data.open_url`` (REQ-F-057)"""
@@ -1902,7 +1928,7 @@ class _Run:
         """
         context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
         # Children first, so the envelope is written after they were signaled (REQ-F-031)
-        self._stop_children()
+        self._stop_children(sig)
         if handler_started and command.cleanup is not None:
             try:
                 command.cleanup()
@@ -1931,9 +1957,18 @@ class _Run:
         started: float,
         meta: Mapping[str, object],
     ) -> Envelope:
+        # A failed child's argv and stderr, or ctx.token, may carry a secret: stdout never
+        # gets one, as the traceback on stderr does not
+        redact = self._redactor(command, args)
+        # Checked below: a handler may pass anything as the message
+        message = redact(exc.message) if isinstance(exc.message, str) else exc.message
         if exc.name.value == FrameworkCode.ARG_ERROR.name:
             # Exit 2 promises nothing ran; from a handler, something did (REQ-F-002)
-            rejected = ParseError(exc.message, context=exc.context, suggestion=exc.suggestion)
+            rejected = ParseError(
+                message,
+                context=cast(dict[str, object], _redacted(json_safe(exc.context), redact)),
+                suggestion=exc.suggestion,
+            )
             return self.after_start(rejected, started=started, meta=meta)
         # The codes the manifest lists for this command without a declaration; any other
         # framework code (NOT_FOUND, RATE_LIMITED, ...) must be declared like a custom one
@@ -1957,7 +1992,7 @@ class _Run:
                     context={
                         "declared": [n.value for n in command.exit_codes],
                         "raised": exc.name.value,
-                        "original_message": exc.message,
+                        "original_message": message,
                     },
                     phase="execution",
                 ),
@@ -1987,7 +2022,7 @@ class _Run:
             retry_after = max(0, math.ceil(retry_after))
         try:
             data = self._payload(exc.data)
-            context = to_jsonable(exc.context, self.app.scalars)
+            context = _redacted(to_jsonable(exc.context, self.app.scalars), redact)
         except SchemaError as err:
             message = f"Command {command.path} raised {exc.name} with {err}"
             return self._broken(command, "INVALID_EXIT", message, started, meta)
@@ -1999,7 +2034,7 @@ class _Run:
             data=data,
             error=ErrorDetail(
                 code=exc.code,
-                message=exc.message,
+                message=message,
                 retryable=entry.retryable,
                 detail=exc.detail,
                 context=context,
