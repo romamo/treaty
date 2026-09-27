@@ -141,8 +141,11 @@ class Processes:
         browser_open: bool,
         headless_behavior: HeadlessBehavior = HeadlessBehavior.EMIT_IN_OUTPUT,
         background: BackgroundSlot | None = None,
+        cwd: Path | None = None,
     ) -> None:
         self.env = dict(env)
+        self.cwd = cwd
+        """``--cwd``: where children start, and what a relative ``cwd=`` is under"""
         self.deadline = deadline
         self.headless = headless
         self.browser_open = browser_open
@@ -312,7 +315,7 @@ class Processes:
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=subprocess.STDOUT,
-                    cwd=cwd,
+                    cwd=self._where(cwd),
                     env={**self.env, **(env or {})},
                     **detach,
                 )
@@ -338,6 +341,11 @@ class Processes:
             self._signal = cancelled
             live = list(self._live)
         self._stop(live)
+
+    def _where(self, cwd: Path | None) -> Path | None:
+        if self.cwd is None:
+            return cwd
+        return self.cwd if cwd is None else self.cwd / cwd
 
     def _seconds(self, timeout: Timeout | None, argv: tuple[str, ...]) -> float | None:
         """The child's time limit: the one given, capped by what is left of the command's"""
@@ -381,7 +389,7 @@ class Processes:
                 stdin=stdin,
                 stdout=subprocess.PIPE,
                 stderr=stderr,
-                cwd=cwd,
+                cwd=self._where(cwd),
                 env={**self.env, **(env or {})},
                 start_new_session=True,
             )

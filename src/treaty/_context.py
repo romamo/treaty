@@ -40,6 +40,10 @@ class Ctx:
     or TERM=dumb, or when stdout is not a terminal (REQ-F-008)"""
     headless: bool
     """No person or display to open a window for (REQ-F-057); ``meta.headless`` says so"""
+    cwd: Path
+    """The directory relative paths resolve against: ``--cwd``, else the working
+    directory, as ``meta.cwd`` reports it. Build paths from it; never ``os.chdir``, which
+    the run undoes with a ``CWD_CHANGED`` warning (REQ-O-017, REQ-F-041)"""
     log_sink: LogSink = field(repr=False, compare=False)
     processes: Processes = field(repr=False, compare=False)
     prompter: Prompter = field(repr=False, compare=False)

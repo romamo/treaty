@@ -61,6 +61,7 @@ CONFIG = EnvVar("config", "Config file to read instead of the project and user f
 CONTEXT = EnvVar("context", "Named context of the config files to apply")
 INSTANCE_ID = EnvVar("instance_id", "Instance namespace for the user config file and state")
 SESSION = EnvVar("session", "Agent session id: repeats of a mutating call in it are deduplicated")
+NO_UPDATE = EnvVar("no_update", "Any value turns the update check off, as --no-update-check does")
 
 KNOWN: tuple[EnvVar, ...] = (
     FORMAT,
@@ -71,5 +72,6 @@ KNOWN: tuple[EnvVar, ...] = (
     CONTEXT,
     INSTANCE_ID,
     SESSION,
+    NO_UPDATE,
 )
 """Every variable treaty itself reads for an app; settings fields add their own"""

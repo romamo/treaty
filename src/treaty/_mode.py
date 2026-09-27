@@ -81,14 +81,35 @@ NO_EDITOR: Mapping[str, str] = {"EDITOR": "true", "VISUAL": "true", "GIT_EDITOR"
 """REQ-F-055: off a terminal, a child that opens an editor gets a no-op that exits at once"""
 
 
-def child_settings(*, color: bool, interactive: bool) -> dict[str, str]:
+UPDATE_NOTIFIERS: Mapping[str, str] = {
+    "CI": "1",
+    "NO_UPDATE_NOTIFIER": "1",
+    "NPM_CONFIG_UPDATE_NOTIFIER": "false",
+    "HOMEBREW_NO_AUTO_UPDATE": "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "GH_NO_UPDATE_NOTIFIER": "1",
+}
+"""REQ-F-050: off a terminal or under CI, no child or library prints an update notice"""
+C_LOCALE: Mapping[str, str] = {"LC_ALL": "C", "LC_NUMERIC": "C"}
+"""REQ-F-066: children answer in English with dot decimals, unless ``preserve_locale``"""
+
+
+def suppress_updates(env: Mapping[str, str], *, interactive: bool) -> bool:
+    """Whether update notices are silenced: no terminal on stdin and stdout, or CI"""
+    return not interactive or bool(env.get("CI"))
+
+
+def child_settings(*, color: bool, interactive: bool, ci: bool = False) -> dict[str, str]:
     """What every child process gets: never a pager, no color once the tool has none
-    (REQ-F-008), and no editor unless stdin and stdout are a terminal"""
+    (REQ-F-008), no editor unless stdin and stdout are a terminal, and no update notice
+    off a terminal or under CI (REQ-F-050)"""
     settings = dict(PAGERS)
     if not color:
         settings["NO_COLOR"] = "1"
     if not interactive:
         settings.update(NO_EDITOR)
+    if not interactive or ci:
+        settings.update(UPDATE_NOTIFIERS)
     return settings
 
 
@@ -98,7 +119,9 @@ def quiet_children(
     """Write ``child_settings`` into ``env``, which every child inherits"""
     env.update(
         child_settings(
-            color=color_allowed(env, stdout_isatty), interactive=stdin_isatty and stdout_isatty
+            color=color_allowed(env, stdout_isatty),
+            interactive=stdin_isatty and stdout_isatty,
+            ci=bool(env.get("CI")),
         )
     )
 

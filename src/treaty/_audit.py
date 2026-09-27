@@ -407,6 +407,19 @@ def _background_declared(app: App) -> Iterator[Finding]:
             )
 
 
+def _preserve_locale(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.preserve_locale:
+            yield Finding(
+                "preserve-locale",
+                Severity.ADVICE,
+                c.path.value,
+                "children run in the user's locale, so their messages and numbers vary by "
+                "machine and an agent's parsing breaks on some (REQ-F-066)",
+                "remove preserve_locale=True, or say in description why child output is localized",
+            )
+
+
 def _builtin_shadowed(app: App) -> Iterator[Finding]:
     for path in app.shadowed_builtins:
         yield Finding(
@@ -1125,6 +1138,41 @@ def walks_up_from_cwd(handler: Callable[..., object]) -> str | None:
     return next((m for m in _ROOT_MARKERS if m in named), ".git")
 
 
+_CHDIR_CALLS = frozenset(
+    {"os.chdir", "chdir", "os.fchdir", "fchdir", "contextlib.chdir", "os.chroot"}
+)
+
+
+def changes_cwd(fn: Callable[..., object]) -> str | None:
+    """A call in ``fn``'s source that changes the process working directory (REQ-F-041)"""
+    tree = _handler_tree(fn)
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and (name := _dotted(node.func)) in _CHDIR_CALLS:
+            return name
+    return None
+
+
+def _no_chdir(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        where = [("the handler", c.handler)] + [
+            (f"{cls.__qualname__}.acquire", spec.acquire) for cls, spec in c.resource_graph.items()
+        ]
+        for label, fn in where:
+            name = changes_cwd(fn)
+            if name is not None:
+                yield Finding(
+                    "no-chdir",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"{label} calls {name}(), which changes the working directory of the whole "
+                    "process; treaty changes it back with a CWD_CHANGED warning (REQ-F-041)",
+                    "build paths from ctx.cwd, or pass cwd= to ctx.run",
+                )
+                break
+
+
 def _project_root(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.project_root:
@@ -1555,6 +1603,12 @@ RULES: tuple[Rule, ...] = (
         _required_tools,
     ),
     Rule(
+        "preserve-locale",
+        "Children run in the C locale",
+        Severity.ADVICE,
+        _preserve_locale,
+    ),
+    Rule(
         "builtin-shadowed",
         "App commands keep the yielding built-ins' names free",
         Severity.ADVICE,
@@ -1646,6 +1700,12 @@ RULES: tuple[Rule, ...] = (
         "Output schema changes bump schema_version",
         Severity.ERROR,
         _schema_version,
+    ),
+    Rule(
+        "no-chdir",
+        "Commands never change the working directory",
+        Severity.WARNING,
+        _no_chdir,
     ),
     Rule(
         "project-root",

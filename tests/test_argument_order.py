@@ -79,6 +79,8 @@ def test_manifest_lists_global_options_at_the_root(app: App) -> None:
         "instance-id",
         "unmask",
         "no-injection-protection",
+        "cwd",
+        "no-update-check",
     }
     assert manifest["flags"]["format"]["enum_values"] == ["plain", "json", "jsonl", "tsv"]
     for entry in manifest["commands"].values():

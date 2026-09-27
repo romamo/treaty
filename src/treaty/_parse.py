@@ -124,6 +124,10 @@ class GlobalOptions:
     """``--unmask``: raw high-entropy values (REQ-O-037)"""
     no_injection_protection: bool = False
     """``--no-injection-protection``: external content without trust tags (REQ-O-023)"""
+    cwd: str | None = None
+    """``--cwd PATH``: the directory relative paths resolve against (REQ-O-017)"""
+    no_update_check: bool = False
+    """``--no-update-check``: no update check this run (REQ-O-020)"""
 
 
 def without_value(token: str) -> str:
@@ -154,7 +158,7 @@ def _repeated(flag: str) -> ParseError:
 
 
 VALUED_GLOBALS = frozenset(
-    {"format", "max-output", "schema-version", "config", "context", "instance-id"}
+    {"format", "max-output", "schema-version", "config", "context", "instance-id", "cwd"}
 )
 SWITCH_GLOBALS = frozenset(
     {
@@ -164,6 +168,7 @@ SWITCH_GLOBALS = frozenset(
         "show-config",
         UNMASK_FLAG,
         NO_INJECTION_FLAG,
+        "no-update-check",
     }
 )
 FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
@@ -228,6 +233,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             instance_id=valued.get("instance-id"),
             unmask=UNMASK_FLAG in switches,
             no_injection_protection=NO_INJECTION_FLAG in switches,
+            cwd=valued.get("cwd"),
+            no_update_check="no-update-check" in switches,
         ),
         rest,
     )

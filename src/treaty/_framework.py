@@ -188,6 +188,8 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "validate-only",
         "resume-from",
         "rollback-on-failure",
+        "cwd",
+        "no-update-check",
     }
 )
 UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED

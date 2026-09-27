@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 
 from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
-from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, app_var
+from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, NO_UPDATE, app_var
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import (
     NO_INJECTION_FLAG,
@@ -95,8 +95,23 @@ def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, o
             "type": "string",
             "required": False,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
-            "description": "Keep the user config file and state apart for this agent instance; "
-            f"default ${app_var(app_name, INSTANCE_ID.key)}",
+            "description": "Keep the user config file, state, and temp files apart for this "
+            f"agent instance; default ${app_var(app_name, INSTANCE_ID.key)}",
+        },
+        "cwd": {
+            "type": "string",
+            "required": False,
+            "pattern_type": "filepath",
+            "description": "Resolve relative paths, find config, and run children in this "
+            "directory instead of the working directory, which never changes; exit 2 when it "
+            "is not a directory",
+        },
+        "no-update-check": {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Check for no newer release this run; default "
+            f"${app_var(app_name, NO_UPDATE.key)}. Off a terminal or under CI no check runs",
         },
     }
 

@@ -207,6 +207,8 @@ class Command:
     """Where the command writes on disk; ``cleanup`` removes the temp and cache ones"""
     background: Background | None = None
     """Starts a process that outlives the run with ``ctx.spawn`` (REQ-C-010)"""
+    preserve_locale: bool = False
+    """Children keep the user's locale instead of ``LC_ALL=C`` (REQ-F-066)"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -329,6 +331,7 @@ def build_command(
     required_tools: Mapping[str, str] | None = None,
     filesystem_side_effects: Sequence[SideEffect] = (),
     background: Background | None = None,
+    preserve_locale: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -581,6 +584,7 @@ def build_command(
         required_tools=check_required_tools(str(path), required_tools or {}),
         filesystem_side_effects=check_side_effects(str(path), filesystem_side_effects),
         background=background,
+        preserve_locale=preserve_locale,
         batch=batch,
     )
 

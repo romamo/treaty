@@ -35,6 +35,7 @@ from ._steps import Rollback, StepName
 from ._subprocess import Completed, Spawned
 from ._table import table
 from ._timeout import Timeout
+from ._update import UpdateCheck
 from ._values import CommandPath, ExitCode, ExitCodeName, SchemaVersion, Scope
 
 __version__ = version("treaty")
@@ -99,6 +100,7 @@ __all__ = [
     "Subprocess",
     "Timeout",
     "TreatyError",
+    "UpdateCheck",
     "WarningDetail",
     "already_exists",
     "table",

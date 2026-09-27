@@ -22,7 +22,15 @@ import traceback
 import types
 import typing
 import uuid
-from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import (
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    Mapping,
+    MutableMapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn, TextIO, cast
@@ -113,12 +121,14 @@ from ._manifest import (
 )
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
+    C_LOCALE,
     Format,
     child_settings,
     color_allowed,
     is_headless,
     quiet_children,
     resolve_mode,
+    suppress_updates,
 )
 from ._out import NO_ORDER, OutSpec, arrange, sorted_indices
 from ._page import (
@@ -153,7 +163,7 @@ from ._protect import (
     tagged,
 )
 from ._redact import REDACTED, redacted, scrub
-from ._resources import Resolver
+from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
@@ -173,6 +183,7 @@ from ._subprocess import (
 )
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
+from ._update import UpdateCheck, available, check_allowed
 from ._values import (
     CommandPath,
     ExitCode,
@@ -267,6 +278,7 @@ class App:
         init: Init | None = None,
         companions: Sequence[str] = (),
         dependencies: Sequence[Dependency] = (),
+        update_check: UpdateCheck | None = None,
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
@@ -279,6 +291,11 @@ class App:
         ``fix_command`` may run, such as ``("mkdir",)`` (REQ-C-030). ``dependencies``
         lists the external tools the app needs, each a ``treaty.Dependency`` that the
         ``doctor`` built-in checks and the manifest lists (REQ-O-031).
+        ``update_check`` has a ``latest(current, timeout)`` method returning the newest
+        release: for a person at a terminal, ``meta.update_available`` names it when it is
+        newer, read from a cache a daemon thread refreshes daily, so no run waits on it.
+        Never under CI, off a terminal, with ``<APP>_NO_UPDATE``, or ``--no-update-check``
+        (REQ-F-029, REQ-O-020).
 
         ``doctor`` and ``cleanup`` are built-ins that yield: an app command or group of the
         same name replaces it (13-D1). ``manifest``, ``version``, and ``exec`` are reserved."""
@@ -316,6 +333,13 @@ class App:
         self._fixes_checked = False
         self._redirects: dict[CommandPath, Moved] = {}
         self.dependencies = check_dependencies(dependencies, name)
+        if update_check is not None and not callable(getattr(update_check, "latest", None)):
+            raise RegistrationError(
+                f"App {name}: update_check has a latest(current, timeout) method returning "
+                "the newest release's version, or None"
+            )
+        self.update_check = update_check
+        self._notifier_hooks: list[Callable[[MutableMapping[str, str]], None]] = []
         self._yielding: set[CommandPath] = set()
         """Built-ins an app command of the same name replaces (13-D1)"""
         self._shadowed: list[CommandPath] = []
@@ -389,6 +413,25 @@ class App:
                 maximum=maximum,
             )
         )
+
+    def suppress_update_notifier(
+        self, fn: Callable[[MutableMapping[str, str]], None]
+    ) -> Callable[[MutableMapping[str, str]], None]:
+        """Register ``fn(env)`` to silence a library's own update notice where treaty's
+        variables do not (``CI=1``, ``NO_UPDATE_NOTIFIER=1``, and the like). Off a
+        terminal or under CI it is called with ``os.environ`` before the run, and with
+        each command's child environment; on a terminal never (REQ-F-050). Usable as a
+        decorator."""
+        refuse_async(fn, "suppress_update_notifier")
+        if not callable(fn):
+            raise RegistrationError("suppress_update_notifier takes a function of the env")
+        self._notifier_hooks.append(fn)
+        return fn
+
+    def silence_notifiers(self, env: MutableMapping[str, str]) -> None:
+        """The app's own ``suppress_update_notifier`` hooks, in registration order"""
+        for hook in self._notifier_hooks:
+            hook(env)
 
     def format(self, mode: Format, *, render: Renderer) -> None:
         """Offer ``--format <mode>``, written by ``render`` for every command without its own
@@ -481,6 +524,7 @@ class App:
         required_tools: Mapping[str, str] | None = None,
         filesystem_side_effects: Sequence[SideEffect] = (),
         background: Background | None = None,
+        preserve_locale: bool = False,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -551,6 +595,9 @@ class App:
         ``background=Background("tool stop-watcher", max_lifetime_seconds=3600)`` lets
         ``ctx.spawn`` start a process that outlives the run; the output carries
         ``background_pid`` and ``cleanup_command`` (REQ-C-010).
+        Children of ``ctx.run`` get ``LC_ALL=C`` and ``LC_NUMERIC=C``, so their messages
+        are English and their numbers dot-decimal; ``preserve_locale=True`` keeps the
+        user's locale for a command whose child output is meant for a person (REQ-F-066).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
@@ -699,6 +746,7 @@ class App:
                     required_tools=required_tools,
                     filesystem_side_effects=filesystem_side_effects,
                     background=background,
+                    preserve_locale=preserve_locale,
                 )
             )
             return fn
@@ -1251,20 +1299,26 @@ class App:
     def main(self) -> NoReturn:
         # A standard stream whose descriptor was closed at startup is None
         stdout, stdin = sys.stdout, sys.stdin
+        stdout_tty = stdout is not None and stdout.isatty()
+        stdin_tty = stdin is not None and stdin.isatty()
+        ci = os.environ.get("CI")
         # Only the console entry point changes os.environ, which every child inherits;
         # run() callers such as tests and embedders pass their own env
-        quiet_children(
-            os.environ,
-            stdout_isatty=stdout is not None and stdout.isatty(),
-            stdin_isatty=stdin is not None and stdin.isatty(),
-        )
+        quiet_children(os.environ, stdout_isatty=stdout_tty, stdin_isatty=stdin_tty)
+        if suppress_updates({"CI": ci or ""}, interactive=stdout_tty and stdin_tty):
+            self.silence_notifiers(os.environ)  # REQ-F-050: before any command runs
         # REQ-F-053: every line reaches a pipe reader as it is written, here and in children
         os.environ["PYTHONUNBUFFERED"] = "1"
+        # The run decides from CI as it was started: the CI=1 set above for libraries
+        # and children must not turn a terminal's plain output into JSON
+        started_env = {k: v for k, v in os.environ.items() if k != "CI"}
+        if ci is not None:
+            started_env["CI"] = ci
         if stdout is None or sys.stderr is None:
             for stream in (stdout, sys.stderr):
                 if isinstance(stream, io.TextIOWrapper):
                     stream.reconfigure(newline="\n")
-            sys.exit(self.run(sys.argv[1:]))
+            sys.exit(self.run(sys.argv[1:], env=started_env))
         # REQ-F-006 below Python: for the run, descriptor 1 is stderr, so a child or C code
         # writing to it cannot corrupt the envelope, which goes to a copy of the original
         stdout.flush()
@@ -1278,7 +1332,7 @@ class App:
             sys.stderr.reconfigure(newline="\n")
         sys.stdout = envelopes
         try:
-            code = self.run(sys.argv[1:])
+            code = self.run(sys.argv[1:], env=started_env)
         finally:
             sys.stdout = stdout
             envelopes.flush()
@@ -1335,6 +1389,12 @@ class App:
             return run.emit(Format.JSON, run.arg_error(exc))
         run.stable = run.stable_all = globals_.stable_output
         run.unmask, run.unprotected = globals_.unmask, globals_.no_injection_protection
+        if globals_.cwd is not None:
+            try:
+                run.cwd = run.chosen_cwd(globals_.cwd)  # before config is found from it
+                run.cwd_given = True
+            except ParseError as exc:
+                return run.emit(mode, run.arg_error(exc))
         # REQ-F-068: help, version, and the schema answer even over a bad TOOL_TRACE_ID or
         # an invalid config layer, which only what runs a command reports
         config_error = run.trace_error
@@ -1352,6 +1412,7 @@ class App:
                 )
             except ParseError as exc:
                 config_error = exc
+        run.check_update(mode, skip=globals_.no_update_check)
         if globals_.show_config:
             if config_error is not None:
                 return run.emit(mode, run.arg_error(config_error))
@@ -1411,6 +1472,7 @@ class App:
             return run.emit(mode, run.args_crashed(command, exc))
         if pinned is not None:
             invocation = dataclasses.replace(invocation, schema_version=pinned)
+        invocation = run.rooted(command, invocation)
         if run.unprotected:
             run.unprotected_record()
         with cancellation_handlers(out) as cancellation:
@@ -1503,6 +1565,16 @@ def _call(
 
 
 CLEANUP_FAILED = "CLEANUP_FAILED"
+CWD_CHANGED = "CWD_CHANGED"
+
+
+def _process_cwd() -> str | None:
+    """The process working directory; None once it was removed"""
+    try:
+        return os.getcwd()
+    except FileNotFoundError:
+        return None
+
 
 # A plan line that never became a command: a plan of only these exits 2
 _UNREAD_LINE = frozenset({"DISPATCH_PARSE_ERROR", "INVALID_JSON"})
@@ -1776,6 +1848,10 @@ class _Run:
         self.unprotected = False
         """``--no-injection-protection``: no trust tags on external content (REQ-O-023)"""
         self._roots: dict[tuple[str, ...], Path | None] = {}
+        self.cwd_given = False
+        """``--cwd`` set ``cwd``: relative paths and children are under it (REQ-O-017)"""
+        self.update_available: str | None = None
+        """A newer release from the app's cached update check (REQ-F-029)"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -1845,17 +1921,26 @@ class _Run:
     ) -> Ctx:
         deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
         # Output is captured, so a child never colors; editors only for a person
-        settings = child_settings(color=False, interactive=self.interactive)
+        quiet = suppress_updates(self.env, interactive=self.interactive)
+        child_env = {
+            **self.env,
+            **child_settings(color=False, interactive=self.interactive, ci=quiet),
+        }
+        if quiet:
+            self.app.silence_notifiers(child_env)
+        if not command.preserve_locale:
+            child_env.update(C_LOCALE)  # REQ-F-066: English messages, dot decimals
         # REQ-O-033: --headless opens no browser even where one could be shown
         headless = self.headless or invocation.headless
         # The run's env holds TOOL_TRACE_ID, so every child inherits it (REQ-F-025)
         self.processes = Processes(
-            {**self.env, **settings},
+            child_env,
             deadline=deadline,
             headless=headless,
             browser_open=BROWSER_OPEN in command.gui_operations,
             headless_behavior=command.headless_behavior or HeadlessBehavior.EMIT_IN_OUTPUT,
             background=self.background_slot(command),
+            cwd=self.cwd if self.cwd_given else None,
         )
         if not supports(command.platform, sys.platform):
             self._warn(
@@ -1898,6 +1983,7 @@ class _Run:
             timeout=timeout,
             color=mode is not Format.JSON and color_allowed(self.env, self.tty),
             headless=headless,
+            cwd=self.cwd,
             log_sink=self._log_sink(command, args, mode),
             processes=self.processes,
             prompter=Prompter(
@@ -1923,6 +2009,71 @@ class _Run:
             teardown=self.teardown,
             steps=self.steps,
         )
+
+    def chosen_cwd(self, raw: str) -> Path:
+        """``--cwd``: an existing directory, relative to the working directory, checked
+        before anything runs; the process never changes into it (REQ-O-017)"""
+        context = {"flag": "cwd", "value": raw}
+        if not raw or "\0" in raw:
+            raise ParseError("--cwd takes a directory path", context=context)
+        path = Path(os.path.normpath(self.cwd / raw))
+        if not path.is_dir():
+            what = "does not exist" if not path.exists() else "is not a directory"
+            raise ParseError(
+                f"--cwd {raw!r} {what}",
+                context=context,
+                suggestion="pass an existing directory, such as --cwd /path/to/project",
+            )
+        return path
+
+    def rooted(self, command: Command, invocation: Invocation) -> Invocation:
+        """Relative ``Path`` arguments, ``--input-file``, and ``--output`` under ``--cwd``,
+        once they passed ``check_path`` (REQ-O-017)"""
+        if not self.cwd_given:
+            return invocation
+
+        def under(value: object) -> object:
+            if isinstance(value, Path) and not value.is_absolute():
+                return self.cwd / value
+            if isinstance(value, tuple):
+                return tuple(under(v) for v in value)
+            return value
+
+        args = invocation.args
+        assert dataclasses.is_dataclass(args) and not isinstance(args, type)
+        moved = {f.name: under(getattr(args, f.name)) for f in command.fields if f.path}
+        changed = {k: v for k, v in moved.items() if v != getattr(args, k)}
+        stdin_file = invocation.input_file
+        output = invocation.output
+        return dataclasses.replace(
+            invocation,
+            args=dataclasses.replace(args, **changed) if changed else args,
+            # --input-file - is stdin, not a file named '-'
+            input_file=stdin_file
+            if stdin_file is None or stdin_file == Path("-") or stdin_file.is_absolute()
+            else self.cwd / stdin_file,
+            output=output if output is None or output.is_absolute() else self.cwd / output,
+        )
+
+    def check_update(self, mode: Format, *, skip: bool) -> None:
+        """``meta.update_available`` from the cached answer, and one stderr line for a
+        person, when the app has a checker and the run allows it (REQ-F-029)"""
+        check = self.app.update_check
+        if check is None or not check_allowed(
+            self.app.name, self.env, interactive=self.interactive, flag=skip
+        ):
+            return
+        state = state_dir(
+            self.app.name, self.app.state_dir, self.env, self.settings.options.instance_id
+        )
+        if state is None:
+            return
+        self.update_available = available(check, self.app.version, state)
+        if self.update_available is not None and mode is Format.PLAIN:
+            self.err.write(
+                f"{self.app.name} {self.update_available} is available; this is "
+                f"{self.app.version}\n"
+            )
 
     def background_slot(self, command: Command) -> BackgroundSlot | None:
         """``background/`` of the state directory, or of the temp directory without one"""
@@ -2034,6 +2185,8 @@ class _Run:
         if any(w.code == TRUNCATED_CODE for w in self.warnings):
             extra["truncated"] = True  # ctx.truncated reported a backend's cut (REQ-F-064)
         extra |= self.settings.meta()
+        if self.update_available is not None:
+            extra["update_available"] = self.update_available
         command = self.current
         if command is None:
             name, version, root = self.app.name, ENVELOPE_SCHEMA_VERSION, None
@@ -2729,17 +2882,21 @@ class _Run:
             assert dataclasses.is_dataclass(args) and not isinstance(args, type)
             args = dataclasses.replace(args, dry_run=True)
         running: list[Pending] = []
+        before = _process_cwd()
         try:
             self.cancellation.check()
-            result = call_with_timeout(
-                (lambda: self.app._gate(command, ctx))
-                if replay is not None
-                else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
-                timeout,
-                running.append,
-                self.cancellation.armed,
-                heartbeat=self._heartbeat(command, invocation, mode, started),
-            )
+            try:
+                result = call_with_timeout(
+                    (lambda: self.app._gate(command, ctx))
+                    if replay is not None
+                    else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
+                    timeout,
+                    running.append,
+                    self.cancellation.armed,
+                    heartbeat=self._heartbeat(command, invocation, mode, started),
+                )
+            finally:
+                self._restore_cwd(before)
         except CliExit as exc:
             return self._exit_envelope(command, args, exc, started, full_meta)
         except ParseError as exc:
@@ -2962,6 +3119,7 @@ class _Run:
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
         ctx = self._ctx(command, invocation.args, mode, timeout, invocation=invocation)
+        before = _process_cwd()
         args = invocation.args
         seq = 0
         events: Iterator[object] | None = None
@@ -3088,6 +3246,7 @@ class _Run:
                     self.err.write(self._redactor(command, args)(_traceback(exc)))
             if self.teardown is not None:
                 self.teardown.run(GRACE_SECONDS)  # beside a held worker, past its grace (06-D3)
+            self._restore_cwd(before)
         # Built after the teardown, so a CLEANUP_FAILED warning reaches it
         yield self._present(command, terminal())
 
@@ -3144,6 +3303,20 @@ class _Run:
             ),
             started=started,
             meta=meta,
+        )
+
+    def _restore_cwd(self, before: str | None) -> None:
+        """A handler, resource, or hook that changed the process working directory: change
+        it back, with a ``CWD_CHANGED`` warning (REQ-F-041)"""
+        after = _process_cwd()
+        if before is None or after == before:
+            return
+        os.chdir(before)
+        self._warn(
+            CWD_CHANGED,
+            "The command changed the working directory, which was changed back; build "
+            "paths from ctx.cwd instead",
+            {"from": before, "to": after},
         )
 
     def _grace(self, running: Sequence[Pending]) -> None:
@@ -4008,4 +4181,4 @@ class _Run:
                     context={"line": line_no, "_cmd": command.path.value},
                 )
             mapping["dry_run"] = True
-        return build_from_mapping(command, mapping, self.env)
+        return self.rooted(command, build_from_mapping(command, mapping, self.env))
