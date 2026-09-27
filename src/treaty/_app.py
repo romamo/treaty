@@ -1789,9 +1789,11 @@ class _StrayStdout(io.TextIOBase):
     """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
     to stderr, and the next envelope reports how much (REQ-F-006)"""
 
-    def __init__(self, err: _Stderr) -> None:
+    def __init__(self, err: _Stderr, redact: Callable[[str], str]) -> None:
         super().__init__()
         self._err = err
+        self._redact = redact
+        """The run's secret values out of what reaches stderr"""
         self._bytes = 0
         self._text = ""
 
@@ -1815,7 +1817,7 @@ class _StrayStdout(io.TextIOBase):
                 where = f"{caller.f_code.co_filename}:{caller.f_lineno}"
                 trace("stdout write", source=where, text=text.rstrip("\r\n"))
         else:
-            self._err.write(text, Level.INFO)  # 11-D5: off a terminal, dropped
+            self._err.write(self._redact(text), Level.INFO)  # 11-D5: off a terminal, dropped
         self._bytes += len(text.encode("utf-8", "surrogatepass"))
         if len(self._text) < TEXT_CAP:
             self._text += text[: TEXT_CAP - len(self._text)]
@@ -2129,7 +2131,7 @@ class _Run:
         a reader that refuses ``input()`` (REQ-F-047). Process-wide, not a context-local
         redirect, because handlers run on worker threads; one run owns the process."""
         global _guarded, _unguarded
-        self.stray = _StrayStdout(self.err)
+        self.stray = _StrayStdout(self.err, self._redact_now)
         with _guard_lock:
             if not _guarded:
                 _unguarded = (sys.stdout, sys.stdin)
@@ -2183,7 +2185,7 @@ class _Run:
             warning = WarningDetail(
                 "THIRD_PARTY_STDOUT",
                 "Third-party code wrote to stdout; the text went to stderr",
-                context={"text": text.rstrip("\r\n"), "bytes": written},
+                context={"text": self._redact_now(text.rstrip("\r\n")), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         if settle:
@@ -2614,6 +2616,10 @@ class _Run:
         root = logging.getLogger()
         root.removeHandler(handler)
         root.setLevel(level)
+
+    def _redact_now(self, text: str) -> str:
+        """``text`` with the secret values of the invocation running now replaced"""
+        return self._redactor(self.current, self.args)(text) if self.current else text
 
     def _trace_line(self, message: str, fields: Mapping[str, object]) -> None:
         redact = self._redactor(self.current, self.args) if self.current else _unchanged

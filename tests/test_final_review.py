@@ -15,7 +15,7 @@ from fixture_session_app import app as session_app
 from test_network_and_fs import Origin, net_app, serving
 from test_network_and_fs import run as net_run
 
-from treaty import App, Ctx, NoArgs, RegistrationError, SideEffect
+from treaty import App, Ctx, Flag, NoArgs, RegistrationError, SideEffect
 from treaty._envelope import without_userinfo
 
 
@@ -246,3 +246,38 @@ def test_a_proxy_variable_with_a_bad_port_names_the_variable_instead_of_crashing
 
 def test_a_proxy_named_in_an_error_keeps_an_ipv6_host_in_brackets() -> None:
     assert without_userinfo("http://u:p@[::1]:8080/x") == "http://[::1]:8080/x"
+
+
+# F-034, F-006: a secret a handler prints
+
+
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description="Token")
+
+
+def printing_app() -> App:
+    app = App("printer", version="1.0.0")
+
+    @app.command("login", description="Log in", danger_level="safe", exit_codes=())
+    def login(args: Login, ctx: Ctx) -> dict[str, bool]:
+        print(f"using {args.api_token}")
+        return {"ok": True}
+
+    return app
+
+
+@pytest.mark.parametrize("verbosity", [[], ["--verbose"]])
+def test_a_printed_secret_is_redacted_in_the_warning_and_on_stderr(verbosity: list[str]) -> None:
+    out, err = io.StringIO(), io.StringIO()
+    code = printing_app().run(
+        ["login", "--api-token-from-env", "TOKEN", *verbosity, "--format", "json"],
+        stdout=out,
+        stderr=err,
+        env={"TOKEN": "SUPERSECRET123"},
+        isatty=False,
+    )
+    envelope = json.loads(out.getvalue())
+    assert code == 0 and envelope["warnings"][0]["code"] == "THIRD_PARTY_STDOUT"
+    assert "SUPERSECRET123" not in out.getvalue() + err.getvalue()
+    assert "[REDACTED]" in envelope["warnings"][0]["context"]["text"]
