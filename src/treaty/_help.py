@@ -94,6 +94,10 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
         rows.append(("--raw-payload JSON", "All field values as one JSON object"))
     if command.streaming:
         rows.append(("--no-stream", "One envelope with every event instead of JSONL"))
+    if command.paginated:
+        default = command.default_limit.count or 0
+        rows.append(("--limit N", f"Most items to return (default: {default}); 0 returns all"))
+        rows.append(("--cursor TOKEN", "Next page: meta.pagination.next_cursor of the last one"))
     if command.interactive:
         rows.append(("--yes", "Answer yes to every confirmation"))
         rows.append(("--non-interactive", "Never prompt; a needed answer exits 4"))

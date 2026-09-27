@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from ._command import Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._mode import Format
+from ._page import CURSOR_FLAG, LIMIT_FLAG
 from ._parse import (
     CONFIRM_FLAG,
     IDEMPOTENCY_FLAG,
@@ -159,6 +160,18 @@ def command_entry(
         # INPUT_REQUIRED or EDITOR_REQUIRED when no one can answer
         entry = exits.framework(FrameworkCode.PRECONDITION)
         exit_codes.setdefault(str(entry.code.value), entry.to_json())
+    if command.paginated:
+        flags[LIMIT_FLAG] = {
+            "type": "integer",
+            "required": False,
+            "default": command.default_limit.count or 0,
+            "description": "Most items to return; 0 returns every item",
+        }
+        flags[CURSOR_FLAG] = {
+            "type": "string",
+            "required": False,
+            "description": "meta.pagination.next_cursor of the previous page, to get the next",
+        }
     if command.safe_default:
         flags[LIVE_FLAG] = {
             "type": "boolean",
@@ -215,6 +228,10 @@ def command_schema(
         entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
     if command.supports_raw_payload:
         entry["raw_payload_schema"] = payload_schema(command)
+    if command.paginated:
+        # REQ-F-019; not ManifestResponse keys, whose --limit flag shows the same default
+        entry["paginated"] = True
+        entry["default_limit"] = command.default_limit.count or 0
     return entry
 
 
@@ -276,6 +293,17 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
             "type": "boolean",
             "default": False,
             "description": "Never prompt; a needed answer exits 4",
+        }
+    if command.paginated:
+        properties[LIMIT_FLAG] = {
+            "type": "integer",
+            "minimum": 0,
+            "default": command.default_limit.count or 0,
+            "description": "Most items to return; 0 returns every item",
+        }
+        properties[CURSOR_FLAG] = {
+            "type": ["string", "null"],
+            "description": "meta.pagination.next_cursor of the previous page, to get the next",
         }
     if command.streaming and stream_key:
         properties[NO_STREAM_KEY] = {

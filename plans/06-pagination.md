@@ -63,12 +63,12 @@ like the flags.
 
 ## Tasks
 
-- [ ] `Page`, `PageRequest`, `ctx.page`; `paginated=`; flags; manifest fields
-- [ ] Cursor wrapping and `INVALID_CURSOR`
-- [ ] Framework slicing and `PAGINATION_UNSUPPORTED`
-- [ ] Runnable `truncation_hint`; `<APP>_MAX_OUTPUT_BYTES`
-- [ ] Terminal envelope pagination for streams; MCP input schema gains `limit` and `cursor`
-- [ ] Audit rule `paginated-list`; README section "Lists"
+- [x] `Page`, `PageRequest`, `ctx.page`; `paginated=`; flags; manifest fields
+- [x] Cursor wrapping and `INVALID_CURSOR`
+- [x] Framework slicing (no `PAGINATION_UNSUPPORTED`; see deviations)
+- [x] Runnable `truncation_hint`; `<APP>_MAX_OUTPUT_BYTES`
+- [x] MCP input schema gains `limit` and `cursor` (streams are not paginated; see deviations)
+- [x] Audit rule `paginated-list`; README section "Lists"
 
 ## Tests
 
@@ -79,3 +79,32 @@ like the flags.
 - `--schema` shows `default_limit: 20`
 - A 10,000-item response cut by the byte cap has a `truncation_hint` that, run as given,
   exits 0
+
+## Deviations as built
+
+- **One cursor shape, no `PAGINATION_UNSUPPORTED`.** The cursor is base64url JSON of
+  `{"v": 1, "cmd": <path>, "c": <handler cursor>, "s": <skip>}`, where `skip` counts the
+  items of the batch at `c` already delivered. A handler that ignores `ctx.page` and
+  returns everything, one that returns a bigger batch than asked, and a page the byte cap
+  cut all resume correctly, so `next_cursor` is never null while items remain (F-018
+  requires that) and there is no gap to warn about. `ctx.page.limit` is `skip + limit`
+- **A plain `list[T]` return is the whole collection**: `total` is its length. A source
+  that cannot load everything returns `Page[T]`, whose `total` may be `None`
+- **`meta.pagination` has exactly the five spec keys**; the `Pagination` definition in
+  `response-envelope.json` has `additionalProperties: false`, so there is no `limit` key.
+  `truncated` equals `has_more`
+- **No `App(default_limit=...)`**: F-019 asks for a per-command setting, which
+  `default_limit=` on the command is. `paginated` and `default_limit` appear only in
+  `--schema`, since `CommandEntry` admits no extra keys; the manifest's `--limit` flag entry
+  carries the same default
+- **Streams are not paginated**: `paginated=True` with `streaming=True` is a registration
+  error. No acceptance criterion needs a paginated stream
+- **The truncation hint is one shell-quoted string**, not also a JSON array. For a cut list
+  page it is the same argv with `--limit <kept> --cursor <token>` (earlier spellings of
+  both removed, inserted before any `--`), and `meta.pagination` is rewritten to match;
+  otherwise the same argv with `--max-output <total_bytes>`. `exec` lines and MCP calls
+  have no argv to repeat, so their hint stays prose (with the limit and cursor for a page)
+- **`<APP>_MAX_OUTPUT_BYTES` wins over `TREATY_MAX_OUTPUT_BYTES`**; both stay
+- **`ParseError(code=...)`** sets `error.code` of a single argument error, and each
+  `error.errors` entry carries its `code`; `INVALID_CURSOR` is the first user
+- The `treaty rules` built-in is paginated, so the treaty CLI passes its own audit

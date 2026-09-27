@@ -9,6 +9,7 @@ from ._errors import CliExit, Exit, ParseError, RegistrationError, SchemaError, 
 from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
 from ._flags import Arg, Flag
 from ._mode import Format
+from ._page import Page, PageRequest
 from ._scalars import ScalarSpec
 from ._subprocess import Completed
 from ._timeout import Timeout
@@ -36,6 +37,8 @@ __all__ = [
     "Group",
     "NoArgs",
     "Format",
+    "Page",
+    "PageRequest",
     "ParseError",
     "RegistrationError",
     "Renderer",

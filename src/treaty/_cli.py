@@ -207,6 +207,7 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     description="List the audit rules in the order they are checked",
     danger_level="safe",
     exit_codes=(),
+    paginated=True,
 )
 def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
     return [{"id": r.id, "title": r.title, "severity": r.severity.value} for r in RULES]

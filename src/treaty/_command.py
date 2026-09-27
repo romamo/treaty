@@ -15,6 +15,7 @@ from ._effect import can_carry, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._mode import Format
+from ._page import CURSOR_FLAG, DEFAULT_LIMIT, LIMIT_FLAG, Limit, Page
 from ._resources import ResourceSpec, dependency_params, resource_graph
 from ._scalars import ScalarRegistry
 from ._scan import ctx_calls
@@ -92,6 +93,10 @@ class Command:
     """The handler may ask through ``ctx.prompt`` and ``ctx.confirm`` (REQ-C-005)"""
     editor_alternatives: tuple[str, ...] = ()
     """Flags that replace ``ctx.edit``; non-empty means the command may open an editor"""
+    paginated: bool = False
+    """A list command: ``--limit``, ``--cursor``, and ``meta.pagination`` (REQ-F-018)"""
+    default_limit: Limit = Limit(DEFAULT_LIMIT)
+    """Items per page without ``--limit`` (REQ-F-019)"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -137,10 +142,18 @@ def build_command(
     gui_operations: Sequence[str] = (),
     interactive: bool = False,
     editor_alternatives: Sequence[str] = (),
+    paginated: bool = False,
+    default_limit: int = DEFAULT_LIMIT,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
-    args_type, output_type, resources = _inspect_handler(fn, path, streaming)
+    if paginated and streaming:
+        raise RegistrationError(
+            f"{path}: a stream has no pages; drop paginated=True or streaming=True"
+        )
+    args_type, output_type, resources = _inspect_handler(fn, path, streaming, paginated)
+    if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
+        raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
     _check_gui(path, output_type, gui_operations)
     _check_ctx_calls(fn, path, gui_operations, interactive, editor_alternatives)
     fields = inspect_fields(args_type, scalars)
@@ -186,6 +199,8 @@ def build_command(
         "live": safe_default,
         "yes": interactive,
         "non-interactive": interactive,
+        LIMIT_FLAG: paginated,
+        CURSOR_FLAG: paginated,
     }
     taken = sorted(
         f.flag
@@ -253,6 +268,30 @@ def build_command(
         gui_operations=tuple(gui_operations),
         interactive=interactive,
         editor_alternatives=tuple(editor_alternatives),
+        paginated=paginated,
+        default_limit=Limit(default_limit or None),
+    )
+
+
+def _page_output(output_type: object, path: CommandPath, paginated: bool) -> object:
+    """A list command's output is ``list[T]`` or ``Page[T]``, served as ``list[T]``"""
+    annotation = resolve_alias(output_type)
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if annotation is Page or origin is Page:
+        if not paginated:
+            raise RegistrationError(
+                f"{path}: returns treaty.Page but is not a list command; add paginated=True"
+            )
+        return list[args[0] if args else object]  # type: ignore[misc]
+    if not paginated:
+        return output_type
+    if origin in (list, collections.abc.Sequence) and len(args) == 1:
+        return list[args[0]]  # type: ignore[valid-type]
+    if origin is tuple and len(args) == 2 and args[1] is Ellipsis:
+        return list[args[0]]  # type: ignore[valid-type]
+    raise RegistrationError(
+        f"{path}: a paginated command returns list[T] or treaty.Page[T], not {output_type!r}"
     )
 
 
@@ -302,7 +341,7 @@ def _check_ctx_calls(
 
 
 def _inspect_handler(
-    fn: Handler, path: CommandPath, streaming: bool
+    fn: Handler, path: CommandPath, streaming: bool, paginated: bool
 ) -> tuple[type, object, tuple[type, ...]]:
     resources = dependency_params(fn, f"{path}: handler")
     params = list(inspect.signature(fn).parameters.values())
@@ -315,6 +354,7 @@ def _inspect_handler(
     output_type = hints["return"]
     if streaming:
         output_type = _event_type(output_type, path)
+    output_type = _page_output(output_type, path, paginated)
     if not is_payload_type(output_type):
         what = "each yielded event" if streaming else "return type"
         raise RegistrationError(f"{path}: {what} must serialize to a JSON object, array, or null")

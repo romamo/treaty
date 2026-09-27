@@ -316,12 +316,45 @@ these commands. Running with no arguments prints help and exits `0`; treaty has 
 ## Output size
 
 JSON output is capped at 1 MiB per envelope: `App(max_output_bytes=...)` app-wide,
-`TREATY_MAX_OUTPUT_BYTES` in the environment, or the global `--max-output` flag, in
-increasing precedence. Past the cap the framework follows whichever child holds most of the
-bytes and cuts the list, object, or string where no child dominates to the longest prefix
-that fits. `meta` gets `truncated`, `total_bytes`, and a `truncation_hint` giving the cap
-that returns everything (plus `total_count` and `returned_count` when `data` is a list), and
-each cut adds a `FIELD_TRUNCATED` warning naming the field. Plain mode is not capped.
+`TREATY_MAX_OUTPUT_BYTES` or `<APP>_MAX_OUTPUT_BYTES` in the environment (the tool's own
+variable wins), or the global `--max-output` flag, in increasing precedence. Past the cap
+the framework follows whichever child holds most of the bytes and cuts the list, object, or
+string where no child dominates to the longest prefix that fits. `meta` gets `truncated`,
+`total_bytes`, and a `truncation_hint` that is a command to run as given (plus
+`total_count` and `returned_count` when `data` is a list), and each cut adds a
+`FIELD_TRUNCATED` warning naming the field. For a list command whose page was cut the hint
+is the next page, `--limit <kept> --cursor <token>`, and `meta.pagination` points there
+too; otherwise it is the same command with the `--max-output` that returns everything.
+Plain mode is not capped.
+
+## Lists
+
+A command declared `paginated=True` returns `list[T]` or `treaty.Page[T]` and gets
+`--limit` (default 20, `default_limit=` per command, `0` for every item) and `--cursor`.
+Every successful response carries `meta.pagination` with `total`, `returned`, `truncated`,
+`has_more`, and `next_cursor`; pass `next_cursor` as `--cursor` for the next page:
+
+```python
+@app.command("releases.list", description="List releases", danger_level="safe",
+             exit_codes=(), paginated=True)
+def releases(args: NoArgs, ctx: Ctx) -> list[Release]:
+    return store.all()  # the framework slices it
+```
+
+A source too large to load returns one batch as a `Page`, reading `ctx.page`:
+
+```python
+def releases(args: NoArgs, ctx: Ctx) -> Page[Release]:
+    rows, after = store.page(after=ctx.page.cursor, limit=ctx.page.limit)
+    return Page(items=rows, next_cursor=after, total=store.count())
+```
+
+The framework slices whatever it gets to the limit, so a batch larger than asked is fine.
+Its own cursor is URL-safe base64 naming the command, the handler's cursor, and how many
+items of that batch were already delivered; one that does not decode or names another
+command exits `2` with `INVALID_CURSOR`. In `exec`, `_opts` take `limit` and `cursor`; MCP
+tools take them as arguments. `--schema` shows `default_limit`, and the `paginated-list`
+audit rule flags list outputs without `paginated=True`. Streams are not paginated.
 
 ## Secrets
 

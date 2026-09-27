@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn, TextIO, cast
 
-from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, StdinCap, cap_envelope
+from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, Rerun, StdinCap, cap_envelope
 from ._command import (
     Cleanup,
     Command,
@@ -48,6 +48,7 @@ from ._mode import (
     quiet_children,
     resolve_mode,
 )
+from ._page import DEFAULT_LIMIT, PageRequest, Position, request, take
 from ._parse import (
     Invocation,
     Route,
@@ -261,9 +262,15 @@ class App:
         gui_operations: Sequence[str] = (),
         interactive: bool = False,
         editor_alternatives: Sequence[str] = (),
+        paginated: bool = False,
+        default_limit: int = DEFAULT_LIMIT,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
-        ``exit_codes=()`` declares that the command raises only the implicit codes"""
+        ``exit_codes=()`` declares that the command raises only the implicit codes
+
+        ``paginated=True`` makes a list command: it returns ``list[T]`` or ``Page[T]``, and
+        gets ``--limit`` (``default_limit`` items, 0 for all) and ``--cursor``.
+        """
         cmd_path = CommandPath(path)
         missing = [
             fix
@@ -312,6 +319,8 @@ class App:
                     gui_operations=gui_operations,
                     interactive=interactive,
                     editor_alternatives=editor_alternatives,
+                    paginated=paginated,
+                    default_limit=default_limit,
                 )
             )
             return fn
@@ -439,10 +448,11 @@ class App:
         # Tracebacks of crashed or late handlers go to the host process's stderr
         run = _Run(self, io.StringIO(), sys.stderr, environ)
         try:
-            cap = OutputCap.resolve(None, environ, self.max_output)
+            cap = OutputCap.resolve(None, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.arg_error(exc, meta={"_cmd": path})
-        return cap_envelope(self._call(run, path, arguments, environ), cap, argv=False)
+        envelope = self._call(run, path, arguments, environ)
+        return cap_envelope(envelope, cap, Rerun(argv=None, page=run.page))
 
     def _call(
         self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
@@ -508,6 +518,7 @@ class App:
         environ = env if env is not None else os.environ
         tty = out.isatty() if isatty is None else isatty
         run = _Run(self, out, err, environ, tty=tty, stdin=inp)
+        run.argv = (self.name, *argv)
         try:
             with run.guard_streams():
                 return self._route(run, list(argv), inp, environ)
@@ -528,7 +539,7 @@ class App:
         try:
             globals_, rest = split_globals(argv)
             mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
-            run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output)
+            run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
         route = resolve_path(rest, self._commands)
@@ -569,6 +580,7 @@ class App:
             run.cancellation = cancellation
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
+                run.argv = None  # a line's hint cannot rerun the whole plan
                 return run.exec(invocation.args, inp)
             render = self.renderer(command, mode)
             if command.streaming:
@@ -804,6 +816,10 @@ class _Run:
         """A streaming command whose events are still being written"""
         self.abandoned: Pending | None = None
         """Set by ``_execute`` when the handler outlived its timeout and still runs"""
+        self.page: tuple[CommandPath, Position] | None = None
+        """Where the list page ``_execute`` last answered started, to resume after a cut"""
+        self.argv: tuple[str, ...] | None = None
+        """The invocation as typed, app name first; None where it cannot be rerun (exec)"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -830,7 +846,7 @@ class _Run:
                 context={"bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
-        write_envelope(cap_envelope(envelope, self.cap), self.out)
+        write_envelope(cap_envelope(envelope, self.cap, Rerun(self.argv, self.page)), self.out)
 
     def _ctx(
         self,
@@ -841,6 +857,7 @@ class _Run:
         idempotency_key: str | None = None,
         *,
         invocation: Invocation,
+        page: PageRequest | None = None,
     ) -> Ctx:
         deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
         # Output is captured, so a child never colors; editors only for a person
@@ -874,6 +891,7 @@ class _Run:
                 env=self.env,
             ),
             idempotency_key=idempotency_key,
+            page=page,
         )
 
     def _log_sink(self, command: Command, args: object, mode: Format) -> LogSink:
@@ -923,12 +941,12 @@ class _Run:
             extra_meta={**extra, **(meta or {})},
         )
 
-    def arg_error(self, exc: ParseError, *, code: str = "ARG_ERROR", **kw: Any) -> Envelope:
+    def arg_error(self, exc: ParseError, *, code: str | None = None, **kw: Any) -> Envelope:
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
-                code=code,
+                code=code or exc.code or "ARG_ERROR",
                 message=exc.message,
                 retryable=False,
                 context=exc.context,
@@ -1176,10 +1194,13 @@ class _Run:
     ) -> Envelope:
         """Run one handler under its timeout and turn the outcome into an envelope"""
         self.abandoned = None
+        self.page = None
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
         key = invocation.idempotency_key
+        position = invocation.cursor if invocation.cursor is not None else Position()
+        limit = invocation.limit if invocation.limit is not None else command.default_limit
         ctx = self._ctx(
             command,
             invocation.args,
@@ -1187,6 +1208,7 @@ class _Run:
             timeout,
             None if key is None else key.value,
             invocation=invocation,
+            page=request(position, limit) if command.paginated else None,
         )
         args = invocation.args
         preview_only = _previewing(command, invocation)
@@ -1237,7 +1259,12 @@ class _Run:
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
             # asyncio.CancelledError, SystemExit, trio.Cancelled: user code, not a signal
             return self._crashed(command, args, exc, started, full_meta)
+        page_meta: dict[str, object] = {}
         try:
+            if command.paginated:
+                result, pagination = take(result, position, limit, command.path)
+                page_meta["pagination"] = pagination.to_json()
+                self.page = (command.path, position)
             data = self._payload(result)
         except SchemaError as exc:
             return self._broken(
@@ -1288,7 +1315,7 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
-        return self._envelope(0, data=data, started=started, meta=full_meta)
+        return self._envelope(0, data=data, started=started, meta={**full_meta, **page_meta})
 
     def stream(
         self,

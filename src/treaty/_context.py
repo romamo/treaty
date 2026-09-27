@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._mode import Format
+from ._page import PageRequest
 from ._prompt import Prompter
 from ._subprocess import Argv, Completed, Processes
 from ._timeout import Timeout
@@ -32,6 +33,9 @@ class Ctx:
     processes: Processes = field(repr=False, compare=False)
     prompter: Prompter = field(repr=False, compare=False)
     idempotency_key: str | None = None
+    page: PageRequest | None = None
+    """The page a list command is asked for (``paginated=True``), else None; a handler
+    that loads its whole list can ignore it and return the list"""
 
     def log(self, message: str, **fields: object) -> None:
         """Write one diagnostic line to stderr, never stdout (REQ-F-006)

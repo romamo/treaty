@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 604 passed |
+| `uv run pytest` | 624 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -165,6 +165,14 @@ The two do not share code.
   `readline` (which `input()` calls) raises, `read`, iteration, and `buffer` pass through.
   `App.call` swaps neither stream. `--yes` and `--non-interactive` exist only on
   `interactive=True` commands
+- **The framework slices every page.** A `paginated=True` handler returns the whole
+  `list[T]` or one `Page[T]` batch; `_page.take` cuts it to the limit. The cursor is
+  base64url JSON of the command path, the handler's own cursor, and a skip count into the
+  batch that cursor returns, so one shape resumes a sliced batch, a handler batch, and a
+  page the byte cap cut (`_cap.Rerun` carries the position and the argv for the hint).
+  `meta.pagination` holds exactly the five spec keys (`additionalProperties: false`);
+  `paginated` and `default_limit` are only in `--schema`. Streams are not paginated.
+  `ParseError(code=...)` sets `error.code` for a single error (`INVALID_CURSOR`)
 
 ## Layout
 
@@ -180,6 +188,7 @@ src/treaty/
   _resources.py  ResourceSpec, resource_graph(), Resolver: typed handler resources
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
+  _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
   _command.py    Command record, build_command(), handler signature inspection
   _context.py    Ctx handed to handlers (mode, env, timeout, color, headless, log, run, ...)
   _dispatch.py   DispatchRequest line parser for exec
@@ -228,15 +237,16 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
-F-011, F-012, F-013, F-015, F-016, F-031, F-034, F-044, F-045 (paths), F-046, F-047, F-048,
-F-051, F-055, F-057, F-062, F-065, F-069, C-001, C-002, C-003, C-004, C-005, C-007, C-012,
-C-013, C-015, C-016, C-020 (all presets), C-023, O-021, O-022, O-032, O-039, O-041, O-048,
-O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
+F-011, F-012, F-013, F-015, F-016, F-018, F-019, F-031, F-034, F-044, F-045 (paths), F-046,
+F-047, F-048, F-051, F-052, F-055, F-057, F-062, F-065, F-069, C-001, C-002, C-003, C-004, C-005, C-007, C-012,
+C-013, C-015, C-016, C-020 (all presets), C-023, O-003, O-021, O-022, O-032, O-039, O-041,
+O-048, O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
-(`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), and
+(`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
+`--cursor` (`paginated=True`), and
 `--<name>-from-env` / `--<name>-from-file` for each secret field.
 
 ## Gotchas

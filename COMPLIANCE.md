@@ -3,7 +3,8 @@
 Status of treaty against the 159 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
-hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations).
+hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations;
+06, pagination).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -16,29 +17,26 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
-| Level 2: every P0 (includes Level 1) | 51 | 36 | 8 | 7 | **78%** |
-| Level 3: full spec | 159 | 47 | 39 | 73 | **42%** |
+| Level 2: every P0 (includes Level 1) | 51 | 40 | 7 | 4 | **85%** |
+| Level 3: full spec | 159 | 51 | 38 | 70 | **44%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 32 | 21 | 26 | **54%** |
+| Framework-automatic (F) | 79 | 35 | 20 | 24 | **57%** |
 | Command contract (C) | 30 | 11 | 8 | 11 | **50%** |
-| Opt-in (O) | 50 | 4 | 10 | 36 | **18%** |
+| Opt-in (O) | 50 | 5 | 10 | 35 | **20%** |
 
 ## Open mandatory requirements
 
-Level 2 (every P0) is the level the spec calls agent-reliable. These 15 requirements
+Level 2 (every P0) is the level the spec calls agent-reliable. These 11 requirements
 stand between treaty and a Level 2 claim; Level 1 is complete.
 
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
 | [REQ-F-011](../cli-agent-ergonomics/requirements/f-011-default-timeout-per-command.md) | Default Timeout Per Command | P0 | 2 | Partial | 60 s default deadline; streaming commands default to no timeout |
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Partial | Exits 141 (OUTPUT_CLOSED); spec requires 0 |
-| [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Not started | No `meta.pagination`, `--cursor`, or `next_cursor` (ROADMAP 0.2.0) |
-| [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Not started | No default item limit or `--limit`; only the 1 MiB byte cap |
-| [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Partial | 1 MiB cap, `--max-output`, `meta.truncated`; hint is prose, not a runnable command |
 | [REQ-F-053](../cli-agent-ergonomics/requirements/f-053-stdout-unbuffering-in-non-tty-mode.md) | Stdout Unbuffering in Non-TTY Mode | P0 | 2 | Partial | Each envelope flushed; no heartbeat, no `PYTHONUNBUFFERED` |
 | [REQ-F-054](../cli-agent-ergonomics/requirements/f-054-stdin-payload-size-cap-with-input-file-fallback.md) | Stdin Payload Size Cap with --input-file Fallback | P0 | 2 | Partial | 64 KiB cap and `--input-file` exist on `exec` only |
 | [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Not started | No headless auth declaration |
@@ -46,7 +44,6 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-C-025](../cli-agent-ergonomics/requirements/c-025-config-writing-commands-declare-write-scope.md) | Config-Writing Commands Declare Write Scope | P0 | 2 | Not started | No config write scope |
 | [REQ-C-029](../cli-agent-ergonomics/requirements/c-029-command-declares-required-scopes.md) | Command Declares Required Scopes | P0 | 2 | Partial | `required_scopes` in every schema, `[]` by default; never required |
 | [REQ-O-001](../cli-agent-ergonomics/requirements/o-001-output-format-flag.md) | --format Output Format Flag | P0 | 2 | Partial | `--format` with json, plain, and registered formats; no `jsonl` |
-| [REQ-O-003](../cli-agent-ergonomics/requirements/o-003-limit-and-cursor-pagination-flags.md) | --limit and --cursor Pagination Flags | P0 | 2 | Not started | No `--limit`/`--cursor` (ROADMAP 0.2.0) |
 | [REQ-O-033](../cli-agent-ergonomics/requirements/o-033-headless-and-token-env-var-flags-for-auth-commands.md) | --headless and --token-env-var Flags for Auth Commands | P0 | 2 | Not started | No headless auth flags |
 | [REQ-O-047](../cli-agent-ergonomics/requirements/o-047-tool-check-permissions-built-in-command.md) | tool check-permissions Built-In Command | P0 | 2 | Partial | `required_scopes` declared; no `check-permissions` or over-privilege warning |
 
@@ -71,8 +68,8 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-F-015](../cli-agent-ergonomics/requirements/f-015-validate-before-execute-phase-order.md) | Validate-Before-Execute Phase Order | P0 | 2 | Done | Field errors and the args `__post_init__` (cross-field) errors collected in one run before the handler; no hooks to misorder |
 | [REQ-F-016](../cli-agent-ergonomics/requirements/f-016-utf-8-sanitization-before-serialization.md) | UTF-8 Sanitization Before Serialization | P1 | 3 | Done | JSON strings: null bytes and lone surrogates become U+FFFD; bytes output is refused as INVALID_OUTPUT |
 | [REQ-F-017](../cli-agent-ergonomics/requirements/f-017-binary-field-base64-encoding.md) | Binary Field Base64 Encoding | P1 | 3 | Not started | Returning `bytes` gives INVALID_OUTPUT; no base64 wrapper with `size_bytes` |
-| [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Not started | No `meta.pagination`, `--cursor`, or `next_cursor` (ROADMAP 0.2.0) |
-| [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Not started | No default item limit or `--limit`; only the 1 MiB byte cap |
+| [REQ-F-018](../cli-agent-ergonomics/requirements/f-018-pagination-metadata-on-list-commands.md) | Pagination Metadata on List Commands | P0 | 2 | Done | `paginated=True` adds `meta.pagination` (total, returned, truncated, has_more, next_cursor) to every successful response; `next_cursor` as `--cursor` returns the next page |
+| [REQ-F-019](../cli-agent-ergonomics/requirements/f-019-default-output-limit.md) | Default Output Limit | P0 | 2 | Done | Default limit 20, `default_limit=` per command, `--limit N`, `--limit 0` for all; the default is in `--schema` and the flag entry |
 | [REQ-F-020](../cli-agent-ergonomics/requirements/f-020-stable-array-sorting-in-json-output.md) | Stable Array Sorting in JSON Output | P2 | 3 | Partial | Object keys sorted; arrays are not |
 | [REQ-F-021](../cli-agent-ergonomics/requirements/f-021-data-meta-separation-in-response-envelope.md) | Data/Meta Separation in Response Envelope | P1 | 3 | Partial | Volatile fields live only in meta; no warning for timestamps in data |
 | [REQ-F-022](../cli-agent-ergonomics/requirements/f-022-schema-version-in-every-response.md) | Schema Version in Every Response | P1 | 3 | Not started | `schema_version` only in the manifest, not in response meta (ROADMAP 0.1.0) |
@@ -105,7 +102,7 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-F-049](../cli-agent-ergonomics/requirements/f-049-async-command-handler-enforcement.md) | Async Command Handler Enforcement | P1 | 3 | Partial | `async def` handlers register and fail only at run time |
 | [REQ-F-050](../cli-agent-ergonomics/requirements/f-050-update-notifier-side-channel-suppression.md) | Update Notifier Side-Channel Suppression | P1 | 3 | Not started | No `CI=1`/`NO_UPDATE_NOTIFIER` for children |
 | [REQ-F-051](../cli-agent-ergonomics/requirements/f-051-debug-and-trace-mode-secret-redaction.md) | Debug and Trace Mode Secret Redaction | P0 | 2 | Done | Secrets redacted in errors, tracebacks, and `ctx.log`, including credential-named fields, env dumps, and headers; no audit log exists yet |
-| [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Partial | 1 MiB cap, `--max-output`, `meta.truncated`; hint is prose, not a runnable command |
+| [REQ-F-052](../cli-agent-ergonomics/requirements/f-052-response-size-hard-cap-with-truncation-indicator.md) | Response Size Hard Cap with Truncation Indicator | P0 | 2 | Done | 1 MiB cap, `--max-output`, `<APP>_MAX_OUTPUT_BYTES`; `truncation_hint` is a runnable command: the next page for a cut list page, else a larger `--max-output` |
 | [REQ-F-053](../cli-agent-ergonomics/requirements/f-053-stdout-unbuffering-in-non-tty-mode.md) | Stdout Unbuffering in Non-TTY Mode | P0 | 2 | Partial | Each envelope flushed; no heartbeat, no `PYTHONUNBUFFERED` |
 | [REQ-F-054](../cli-agent-ergonomics/requirements/f-054-stdin-payload-size-cap-with-input-file-fallback.md) | Stdin Payload Size Cap with --input-file Fallback | P0 | 2 | Partial | 64 KiB cap and `--input-file` exist on `exec` only |
 | [REQ-F-055](../cli-agent-ergonomics/requirements/f-055-editor-and-visual-no-op-in-non-tty-mode.md) | $EDITOR and $VISUAL No-Op in Non-TTY Mode | P0 | 2 | Done | Off a terminal, children get `EDITOR`, `VISUAL`, `GIT_EDITOR`=`true`; `ctx.edit` exits 4 `EDITOR_REQUIRED` with `alternatives[]`; on a terminal the editor runs |
@@ -175,7 +172,7 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 |----|-------|----------|-------|--------|-------|
 | [REQ-O-001](../cli-agent-ergonomics/requirements/o-001-output-format-flag.md) | --format Output Format Flag | P0 | 2 | Partial | `--format` with json, plain, and registered formats; no `jsonl` |
 | [REQ-O-002](../cli-agent-ergonomics/requirements/o-002-fields-selector.md) | --fields Selector | P2 | 3 | Not started | No `--fields` |
-| [REQ-O-003](../cli-agent-ergonomics/requirements/o-003-limit-and-cursor-pagination-flags.md) | --limit and --cursor Pagination Flags | P0 | 2 | Not started | No `--limit`/`--cursor` (ROADMAP 0.2.0) |
+| [REQ-O-003](../cli-agent-ergonomics/requirements/o-003-limit-and-cursor-pagination-flags.md) | --limit and --cursor Pagination Flags | P0 | 2 | Done | `--limit` and `--cursor` on paginated commands (and in exec, MCP, raw payloads); base64url stateless cursors bound to the command; a bad cursor exits 2 with `INVALID_CURSOR` |
 | [REQ-O-004](../cli-agent-ergonomics/requirements/o-004-output-jsonl-stream-flag.md) | --format jsonl / --stream Flag | P2 | 3 | Partial | Streaming handlers with `--no-stream`; no `--stream` opt-in |
 | [REQ-O-005](../cli-agent-ergonomics/requirements/o-005-output-id-extraction-mode.md) | --format id Extraction Mode | P3 | 3 | Not started | No `--format id` |
 | [REQ-O-006](../cli-agent-ergonomics/requirements/o-006-stdin-as-id-source.md) | Stdin as ID Source (-) | P3 | 3 | Not started | No `-` for stdin arguments |

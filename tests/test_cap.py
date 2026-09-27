@@ -74,10 +74,7 @@ def test_list_is_cut_to_the_longest_prefix_that_fits() -> None:
     assert meta["truncated"] is True and meta["total_count"] == 1000
     assert meta["returned_count"] == len(env["data"]) > 1
     assert env["data"] == [{"id": i, "name": f"item-{i}"} for i in range(len(env["data"]))]
-    assert meta["truncation_hint"] == (
-        f"rerun with --max-output {meta['total_bytes']} "
-        f"or TREATY_MAX_OUTPUT_BYTES={meta['total_bytes']}"
-    )
+    assert meta["truncation_hint"] == f"bigctl items --max-output {meta['total_bytes']}"
     (warning,) = env["warnings"]
     assert warning["code"] == "FIELD_TRUNCATED" and warning["context"]["field"] == "$"
 

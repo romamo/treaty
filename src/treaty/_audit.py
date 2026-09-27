@@ -196,6 +196,19 @@ def _typed_output(app: App) -> Iterator[Finding]:
             )
 
 
+def _paginated_list(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.output_schema.get("type") == "array" and not (c.paginated or c.streaming):
+            yield Finding(
+                "paginated-list",
+                Severity.WARNING,
+                c.path.value,
+                "returns a list without paginated=True, so it has no default limit, "
+                "--limit, --cursor, or meta.pagination (REQ-F-018, REQ-F-019)",
+                "paginated=True; return the list, or a treaty.Page read with ctx.page",
+            )
+
+
 def _network_io(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.has_network_io:
@@ -413,6 +426,12 @@ RULES: tuple[Rule, ...] = (
         "Outputs are typed so output_schema is informative",
         Severity.ADVICE,
         _typed_output,
+    ),
+    Rule(
+        "paginated-list",
+        "Commands returning lists are paginated",
+        Severity.WARNING,
+        _paginated_list,
     ),
     Rule("network-io", "Network commands declare has_network_io", Severity.WARNING, _network_io),
     Rule(

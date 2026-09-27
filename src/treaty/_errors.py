@@ -38,9 +38,12 @@ class ParseError(Exception):
         context: Mapping[str, object] | None = None,
         suggestion: str | None = None,
         errors: Sequence[ParseError] = (),
+        code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
+        self.code = code
+        """``error.code`` when this is the only error; ``ARG_ERROR`` when None"""
         self.context: dict[str, object] = dict(context or {})
         self.suggestion = suggestion
         self.errors: tuple[ParseError, ...] = tuple(errors)
@@ -72,6 +75,8 @@ class ParseError(Exception):
         out: list[dict[str, object]] = []
         for e in self.errors or (self,):
             item: dict[str, object] = {"message": e.message}
+            if e.code is not None:
+                item["code"] = e.code
             if e.field is not None:
                 item["field"] = e.field
             if e.context:

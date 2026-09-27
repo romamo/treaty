@@ -84,6 +84,10 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `--non-interactive`; `ctx.prompt`, `ctx.confirm`, and `ctx.edit` ask only on a terminal
   and otherwise exit `4` naming the flag that answers; `editor_alternatives=`; a stray
   `input()` off a terminal exits `4` with `INTERACTIVE_BLOCKED`
+- Pagination (REQ-F-018, F-019, O-003, F-052): `paginated=True`, `--limit` and
+  `--cursor`, `meta.pagination`, `treaty.Page` and `ctx.page`, `INVALID_CURSOR`; a cut
+  page's `truncation_hint` is the command for the next page; `<APP>_MAX_OUTPUT_BYTES`;
+  `paginated-list` audit rule
 
 ## 0.1.0: first release
 
@@ -109,8 +113,7 @@ landed the same day; what remains under each is follow-up work:
 - **Typed resources**: done, see above. Still open from it: a `release` counterpart to
   `acquire` for resources that hold a lock or a connection, run after the handler and on
   cancellation alongside `cleanup=`
-- **Streaming handlers**: done, see above. Still open from it: pagination metadata on
-  the terminal envelope for list commands (with REQ-F-018 in 0.2.0), and streaming for
+- **Streaming handlers**: done, see above. Still open from it: streaming for
   mutating commands once the effect contract can name the event that carries `effect`
 - **MCP adapter**: done, see above, as the `treaty-mcp` script rather than a `treaty`
   subcommand because a stdio server owns stdout. Still open from it: the manifest as an
@@ -121,8 +124,6 @@ landed the same day; what remains under each is follow-up work:
 Every remaining P0 requirement the kit cannot yet check. Each new declaration gets a
 matching audit rule so adoption never requires reading the spec.
 
-- Pagination metadata on list commands: `--limit`, `--cursor`, `meta.pagination`
-  (REQ-F-018)
 - `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028)
 - `REDIRECTED` exit `13` with `error.redirect` for renamed commands and `aliases` in the
   manifest

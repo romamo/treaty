@@ -18,6 +18,7 @@ from ._dispatch import loads_strict
 from ._errors import ParseError
 from ._flags import FieldInfo, apply_scalar
 from ._idempotency import IdempotencyKey
+from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position
 from ._paths import check_path
 from ._secrets import (
     SecretRef,
@@ -56,6 +57,10 @@ class Invocation:
     """``--yes``: every ``ctx.confirm`` of an interactive command answers yes"""
     non_interactive: bool = False
     """``--non-interactive``: an interactive command never prompts, even on a terminal"""
+    limit: Limit | None = None
+    """``--limit`` of a list command; None takes the command's default"""
+    cursor: Position | None = None
+    """``--cursor`` of a list command, decoded; None is the first page"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +226,8 @@ def parse_command_args(
     no_stream = False
     live = False
     switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
+    limit: Limit | None = None
+    cursor: Position | None = None
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -299,6 +306,22 @@ def parse_command_args(
                     if timeout is not None and timeout != parsed_timeout:
                         raise _repeated(TIMEOUT_FLAG)
                     timeout = parsed_timeout
+                    i += 1
+                    continue
+                if name == LIMIT_FLAG and command.paginated:
+                    parsed_limit = Limit.parse(value_after(tok, LIMIT_FLAG, has_eq, inline))
+                    if limit is not None and limit != parsed_limit:
+                        raise _repeated(LIMIT_FLAG)
+                    limit = parsed_limit
+                    i += 1
+                    continue
+                if name == CURSOR_FLAG and command.paginated:
+                    parsed_cursor = Position.decode(
+                        value_after(tok, CURSOR_FLAG, has_eq, inline), command.path
+                    )
+                    if cursor is not None and cursor != parsed_cursor:
+                        raise _repeated(CURSOR_FLAG)
+                    cursor = parsed_cursor
                     i += 1
                     continue
                 if name == RAW_PAYLOAD_FLAG and command.supports_raw_payload:
@@ -417,6 +440,10 @@ def parse_command_args(
             raise _repeated(TIMEOUT_FLAG)
         if key is not None and built.idempotency_key not in (None, key):
             raise _repeated(IDEMPOTENCY_FLAG)
+        if limit is not None and built.limit not in (None, limit):
+            raise _repeated(LIMIT_FLAG)
+        if cursor is not None and built.cursor not in (None, cursor):
+            raise _repeated(CURSOR_FLAG)
         for flag, given in (
             (CONFIRM_FLAG, confirmed),
             (NO_STREAM_FLAG, no_stream),
@@ -435,6 +462,8 @@ def parse_command_args(
             live=live or built.live,
             yes=switches[YES_FLAG] or built.yes,
             non_interactive=switches[NON_INTERACTIVE_FLAG] or built.non_interactive,
+            limit=limit if limit is not None else built.limit,
+            cursor=cursor if cursor is not None else built.cursor,
         )
     _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
@@ -446,6 +475,8 @@ def parse_command_args(
         live=live,
         yes=switches[YES_FLAG],
         non_interactive=switches[NON_INTERACTIVE_FLAG],
+        limit=limit,
+        cursor=cursor,
     )
 
 
@@ -516,6 +547,8 @@ def known_flags(command: Command) -> list[str]:
         flags.append(LIVE_FLAG)
     if command.interactive:
         flags.extend((YES_FLAG, NON_INTERACTIVE_FLAG))
+    if command.paginated:
+        flags.extend((LIMIT_FLAG, CURSOR_FLAG))
     return flags
 
 
@@ -567,12 +600,21 @@ def build_from_mapping(
     no_stream = False
     live = False
     switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
+    limit: Limit | None = None
+    cursor: Position | None = None
     errors = _Collector()
     for key, value in mapping.items():
         try:
             flag = key.replace("_", "-")
             if flag == TIMEOUT_FLAG and command.accepts_timeout:
                 timeout = Timeout.parse(value)
+                continue
+            if flag == LIMIT_FLAG and command.paginated:
+                limit = Limit.parse(value)
+                continue
+            if flag == CURSOR_FLAG and command.paginated:
+                # null is the first page, as a JSON caller spells an absent cursor
+                cursor = None if value is None else Position.decode(value, command.path)
                 continue
             if flag == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
                 if not isinstance(value, str):
@@ -645,6 +687,8 @@ def build_from_mapping(
         live=live,
         yes=switches[YES_FLAG],
         non_interactive=switches[NON_INTERACTIVE_FLAG],
+        limit=limit,
+        cursor=cursor,
     )
 
 
