@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, AuthKind, check_declaration
 from ._effect import can_carry, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
@@ -103,6 +104,12 @@ class Command:
     """The handler reads a payload, ``ctx.stdin_text``, from stdin or ``--input-file``"""
     output_file: bool = False
     """``--output PATH`` writes the rendered ``data`` to a file (REQ-O-001)"""
+    requires_auth: bool = False
+    """The app's credentials must hold ``required_scopes`` before the handler runs"""
+    auth: AuthKind | None = None
+    """A login command (REQ-C-021): ``--headless``, ``--token-env-var``, ``ctx.token``"""
+    token_env_vars: tuple[str, ...] = ()
+    """Where a login command looks for a pre-acquired token, in order; ``<APP>_TOKEN`` first"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -158,9 +165,20 @@ def build_command(
     heartbeat: bool = False,
     stdin_input: bool = False,
     output_file: bool = False,
+    requires_auth: bool = False,
+    auth: AuthKind | None = None,
+    token_env_vars: Sequence[str] = (),
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
+    check_declaration(
+        str(path),
+        requires_auth=requires_auth,
+        required_scopes=required_scopes,
+        auth=auth,
+        token_env_vars=token_env_vars,
+        streaming=streaming,
+    )
     if paginated and streaming:
         raise RegistrationError(
             f"{path}: a stream has no pages; drop paginated=True or streaming=True"
@@ -226,6 +244,8 @@ def build_command(
         HEARTBEAT_FLAG: heartbeat,
         INPUT_FILE_FLAG: stdin_input,
         OUTPUT_FLAG: output_file,
+        HEADLESS_FLAG: auth is not None,
+        TOKEN_ENV_FLAG: auth is not None,
     }
     taken = sorted(
         f.flag
@@ -298,6 +318,11 @@ def build_command(
         heartbeat=heartbeat,
         stdin_input=stdin_input,
         output_file=output_file,
+        requires_auth=requires_auth,
+        auth=auth,
+        token_env_vars=tuple(
+            dict.fromkeys((default_env_var(app_name, "token"), *token_env_vars)) if auth else ()
+        ),
     )
 
 

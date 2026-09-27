@@ -20,6 +20,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn, TextIO, cast
 
+from ._auth import (
+    OVER_PRIVILEGED,
+    AuthKind,
+    Coverage,
+    Credentials,
+    insufficient,
+    names,
+    not_logged_in,
+    scope_set,
+)
 from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, Rerun, StdinCap, cap_envelope
 from ._command import (
     DEFAULT_HEARTBEAT_MS,
@@ -73,6 +83,7 @@ from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_tim
 from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
 
 EXEC_PATH = CommandPath("exec")
+CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
 MANIFEST_PATH = CommandPath("manifest")
 VERSION_PATH = CommandPath("version")
 DEFAULT_TIMEOUT = Timeout(60.0)
@@ -95,6 +106,13 @@ UNSET = _Unset()
 @dataclass(frozen=True, slots=True)
 class NoArgs:
     """Arguments dataclass for commands that take nothing"""
+
+
+@dataclass(frozen=True, slots=True)
+class CheckPermissionsArgs:
+    for_: str | None = Flag(
+        default=None, description="Command to check, such as 'deploy rollback'; omit for all"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +153,10 @@ class App:
         max_stdin_bytes: int = DEFAULT_STDIN_CAP.bytes,
         state_dir: str | Path | None = None,
         enable_exec: bool = True,
+        credentials: Credentials | None = None,
     ) -> None:
+        """``credentials`` tells treaty which scopes the active credential holds: it gates
+        ``requires_auth=True`` commands and adds the ``check-permissions`` built-in"""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         self.name = name
@@ -151,6 +172,7 @@ class App:
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
         self._renderers: dict[Format, Renderer] = {}
+        self.credentials = credentials
         self._register_builtins(enable_exec)
 
     # Registration
@@ -270,6 +292,9 @@ class App:
         heartbeat: bool = False,
         stdin_input: bool = False,
         output_file: bool = False,
+        requires_auth: bool = False,
+        auth: str | None = None,
+        token_env_vars: Sequence[str] = (),
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -281,6 +306,10 @@ class App:
         into ``ctx.stdin_text`` before the handler runs: stdin up to the stdin cap, or any
         size from ``--input-file``. ``output_file=True`` adds ``--output PATH``, which
         writes ``data`` there in the ``--format`` representation and the envelope to stdout.
+        ``requires_auth=True`` checks the app's ``credentials`` for ``required_scopes``
+        before the handler runs. ``auth="browser"`` or ``"device"`` marks a login command:
+        it gets ``--headless`` and ``--token-env-var``, and ``ctx.token`` from
+        ``<APP>_TOKEN`` or the ``token_env_vars`` after it.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -294,6 +323,14 @@ class App:
                 f"(REQ-C-001, REQ-C-002); add {' and '.join(missing)}, or the values it has"
             )
         assert not isinstance(danger_level, _Unset) and not isinstance(exit_codes, _Unset)
+        if requires_auth and self.credentials is None:
+            raise RegistrationError(
+                f"{cmd_path}: requires_auth=True needs App(credentials=...), which tells "
+                "treaty the scopes of the active credential"
+            )
+        if auth is not None and auth not in AuthKind:
+            kinds = ", ".join(k.value for k in AuthKind)
+            raise RegistrationError(f"{cmd_path}: auth={auth!r} is not one of {kinds}")
         overrides = dict(renderers or {})
         for mode, render in overrides.items():
             _check_renderer(f"{cmd_path}: renderers", mode, render)
@@ -332,6 +369,9 @@ class App:
                     heartbeat=heartbeat,
                     stdin_input=stdin_input,
                     output_file=output_file,
+                    requires_auth=requires_auth,
+                    auth=None if auth is None else AuthKind(auth),
+                    token_env_vars=token_env_vars,
                 )
             )
             return fn
@@ -380,6 +420,9 @@ class App:
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {"name": self.name, "version": self.version}
 
+        if self.credentials is not None:
+            self._register_check_permissions(self.credentials)
+
         if enable_exec:
 
             @self.command(
@@ -391,6 +434,102 @@ class App:
             )
             def exec_(args: ExecArgs, ctx: Ctx) -> None:
                 raise RegistrationError("exec is dispatched by the framework, not called directly")
+
+    def _register_check_permissions(self, credentials: Credentials) -> None:
+        @self.command(
+            CHECK_PERMISSIONS_PATH.value,
+            description="Compare the active credential's scopes with what commands require",
+            danger_level="safe",
+            exit_codes=("AUTH_REQUIRED", "NOT_FOUND"),
+            examples=[("Check one command", f"{self.name} check-permissions --for manifest")],
+        )
+        def check_permissions(args: CheckPermissionsArgs, ctx: Ctx) -> dict[str, object]:
+            # REQ-O-047: exit 0 unless no one is logged in or --for lacks a scope
+            active = scope_set(credentials.active_scopes(ctx))
+            if active is None:
+                raise not_logged_in(CHECK_PERMISSIONS_PATH.value, self._logins())
+            if args.for_ is None:
+                gated = sorted(
+                    (
+                        (p.value, Coverage(c.required_scopes, active))
+                        for p, c in self._commands.items()
+                        if c.requires_auth
+                    ),
+                    key=lambda item: item[0],
+                )
+                over = [path for path, cover in gated if cover.over_privileged]
+                if over:
+                    ctx.warn(
+                        OVER_PRIVILEGED,
+                        f"Credential is over-privileged for {len(over)} of the commands",
+                        commands=over,
+                    )
+                return {
+                    "active_scopes": names(active),
+                    "commands": {
+                        path: {
+                            "required_scopes": [s.value for s in cover.required],
+                            "covered": not cover.missing,
+                            "over_privileged": cover.over_privileged,
+                        }
+                        for path, cover in gated
+                    },
+                }
+            target = self._command_named(args.for_)
+            coverage = Coverage(target.required_scopes if target.requires_auth else (), active)
+            if coverage.missing:
+                raise insufficient(target.path.value, coverage, "AUTH_REQUIRED")
+            flagged = target.requires_auth and coverage.over_privileged
+            if flagged:
+                self._warn_excess(ctx, target, coverage)
+            report = coverage.report(target.path.value)
+            report["over_privileged"] = flagged
+            return report
+
+    def _command_named(self, name: str) -> Command:
+        """``deploy rollback`` as typed, or ``deploy.rollback`` as the manifest keys it"""
+        try:
+            path = CommandPath(".".join(name.split()))
+        except InvalidValue:
+            path = None
+        command = None if path is None else self._commands.get(path)
+        if command is None:
+            raise CliExit(
+                ExitCodeName("NOT_FOUND"),
+                f"no command {name!r} to check",
+                code="UNKNOWN_COMMAND",
+                context={"for": name, "available": sorted(p.value for p in self._commands)},
+                fix_required="pass --for one of the available commands",
+            )
+        return command
+
+    def _logins(self) -> list[str]:
+        """How to log in, for the fix of AUTH_REQUIRED"""
+        return sorted(
+            f"{self.name} {' '.join(p.parts)}" for p, c in self._commands.items() if c.auth
+        )
+
+    @staticmethod
+    def _warn_excess(ctx: Ctx, command: Command, coverage: Coverage) -> None:
+        ctx.warn(
+            OVER_PRIVILEGED,
+            f"Credential has scopes beyond what {command.path} requires",
+            command=command.path.value,
+            excess_scopes=coverage.excess,
+            required_scopes=[s.value for s in coverage.required],
+        )
+
+    def _gate(self, command: Command, ctx: Ctx) -> None:
+        """REQ-C-029: before a ``requires_auth`` handler, the credential holds its scopes"""
+        assert self.credentials is not None  # checked at registration
+        active = scope_set(self.credentials.active_scopes(ctx))
+        if active is None:
+            raise not_logged_in(command.path.value, self._logins())
+        coverage = Coverage(command.required_scopes, active)
+        if coverage.missing:
+            raise insufficient(command.path.value, coverage, "PERMISSION_DENIED")
+        if coverage.over_privileged:
+            self._warn_excess(ctx, command, coverage)  # REQ-O-047
 
     def _invocations(self, prefix: tuple[str, ...]) -> list[str]:
         """Commands as the agent must type them, scoped to the prefix it was already under
@@ -617,8 +756,11 @@ class App:
             return run.emit(mode, envelope, render=render)
 
 
-def _invoke(command: Command, args: object, ctx: Ctx) -> object:
-    """Acquire the handler's resources, each once and in dependency order, then run it"""
+def _invoke(app: App, command: Command, args: object, ctx: Ctx) -> object:
+    """Check the credential, acquire the handler's resources, each once and in dependency
+    order, then run it; ``active_scopes`` is app code, so it runs where the handler does"""
+    if command.requires_auth:
+        app._gate(command, ctx)
     resolver = Resolver(command.resource_graph, args, ctx)
     return command.handler(args, ctx, *resolver.all(command.resources))
 
@@ -852,6 +994,10 @@ class _Run:
         """Whether a complete envelope, event, or rendered result was written and flushed"""
         self.payload_stdin: IO[str] | None = stdin
         """Where a ``stdin_input`` command reads its payload; None in ``App.call``"""
+        self.warnings: list[WarningDetail] = []
+        """``ctx.warn`` entries of the command that runs now, added to its envelopes"""
+        self.token: str | None = None
+        """A login command's token, redacted wherever a secret argument is"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -895,10 +1041,12 @@ class _Run:
         deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
         # Output is captured, so a child never colors; editors only for a person
         settings = child_settings(color=False, interactive=self.interactive)
+        # REQ-O-033: --headless opens no browser even where one could be shown
+        headless = self.headless or invocation.headless
         self.processes = Processes(
             {**self.env, **settings},
             deadline=deadline,
-            headless=self.headless,
+            headless=headless,
             browser_open=BROWSER_OPEN in command.gui_operations,
         )
         return Ctx(
@@ -910,7 +1058,7 @@ class _Run:
             state=self.app._state,
             timeout=timeout,
             color=mode is not Format.JSON and color_allowed(self.env, self.tty),
-            headless=self.headless,
+            headless=headless,
             log_sink=self._log_sink(command, args, mode),
             processes=self.processes,
             prompter=Prompter(
@@ -923,10 +1071,19 @@ class _Run:
                 stderr=self.err.stream,
                 env=self.env,
             ),
+            warn_sink=self._warn,
             idempotency_key=idempotency_key,
             stdin_text=invocation.stdin_text,
             page=page,
+            token=invocation.token,
         )
+
+    def _warn(self, code: str, message: str, context: Mapping[str, object]) -> None:
+        if not _ERROR_CODE.fullmatch(code):
+            raise ValueError(f"warning code {code!r} is not UPPER_SNAKE_CASE")
+        safe = json_safe(dict(context))
+        assert isinstance(safe, dict)
+        self.warnings.append(WarningDetail(code, message, context=safe))
 
     def _log_sink(self, command: Command, args: object, mode: Format) -> LogSink:
         """``ctx.log``: one line on stderr, secrets redacted, escapes stripped unless the
@@ -972,6 +1129,7 @@ class _Run:
             error=error,
             duration_ms=int((time.perf_counter() - origin) * 1000),
             request_id=self.request_id,
+            warnings=tuple(self.warnings),
             extra_meta={**extra, **(meta or {})},
         )
 
@@ -1021,6 +1179,12 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen"""
+        if command.auth is not None:
+            token = self._login_token(command, invocation, meta)
+            if isinstance(token, Envelope):
+                return token
+            self.token = token
+            invocation = dataclasses.replace(invocation, token=token)
         if command.stdin_input:
             try:
                 payload = self._read_input(invocation.input_file, meta=meta)
@@ -1048,6 +1212,45 @@ class _Run:
         if applied:
             extra["confirmed"] = True
         return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+
+    def _login_token(
+        self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
+    ) -> str | None | Envelope:
+        """A login command's token: ``--token-env-var``, else the first set variable of
+        ``token_env_vars``. A browser login no person can finish, or a named variable
+        that is empty, exits 4 listing where the token goes (REQ-C-021, REQ-O-033)."""
+        named = invocation.token_env_var
+        candidates = (named,) if named is not None else command.token_env_vars
+        token = next((self.env[v] for v in candidates if self.env.get(v)), None)
+        headless = self.headless or invocation.headless
+        if token is not None or (
+            named is None and not (headless and command.auth is AuthKind.BROWSER)
+        ):
+            return token
+        first = candidates[0]
+        entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
+        why = (
+            f"{named} is not set"
+            if named is not None
+            else f"Command {command.path} logs in through a browser, and this run is headless"
+        )
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="TOKEN_REQUIRED",
+                message=f"{why}; set {first} to a token to log in without one",
+                retryable=False,
+                context={"command": command.path.value, "token_env_vars": list(candidates)},
+                fix_required=f"export {first}=<token>, or pass --token-env-var NAME naming "
+                "a variable that holds it",
+                phase="validation",
+                auth_methods=[
+                    {"type": "env_var", "name": v, "hint": f"Set {v} to your API token"}
+                    for v in candidates
+                ],
+            ),
+            meta=meta,
+        )
 
     def _keyed(
         self,
@@ -1263,7 +1466,7 @@ class _Run:
         try:
             self.cancellation.check()
             result = call_with_timeout(
-                lambda: _invoke(command, args, ctx),
+                lambda: _invoke(self.app, command, args, ctx),
                 timeout,
                 running.append,
                 self.cancellation.armed,
@@ -1410,7 +1613,7 @@ class _Run:
         try:
             self.cancellation.check()
             produced = call_with_timeout(
-                lambda: _invoke(command, args, ctx),
+                lambda: _invoke(self.app, command, args, ctx),
                 remaining(),
                 running.append,
                 self.cancellation.armed,
@@ -1619,8 +1822,10 @@ class _Run:
         implicit.add(FrameworkCode.TIMEOUT)
         if command.danger_level is not DangerLevel.SAFE:
             implicit |= {FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION}
-        if command.interactive or command.editor_alternatives:
+        if command.interactive or command.editor_alternatives or command.auth is not None:
             implicit.add(FrameworkCode.PRECONDITION)
+        if command.requires_auth:
+            implicit |= {FrameworkCode.AUTH_REQUIRED, FrameworkCode.PERMISSION_DENIED}
         allowed = {ExitCodeName(c.name) for c in implicit}
         if exc.name not in command.exit_codes and exc.name not in allowed:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
@@ -1729,6 +1934,8 @@ class _Run:
         """Replace every spelling of the run's secret values: the value, its serialized
         form for a registered scalar, and the escaped form ``repr`` puts in messages"""
         spellings: set[str] = set()
+        if self.token is not None and len(self.token) >= MIN_REDACTED:
+            spellings.update({self.token, repr(self.token)[1:-1]})
         for f in command.fields:
             value = getattr(args, f.name, None) if f.secret else None
             # A default is in the source anyway; redacting it (max_tokens=1) garbles text
@@ -2148,6 +2355,7 @@ class _Run:
             line = raw.strip()
             if not line:
                 continue
+            self.warnings, self.token = [], None  # each line is its own command
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:

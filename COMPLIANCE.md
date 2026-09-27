@@ -4,7 +4,7 @@ Status of treaty against the 159 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
 hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations;
-06, pagination; 07, I/O and streams).
+06, pagination; 07, I/O and streams; 08, auth and scopes).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -17,30 +17,26 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
-| Level 2: every P0 (includes Level 1) | 51 | 45 | 2 | 4 | **90%** |
-| Level 3: full spec | 159 | 56 | 33 | 70 | **46%** |
+| Level 2: every P0 (includes Level 1) | 51 | 49 | 0 | 2 | **96%** |
+| Level 3: full spec | 159 | 60 | 31 | 68 | **47%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Framework-automatic (F) | 79 | 39 | 16 | 24 | **59%** |
-| Command contract (C) | 30 | 11 | 8 | 11 | **50%** |
-| Opt-in (O) | 50 | 6 | 9 | 35 | **21%** |
+| Command contract (C) | 30 | 13 | 7 | 10 | **55%** |
+| Opt-in (O) | 50 | 8 | 8 | 34 | **24%** |
 
 ## Open mandatory requirements
 
-Level 2 (every P0) is the level the spec calls agent-reliable. These 6 requirements
+Level 2 (every P0) is the level the spec calls agent-reliable. These 2 requirements
 stand between treaty and a Level 2 claim; Level 1 is complete.
 
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
-| [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Not started | No headless auth declaration |
 | [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Not started | No async job descriptor |
 | [REQ-C-025](../cli-agent-ergonomics/requirements/c-025-config-writing-commands-declare-write-scope.md) | Config-Writing Commands Declare Write Scope | P0 | 2 | Not started | No config write scope |
-| [REQ-C-029](../cli-agent-ergonomics/requirements/c-029-command-declares-required-scopes.md) | Command Declares Required Scopes | P0 | 2 | Partial | `required_scopes` in every schema, `[]` by default; never required |
-| [REQ-O-033](../cli-agent-ergonomics/requirements/o-033-headless-and-token-env-var-flags-for-auth-commands.md) | --headless and --token-env-var Flags for Auth Commands | P0 | 2 | Not started | No headless auth flags |
-| [REQ-O-047](../cli-agent-ergonomics/requirements/o-047-tool-check-permissions-built-in-command.md) | tool check-permissions Built-In Command | P0 | 2 | Partial | `required_scopes` declared; no `check-permissions` or over-privilege warning |
 
 ## Framework-automatic
 
@@ -150,7 +146,7 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-C-018](../cli-agent-ergonomics/requirements/c-018-commands-declare-platform-requirements.md) | Commands Declare Platform Requirements | P3 | 3 | Not started | No platform or required-tools declaration |
 | [REQ-C-019](../cli-agent-ergonomics/requirements/c-019-subprocess-invoking-commands-declare-argument-sche.md) | Subprocess-Invoking Commands Declare Argument Schema | P1 | 3 | Not started | No subprocess API |
 | [REQ-C-020](../cli-agent-ergonomics/requirements/c-020-resource-id-fields-declare-validation-pattern.md) | Resource ID Fields Declare Validation Pattern | P1 | 3 | Partial | Presets and `pattern=` checked in phase 1; no warning for ID fields without a pattern |
-| [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Not started | No headless auth declaration |
+| [REQ-C-021](../cli-agent-ergonomics/requirements/c-021-auth-commands-declare-headless-mode-support.md) | Auth Commands Declare Headless Mode Support | P0 | 2 | Done | `auth="browser"` or `"device"` declares a login command; `--schema` and the manifest carry `headless_supported` and `token_env_vars`; a headless browser login without a token exits 4 with `TOKEN_REQUIRED` |
 | [REQ-C-022](../cli-agent-ergonomics/requirements/c-022-async-commands-declare-job-descriptor-schema.md) | Async Commands Declare Job Descriptor Schema | P0 | 2 | Not started | No async job descriptor |
 | [REQ-C-023](../cli-agent-ergonomics/requirements/c-023-editor-requiring-commands-declare-non-interactive-.md) | Editor-Requiring Commands Declare Non-Interactive Alternative | P1 | 3 | Done | `editor_alternatives=[...]` gives `requires_editor` and `non_interactive_alternatives`, checked against the command's flags; `ctx.edit` without it is a `RegistrationError` |
 | [REQ-C-024](../cli-agent-ergonomics/requirements/c-024-gui-launching-commands-declare-headless-behavior.md) | GUI-Launching Commands Declare Headless Behavior | P1 | 3 | Partial | `gui_operations=["browser_open"]` with `headless_behavior: emit_in_output` in the manifest; `skip` and `error` behaviors not offered |
@@ -158,7 +154,7 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-C-026](../cli-agent-ergonomics/requirements/c-026-commands-declare-conditional-argument-dependencies.md) | Commands Declare Conditional Argument Dependencies | P1 | 3 | Not started | No conditional argument rules (ROADMAP 0.3.0) |
 | [REQ-C-027](../cli-agent-ergonomics/requirements/c-027-commands-declare-option-placement.md) | Commands Declare Option Placement Convention | P1 | 3 | Not started | No `option_placement`; tokens after `--` are rejected, not forwarded |
 | [REQ-C-028](../cli-agent-ergonomics/requirements/c-028-already-exists-response-pattern.md) | ALREADY_EXISTS Response Pattern | P1 | 3 | Partial | `Exit.CONFLICT(code="ALREADY_EXISTS", data=...)` works; not a prescribed pattern |
-| [REQ-C-029](../cli-agent-ergonomics/requirements/c-029-command-declares-required-scopes.md) | Command Declares Required Scopes | P0 | 2 | Partial | `required_scopes` in every schema, `[]` by default; never required |
+| [REQ-C-029](../cli-agent-ergonomics/requirements/c-029-command-declares-required-scopes.md) | Command Declares Required Scopes | P0 | 2 | Done | `requires_auth=True` refuses registration without `required_scopes`; `required_scopes` in every schema, `[]` by default; `broad-scope` audit rule for blanket scopes |
 | [REQ-C-030](../cli-agent-ergonomics/requirements/c-030-error-responses-include-fix-command.md) | Error Responses Include Executable fix_command | P1 | 3 | Partial | `fix_command` emitted but not validated |
 
 ## Opt-in
@@ -197,7 +193,7 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-O-030](../cli-agent-ergonomics/requirements/o-030-tool-audit-log-built-in-command.md) | tool audit-log Built-In Command | P2 | 3 | Not started | No `audit-log` built-in |
 | [REQ-O-031](../cli-agent-ergonomics/requirements/o-031-dependency-version-matrix-declaration.md) | Dependency Version Matrix Declaration | P1 | 3 | Not started | No dependency declarations (ROADMAP 0.3.0) |
 | [REQ-O-032](../cli-agent-ergonomics/requirements/o-032-raw-payload-flag-for-mutating-commands.md) | --raw-payload Flag for Mutating Commands | P1 | 3 | Done | `--raw-payload` with schema and equivalence tests |
-| [REQ-O-033](../cli-agent-ergonomics/requirements/o-033-headless-and-token-env-var-flags-for-auth-commands.md) | --headless and --token-env-var Flags for Auth Commands | P0 | 2 | Not started | No headless auth flags |
+| [REQ-O-033](../cli-agent-ergonomics/requirements/o-033-headless-and-token-env-var-flags-for-auth-commands.md) | --headless and --token-env-var Flags for Auth Commands | P0 | 2 | Done | Login commands get `--headless` and `--token-env-var NAME`; no terminal implies headless; the token reaches `ctx.token`, redacted; a missing one exits 4 with `auth_methods` |
 | [REQ-O-034](../cli-agent-ergonomics/requirements/o-034-tool-generate-skills-built-in-command.md) | tool generate-skills Built-In Command | P2 | 3 | Not started | No skill generation |
 | [REQ-O-035](../cli-agent-ergonomics/requirements/o-035-tool-mcp-validate-built-in-command.md) | tool mcp-validate Built-In Command | P2 | 3 | Not started | No MCP drift check |
 | [REQ-O-036](../cli-agent-ergonomics/requirements/o-036-instance-id-flag-for-agent-state-namespacing.md) | --instance-id Flag for Agent State Namespacing | P1 | 3 | Not started | No `--instance-id` |
@@ -211,7 +207,7 @@ stand between treaty and a Level 2 claim; Level 1 is complete.
 | [REQ-O-044](../cli-agent-ergonomics/requirements/o-044-noninteractive-install-command.md) | Non-Interactive Install Command Documentation | P1 | 3 | Partial | AGENTS.md has an install section; heading and app scaffold do not match the spec |
 | [REQ-O-045](../cli-agent-ergonomics/requirements/o-045-integration-artifact-version-declaration.md) | Integration Artifact Version Declaration | P1 | 3 | Partial | MCP adapter generated in-process; no version in static artifacts |
 | [REQ-O-046](../cli-agent-ergonomics/requirements/o-046-agents-md-ci-validation.md) | AGENTS.md CI Validation | P2 | 3 | Not started | No AGENTS.md check in CI |
-| [REQ-O-047](../cli-agent-ergonomics/requirements/o-047-tool-check-permissions-built-in-command.md) | tool check-permissions Built-In Command | P0 | 2 | Partial | `required_scopes` declared; no `check-permissions` or over-privilege warning |
+| [REQ-O-047](../cli-agent-ergonomics/requirements/o-047-tool-check-permissions-built-in-command.md) | tool check-permissions Built-In Command | P0 | 2 | Done | `check-permissions` with and without `--for` over `App(credentials=)`; insufficient scopes exit 8 with `missing_scopes`; gated commands warn `CREDENTIAL_OVER_PRIVILEGED` |
 | [REQ-O-048](../cli-agent-ergonomics/requirements/o-048-destructive-commands-default-dry-run.md) | Destructive Commands Default to Dry-Run Mode | P0 | 2 | Done | `safe_default=True`: dry run and exit 0 without `--live`; `--live --confirm-destructive` applies; `meta.dry_run` on every response, `meta.confirmed` when applied; `safe_default` in the manifest |
 | [REQ-O-049](../cli-agent-ergonomics/requirements/o-049-llm-token-budget-flags.md) | LLM Token Budget Flags | P2 | 3 | Not started | No token budget flags (ROADMAP 0.3.0) |
 | [REQ-O-050](../cli-agent-ergonomics/requirements/o-050-tool-exec-built-in-command.md) | tool exec Built-In Command | P2 | 3 | Partial | `exec` built-in with per-line envelopes; no `jsonl` format |

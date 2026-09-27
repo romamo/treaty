@@ -23,7 +23,7 @@ from ._types import FlagType
 if TYPE_CHECKING:
     from ._app import App
 
-BUILTINS = frozenset({"manifest", "version", "exec"})
+BUILTINS = frozenset({"manifest", "version", "exec", "check-permissions"})
 _DESTRUCTIVE_VERBS = ("delete", "remove", "destroy", "drop", "purge", "reset", "rollback", "wipe")
 _MUTATING_VERBS = ("create", "update", "set", "add", "apply", "deploy", "write", "push", "start")
 _NETWORK_HINTS = re.compile(r"\b(socket|http\.client|urllib|requests|httpx|aiohttp|grpc)\b")
@@ -388,6 +388,38 @@ def _cleanup(app: App) -> Iterator[Finding]:
             )
 
 
+# A whole scope word: "admin:org", "root", "*"; "administrators:read" is not one
+_BROAD_SCOPE = re.compile(r"(^|[:._/-])(admin|owner|root|\*)($|[:._/-])", re.IGNORECASE)
+_LOGIN_NAMES = frozenset({"login", "signin", "sign-in", "authenticate"})
+
+
+def _broad_scope(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        for scope in c.required_scopes:
+            if _BROAD_SCOPE.search(scope.value) and scope.value not in c.description:
+                yield Finding(
+                    "broad-scope",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"requires the blanket scope {scope.value!r}; required_scopes lists only "
+                    "what the command uses (REQ-C-029)",
+                    f"a narrower scope, or name {scope.value!r} and why in the description",
+                )
+
+
+def _auth_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.auth is None and c.path.parts[-1] in _LOGIN_NAMES:
+            yield Finding(
+                "auth-declared",
+                Severity.WARNING,
+                c.path.value,
+                "looks like a login command but declares no auth=; agents cannot tell whether "
+                "it works without a browser (REQ-C-021)",
+                'auth="browser" (or "device" for a device code flow)',
+            )
+
+
 def _profile(app: App) -> Iterator[Finding]:
     if not any(Path("conformance").glob("*.json")):
         yield Finding(
@@ -452,6 +484,8 @@ RULES: tuple[Rule, ...] = (
         "raw-payload", "Wide mutating commands accept --raw-payload", Severity.ADVICE, _raw_payload
     ),
     Rule("cleanup", "Network commands register a cleanup hook", Severity.ADVICE, _cleanup),
+    Rule("broad-scope", "Required scopes are narrow", Severity.WARNING, _broad_scope),
+    Rule("auth-declared", "Login commands declare auth", Severity.WARNING, _auth_declared),
     Rule("profile", "A conformance profile exists for the spec kit", Severity.ADVICE, _profile),
 )
 

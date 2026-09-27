@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
+from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG
 from ._command import (
     DEFAULT_HEARTBEAT_MS,
     HEARTBEAT_FLAG,
@@ -165,10 +166,28 @@ def command_entry(
             "default": False,
             "description": "Never prompt, even on a terminal; a needed answer exits 4",
         }
-    if command.interactive or command.editor_alternatives:
-        # INPUT_REQUIRED or EDITOR_REQUIRED when no one can answer
+    if command.interactive or command.editor_alternatives or command.auth is not None:
+        # INPUT_REQUIRED or EDITOR_REQUIRED when no one can answer; TOKEN_REQUIRED
         entry = exits.framework(FrameworkCode.PRECONDITION)
         exit_codes.setdefault(str(entry.code.value), entry.to_json())
+    if command.requires_auth:
+        # Not logged in, or the credential lacks a required scope (REQ-C-029)
+        for code in (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED):
+            entry = exits.framework(code)
+            exit_codes.setdefault(str(entry.code.value), entry.to_json())
+    if command.auth is not None:
+        flags[HEADLESS_FLAG] = {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Never open a browser; read the token from --token-env-var or "
+            "the default variables. Implied without a terminal",
+        }
+        flags[TOKEN_ENV_FLAG] = {
+            "type": "string",
+            "required": False,
+            "description": "Name of the environment variable holding a pre-acquired token",
+        }
     if command.paginated:
         flags[LIMIT_FLAG] = {
             "type": "integer",
@@ -244,6 +263,9 @@ def command_entry(
         out["gui_operations"] = list(command.gui_operations)
         # The only behavior treaty has: the URL goes to data.open_url (REQ-C-024)
         out["headless_behavior"] = "emit_in_output"
+    if command.auth is not None:
+        out["headless_supported"] = command.auth.headless_supported  # REQ-C-021
+        out["token_env_vars"] = list(command.token_env_vars)
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret
@@ -282,22 +304,23 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
     required: list[str] = []
     base = command.args_schema
     for f in command.fields:
+        key = f.flag.replace("-", "_")  # the field name, less a keyword's trailing _
         if f.secret:
             what = f.spec.description
-            properties[f"{f.name}_from_env"] = {
+            properties[f"{key}_from_env"] = {
                 "type": "string",
                 "description": f"Name of the environment variable holding: {what}",
             }
-            properties[f"{f.name}_from_file"] = {
+            properties[f"{key}_from_file"] = {
                 "type": "string",
                 "description": f"Path of the file holding: {what}",
             }
             continue
         prop = dict(base["properties"][f.name])
         prop["description"] = f.spec.description
-        properties[f.name] = prop
+        properties[key] = prop
         if f.required:  # an X | None field without a default is optional, as the parser says
-            required.append(f.name)
+            required.append(key)
     if command.accepts_timeout:
         properties[TIMEOUT_KEY] = {
             "type": "number",
@@ -349,6 +372,16 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         properties[INPUT_FILE_FLAG.replace("-", "_")] = {
             "type": "string",
             "description": "Path of the file holding the input",
+        }
+    if command.auth is not None:
+        properties[HEADLESS_FLAG] = {
+            "type": "boolean",
+            "default": False,
+            "description": "Never open a browser; read the token from a variable",
+        }
+        properties[TOKEN_ENV_FLAG.replace("-", "_")] = {
+            "type": "string",
+            "description": "Name of the environment variable holding a pre-acquired token",
         }
     if command.streaming and stream_key:
         properties[NO_STREAM_KEY] = {

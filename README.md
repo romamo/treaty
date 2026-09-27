@@ -108,7 +108,8 @@ uv add --editable /path/to/treaty
 
 ## Built-ins
 
-Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`).
+Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`);
+`App(credentials=...)` adds `check-permissions` (see Credentials).
 `<app> --version` at the root is an alias for `<app> version`; a command's own `--version`
 flag is never shadowed.
 `exec` reads one `DispatchRequest` per stdin line and dispatches in-process, writing one
@@ -399,6 +400,38 @@ deployctl push --token-from-file /run/secrets/tok  # reads the file, one trailin
 DEPLOYCTL_TOKEN=... deployctl push                 # the default variable
 ```
 
+## Credentials
+
+Treaty never stores or refreshes a token. The app tells it which scopes the active
+credential holds, or `None` when no one is logged in:
+
+```python
+class Keychain:
+    def active_scopes(self, ctx: Ctx) -> Iterable[str] | None: ...
+
+app = App("authctl", version="1.0.0", credentials=Keychain())
+
+@app.command("repos.list", description="List repositories", danger_level="safe",
+             exit_codes=(), requires_auth=True, required_scopes=["repo:read"])
+```
+
+A `requires_auth=True` command must list its scopes (REQ-C-029). Before its handler runs,
+no credential exits `8` (`AUTH_REQUIRED`), a missing scope exits `7` with
+`INSUFFICIENT_SCOPES` and `context.missing_scopes`, and scopes beyond the required ones add
+a `CREDENTIAL_OVER_PRIVILEGED` warning (REQ-O-047). `check-permissions --for <command>`
+reports `required_scopes`, `active_scopes`, and `over_privileged`; without `--for` it maps
+every gated command to its coverage. The `broad-scope` audit rule flags `admin`, `owner`,
+`root`, and `*` scopes the description does not name.
+
+A login command declares `auth="browser"` or `auth="device"` (REQ-C-021). Both get
+`--headless` and `--token-env-var NAME` (REQ-O-033) and receive a pre-acquired token as
+`ctx.token`, read from `NAME` or the first set variable of `token_env_vars` (`<APP>_TOKEN`,
+then any `token_env_vars=` the command adds), and redacted from logs and tracebacks. A
+browser login in a headless run (no terminal, `CI`, or `--headless`) without a token exits
+`4` with `TOKEN_REQUIRED`, the variables in `context.token_env_vars`, and `auth_methods`.
+`--schema` shows `headless_supported` and `token_env_vars`; `ctx.warn(code, message,
+**context)` adds a warning to any command's response.
+
 ## Validation errors
 
 Phase 1 keeps going past a bad value, an unknown flag, or a refused secret, so one run
@@ -644,11 +677,12 @@ envelope per run.
 uv run treaty audit myapp.cli:app
 ```
 
-Ten ordered rules check the registry and print the next steps with a fix using your own
-names: missing examples, danger levels that contradict command names, mutating commands
-without their own exit codes, retryable codes on non-idempotent commands, untyped outputs,
-undeclared network I/O, path-like fields not typed `Path`, wide mutating commands without
-`--raw-payload`, missing cleanup hooks, and a missing conformance profile. `--all` lists
+Ordered rules (`treaty rules` lists them) check the registry and print the next steps with a
+fix using your own names: missing examples, danger levels that contradict command names,
+mutating commands without their own exit codes, retryable codes on non-idempotent commands,
+untyped outputs, undeclared network I/O, path-like fields not typed `Path`, wide mutating
+commands without `--raw-payload`, missing cleanup hooks, blanket scopes, login commands
+without `auth=`, and a missing conformance profile. `--all` lists
 everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and
 piping the output gives an envelope an agent can act on. Rules see declarations only; the
 conformance kit covers runtime behaviour.

@@ -14,6 +14,7 @@ from dataclasses import MISSING, dataclass
 from pathlib import Path
 from typing import NoReturn
 
+from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, is_env_var_name
 from ._command import HEARTBEAT_FLAG, INPUT_FILE_FLAG, OUTPUT_FLAG, Command, DangerLevel
 from ._dispatch import loads_strict
 from ._errors import ParseError
@@ -70,6 +71,12 @@ class Invocation:
     """The payload of a ``stdin_input`` command, read before the handler runs"""
     output: Path | None = None
     """``--output`` of an ``output_file`` command: where the rendered ``data`` goes"""
+    headless: bool = False
+    """``--headless`` of a login command: never wait for a person at a browser"""
+    token_env_var: str | None = None
+    """``--token-env-var`` of a login command: the one variable to read the token from"""
+    token: str | None = None
+    """The pre-acquired token of a login command, read before the handler runs"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +247,8 @@ def parse_command_args(
     heartbeat_ms: int | None = None
     input_file: Path | None = None
     output: Path | None = None
+    headless = False
+    token_var: str | None = None
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -403,6 +412,19 @@ def parse_command_args(
                     switches[name] = True
                     i += 1
                     continue
+                if name == HEADLESS_FLAG and command.auth is not None:
+                    if has_eq:
+                        raise ParseError(f"'{name}' takes no value", context={"flag": name})
+                    headless = True
+                    i += 1
+                    continue
+                if name == TOKEN_ENV_FLAG and command.auth is not None:
+                    parsed_var = env_var(value_after(tok, TOKEN_ENV_FLAG, has_eq, inline))
+                    if token_var is not None and token_var != parsed_var:
+                        raise _repeated(TOKEN_ENV_FLAG)
+                    token_var = parsed_var
+                    i += 1
+                    continue
                 found = command.field_by_flag(name)
                 if found is not None and found.secret:
                     errors.add(direct_secret_error(found.flag))
@@ -479,10 +501,13 @@ def parse_command_args(
             raise _repeated(LIMIT_FLAG)
         if cursor is not None and built.cursor not in (None, cursor):
             raise _repeated(CURSOR_FLAG)
+        if token_var is not None and built.token_env_var not in (None, token_var):
+            raise _repeated(TOKEN_ENV_FLAG)
         for flag, given in (
             (CONFIRM_FLAG, confirmed),
             (NO_STREAM_FLAG, no_stream),
             (LIVE_FLAG, live),
+            (HEADLESS_FLAG, headless),
             *switches.items(),
         ):
             spellings = (flag, flag.replace("-", "_"))
@@ -502,6 +527,8 @@ def parse_command_args(
             heartbeat_ms=heartbeat_ms,
             input_file=input_file if input_file is not None else built.input_file,
             output=output,
+            headless=headless or built.headless,
+            token_env_var=token_var if token_var is not None else built.token_env_var,
         )
     _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
@@ -518,11 +545,24 @@ def parse_command_args(
         heartbeat_ms=heartbeat_ms,
         input_file=input_file,
         output=output,
+        headless=headless,
+        token_env_var=token_var,
     )
 
 
 # REQ-O-001: names an agent may pass to --output meaning a representation, not a file
 _FORMAT_NAMES = frozenset({"json", "jsonl", "tsv", "csv", "plain", "table", "id", "yaml"})
+
+
+def env_var(raw: str) -> str:
+    """``--token-env-var``: the name of a variable, never the token itself"""
+    if not is_env_var_name(raw):
+        raise ParseError(
+            f"'{TOKEN_ENV_FLAG}' takes the name of an environment variable, such as MY_TOKEN",
+            context={"flag": TOKEN_ENV_FLAG},
+            suggestion="export the token in a variable and pass its name, not its value",
+        )
+    return raw
 
 
 def output_path(raw: str) -> Path:
@@ -621,6 +661,8 @@ def known_flags(command: Command) -> list[str]:
         flags.append(INPUT_FILE_FLAG)
     if command.output_file:
         flags.append(OUTPUT_FLAG)
+    if command.auth is not None:
+        flags.extend((HEADLESS_FLAG, TOKEN_ENV_FLAG))
     return flags
 
 
@@ -675,6 +717,8 @@ def build_from_mapping(
     limit: Limit | None = None
     cursor: Position | None = None
     input_file: Path | None = None
+    headless = False
+    token_var: str | None = None
     errors = _Collector()
     for key, value in mapping.items():
         try:
@@ -727,6 +771,18 @@ def build_from_mapping(
                     )
                 switches[flag] = value
                 continue
+            if flag == HEADLESS_FLAG and command.auth is not None:
+                if not isinstance(value, bool):
+                    raise ParseError(
+                        f"{key!r} expects a boolean", context={"field": key, "value": value}
+                    )
+                headless = value
+                continue
+            if flag == TOKEN_ENV_FLAG and command.auth is not None:
+                if not isinstance(value, str):
+                    raise ParseError(f"{key!r} expects a string", context={"field": key})
+                token_var = env_var(value)
+                continue
             found = command.field_by_flag(flag)
             if found is not None and found.secret:
                 raise direct_secret_error(found.flag)
@@ -768,6 +824,8 @@ def build_from_mapping(
         limit=limit,
         cursor=cursor,
         input_file=input_file,
+        headless=headless,
+        token_env_var=token_var,
     )
 
 

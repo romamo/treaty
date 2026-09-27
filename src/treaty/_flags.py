@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import keyword
 import math
 import re
 import typing
@@ -434,6 +435,13 @@ def _check_positionals(cls: type, positionals: list[FieldInfo]) -> None:
         )
 
 
+def flag_name(field_name: str) -> str:
+    """``dry_run`` is ``--dry-run``; ``for_``, spelled so for Python, is ``--for``"""
+    if field_name.endswith("_") and keyword.iskeyword(field_name[:-1]):
+        field_name = field_name[:-1]
+    return field_name.replace("_", "-")
+
+
 def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
     """Read an arguments dataclass into ordered ``FieldInfo`` records"""
     if not dataclasses.is_dataclass(cls):
@@ -483,7 +491,7 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
         required = default is MISSING and not classified.optional
         info = FieldInfo(
             name=f.name,
-            flag=f.name.replace("_", "-"),
+            flag=flag_name(f.name),
             classified=classified,
             required=required,
             default=default,

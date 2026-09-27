@@ -92,6 +92,8 @@ class ErrorDetail:
     """Flags that replace an editor the run could not open (REQ-F-055)"""
     hint: str | None = None
     """The flag that avoids this failure, such as ``--input-file`` (REQ-F-054)"""
+    auth_methods: Sequence[Mapping[str, str]] | None = None
+    """Ways to log in without a browser, such as a token variable (REQ-O-033)"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
@@ -134,6 +136,8 @@ class ErrorDetail:
             out["errors"] = [json_safe(dict(e)) for e in self.errors]
         if self.alternatives is not None:
             out["alternatives"] = [dict(a) for a in self.alternatives]
+        if self.auth_methods is not None:
+            out["auth_methods"] = [dict(a) for a in self.auth_methods]
         return out
 
 

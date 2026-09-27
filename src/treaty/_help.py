@@ -107,6 +107,12 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
     if command.interactive:
         rows.append(("--yes", "Answer yes to every confirmation"))
         rows.append(("--non-interactive", "Never prompt; a needed answer exits 4"))
+    if command.auth is not None:
+        rows.append(("--headless", "Never open a browser; log in with a token variable"))
+        rows.append(("--token-env-var NAME", "Read the token from $NAME"))
+        rows.extend(
+            (f"${v}", "Token read when no --token-env-var is given") for v in command.token_env_vars
+        )
     return rows
 
 

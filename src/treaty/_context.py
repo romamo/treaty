@@ -13,6 +13,7 @@ from ._subprocess import Argv, Completed, Processes
 from ._timeout import Timeout
 
 LogSink = Callable[[str, Mapping[str, object]], None]
+WarnSink = Callable[[str, str, Mapping[str, object]], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,12 +33,16 @@ class Ctx:
     log_sink: LogSink = field(repr=False, compare=False)
     processes: Processes = field(repr=False, compare=False)
     prompter: Prompter = field(repr=False, compare=False)
+    warn_sink: WarnSink = field(repr=False, compare=False)
     idempotency_key: str | None = None
     stdin_text: str | None = None
     """The payload of a ``stdin_input=True`` command: stdin, capped, or ``--input-file``"""
     page: PageRequest | None = None
     """The page a list command is asked for (``paginated=True``), else None; a handler
     that loads its whole list can ignore it and return the list"""
+    token: str | None = field(default=None, repr=False)
+    """A login command's pre-acquired token (``auth=``): from ``--token-env-var`` or the
+    first set variable of ``token_env_vars``; redacted from logs and tracebacks"""
 
     def log(self, message: str, **fields: object) -> None:
         """Write one diagnostic line to stderr, never stdout (REQ-F-006)
@@ -47,6 +52,10 @@ class Ctx:
         written as ``[REDACTED]`` (REQ-F-051).
         """
         self.log_sink(message, fields)
+
+    def warn(self, code: str, message: str, **context: object) -> None:
+        """Add an entry to the response's ``warnings``; the run still succeeds"""
+        self.warn_sink(code, message, context)
 
     def run(
         self,

@@ -93,6 +93,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   exit `0` when the reader leaves after a complete envelope, `PYTHONUNBUFFERED` and
   `heartbeat=True`, `stdin_input=True` with `--input-file` and `hint`, `--format jsonl`,
   built-in `tsv` and `treaty.table`, `output_file=True` with `--output PATH`
+- Auth and scopes (REQ-C-021, C-029, O-033, O-047): `App(credentials=)` with one
+  `active_scopes` method, `requires_auth=True` gated before the handler (exit `8` or `7`,
+  `CREDENTIAL_OVER_PRIVILEGED` warning), `check-permissions`, login commands with `auth=`,
+  `--headless`, `--token-env-var`, and `ctx.token`; `ctx.warn`; `broad-scope` and
+  `auth-declared` audit rules
 
 ## 0.1.0: first release
 
@@ -100,7 +105,6 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - GitHub Actions: pytest, mypy, ruff, and the conformance kit against a spec checkout
 - `meta.schema_version` on every response (REQ-F-022), derived from a per-command
   `schema_version=` declaration
-- Warnings API: `ctx.warn(code, message, context)` so `warnings` stops being always empty
 - `CHANGELOG.md`
 - `docs/guide.md`: the judgement calls the audit cannot make (naming paths, what belongs in
   `error.context`, when a failure deserves its own exit code); short, because every

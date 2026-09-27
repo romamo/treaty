@@ -1,6 +1,7 @@
 """treaty: zero-dependency CLI framework implementing the CLI Agent Spec."""
 
 from ._app import App, ExecArgs, Group, NoArgs
+from ._auth import Credentials
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
 from ._effect import Affects
@@ -23,6 +24,7 @@ __all__ = [
     "CliExit",
     "CommandPath",
     "Completed",
+    "Credentials",
     "Ctx",
     "DangerLevel",
     "Envelope",
