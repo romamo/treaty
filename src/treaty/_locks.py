@@ -21,6 +21,7 @@ from pathlib import Path
 from ._atomic import try_lock, unlock, write_atomic
 from ._errors import CliExit, RegistrationError
 from ._values import ExitCodeName
+from ._verbosity import trace
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 _POLL_SECONDS = 0.05
@@ -118,6 +119,7 @@ class Locks:
                 if limit is not None and waited >= limit:
                     raise LockHeld(name, path, limit, retry_after_ms)
                 time.sleep(_POLL_SECONDS)
+            trace("lock acquired", name=name, path=str(path))
             try:
                 write_atomic(
                     _holder_path(path), json.dumps({"pid": os.getpid(), "since": time.time()})

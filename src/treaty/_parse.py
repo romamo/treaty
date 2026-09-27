@@ -49,6 +49,7 @@ from ._steps import StepName
 from ._timeout import Timeout
 from ._types import Classified, FlagType
 from ._values import CommandPath, InvalidValue, SchemaVersion
+from ._verbosity import DEBUG_FLAG, QUIET_FLAG, VERBOSE_FLAG, WARNINGS_AS_ERRORS_FLAG
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +148,10 @@ class GlobalOptions:
     """``--cwd PATH``: the directory relative paths resolve against (REQ-O-017)"""
     no_update_check: bool = False
     """``--no-update-check``: no update check this run (REQ-O-020)"""
+    verbosity: frozenset[str] = frozenset()
+    """Which of ``--quiet``, ``--verbose``, ``--debug`` were given (REQ-O-008)"""
+    warnings_as_errors: bool = False
+    """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
 
 
 def without_value(token: str) -> str:
@@ -188,6 +193,10 @@ SWITCH_GLOBALS = frozenset(
         UNMASK_FLAG,
         NO_INJECTION_FLAG,
         "no-update-check",
+        QUIET_FLAG,
+        VERBOSE_FLAG,
+        DEBUG_FLAG,
+        WARNINGS_AS_ERRORS_FLAG,
     }
 )
 FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
@@ -254,6 +263,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             no_injection_protection=NO_INJECTION_FLAG in switches,
             cwd=valued.get("cwd"),
             no_update_check="no-update-check" in switches,
+            verbosity=frozenset(switches & {QUIET_FLAG, VERBOSE_FLAG, DEBUG_FLAG}),
+            warnings_as_errors=WARNINGS_AS_ERRORS_FLAG in switches,
         ),
         rest,
     )

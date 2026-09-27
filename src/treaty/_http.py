@@ -36,6 +36,7 @@ from ._envelope import NetworkContext, without_userinfo
 from ._errors import CliExit, ParseError
 from ._retry import Retrier
 from ._values import ExitCodeName
+from ._verbosity import trace
 
 PROXY_FLAG = "proxy"
 NO_PROXY_FLAG = "no-proxy"
@@ -292,17 +293,29 @@ class Http:
             timeout = self.deadline - time.monotonic()
             if timeout <= 0:
                 raise self._failure(url, "TIMEOUT", "TIMEOUT", "the command's timeout ran out")
+        started = time.perf_counter()
         try:
             with self.opener().open(request, timeout=timeout) as reply:
-                return HttpResponse(reply.status, _headers(reply.headers), reply.read())
+                response = HttpResponse(reply.status, _headers(reply.headers), reply.read())
+            failed = False
         except urllib.error.HTTPError as exc:
             response = HttpResponse(exc.code, _headers(exc.headers), exc.read())
             exc.close()
-            return self._status(url, response)
+            failed = True
         except urllib.error.URLError as exc:
             raise self._reason(url, exc.reason) from exc
         except (TimeoutError, http.client.HTTPException, OSError) as exc:
             raise self._reason(url, exc) from exc
+        # REQ-O-008: --debug shows each request; the writer redacts Authorization
+        trace(
+            "http request",
+            method=request.get_method(),
+            url=without_userinfo(url),
+            headers=dict(request.header_items()),
+            status=response.status,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return self._status(url, response) if failed else response
 
     def opener(self) -> urllib.request.OpenerDirector:
         if self._opener is None:

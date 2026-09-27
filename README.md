@@ -135,8 +135,9 @@ uv add --editable /path/to/treaty
 ## Built-ins
 
 Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`),
-plus `doctor` and `cleanup` (see Declarations), which yield: an app command or group of the
-same name replaces them, and the `builtin-shadowed` audit rule says so.
+plus `doctor`, `cleanup` (see Declarations), and `audit-log` (see Audit log), which yield:
+an app command or group of the same name replaces them, and the `builtin-shadowed` audit
+rule says so.
 `App(credentials=...)` adds `check-permissions` (see Credentials) and `App(jobs=...)` adds
 `job status` and `job cancel` (see Async jobs).
 `<app> --version` at the root is an alias for `<app> version`; a command's own `--version`
@@ -324,6 +325,56 @@ the app, as the `entry.py` of `treaty init` does (REQ-F-060). Under
 `message`, and `fields` in JSON mode and `message key=value` otherwise. Declared secrets
 and fields named like credentials (`token`, `password`, `API_KEY`, `DB_PASS`,
 `Authorization`, `Cookie`, at any depth) print as `[REDACTED]` (REQ-F-051).
+
+## Logging and verbosity
+
+`ctx.log` is INFO; `ctx.progress("copying", done=3, total=10)`, `ctx.debug(...)`, and
+`ctx.log_error(...)` write the other levels. What reaches stderr depends on the run
+(REQ-F-038, REQ-O-008):
+
+| Run | Written on stderr |
+|-----|-------------------|
+| Off a terminal, or under `CI` | Errors and warnings only: tracebacks, `log_error`, deprecation lines |
+| A terminal | Also info and progress, and stray `print()` text |
+| `--verbose` | Info and progress anywhere, even under `CI` |
+| `--debug` | Also `ctx.debug` and the framework's trace: config resolution, each `ctx.http` request (headers redacted), each child's argv and exit, locks, the audit log; records of any `logging` logger, such as urllib3's, go through the same redaction; a stray `print()` is attributed to its file and line |
+| `--quiet` | Nothing, not even errors: the envelope carries them |
+
+The three flags are exclusive (two exit `2`). Stray `print()` text off a terminal is
+dropped, and still reported in `THIRD_PARTY_STDOUT`. The `log-not-print` audit rule flags
+handlers that call `print()` or `sys.stderr.write`.
+
+`--warnings-as-errors` turns a successful run with any warning into exit `1` with
+`WARNINGS_AS_ERRORS` (`context.count` and `codes`); the warnings and `data` stay, since a
+mutating command already applied its effect. Framework warnings count too, and each exec
+line and a stream's terminal envelope are checked (REQ-O-025).
+
+## Audit log
+
+Every invocation, successful or not, appends one line to `audit.jsonl`: `timestamp`,
+`command`, `parameters` (the parsed arguments, never raw argv), `exit_code`,
+`duration_ms`, `trace_id`, `request_id`, `operator` (`<APP>_SESSION`), `error_code`,
+`warnings` (the codes, so `--no-injection-protection` is on record), and `data` when it is
+under 4 KiB (REQ-F-026). Secret fields, the login token, and every key named like a
+credential are `[REDACTED]` at any depth (REQ-F-034). `--help` and the schemas are not
+invocations and are not logged. `meta.audit_log_path` names the file; a log that cannot
+be written adds `AUDIT_LOG_UNAVAILABLE` and never fails the command.
+
+The file is `App(audit_log=treaty.AuditLog(path=...))`, else `<APP>_AUDIT_LOG`, else
+`$XDG_DATA_HOME/<app>/audit.jsonl`, else `~/.local/share/<app>/audit.jsonl`;
+`<APP>_AUDIT_LOG=off` turns it off for a run and `App(audit_log=None)` for the app. It is
+`0600` in a `0700` directory, one `write` per line. Past `max_bytes` (100 MiB) it rotates to
+`audit.1.jsonl`, keeping `keep` (5) rotated files, and the first append of a process
+deletes files older than `max_age_days` (30), so it never holds more than
+`(keep + 1) * max_bytes` (REQ-F-042).
+
+```bash
+deployctl audit-log --since 1h --format jsonl        # one entry per line
+deployctl audit-log --trace-id abc123 --limit 100    # the newest 100 of one trace
+```
+
+`audit-log` streams entries oldest first, filtered by `--since` (`30m`, `1h`, `2d`, or ISO
+8601), `--command`, and `--trace-id`, redacting them again as it reads (REQ-O-030).
 
 In JSON mode every string value is cleaned before it is written: ANSI escape sequences
 are removed, and null bytes and lone surrogates become U+FFFD (REQ-F-007, REQ-F-016).

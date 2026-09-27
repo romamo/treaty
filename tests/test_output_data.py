@@ -472,7 +472,8 @@ def test_f072_stdout_and_stderr_contain_no_carriage_return(tmp_path: Path) -> No
         proc = outctl(argv, tmp_path)
         assert proc.stdout and b"\r" not in proc.stdout, argv
         assert b"\r" not in proc.stderr, argv
-    assert b"greeting" in outctl(["greet"], tmp_path).stderr  # ctx.log reached stderr
+    # ctx.log reached stderr
+    assert b"greeting" in outctl(["greet", "--verbose"], tmp_path).stderr
 
 
 def test_f072_json_output_written_to_a_file_contains_no_carriage_return(tmp_path: Path) -> None:

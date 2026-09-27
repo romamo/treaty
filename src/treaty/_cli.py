@@ -32,7 +32,14 @@ from ._profile import (
 )
 from ._scaffold import ProjectName, render
 
-cli = App("treaty", version=__version__, description="Build and audit agent-ready CLIs")
+# The treaty CLI keeps no audit log: `treaty audit` is the linter, and a second
+# `audit-log` beside it would only confuse
+cli = App(
+    "treaty",
+    version=__version__,
+    description="Build and audit agent-ready CLIs",
+    audit_log=None,
+)
 cli.exit_code(
     "CONFORMANCE_FAILED",
     80,

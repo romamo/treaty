@@ -244,7 +244,7 @@ def test_browser_login_off_a_terminal_without_a_token_exits_4_listing_the_variab
 
 def test_browser_login_off_a_terminal_with_a_token_succeeds_and_never_prints_it() -> None:
     app = login_app()
-    code, env, err = run(app, ["login"], {"AUTHCTL_TOKEN": TOKEN})
+    code, env, err = run(app, ["login", "--verbose"], {"AUTHCTL_TOKEN": TOKEN})
     assert code == 0 and env["data"] == {"token_length": len(TOKEN), "headless": True}
     assert TOKEN not in json.dumps(env) and TOKEN not in err
     assert "got token" in err

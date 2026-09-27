@@ -1,10 +1,14 @@
 """Built-ins every app gets that yield to an app command of the same name (13-D1):
-``doctor`` (REQ-O-031, REQ-C-018) and ``cleanup`` (REQ-C-011)."""
+``doctor`` (REQ-O-031, REQ-C-018), ``cleanup`` (REQ-C-011), and ``audit-log``
+(REQ-O-030)."""
 
 from __future__ import annotations
 
+import datetime as dt
 import glob
 import shutil
+from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,8 +18,10 @@ from ._context import Ctx
 from ._declare import CLEARED
 from ._deps import Found, Version, dependency_result, find, tool_check
 from ._effect import Affects
-from ._errors import CliExit
+from ._errors import CliExit, ParseError
 from ._flags import Flag
+from ._journal import AuditLog, entry_time, log_path, parse_since, read_entries
+from ._redact import scrub
 from ._session import outputs
 from ._values import CommandPath, ExitCodeName
 
@@ -138,3 +144,87 @@ def _cleared(app: App, home: str | None) -> set[str]:
                     glob.glob(glob.escape(pattern).replace("[*]", "*"), include_hidden=True)
                 )
     return found
+
+
+AUDIT_LOG_PATH = CommandPath("audit-log")
+AUDIT_LOG_OFF = "AUDIT_LOG_OFF"
+AUDIT_LINES_UNREADABLE = "AUDIT_LINES_UNREADABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class AuditLogArgs:
+    since: str | None = Flag(
+        default=None,
+        description="Only entries from this long ago, such as 30m, 1h, or 2d, or since this "
+        "ISO 8601 time",
+    )
+    command: str | None = Flag(
+        default=None, description="Only entries of this command, such as deploy.rollback"
+    )
+    trace_id: str | None = Flag(default=None, description="Only entries with this trace ID")
+    limit: int | None = Flag(
+        default=None, description="Most entries to return, the newest; default every entry"
+    )
+
+    def __post_init__(self) -> None:
+        if self.since is not None:
+            parse_since(self.since, dt.datetime.now(dt.UTC))  # a bad value exits 2
+        if self.limit is not None and self.limit < 1:
+            raise ParseError(
+                "--limit is a whole number of at least 1",
+                context={"flag": "limit", "value": self.limit},
+            )
+
+
+def register_audit_log(app: App, settings: AuditLog) -> CommandPath:
+    @app.command(
+        AUDIT_LOG_PATH.value,
+        description="Query the audit log: one entry per invocation, oldest first, with its "
+        "parameters (secrets redacted), exit code, duration, and trace, request, and "
+        "session ids",
+        danger_level="safe",
+        exit_codes=(),
+        streaming=True,
+        examples=[
+            ("Invocations of the past hour", f"{app.name} audit-log --since 1h --format jsonl"),
+            ("One trace", f"{app.name} audit-log --trace-id abc123"),
+        ],
+    )
+    def audit_log(args: AuditLogArgs, ctx: Ctx) -> Iterator[dict[str, object]]:
+        path = log_path(settings, app.name, ctx.env)
+        if path is None:
+            raise CliExit(
+                ExitCodeName("PRECONDITION"),
+                "the audit log is off for this run",
+                code=AUDIT_LOG_OFF,
+                fix_required="unset the tool's AUDIT_LOG variable, or set it to a path, "
+                "or set HOME or XDG_DATA_HOME",
+            )
+        since = None if args.since is None else parse_since(args.since, dt.datetime.now(dt.UTC))
+        wanted = None if args.command is None else ".".join(args.command.split())
+        kept: deque[dict[str, object]] = deque(maxlen=args.limit)
+        unreadable = 0
+        for entry in read_entries(path):
+            if entry is None:
+                unreadable += 1
+                continue
+            if wanted is not None and entry.get("command") != wanted:
+                continue
+            if args.trace_id is not None and entry.get("trace_id") != args.trace_id:
+                continue
+            if since is not None and ((when := entry_time(entry)) is None or when < since):
+                continue
+            # Redacted again: a line may predate the declaration that made a field secret
+            cleaned = scrub("", entry)
+            assert isinstance(cleaned, dict)
+            kept.append(cleaned)
+        if unreadable:
+            ctx.warn(
+                AUDIT_LINES_UNREADABLE,
+                f"{unreadable} lines of the audit log are not JSON objects and were skipped",
+                count=unreadable,
+                path=str(path),
+            )
+        yield from kept
+
+    return AUDIT_LOG_PATH

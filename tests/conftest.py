@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -26,6 +27,12 @@ needs_posix_permissions = pytest.mark.skipif(
 needs_sh_launcher = pytest.mark.skipif(
     WINDOWS, reason="the conformance launcher is a /bin/sh script"
 )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """11-D1: the audit log is on by default; every app the suite runs in-process or as a
+    child with the inherited environment writes it here, never in the user's home"""
+    os.environ["XDG_DATA_HOME"] = tempfile.mkdtemp(prefix="treaty-tests-data-")
 
 
 def spec_validator(name: str) -> Draft7Validator:

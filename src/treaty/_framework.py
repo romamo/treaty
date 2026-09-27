@@ -192,6 +192,10 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "no-proxy",
         "no-follow-symlinks",
         "max-depth",
+        "quiet",
+        "verbose",
+        "debug",
+        "warnings-as-errors",
     }
 )
 UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED

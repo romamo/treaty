@@ -193,7 +193,14 @@ def deployctl_in(cwd: Path, *argv: str, env: dict[str, str]) -> dict[str, object
 
 def test_config_set_writes_the_project_file_not_the_user_file(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    env = deployctl_in(tmp_path, "config", "set", "region", "eu-west-1", env={"HOME": str(home)})
+    env = deployctl_in(
+        tmp_path,
+        "config",
+        "set",
+        "region",
+        "eu-west-1",
+        env={"HOME": str(home), "XDG_DATA_HOME": str(tmp_path / "data")},  # the audit log
+    )
     assert (tmp_path / ".deployctl.toml").read_text() == 'region = "eu-west-1"\n'
     assert not home.exists() and env["warnings"] == []
 

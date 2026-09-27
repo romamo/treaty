@@ -10,6 +10,7 @@ import functools
 import inspect
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -50,7 +51,7 @@ from ._auth import (
     scope_set,
 )
 from ._batch import Batch, ItemError
-from ._builtins import register_cleanup, register_doctor
+from ._builtins import register_audit_log, register_cleanup, register_doctor
 from ._cache import Cache, CachePolicy, cache_dir
 from ._cap import (
     DEFAULT_CAP,
@@ -113,6 +114,7 @@ from ._idempotency import (
 from ._init import INIT_COMMAND, Init, Initialized, run_init
 from ._init import required as init_required
 from ._jobs import Job, JobStore, with_links
+from ._journal import AUDIT_LOG_UNAVAILABLE, DEFAULT_AUDIT_LOG, AuditLog, Journal, log_path
 from ._lifecycle import Teardown
 from ._locks import LockHeld, Locks
 from ._manifest import (
@@ -198,6 +200,7 @@ from ._values import (
     Scope,
     ToolVersion,
 )
+from ._verbosity import TRACE_FIELDS, Level, Verbosity, resolve_verbosity, trace
 from ._walk import DEFAULT_MAX_DEPTH, Traversal, TraversalStopped
 
 EXEC_PATH = CommandPath("exec")
@@ -285,6 +288,7 @@ class App:
         companions: Sequence[str] = (),
         dependencies: Sequence[Dependency] = (),
         update_check: UpdateCheck | None = None,
+        audit_log: AuditLog | None = DEFAULT_AUDIT_LOG,
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
@@ -301,10 +305,13 @@ class App:
         release: for a person at a terminal, ``meta.update_available`` names it when it is
         newer, read from a cache a daemon thread refreshes daily, so no run waits on it.
         Never under CI, off a terminal, with ``<APP>_NO_UPDATE``, or ``--no-update-check``
-        (REQ-F-029, REQ-O-020).
+        (REQ-F-029, REQ-O-020). ``audit_log`` is where every invocation is recorded, a
+        ``treaty.AuditLog``; None keeps no log and drops the ``audit-log`` built-in
+        (REQ-F-026, REQ-O-030).
 
-        ``doctor`` and ``cleanup`` are built-ins that yield: an app command or group of the
-        same name replaces it (13-D1). ``manifest``, ``version``, and ``exec`` are reserved."""
+        ``doctor``, ``cleanup``, and ``audit-log`` are built-ins that yield: an app command
+        or group of the same name replaces it (13-D1). ``manifest``, ``version``, and
+        ``exec`` are reserved."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -345,6 +352,9 @@ class App:
                 "the newest release's version, or None"
             )
         self.update_check = update_check
+        if audit_log is not None and not isinstance(audit_log, AuditLog):
+            raise RegistrationError(f"App {name}: audit_log is a treaty.AuditLog, or None")
+        self.audit_log = audit_log
         self._notifier_hooks: list[Callable[[MutableMapping[str, str]], None]] = []
         self._yielding: set[CommandPath] = set()
         """Built-ins an app command of the same name replaces (13-D1)"""
@@ -955,6 +965,8 @@ class App:
 
         self._yielding.add(register_doctor(self))
         self._yielding.add(register_cleanup(self))
+        if self.audit_log is not None:
+            self._yielding.add(register_audit_log(self, self.audit_log))
 
         if self.init is not None:
             setup = self.init
@@ -1251,9 +1263,9 @@ class App:
         try:
             cap = OutputCap.resolve(None, environ, self.max_output, self.name)
         except ParseError as exc:
-            return run.arg_error(exc, meta={"_cmd": path})
+            return run.settle(run.arg_error(exc, meta={"_cmd": path}))
         # REQ-F-068: the pure built-ins answer over a bad TOOL_TRACE_ID or config layer
-        deferred = run.trace_error
+        deferred = run.env_error
         if deferred is None:
             try:
                 # No argv here: <APP>_CONFIG, <APP>_CONTEXT, and <APP>_INSTANCE_ID stand in
@@ -1261,8 +1273,8 @@ class App:
             except ParseError as exc:
                 deferred = exc
         if deferred is not None and path not in {p.value for p in PURE_PATHS}:
-            return run.arg_error(deferred, meta={"_cmd": path})
-        envelope = self._call(run, path, arguments, environ)
+            return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
+        envelope = run.settle(self._call(run, path, arguments, environ))
         return cap_envelope(envelope, cap, Rerun(argv=None, page=run.page))
 
     def _call(
@@ -1392,6 +1404,8 @@ class App:
                 raise
             # The reader of stdout went away, on any path: help, schema, errors, results
             return run.output_closed()
+        finally:
+            run.detach_trace()
 
     def _route(
         self,
@@ -1402,6 +1416,8 @@ class App:
         out = run.out
         try:
             globals_, rest = split_globals(strict_argv(argv, self._commands))
+            run.err.verbosity = resolve_verbosity(globals_.verbosity, environ, run.tty)
+            run.warnings_as_errors = globals_.warnings_as_errors
             mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
             requested = mode
             if mode is Format.JSONL:
@@ -1409,6 +1425,14 @@ class App:
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
+        run.mode = mode
+        run.attach_trace()
+        trace(
+            "run",
+            format=mode.value,
+            verbosity=run.err.verbosity.name.lower(),
+            audit_log=None if run.journal is None else str(run.journal.path),
+        )
         run.stable = run.stable_all = globals_.stable_output
         run.unmask, run.unprotected = globals_.unmask, globals_.no_injection_protection
         if globals_.cwd is not None:
@@ -1419,7 +1443,7 @@ class App:
                 return run.emit(mode, run.arg_error(exc))
         # REQ-F-068: help, version, and the schema answer even over a bad TOOL_TRACE_ID or
         # an invalid config layer, which only what runs a command reports
-        config_error = run.trace_error
+        config_error = run.env_error
         if config_error is None:
             try:
                 run.load_settings(
@@ -1587,6 +1611,9 @@ def _call(
 
 
 CLEANUP_FAILED = "CLEANUP_FAILED"
+WARNINGS_AS_ERRORS = "WARNINGS_AS_ERRORS"
+AUDIT_DATA_BYTES = 4096
+"""Larger ``data`` is left out of the audit entry, which keeps its size instead"""
 CWD_CHANGED = "CWD_CHANGED"
 SESSION_HOOK = "session temp dir"
 
@@ -1632,7 +1659,14 @@ class _StrayStdout(io.TextIOBase):
         return getattr(self._err.stream, "encoding", None) or "utf-8"
 
     def write(self, text: str, /) -> int:
-        self._err.write(text)
+        if self._err.verbosity >= Verbosity.DEBUG:
+            if text.strip():
+                # REQ-F-060: under --debug, the line that printed it
+                caller = sys._getframe(1)
+                where = f"{caller.f_code.co_filename}:{caller.f_lineno}"
+                trace("stdout write", source=where, text=text.rstrip("\r\n"))
+        else:
+            self._err.write(text, Level.INFO)  # 11-D5: off a terminal, dropped
         self._bytes += len(text.encode("utf-8", "surrogatepass"))
         if len(self._text) < TEXT_CAP:
             self._text += text[: TEXT_CAP - len(self._text)]
@@ -1670,16 +1704,23 @@ def _closed_pipe(exc: OSError) -> bool:
 
 class _Stderr:
     """Diagnostics with no reader left are dropped: a closed stderr must neither cost the
-    stdout envelope nor pass for a closed stdout"""
+    stdout envelope nor pass for a closed stdout. A line above the run's verbosity is
+    dropped too (REQ-O-008, REQ-F-038)."""
 
-    def __init__(self, stream: IO[str]) -> None:
+    def __init__(self, stream: IO[str], verbosity: Verbosity) -> None:
         self._stream = stream
+        self.verbosity = verbosity
 
     @property
     def stream(self) -> IO[str]:
         return self._stream
 
-    def write(self, text: str) -> None:
+    def shows(self, level: Level) -> bool:
+        return self.verbosity >= level.shown_from
+
+    def write(self, text: str, level: Level = Level.ERROR) -> None:
+        if not self.shows(level):
+            return
         try:
             self._stream.write(text)
         except OSError as exc:
@@ -1701,6 +1742,24 @@ class _Stderr:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stderr.fileno())
             os.close(devnull)
+
+
+def _unchanged(text: str) -> str:
+    return text
+
+
+class _TraceHandler(logging.Handler):
+    """Log records of the framework and of libraries, as ``--debug`` lines on stderr"""
+
+    def __init__(self, write: Callable[[str, Mapping[str, object]], None]) -> None:
+        super().__init__(logging.DEBUG)
+        self._write = write
+
+    def emit(self, record: logging.LogRecord) -> None:
+        fields = dict(getattr(record, TRACE_FIELDS, {}))
+        if record.name != "treaty":
+            fields["logger"] = record.name
+        self._write(record.getMessage(), fields)
 
 
 def _warned(envelope: Envelope, code: str, message: str, command: Command) -> Envelope:
@@ -1739,6 +1798,12 @@ def _ready(envelope: Envelope) -> Callable[[], Envelope]:
 def _still_running(running: Sequence[Pending]) -> Pending | None:
     """The handler's worker when an interrupted wait left it running"""
     return next((p for p in running if p.worker.is_alive()), None)
+
+
+def _terminal(envelope: Envelope) -> bool:
+    """Whether an envelope ends its invocation: anything but a stream's event"""
+    meta = envelope.extra_meta
+    return not envelope.ok or "seq" not in meta or bool(meta.get("end"))
 
 
 def _mode_meta(command: Command) -> dict[str, object]:
@@ -1810,7 +1875,7 @@ class _Run:
     ) -> None:
         self.app = app
         self.out = out
-        self.err = _Stderr(err)
+        self.err = _Stderr(err, resolve_verbosity(frozenset(), env, tty))
         self.env = env
         self.tty = tty
         """Whether stdout is a terminal"""
@@ -1851,12 +1916,25 @@ class _Run:
         self.timestamp = utc_timestamp()
         self.cwd = logical_cwd(env)
         self.trace_id: str | None = None
-        self.trace_error: ParseError | None = None
-        """An unusable ``TOOL_TRACE_ID``, answered with exit 2 before anything runs"""
+        self.env_error: ParseError | None = None
+        """An unusable ``TOOL_TRACE_ID`` or ``<APP>_AUDIT_LOG``, answered with exit 2
+        before anything runs"""
+        self.journal: Journal | None = None
+        """The audit log this run appends each answered invocation to (REQ-F-026)"""
         try:
             self.trace_id = read_trace_id(env)
+            if app.audit_log is not None:
+                where = log_path(app.audit_log, app.name, env)
+                self.journal = None if where is None else Journal(where, app.audit_log)
         except ParseError as exc:
-            self.trace_error = exc
+            self.env_error = exc
+        self.args: object = None
+        """The parsed arguments of the command that runs now, for its audit entry"""
+        self.warnings_as_errors = False
+        """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
+        self.mode = Format.JSON
+        """How the run answers, for the lines ``--debug`` writes"""
+        self._tracing: tuple[_TraceHandler, int] | None = None
         self.current: Command | None = None
         """The command being answered, for ``meta.command`` and ``meta.schema_version``"""
         self.pinned: SchemaVersion | None = None
@@ -1917,7 +1995,7 @@ class _Run:
 
     def unprotected_record(self) -> None:
         """REQ-O-023: the use of ``--no-injection-protection`` on stderr, one structured
-        line, the audit record until an audit log exists"""
+        line; the audit log entry lists its warning too"""
         line = {
             "level": "warn",
             "code": UNPROTECTED_CODE,
@@ -1925,15 +2003,20 @@ class _Run:
             "trust markers",
             "argv": list(self.argv or ()),
         }
-        self.err.write(json.dumps(scrub("", line), separators=(",", ":")) + "\n")
+        self.err.write(json.dumps(scrub("", line), separators=(",", ":")) + "\n", Level.WARN)
         self.err.flush()
 
-    def _write(self, envelope: Envelope) -> None:
-        """One JSON envelope on stdout, warning when text was printed there since the last"""
+    def _write(self, envelope: Envelope, *, settle: bool = True) -> int:
+        """One JSON envelope on stdout, warning when text was printed there since the last;
+        ``settle`` when it answers an invocation, not a stream event or help. Returns the
+        exit code written."""
         text, written = ("", 0) if self.stray is None else self.stray.take()
         below = active_interceptor()
         if below is not None:
             caught, count = below.take()
+            if caught.strip():
+                # REQ-F-060: a child's or C code's write reached descriptor 1 directly
+                trace("stdout write", source="descriptor 1", text=caught.rstrip("\r\n"))
             text, written = (text + caught)[:TEXT_CAP], written + count
         # REQ-F-060: JSON printed by mistake is not reported, so it is never seen twice
         text = prose(text)
@@ -1944,8 +2027,83 @@ class _Run:
                 context={"text": text.rstrip("\r\n"), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        if settle:
+            envelope = self.settle(envelope)
         write_envelope(cap_envelope(envelope, self.cap, Rerun(self.argv, self.page)), self.out)
         self.delivered = True
+        return envelope.exit_code
+
+    def settle(self, envelope: Envelope) -> Envelope:
+        """The last step before an invocation's answer is written or returned:
+        ``--warnings-as-errors`` (REQ-O-025), then its audit log entry (REQ-F-026)"""
+        if self.warnings_as_errors and envelope.ok and envelope.warnings:
+            count = len(envelope.warnings)
+            entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+            envelope = dataclasses.replace(
+                envelope,
+                exit_code=entry.code.value,
+                error=ErrorDetail(
+                    code=WARNINGS_AS_ERRORS,
+                    message=f"Command produced {count} warning{'s' if count > 1 else ''}; "
+                    "treated as errors due to --warnings-as-errors",
+                    retryable=False,
+                    context={"count": count, "codes": sorted({w.code for w in envelope.warnings})},
+                    phase="execution",
+                    fix_required="resolve the conditions in warnings, or drop --warnings-as-errors",
+                ),
+            )
+        journal = self.journal
+        if journal is None:
+            return envelope
+        try:
+            journal.append(self._audit_entry(envelope))
+        except OSError as exc:
+            # The log never fails the command it records
+            warning = WarningDetail(
+                AUDIT_LOG_UNAVAILABLE,
+                f"The audit log could not be written: {exc.strerror or exc}",
+                context={"path": str(journal.path)},
+            )
+            return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        trace("audit entry written", path=str(journal.path))
+        return envelope
+
+    def _audit_entry(self, envelope: Envelope) -> dict[str, object]:
+        """One audit log line: ``parameters`` are the parsed arguments, never raw argv,
+        with secret fields, the login token, and credential-named keys ``[REDACTED]``
+        (REQ-F-026, REQ-F-034); ``data`` is kept when short, redacted the same way"""
+        command, args = self.current, self.args
+        redact = _unchanged if command is None else self._redactor(command, args)
+        parameters: dict[str, object] = {}
+        if command is not None and args is not None:
+            for f in command.fields:
+                if f.secret:
+                    parameters[f.name] = REDACTED
+                    continue
+                value = to_jsonable(getattr(args, f.name), self.app.scalars, base=self.cwd)
+                parameters[f.name] = scrub(f.name, value, redact)
+        data = scrub("", envelope.data, redact)
+        size = len(json.dumps(data, separators=(",", ":")))
+        error = envelope.error
+        entry: dict[str, object] = {
+            "timestamp": utc_timestamp(),
+            "command": envelope.meta.command,
+            "parameters": parameters,
+            "exit_code": envelope.exit_code,
+            # --stable-output reports 0; the log keeps the real time
+            "duration_ms": int((time.perf_counter() - self.started) * 1000)
+            if self.stable
+            else envelope.meta.duration_ms,
+            "trace_id": self.trace_id,
+            "request_id": self.request_id,
+            "operator": self.env.get(app_var(self.app.name, SESSION.key)) or None,
+            "error_code": None if error is None else error.code,
+            "warnings": [w.code for w in envelope.warnings],
+            "data": data if size <= AUDIT_DATA_BYTES else None,
+        }
+        if size > AUDIT_DATA_BYTES:
+            entry["data_bytes"] = size
+        return entry
 
     def _ctx(
         self,
@@ -1959,6 +2117,7 @@ class _Run:
         page: PageRequest | None = None,
     ) -> Ctx:
         deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
+        trace("command started", command=command.path.value, timeout_ms=timeout.milliseconds)
         # Output is captured, so a child never colors; editors only for a person
         quiet = suppress_updates(self.env, interactive=self.interactive)
         child_env = {
@@ -1997,7 +2156,7 @@ class _Run:
         self.steps = (
             StepTracker(
                 command.steps,
-                self._log_sink(command, args, mode),
+                functools.partial(self._log_sink(command, args, mode), Level.PROGRESS),
                 resume_from=invocation.resume_from,
                 rollback=command.rollback if invocation.rollback_on_failure else None,
             )
@@ -2157,7 +2316,8 @@ class _Run:
         if self.update_available is not None and mode is Format.PLAIN:
             self.err.write(
                 f"{self.app.name} {self.update_available} is available; this is "
-                f"{self.app.version}\n"
+                f"{self.app.version}\n",
+                Level.INFO,
             )
 
     def background_slot(self, command: Command) -> BackgroundSlot | None:
@@ -2185,6 +2345,13 @@ class _Run:
         app = self.app
         self.settings = resolve_settings(
             app.settings, app.name, options, self.env, self.cwd, app.scalars
+        )
+        trace(
+            "config resolved",
+            searched=[str(p) for p in self.settings.candidates],
+            read=[str(p) for p in self.settings.files],
+            context=self.settings.context,
+            sources=dict(self.settings.sources),
         )
 
     def provided(self) -> dict[type, object]:
@@ -2228,30 +2395,64 @@ class _Run:
         return failed
 
     def _log_sink(self, command: Command, args: object, mode: Format) -> LogSink:
-        """``ctx.log``: one line on stderr, secrets redacted, escapes stripped unless the
-        run may color (REQ-F-006, REQ-F-051)"""
-        keep_escapes = mode is not Format.JSON and color_allowed(self.env, self.tty)
+        """``ctx.log`` and its levels: one line on stderr when the run's verbosity shows
+        the level, secrets redacted, escapes stripped unless the run may color
+        (REQ-F-006, REQ-F-038, REQ-F-051)"""
 
-        def write(message: str, fields: Mapping[str, object]) -> None:
-            # Built per call, inside the handler: a secret scalar's serialize= is user code
-            redact = self._redactor(command, args)
-            safe = {k: scrub(k, json_safe(v), redact) for k, v in fields.items()}
-            if mode is Format.JSON:
-                record = {"level": "info", "message": redact(message), "fields": safe}
-                if self.trace_id is not None:
-                    record["trace_id"] = self.trace_id
-                line = json.dumps(clean(record), separators=(",", ":"), sort_keys=True)
-            else:
-                pairs = (
-                    f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in safe.items()
-                )
-                line = " ".join((redact(message), *pairs)) + self._trace_suffix()
-                if not keep_escapes:
-                    line = str(clean(line))
-            self.err.write(line + "\n")
-            self.err.flush()
+        def write(level: Level, message: str, fields: Mapping[str, object]) -> None:
+            if self.err.shows(level):
+                # Built per call, inside the handler: a secret scalar's serialize= is user code
+                self._log_line(level, message, fields, self._redactor(command, args), mode)
 
         return write
+
+    def _log_line(
+        self,
+        level: Level,
+        message: str,
+        fields: Mapping[str, object],
+        redact: Callable[[str], str],
+        mode: Format,
+    ) -> None:
+        """A JSON object in JSON mode, ``message key=value`` otherwise, with the trace"""
+        safe = {k: scrub(k, json_safe(v), redact) for k, v in fields.items()}
+        if mode is Format.JSON:
+            record = {"level": level.value, "message": redact(message), "fields": safe}
+            if self.trace_id is not None:
+                record["trace_id"] = self.trace_id
+            line = json.dumps(clean(record), separators=(",", ":"), sort_keys=True)
+        else:
+            pairs = (f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in safe.items())
+            prefix = "" if level is Level.INFO else f"{level.value}: "
+            line = prefix + " ".join((redact(message), *pairs)) + self._trace_suffix()
+            if not color_allowed(self.env, self.tty):
+                line = str(clean(line))
+        self.err.write(line + "\n", level)
+        self.err.flush()
+
+    def attach_trace(self) -> None:
+        """``--debug``: the framework's trace and every library's log records, such as
+        urllib3's and httpx's requests, on stderr through the redacting writer until
+        ``detach_trace`` (REQ-O-008)"""
+        if self.err.verbosity < Verbosity.DEBUG or self._tracing is not None:
+            return
+        root = logging.getLogger()
+        self._tracing = (_TraceHandler(self._trace_line), root.level)
+        root.addHandler(self._tracing[0])
+        root.setLevel(logging.DEBUG)
+
+    def detach_trace(self) -> None:
+        if self._tracing is None:
+            return
+        handler, level = self._tracing
+        self._tracing = None
+        root = logging.getLogger()
+        root.removeHandler(handler)
+        root.setLevel(level)
+
+    def _trace_line(self, message: str, fields: Mapping[str, object]) -> None:
+        redact = self._redactor(self.current, self.args) if self.current else _unchanged
+        self._log_line(Level.DEBUG, message, fields, redact, self.mode)
 
     # Envelope construction
 
@@ -2272,6 +2473,8 @@ class _Run:
         extra |= self.settings.meta()
         if self.update_available is not None:
             extra["update_available"] = self.update_available
+        if self.journal is not None:
+            extra["audit_log_path"] = str(self.journal.path)  # REQ-F-026
         if self.cache is not None:
             extra["cache_used"] = self.cache.used
         if self.session is not None and self.session.made is not None:
@@ -2393,6 +2596,7 @@ class _Run:
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen;
         the store keeps the raw result, so a replay with ``--unmask`` still has it"""
+        self.args = invocation.args
         return self._present(command, self._answer(command, invocation, mode, meta=meta))
 
     def _present(self, command: Command, envelope: Envelope) -> Envelope:
@@ -2529,7 +2733,7 @@ class _Run:
             self._warn(code, message, context)
             line: dict[str, object] = {"level": "warn", "code": code, "message": message}
             line |= {k: v for k, v in context.items() if k != "since"}
-            self.err.write(json.dumps(line, separators=(",", ":")) + "\n")
+            self.err.write(json.dumps(line, separators=(",", ":")) + "\n", Level.WARN)
             self.err.flush()
 
     def _pin(self, command: Command, invocation: Invocation) -> None:
@@ -3203,6 +3407,7 @@ class _Run:
         caller that sees nothing until the stream ends. A failure after some events keeps
         their count in ``meta.seq`` and marks the response ``partial``.
         """
+        self.args = invocation.args
         self._pin(command, invocation)
         if invocation.validate_only:
             yield self._present(command, self.validated(meta))
@@ -3793,11 +3998,18 @@ class _Run:
 
     # Output
 
-    def emit(self, mode: Format, envelope: Envelope, *, render: Renderer | None = None) -> int:
+    def emit(
+        self,
+        mode: Format,
+        envelope: Envelope,
+        *,
+        render: Renderer | None = None,
+        settle: bool = True,
+    ) -> int:
+        """Write the answer; ``settle=False`` for help and schemas, which run no command"""
         if mode is Format.JSON:
-            self._write(envelope)
-            return envelope.exit_code
-        return self._emit_text(mode, envelope, render)
+            return self._write(envelope, settle=settle)
+        return self._emit_text(mode, envelope, render, settle=settle)
 
     def output_closed(self) -> int:
         """The reader went away: nothing more can be written, and nothing goes to stderr.
@@ -3886,10 +4098,11 @@ class _Run:
         render_failed = False
         for envelope in drain(envelopes):
             if mode is Format.JSON:
-                self._write(envelope)
-                code = envelope.exit_code
+                code = self._write(envelope, settle=_terminal(envelope))
                 continue
-            code = self._emit_text(mode, envelope, render, fallback=render_event)
+            code = self._emit_text(
+                mode, envelope, render, fallback=render_event, settle=_terminal(envelope)
+            )
             if code != envelope.exit_code:
                 # One traceback is enough: later events use the plain fallback
                 render_failed, render = True, None
@@ -3904,8 +4117,11 @@ class _Run:
         render: Renderer | None,
         *,
         fallback: Renderer = render_plain,
+        settle: bool = True,
     ) -> int:
         """Data through the renderer on stdout, errors as prose on stderr"""
+        if settle:
+            envelope = self.settle(envelope)
         code = envelope.exit_code
         if envelope.data is not None and render is not None:
             try:
@@ -3951,13 +4167,13 @@ class _Run:
             data = build_manifest(
                 subtree, self.app.exits, self.app.version, self.app.formats, self.app.name
             )
-        return self.emit(mode, self._envelope(0, data=data), render=_json_text)
+        return self.emit(mode, self._envelope(0, data=data), render=_json_text, settle=False)
 
     def show_config(self, mode: Format) -> int:
         """``--show-config``: the effective settings, where each came from, and the layers
         in precedence order, as JSON in every mode (REQ-O-015)"""
         data = self.settings.show(self.app.settings)
-        return self.emit(mode, self._envelope(0, data=data), render=_json_text)
+        return self.emit(mode, self._envelope(0, data=data), render=_json_text, settle=False)
 
     def output_schema(
         self, mode: Format, command: Command | None, pinned: SchemaVersion | None
@@ -3978,7 +4194,7 @@ class _Run:
             )
         self.pinned = pinned
         data = command.output_schema if pinned is None else command.compat_for(pinned).output_schema
-        return self.emit(mode, self._envelope(0, data=dict(data)), render=_json_text)
+        return self.emit(mode, self._envelope(0, data=dict(data)), render=_json_text, settle=False)
 
     def help_root(self, mode: Format, prefix: tuple[str, ...]) -> int:
         text = render_root(
@@ -4005,11 +4221,11 @@ class _Run:
         if mode is not Format.JSON:
             self.out.write(text)
             return 0
-        self.err.write(text)
+        self.err.write(text)  # asked for, so written like an error: all but --quiet
         self.err.flush()
         schema_ref = " ".join((*parts, "--schema"))
         meta = {"help": True, "schema_ref": schema_ref}
-        return self.emit(mode, self._envelope(0, meta=meta))
+        return self.emit(mode, self._envelope(0, meta=meta), settle=False)
 
     # exec (REQ-O-050)
 
@@ -4031,15 +4247,16 @@ class _Run:
         with contextlib.closing(self._exec_lines(args, plan)) as lines:
             for line_no, envelope in lines:
                 lines_seen, last = line_no, envelope
-                self._write(envelope)
+                written = self._write(envelope, settle=_terminal(envelope))
                 if envelope.error is None or envelope.error.code not in _UNREAD_LINE:
                     parsed_any = True
-                if not envelope.ok:
+                if written != 0:
                     any_failed = True
                     if not args.ignore_errors:
                         break
         # What follows answers the plan, not its last line
         self.current, self.pinned, self.retrier, self.warnings = plan_command, None, None, []
+        self.args = None
         self.stable = self.stable_all
         if (received := self.cancellation.received) is not None:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
@@ -4212,7 +4429,7 @@ class _Run:
                 continue
             # One command per line
             self.warnings, self.token, self.config_file = [], None, None
-            self.current, self.pinned, self.retrier = None, None, None
+            self.current, self.pinned, self.retrier, self.args = None, None, None, None
             self.session, self.processes, self.cache = None, None, None
             self.stable = self.stable_all
             started = time.perf_counter()

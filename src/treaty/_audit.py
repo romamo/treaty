@@ -1282,6 +1282,35 @@ def _no_chdir(app: App) -> Iterator[Finding]:
                 break
 
 
+_PRINT_CALLS = frozenset({"print", "sys.stderr.write", "sys.stdout.write", "sys.stderr.writelines"})
+
+
+def prints(fn: Callable[..., object]) -> str | None:
+    """A call in ``fn``'s source that writes diagnostics around ``ctx.log`` (REQ-F-038)"""
+    tree = _handler_tree(fn)
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and (name := _dotted(node.func)) in _PRINT_CALLS:
+            return name
+    return None
+
+
+def _log_not_print(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        name = prints(c.handler)
+        if name is not None:
+            yield Finding(
+                "log-not-print",
+                Severity.WARNING,
+                c.path.value,
+                f"handler calls {name}(), which --quiet cannot silence and an agent pays "
+                "tokens to read; ctx.log is silent off a terminal unless --verbose (REQ-F-038)",
+                "ctx.log(...) for info, ctx.progress(...) for progress, ctx.log_error(...) "
+                "for errors, ctx.debug(...) for --debug",
+            )
+
+
 def _project_root(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.project_root:
@@ -1833,6 +1862,12 @@ RULES: tuple[Rule, ...] = (
         "Commands never change the working directory",
         Severity.WARNING,
         _no_chdir,
+    ),
+    Rule(
+        "log-not-print",
+        "Handlers write diagnostics with ctx.log, not print",
+        Severity.WARNING,
+        _log_not_print,
     ),
     Rule(
         "project-root",

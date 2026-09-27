@@ -23,9 +23,10 @@ from ._session import DEFAULT_KEEP_SECONDS, Session
 from ._steps import StepTracker
 from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Processes, Spawned
 from ._timeout import Timeout
+from ._verbosity import Level
 from ._walk import Traversal, Walk
 
-LogSink = Callable[[str, Mapping[str, object]], None]
+LogSink = Callable[[Level, str, Mapping[str, object]], None]
 WarnSink = Callable[[str, str, Mapping[str, object]], None]
 T = TypeVar("T")
 
@@ -175,13 +176,28 @@ class Ctx:
         return self._config_file.write(text)
 
     def log(self, message: str, **fields: object) -> None:
-        """Write one diagnostic line to stderr, never stdout (REQ-F-006)
+        """Write one INFO line to stderr, never stdout (REQ-F-006)
 
-        A JSON object in JSON mode, ``message key=value`` otherwise. Declared secrets and
-        fields named like credentials (token, password, api_key, Authorization, ...) are
-        written as ``[REDACTED]`` (REQ-F-051).
+        A JSON object in JSON mode, ``message key=value`` otherwise. Only a terminal, or
+        ``--verbose``, shows it: off a terminal or under CI the run writes errors only
+        (REQ-F-038). Declared secrets and fields named like credentials (token,
+        password, api_key, Authorization, ...) are written as ``[REDACTED]`` (REQ-F-051).
         """
-        self.log_sink(message, fields)
+        self.log_sink(Level.INFO, message, fields)
+
+    def log_error(self, message: str, **fields: object) -> None:
+        """Like ``log``, at ERROR: written at every verbosity but ``--quiet``"""
+        self.log_sink(Level.ERROR, message, fields)
+
+    def debug(self, message: str, **fields: object) -> None:
+        """Like ``log``, at DEBUG: written only under ``--debug`` (REQ-O-008)"""
+        self.log_sink(Level.DEBUG, message, fields)
+
+    def progress(self, message: str, *, done: int | None = None, total: int | None = None) -> None:
+        """A progress line, such as ``done=3 total=10``: shown where ``log`` is, never off
+        a terminal without ``--verbose`` (REQ-F-038)"""
+        fields = {k: v for k, v in (("done", done), ("total", total)) if v is not None}
+        self.log_sink(Level.PROGRESS, message, fields)
 
     def warn(self, code: str, message: str, **context: object) -> None:
         """Add an entry to the response's ``warnings``; the run still succeeds"""

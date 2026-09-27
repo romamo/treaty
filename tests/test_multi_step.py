@@ -144,7 +144,7 @@ def test_the_sigterm_timeout_response_includes_the_same_step_tracking_fields() -
 
 
 def test_a_complete_run_lists_every_step_completed_and_none_failed() -> None:
-    code, envelope, err = run(migrate_app([]), ["migrate"])
+    code, envelope, err = run(migrate_app([]), ["migrate", "--verbose"])
     assert code == 0
     assert envelope["data"] == {
         "effect": "updated",

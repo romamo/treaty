@@ -290,6 +290,7 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
     tools = got["tools"]
     assert sorted(tools) == [
         "add",
+        "audit-log",
         "cleanup",
         "doctor",
         "done",

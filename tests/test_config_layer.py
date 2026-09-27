@@ -417,7 +417,13 @@ def test_two_concurrent_invocations_with_different_config_paths_share_no_mutable
     for session in sessions:
         session.mkdir()
     procs = [
-        spawn(["config", "set", f"r{n}", "--config", str(s / "config.toml")], s, HOME=str(home))
+        # The audit log is the one file every run shares by design (REQ-F-026)
+        spawn(
+            ["config", "set", f"r{n}", "--config", str(s / "config.toml")],
+            s,
+            HOME=str(home),
+            CONFIGCTL_AUDIT_LOG="off",
+        )
         for n, s in enumerate(sessions)
     ]
     assert [p.wait(timeout=60) for p in procs] == [0, 0]
@@ -535,7 +541,11 @@ def keyctl(app: App, argv: list[str]) -> tuple[int, dict[str, Any]]:
 def test_first_invocation_of_a_non_init_command_is_identical_to_the_hundredth(
     tmp_path: Path,
 ) -> None:
-    home = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "cfg")}
+    home = {
+        "HOME": str(tmp_path),
+        "XDG_CONFIG_HOME": str(tmp_path / "cfg"),
+        "CONFIGCTL_AUDIT_LOG": "off",  # the audit log is written on every run by design
+    }
     runs = [configctl(["show", "--stable-output"], home) for _ in range(3)]
     assert runs[0] == runs[1] == runs[2] and runs[0][0] == 0
     assert list(tmp_path.iterdir()) == []  # reading config created nothing

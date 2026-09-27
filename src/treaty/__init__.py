@@ -27,6 +27,7 @@ from ._flags import Arg, Flag
 from ._http import HttpResponse
 from ._init import Init
 from ._jobs import Job, JobStore
+from ._journal import AuditLog
 from ._mode import Format
 from ._out import Binary, Out
 from ._page import Page, PageRequest
@@ -48,6 +49,7 @@ __all__ = [
     "Affects",
     "App",
     "Arg",
+    "AuditLog",
     "Background",
     "Batch",
     "Binary",

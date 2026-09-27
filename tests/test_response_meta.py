@@ -358,11 +358,14 @@ def test_a_child_process_spawned_by_the_framework_inherits_tool_trace_id(tmp_pat
 
 
 def test_framework_log_lines_include_the_trace_id_when_set() -> None:
-    _, _, err = run(["say"], env={"TOOL_TRACE_ID": "span-42"})
+    _, _, err = run(["say", "--verbose"], env={"TOOL_TRACE_ID": "span-42"})
     assert json.loads(err)["trace_id"] == "span-42"
     out, errs = io.StringIO(), io.StringIO()
     make_app().run(
-        ["say", "--format", "plain"], stdout=out, stderr=errs, env={"TOOL_TRACE_ID": "s"}
+        ["say", "--format", "plain", "--verbose"],
+        stdout=out,
+        stderr=errs,
+        env={"TOOL_TRACE_ID": "s"},
     )
     assert errs.getvalue() == "hello step=1 trace=s\n"
     errs = io.StringIO()
@@ -373,7 +376,7 @@ def test_framework_log_lines_include_the_trace_id_when_set() -> None:
 
 
 def test_log_lines_carry_no_trace_id_without_one() -> None:
-    _, _, err = run(["say"])
+    _, _, err = run(["say", "--verbose"])
     assert "trace_id" not in json.loads(err)
 
 

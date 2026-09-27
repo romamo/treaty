@@ -68,7 +68,7 @@ def error_of(env: dict[str, object]) -> dict[str, object]:
 
 
 def test_print_in_a_handler_goes_to_stderr_with_a_warning() -> None:
-    code, out, err = run(["chatty"])
+    code, out, err = run(["chatty", "--verbose"])
     env = json.loads(out)  # exactly one JSON document: nothing printed ahead of it
     spec_validator("response-envelope").validate(env)
     assert code == 0 and env["data"] == {"status": "ok"}
@@ -96,7 +96,7 @@ def test_stderr_discarded_still_yields_the_envelope() -> None:
 
 def test_stdout_discarded_loses_no_log_line() -> None:
     """1>/dev/null; JSON forced, because Windows reports NUL as a terminal"""
-    proc = tool(["chatty", "--format", "json"], {}, stdout=subprocess.DEVNULL)
+    proc = tool(["chatty", "--format", "json", "--verbose"], {}, stdout=subprocess.DEVNULL)
     lines = proc.stderr.splitlines()
     assert proc.returncode == 0 and "initialized" in lines
     logged = json.loads(lines[-1])
@@ -108,7 +108,7 @@ def test_stdout_discarded_loses_no_log_line() -> None:
 
 
 def test_log_is_plain_text_in_plain_mode() -> None:
-    code, _, err = run(["chatty", "--format", "plain"])
+    code, _, err = run(["chatty", "--format", "plain", "--verbose"])
     assert code == 0 and "connecting host=db.example.com\n" in err
 
 
@@ -117,7 +117,7 @@ def test_log_is_plain_text_in_plain_mode() -> None:
 
 def test_log_redacts_declared_secrets_and_credential_names() -> None:
     code, env, err = envelope(
-        ["login", "--api-token-from-env", "TOKEN"], env={"TOKEN": "sk-live-123456"}
+        ["login", "--api-token-from-env", "TOKEN", "--verbose"], env={"TOKEN": "sk-live-123456"}
     )
     assert code == 0 and data_of(env) == {"logged_in": True}
     assert "sk-live-123456" not in err and "abc" not in err

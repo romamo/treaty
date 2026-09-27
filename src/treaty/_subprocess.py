@@ -34,6 +34,7 @@ from ._session import Session
 from ._signals import Cancelled, CancelSignal
 from ._timeout import Timeout
 from ._values import ExitCodeName
+from ._verbosity import trace
 
 Argv = Sequence[str | os.PathLike[str]]
 """One program and its arguments: a list or tuple, never a single string"""
@@ -256,6 +257,8 @@ class Processes:
             duration_ms=int((time.perf_counter() - started) * 1000),
             stage=stage,
         )
+        for argv, code in zip(argvs, codes, strict=True):
+            trace("child exited", argv=list(argv), returncode=code, duration_ms=done.duration_ms)
         if check and done.returncode != 0:
             raise CliExit(
                 ExitCodeName("GENERAL_ERROR"),

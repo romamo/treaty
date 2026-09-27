@@ -173,6 +173,33 @@ _FIXED_GLOBAL_FLAGS: dict[str, object] = {
         "request_id and timestamp, duration_ms is 0, and volatile data fields are dropped",
     },
     **SECURITY_FLAGS,
+    "quiet": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Write nothing on stderr, not even errors; the envelope carries them",
+    },
+    "verbose": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Write info and progress lines on stderr even off a terminal or under "
+        "CI, where only errors and warnings are written",
+    },
+    "debug": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Write the framework's trace on stderr too: config resolution, HTTP "
+        "requests, child processes, locks, and the audit log, secrets redacted",
+    },
+    "warnings-as-errors": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Exit 1 with WARNINGS_AS_ERRORS when the command succeeds with any "
+        "warning; the warnings and data stay in the response",
+    },
     "help": {
         "type": "boolean",
         "required": False,
