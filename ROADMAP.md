@@ -117,6 +117,14 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   streams, and `--stable-output`; audit rules `stable-order`, `binary-output`, and
   `field-limits`. Breaking: array order, relative `Path` output, `list[T] | None` in
   outputs, `Meta.request_id` and `timestamp` optional
+- 1.0 plan, config layer (`plans/1.0/02-config-layer.md`): `App(settings=)` read from
+  `<APP>_<FIELD>`, `--config` or the project and user TOML files, and defaults;
+  `--context`, `--no-config`, `--show-config`, `--instance-id`; `meta.config_sources`,
+  `meta.effective_config_hash`, `meta.context`, `meta.instance_id`; `App(init=)` with the
+  `init` built-in and `INIT_REQUIRED`; audit rules `settings-declared`, `env-prefix`, and
+  `init-isolated`. Breaking: `TREATY_FORMAT`, `TREATY_MAX_OUTPUT_BYTES`,
+  `TREATY_MAX_STDIN_BYTES`, `TREATY_STATE_DIR` are now `<APP>_*` (`<APP>_STATE_DIR` names
+  the directory itself), `Ctx.config` is private, and every config write is locked
 
 ## 0.1.x: after the first minor release
 

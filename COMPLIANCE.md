@@ -7,7 +7,8 @@ hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declar
 06, pagination; 07, I/O and streams; 08, auth and scopes; 09, async jobs and config
 writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048), and
 re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039), then updated for
-the 1.0 plan's reserved names, response metadata (01), and output data contract (05).
+the 1.0 plan's reserved names, response metadata (01), output data contract (05), and
+config layer (02).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -21,15 +22,15 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 80 | 24 | 55 | **58%** |
+| Level 3: full spec | 159 | 87 | 22 | 50 | **62%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 79 | 52 | 10 | 17 | **72%** |
+| Framework-automatic (F) | 79 | 54 | 9 | 16 | **74%** |
 | Command contract (C) | 30 | 15 | 8 | 7 | **63%** |
-| Opt-in (O) | 50 | 13 | 6 | 31 | **32%** |
+| Opt-in (O) | 50 | 18 | 5 | 27 | **41%** |
 
 ## Open mandatory requirements
 
@@ -68,7 +69,7 @@ open.
 | [REQ-F-025](../cli-agent-ergonomics/requirements/f-025-tool-trace-id-environment-variable-propagation.md) | TOOL_TRACE_ID Environment Variable Propagation | P2 | 3 | Partial | `ctx.run` children inherit `TOOL_TRACE_ID`; `ctx.log`, plain error lines, and crash headers on stderr carry the trace; the audit log criterion waits on F-026 |
 | [REQ-F-026](../cli-agent-ergonomics/requirements/f-026-append-only-audit-log.md) | Append-Only Audit Log | P2 | 3 | Not started | No append-only audit log (`treaty audit` is a static linter) |
 | [REQ-F-027](../cli-agent-ergonomics/requirements/f-027-cwd-in-response-meta.md) | CWD in Response Meta | P2 | 3 | Done | `meta.cwd` on every response, the logical `PWD` when it names the same directory; `project_root=` markers give `meta.project_root` and `ctx.project_root`; audit rule `project-root` |
-| [REQ-F-028](../cli-agent-ergonomics/requirements/f-028-config-source-tracking-in-response-meta.md) | Config Source Tracking in Response Meta | P1 | 3 | Not started | No config layer, so no `meta.config_sources` |
+| [REQ-F-028](../cli-agent-ergonomics/requirements/f-028-config-source-tracking-in-response-meta.md) | Config Source Tracking in Response Meta | P1 | 3 | Done | `meta.config_sources` (absolute paths of the files read, highest first; `[]` when none) and `meta.effective_config_hash` (12 hex of sha256 over the merged `App(settings=)`) on every response, errors and help included; without `settings=` no file is read and the hash is that of `{}` |
 | [REQ-F-029](../cli-agent-ergonomics/requirements/f-029-auto-update-suppression-in-non-interactive-mode.md) | Auto-Update Suppression in Non-Interactive Mode | P1 | 3 | Partial | Holds only because treaty never checks for updates; no suppression hook for app authors |
 | [REQ-F-030](../cli-agent-ergonomics/requirements/f-030-child-process-session-tracking.md) | Child Process Session Tracking | P2 | 3 | Partial | `ctx.run` children are tracked and stopped on signal or timeout; no session tracking file |
 | [REQ-F-031](../cli-agent-ergonomics/requirements/f-031-sigterm-forwarding-to-tracked-children.md) | SIGTERM Forwarding to Tracked Children | P2 | 3 | Done | SIGTERM or SIGINT sends SIGTERM to each tracked child's process group, SIGKILL after 2 s, before the `CANCELLED` envelope |
@@ -113,10 +114,10 @@ open.
 | [REQ-F-070](../cli-agent-ergonomics/requirements/f-070-atomic-write-via-rename.md) | Atomic Write via Rename | P1 | 3 | Done | `write_atomic` (temp file in the target's directory, fsync, rename, cleanup on failure) for idempotency records, config writes, and `--output` |
 | [REQ-F-071](../cli-agent-ergonomics/requirements/f-071-file-descriptor-leak-prevention.md) | File Descriptor Leak Prevention | P1 | 3 | Done | File descriptors are non-inheritable (PEP 446); `ctx.run` children inherit only stdin, stdout, and stderr (`close_fds` default) |
 | [REQ-F-072](../cli-agent-ergonomics/requirements/f-072-lf-line-ending-enforcement.md) | LF Line Ending Enforcement | P1 | 3 | Done | `App.main` opens stdout with `newline="\n"` and reconfigures stderr the same way; a subprocess test (run on Windows CI) finds no `\r` in results, help, errors, or logs |
-| [REQ-F-073](../cli-agent-ergonomics/requirements/f-073-env-var-namespace-prefix.md) | Environment Variable Namespace Prefix | P1 | 3 | Partial | Env vars prefixed `TREATY_`, not per tool; unprefixed `CI` is read |
+| [REQ-F-073](../cli-agent-ergonomics/requirements/f-073-env-var-namespace-prefix.md) | Environment Variable Namespace Prefix | P1 | 3 | Partial | Every variable read is `<APP>_*` (`TREATY_*` gone, 02-D2); unprefixed only `CI`, `NO_COLOR`, `TERM`, `HOME`, `XDG_*`, CI detection, and `TOOL_TRACE_ID`; `--help` lists them under Environment and the manifest's global flags name theirs; no plugins, so the `env-prefix` audit rule warns on handlers reading unprefixed names. Open: the manifest schema has no `environment` key (02-D1) |
 | [REQ-F-074](../cli-agent-ergonomics/requirements/f-074-json-null-absent-empty-convention.md) | JSON Null/Absent/Empty Convention | P1 | 3 | Done | Output schemas list every dataclass key as `required` (nullable as `anyOf` null); `list`/`tuple`/`dict` `\| None` in an output type is a `RegistrationError`; `""` versus `null` is a documented convention, not checked |
 | [REQ-F-075](../cli-agent-ergonomics/requirements/f-075-subcommand-additive-stability.md) | Subcommand Additive Stability | P1 | 3 | Not started | No deprecation metadata |
-| [REQ-F-076](../cli-agent-ergonomics/requirements/f-076-first-run-init-isolation.md) | First-Run Init Isolation | P1 | 3 | Partial | No first-run work; no `init` built-in or INIT_REQUIRED helper |
+| [REQ-F-076](../cli-agent-ergonomics/requirements/f-076-first-run-init-isolation.md) | First-Run Init Isolation | P1 | 3 | Done | Treaty does no first-run work (config reads create nothing; the state dir is made by a keyed run with structured `STATE_*` errors); `App(init=)` adds an idempotent `init` built-in (`already_initialized`), `INIT_REQUIRED` (exit 4, `fix_command`) on other commands until it ran, `INIT_FAILED` with `context.reason` permissions, network, disk, or io; `init-isolated` audit rule |
 | [REQ-F-077](../cli-agent-ergonomics/requirements/f-077-telemetry-non-blocking.md) | Telemetry Non-Blocking | P2 | 3 | Done | No network code or telemetry |
 | [REQ-F-078](../cli-agent-ergonomics/requirements/f-078-retry-count-in-response-meta.md) | Retry Count in Response Meta | P2 | 3 | Done | `retry=Retry(...)` with `ctx.retry`, `--retries`, `--retry-delay`; `meta.retries` when above 0; exhaustion exits the declared code with `retryable: false` and `retries_exhausted`; the timeout bounds every attempt; audit rule `retry-declared` |
 | [REQ-F-079](../cli-agent-ergonomics/requirements/f-079-global-option-scope.md) | Global Option Scope | P1 | 3 | Done | Root `flags` map; colliding command flags fail at registration, including names reserved for 1.0 features, which exit 2 `RESERVED_FLAG` until they land |
@@ -174,8 +175,8 @@ open.
 | [REQ-O-012](../cli-agent-ergonomics/requirements/o-012-heartbeat-interval-flag.md) | --heartbeat-interval Flag | P2 | 3 | Not started | No `--heartbeat-interval` |
 | [REQ-O-013](../cli-agent-ergonomics/requirements/o-013-schema-output-schema-flag.md) | --schema / --output-schema Flag | P1 | 3 | Done | `--schema`, the `--print-schema` alias, and `<cmd> --output-schema` (the `data` schema in an envelope); per-field stability tiers have no criterion or schema field |
 | [REQ-O-014](../cli-agent-ergonomics/requirements/o-014-schema-version-compatibility-flag.md) | --schema-version Compatibility Flag | P2 | 3 | Done | `compat={"1.4": shim}` served by `--schema-version MAJOR` (argv global, `schema_version` in JSON); `SCHEMA_DEPRECATED` warning; `SCHEMA_VERSION_UNSUPPORTED` exit 2; `<cmd> --schema` shows `schema_version` and `min_schema_version` |
-| [REQ-O-015](../cli-agent-ergonomics/requirements/o-015-show-config-flag.md) | --show-config Flag | P1 | 3 | Not started | No `--show-config` |
-| [REQ-O-016](../cli-agent-ergonomics/requirements/o-016-no-config-flag.md) | --no-config Flag | P1 | 3 | Not started | No `--no-config` |
+| [REQ-O-015](../cli-agent-ergonomics/requirements/o-015-show-config-flag.md) | --show-config Flag | P1 | 3 | Done | `--show-config` anywhere, also at the root: `data.effective_config` (secret-named fields `[REDACTED]`), per-key `sources` (`env:VAR`, `file:/abs`, `default`), `precedence_order` (`env-vars`, each file, `defaults`); JSON in every mode |
+| [REQ-O-016](../cli-agent-ergonomics/requirements/o-016-no-config-flag.md) | --no-config Flag | P1 | 3 | Done | `--no-config` reads no file whatever exists; `<APP>_<FIELD>` still applies; `meta.config_sources` is `[]`; listed under Global flags in every command's `--help` |
 | [REQ-O-017](../cli-agent-ergonomics/requirements/o-017-cwd-root-flag.md) | --cwd / --root Flag | P2 | 3 | Not started | No `--cwd` |
 | [REQ-O-018](../cli-agent-ergonomics/requirements/o-018-no-cache-and-cache-ttl-flags.md) | --no-cache and --cache-ttl Flags | P3 | 3 | Not started | No cache flags |
 | [REQ-O-019](../cli-agent-ergonomics/requirements/o-019-proxy-and-no-proxy-flags.md) | --proxy and --no-proxy Flags | P2 | 3 | Not started | No `--proxy`/`--no-proxy` |
@@ -183,7 +184,7 @@ open.
 | [REQ-O-021](../cli-agent-ergonomics/requirements/o-021-confirm-destructive-flag.md) | --confirm-destructive Flag | P0 | 2 | Done | Unconfirmed destructive runs exit 2 with the preview and the `would_affect` summary; `--schema` has `requires_confirmation: true` |
 | [REQ-O-022](../cli-agent-ergonomics/requirements/o-022-secret-from-env-secret-from-file-flags.md) | --secret-from-env / --secret-from-file Flags | P1 | 3 | Done | `--x-from-env` and `--x-from-file` |
 | [REQ-O-023](../cli-agent-ergonomics/requirements/o-023-no-injection-protection-flag.md) | --no-injection-protection Flag | P3 | 3 | Not started | No trust tagging flag |
-| [REQ-O-024](../cli-agent-ergonomics/requirements/o-024-context-config-override-flag.md) | --context / --config Override Flag | P1 | 3 | Not started | No `--config`/`--context` |
+| [REQ-O-024](../cli-agent-ergonomics/requirements/o-024-context-config-override-flag.md) | --context / --config Override Flag | P1 | 3 | Done | `--config PATH` (or `<APP>_CONFIG`; TOML, or JSON by suffix) is the only file read and the write target of config commands; `--context NAME` (or `<APP>_CONTEXT`, else the file's `current_context`) overlays `[contexts.NAME]`, `meta.context`; an unknown one exits 2 `CONTEXT_UNKNOWN`; runs share no state |
 | [REQ-O-025](../cli-agent-ergonomics/requirements/o-025-warnings-as-errors-flag.md) | --warnings-as-errors Flag | P3 | 3 | Not started | No warn API, so no `--warnings-as-errors` |
 | [REQ-O-026](../cli-agent-ergonomics/requirements/o-026-tool-doctor-built-in-command.md) | tool doctor Built-In Command | P1 | 3 | Not started | No `doctor` built-in |
 | [REQ-O-027](../cli-agent-ergonomics/requirements/o-027-tool-cleanup-built-in-command.md) | tool cleanup Built-In Command | P2 | 3 | Not started | No `cleanup` built-in |
@@ -195,13 +196,13 @@ open.
 | [REQ-O-033](../cli-agent-ergonomics/requirements/o-033-headless-and-token-env-var-flags-for-auth-commands.md) | --headless and --token-env-var Flags for Auth Commands | P0 | 2 | Done | Login commands get `--headless` and `--token-env-var NAME`; no terminal implies headless; the token reaches `ctx.token`, redacted; a missing one exits 4 with `auth_methods` |
 | [REQ-O-034](../cli-agent-ergonomics/requirements/o-034-tool-generate-skills-built-in-command.md) | tool generate-skills Built-In Command | P2 | 3 | Not started | No skill generation |
 | [REQ-O-035](../cli-agent-ergonomics/requirements/o-035-tool-mcp-validate-built-in-command.md) | tool mcp-validate Built-In Command | P2 | 3 | Not started | No MCP drift check |
-| [REQ-O-036](../cli-agent-ergonomics/requirements/o-036-instance-id-flag-for-agent-state-namespacing.md) | --instance-id Flag for Agent State Namespacing | P1 | 3 | Not started | No `--instance-id` |
+| [REQ-O-036](../cli-agent-ergonomics/requirements/o-036-instance-id-flag-for-agent-state-namespacing.md) | --instance-id Flag for Agent State Namespacing | P1 | 3 | Done | `--instance-id` or `<APP>_INSTANCE_ID` puts the user config at `<config home>/<app>/instances/<id>/config.toml` and state under `instances/<id>` (XDG locations, not `~/.tool/instances/`); `meta.instance_id`; every config write is locked, so concurrent writes go one after another |
 | [REQ-O-037](../cli-agent-ergonomics/requirements/o-037-unmask-flag-for-high-entropy-fields.md) | --unmask Flag for High-Entropy Fields | P2 | 3 | Not started | No entropy masking |
 | [REQ-O-038](../cli-agent-ergonomics/requirements/o-038-heartbeat-ms-flag-for-long-running-commands.md) | --heartbeat-ms Flag for Long-Running Commands | P1 | 3 | Done | `heartbeat=True` adds `--heartbeat-ms` (10 s default, `0` off); lines are `{"status":"running","heartbeat":true,"elapsed_ms":...}`, the final envelope has no `heartbeat` field |
 | [REQ-O-039](../cli-agent-ergonomics/requirements/o-039-input-file-flag-for-stdin-commands.md) | --input-file Flag for Stdin Commands | P1 | 3 | Done | `stdin_input=True` adds `--input-file` (any size, `-` for stdin); over-cap stdin exits 2 with `STDIN_TOO_LARGE` and a `hint`; `exec` has it too |
 | [REQ-O-040](../cli-agent-ergonomics/requirements/o-040-no-follow-symlinks-flag-for-traversal-commands.md) | --no-follow-symlinks Flag for Traversal Commands | P1 | 3 | Not started | No `--no-follow-symlinks`/`--max-depth` |
 | [REQ-O-041](../cli-agent-ergonomics/requirements/o-041-tool-manifest-built-in-command.md) | tool manifest Built-In Command | P1 | 3 | Partial | `manifest` built-in with etag; no `manifest --etag` or `meta.not_modified` |
-| [REQ-O-042](../cli-agent-ergonomics/requirements/o-042-output-format-env-var-default.md) | Output Format Environment Variable Default | P2 | 3 | Partial | `TREATY_FORMAT` honored; not tool-prefixed or listed in help |
+| [REQ-O-042](../cli-agent-ergonomics/requirements/o-042-output-format-env-var-default.md) | Output Format Environment Variable Default | P2 | 3 | Done | `<APP>_FORMAT` defaults `--format`, which wins; a bad value fails as the same `--format` value (exit 2, same code and context, plus `source`); `_FORMAT` and `FORMAT` are ignored; `--help` and the manifest name the variable |
 | [REQ-O-043](../cli-agent-ergonomics/requirements/o-043-agents-md-content-spec.md) | AGENTS.md Required Content | P1 | 3 | Not started | AGENTS.md lacks required sections; `treaty init` generates none |
 | [REQ-O-044](../cli-agent-ergonomics/requirements/o-044-noninteractive-install-command.md) | Non-Interactive Install Command Documentation | P1 | 3 | Partial | AGENTS.md has an install section; heading and app scaffold do not match the spec |
 | [REQ-O-045](../cli-agent-ergonomics/requirements/o-045-integration-artifact-version-declaration.md) | Integration Artifact Version Declaration | P1 | 3 | Partial | MCP adapter generated in-process; no version in static artifacts |

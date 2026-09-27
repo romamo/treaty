@@ -147,14 +147,30 @@ by an existence check (`if not path.exists()`), with the fix "move it into `App(
 
 ## Tasks
 
-- [ ] `_env.py`: `app_var`, `KNOWN`; replace the four `TREATY_*` reads; `<APP>_FORMAT` error parity; `--help` names it
-- [ ] Audit rule `env-prefix` with generated rename fix
-- [ ] `App(settings=)`, `_settings.py` layers and coercion, settings injection in `_resources.py`, `CONFIG_INVALID`
-- [ ] `meta.config_sources` and `meta.effective_config_hash` on every envelope
-- [ ] Global flags `--config`, `--context`, `--no-config` in `split_globals` and manifest `flags`; `meta.context`; `--config` as the write target
-- [ ] `--show-config` with sources, precedence, and redaction
-- [ ] `--instance-id`, `<APP>_INSTANCE_ID`, namespaced `user_config` and `state_dir`, `meta.instance_id`; lock local config writes
-- [ ] Make `Ctx.config` private
-- [ ] `Init` protocol, `init` built-in, `INIT_REQUIRED` and `INIT_FAILED`, audit rule `init-isolated`
-- [ ] Spec PR for manifest `environment` (02-D1), then emit it
-- [ ] Update examples, scaffold, tutorial, COMPLIANCE rows, README, HANDOFF, ROADMAP; changelog under Breaking
+- [x] `_env.py`: `app_var`, `KNOWN`; replace the four `TREATY_*` reads; `<APP>_FORMAT` error parity; `--help` names it:
+  `<APP>_STATE_DIR` names the state directory itself, not a parent of `<app>/`
+- [x] Audit rule `env-prefix` with generated rename fix
+- [x] `App(settings=)`, `_settings.py` layers and coercion, settings injection in `_resources.py`, `CONFIG_INVALID`:
+  Settings fields take the built-in types only (no `app.scalar` classes: the class is
+  checked at `App()`, before scalars register); an env array is comma-separated. Added
+  audit rule `settings-declared` for handlers that parse TOML themselves
+- [x] `meta.config_sources` and `meta.effective_config_hash` on every envelope:
+  Settings are read in `_route` before routing, not in `_Run.execute`, so help, schema,
+  and errors carry them too
+- [x] Global flags `--config`, `--context`, `--no-config` in `split_globals` and manifest `flags`; `meta.context`; `--config` as the write target:
+  A `--config` file that does not exist yet reads as empty (a fresh session's file, which
+  its first write creates); an unknown context is `CONTEXT_UNKNOWN`
+- [x] `--show-config` with sources, precedence, and redaction
+- [x] `--instance-id`, `<APP>_INSTANCE_ID`, namespaced `user_config` and `state_dir`, `meta.instance_id`; lock local config writes:
+  The session temp root (09) does not exist yet; it takes the same segment when it lands
+- [x] Make `Ctx.config` private (`Ctx._config_file`)
+- [x] `Init` protocol, `init` built-in, `INIT_REQUIRED` and `INIT_FAILED`, audit rule `init-isolated`:
+  Simplified: `Init.run` returns None, so there is no `InitResult`; the built-in answers
+  `{effect, initialized, already_initialized}`. A non-`OSError` from `run` is a handler
+  crash; `OSError` reasons are `permissions`, `network`, `disk`, and `io`
+- [ ] Spec PR for manifest `environment` (02-D1), then emit it. Not done: the spec
+  checkout is read-only here. Until then `--help` lists every variable under Environment
+  and each global flag's manifest description names its variable; F-073 stays Partial
+- [x] Update examples, scaffold, tutorial, COMPLIANCE rows, README, HANDOFF, ROADMAP; changelog under Breaking:
+  No changelog file exists yet (15 creates it); the breaking changes are listed in the
+  ROADMAP entry. Examples and scaffold needed no change

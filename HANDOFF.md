@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 952 passed |
+| `uv run pytest` | 995 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -263,6 +263,19 @@ The two do not share code.
   `_Run.stable_all` holds the argv flag and `_Run.stable` the current envelope's (an exec
   line or MCP call may set `stable_output` for itself). `Meta.request_id` and
   `Meta.timestamp` are None under it and left out of `meta`
+- **Settings are read once per run, before routing** (`_Run.load_settings`, from
+  `_settings.options` and `resolve`), so every envelope, help and errors included, carries
+  `config_sources` and `effective_config_hash` from `Resolved.meta()`. A bad file answers
+  every path with `CONFIG_INVALID`. The settings class is not a resource: `build_command`
+  gets it as `provided`, `resource_graph` skips it, and `Resolver` starts with its value
+  cached. `App.call` and MCP read `<APP>_CONFIG`, `<APP>_CONTEXT`, `<APP>_INSTANCE_ID`
+- **Every variable treaty reads is `_env.app_var(app, key)`**; `_env.KNOWN` lists the
+  framework's own, and `App.environment()` adds settings fields and secret defaults for the
+  Environment section of `--help`. Global flag help rows come from the manifest's root
+  `flags` (`_help.global_rows`), so the two cannot drift
+- **`App.builtins`** is every path `_register_builtins` added (including `init` under
+  `App(init=)`); the audit skips them and the `INIT_REQUIRED` gate in `_invoke` lets them
+  through
 - **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
   the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
 
@@ -294,7 +307,10 @@ src/treaty/
   _help.py       plain-mode help renderer (root, group, command)
   _idempotency.py  IdempotencyKey VO, per-key locked record store, state dir lookup
   _manifest.py   build_manifest(), command_entry(), command_schema(), etag
-  _mode.py       OutputMode resolution (--format, TREATY_FORMAT, CI, tty)
+  _mode.py       OutputMode resolution (--format, <APP>_FORMAT, CI, tty)
+  _env.py        app_var(): the <APP>_ prefix, KNOWN framework variables, UNPREFIXED list
+  _settings.py   App(settings=): layered read, contexts, --show-config data, CONFIG_INVALID
+  _init.py       Init protocol, the init built-in, INIT_REQUIRED and INIT_FAILED
   _plain.py      plain fallback: flat key: value lines for commands without plain=
   _parse.py      globals, path routing, per-command parsing, mapping builder, raw payload
   _schema.py     annotation to draft-07 schema, to_jsonable()
@@ -310,7 +326,7 @@ src/treaty/
   _signals.py    SIGINT/SIGTERM handlers, Cancellation (armed windows, held signals)
   _timeout.py    Timeout VO, call_with_timeout()
   _types.py      annotation classification shared by _flags and _schema
-  _values.py     CommandPath, ExitCodeName, ExitCode, Scope, Etag
+  _values.py     CommandPath, ExitCodeName, ExitCode, Scope, Etag, InstanceId
 examples/        deployctl.py (destructive, raw payload, async job, config write),
                  slowctl.py (timeout, cleanup),
                  authctl.py (credentials, login)
@@ -320,8 +336,9 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 ## Execution path
 
-1. `split_globals` strips `--format`, `--help`, `--schema`
-2. `resolve_mode` picks plain or JSON
+1. `split_globals` strips `--format`, `--help`, `--schema`, and the other globals
+2. `resolve_mode` picks plain or JSON; `load_settings` reads the config layers, and
+   `--show-config` answers here
 3. `resolve_path` consumes tokens by longest known prefix
 4. `parse_command_args` (argv) or `build_from_mapping` (exec, raw payload) yields an
    `Invocation`: args dataclass plus `timeout` and `confirmed`. Field errors are collected
@@ -338,16 +355,17 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
 F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-022, F-023, F-024,
-F-025 (not the audit log), F-027, F-031, F-034, F-040, F-044, F-045 (paths),
+F-025 (not the audit log), F-027, F-028, F-031, F-034, F-040, F-044, F-045 (paths),
 F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-064, F-065, F-069,
-F-070, F-072, F-074, F-078,
+F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
 C-001, C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
-C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-007, O-013, O-014, O-021, O-022, O-032, O-033, O-039, O-041,
-O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
+C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-007, O-013, O-014, O-015, O-016, O-021, O-022,
+O-024, O-032, O-033, O-036, O-039, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),
-`--output-schema`, `--schema-version`, `--stable-output`, `--max-output`, and per
+`--output-schema`, `--schema-version`, `--stable-output`, `--max-output`, `--config`,
+`--context`, `--no-config`, `--show-config`, `--instance-id`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
@@ -371,6 +389,9 @@ payload schema, and the help all iterate it. A new framework flag is one row plu
   check the diff after autofix
 - `tests/fixture_audit_app.py` is a deliberately flawed app; the audit tests count its
   findings exactly, so adding a rule means updating `failed == 9` there
+- Apps under test pass `env={}`, so no user config file is found; a project file needs a
+  real process with its own `cwd` (see `tests/test_config_layer.py`), since the project
+  file is found from `meta.cwd`
 - The kit resolves a `command` path containing a slash against the profile's directory;
   `_profile.build_profile` makes a relative `--command` absolute (with `absolute()`, so a
   venv's `bin/python` symlink survives) and keeps the scaffold's `./<name>` launcher,
