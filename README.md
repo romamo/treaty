@@ -77,6 +77,29 @@ class Window:
             raise ParseError("end is before start", context={"field": "end"})
 ```
 
+A rule the manifest can show is better declared than coded: `requires=` on the command
+lists `RequiredWhen("format", "csv", then=("separator",))`, `Excludes("output",
+prohibited=("stdout",))`, and `DefaultWhenAbsent("output", target="level", default=9)`.
+They are checked in phase 1 on what the caller passed, before `__post_init__`, on argv,
+`exec`, `App.call`, and MCP alike, and appear in the manifest and `--schema` as `requires`,
+so an agent knows the combination before its first call. The `conditional-rules` audit
+rule spots a `__post_init__` that compares one field and raises about another.
+
+`--validate-only` on any command runs phase 1 and stops: exit `0` with `data: null` and
+`meta.validation_only: true`, or exit `2` listing every error. The credential gate, the
+idempotency store, and the handler never run.
+
+An identifier field declares its shape: `Flag(pattern_type="alphanumeric_id")` (or `uuid`,
+`semver`, `url`) without registering a scalar, or `pattern="[a-z0-9-]{3,64}"`; the error
+names the flag and the pattern. The `id-pattern` audit rule warns about `str` fields named
+`id`, `*_id`, `slug`, or `ref` with neither. `Flag(from_stdin=True)` lets `--id -` read the
+value from stdin, as in `tool get --format id | tool delete --id -`; an array takes one
+item per line, and empty stdin exits `2` with `EMPTY_STDIN`.
+
+Handlers, `cleanup=`, `cursor_check=`, and resource `acquire` are plain `def`: treaty
+runs no event loop, so `async def` is a `RegistrationError` instead of a body that never
+runs.
+
 A `ParseError` or `Exit.ARG_ERROR` raised by a handler or a resource's `acquire` comes
 after user code ran, so it exits `1` with `VALIDATION_AFTER_START` and `phase: execution`,
 keeping its message, context, and suggestion. Move the check into `__post_init__` to get
@@ -155,6 +178,14 @@ Any option repeated with a different value exits `2` naming the option; repeatin
 value is accepted, and array flags accumulate. A negative number such as `-5` is a value,
 not a flag.
 
+A command that forwards its trailing arguments to a child declares
+`option_placement="strict"`: options, global or local, go before the first positional, and
+that positional and every token after it reach the positionals verbatim, the last of them a
+`tuple[str, ...]`. So `tool run --format json ./script --child-flag` hands `--child-flag`
+to the script, and `tool run ./script --format plain` forwards `--format plain` instead of
+parsing it. Every manifest entry carries `option_placement` (`any` by default), and the
+`option-placement` audit rule flags a variadic positional passed to `ctx.run` under `any`.
+
 A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
 words resolve to in `context.command`, and puts the corrected order in `suggestion`. Plain
 mode prints every error's suggestion as a final `hint:` line on stderr.
@@ -172,6 +203,22 @@ app.redirect("deploy.undo", to="deploy.rollback")  # reason="renamed", permanent
 arguments under the new path, ready to run as is. In `exec` and MCP the replacement is the
 new path. The target lists `deploy.undo` in its manifest `aliases`; registering a redirect
 to a missing command or from a live path is a `RegistrationError`.
+
+Before a command or flag goes, it is deprecated for at least a minor release:
+
+```python
+@app.command("old-sub", ..., introduced_in="1.0.0",
+             deprecated=Deprecated("1.1.0", replacement="new-sub", removed_in="2.0.0"))
+```
+
+It keeps working, and every run writes
+`{"level":"warn","code":"DEPRECATED","message":"...","replacement":"tool new-sub"}` to
+stderr and a `DEPRECATED` warning to the envelope; `Flag(deprecated=Deprecated(...))` does
+the same with `DEPRECATED_FLAG` when the flag is passed. `--schema` lists `introduced_in`,
+`deprecated_in`, `replacement`, and `removed_in`. `treaty audit app:cli --baseline
+manifest.json` compares against the last release's `manifest` output and fails on a
+command, flag, or exit code that vanished without a redirect or a deprecating release,
+unless the major version went up.
 
 ## Output formats
 
@@ -827,7 +874,11 @@ class Report:
 
 Declare `supports_raw_payload=True` and the command accepts `--raw-payload '{"name": "x"}'`
 as an alternative to individual flags. The payload is checked against the same field types as
-`exec` lines, and mixing it with individual flags exits `2`.
+`exec` lines, and mixing it with individual flags exits `2`. It and `exec` lines forgive
+what agents write: trailing commas, `//` and `/* */` comments, single quotes, and unquoted
+keys parse to the same value as strict JSON. Anything worse exits `2` with `INVALID_JSON`,
+and `error.corrected_input` holds the repaired JSON when there is one, such as
+`{"env": "prod"}` for `{env prod}`.
 
 ## Schemas
 

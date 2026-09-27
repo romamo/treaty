@@ -136,6 +136,16 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `UNAUTHENTICATED` and a missing scope at run time `PERMISSION_DENIED`; a read-only
   command's `TIMEOUT` is retryable. Help, version, schema, and manifest no longer fail on
   an invalid config file
+- 1.0 plan, argument grammar (`plans/1.0/04-argument-grammar.md`): `pattern_type=` on
+  `Flag` and `Arg`, `requires=` with `RequiredWhen`, `Excludes`, and `DefaultWhenAbsent`,
+  `option_placement="strict"` forwarding the tail of argv, `from_stdin=` for `-`,
+  `--validate-only` on every command, JSON5 in `--raw-payload` and `exec` lines with
+  `corrected_input`, and `introduced_in=` and `deprecated=Deprecated(...)` with
+  `treaty audit --baseline`; audit rules `id-pattern`, `conditional-rules`,
+  `option-placement`, and `additive`. Breaking: `async def` handlers, hooks, and acquires
+  are a `RegistrationError`; unparseable JSON input is `INVALID_JSON` instead of
+  `ARG_ERROR` (or `DISPATCH_PARSE_ERROR` for an `exec` line); `validate_only` is a
+  framework key; every manifest entry gains `option_placement`
 
 ## 0.1.x: after the first minor release
 
@@ -176,12 +186,9 @@ matching audit rule so adoption never requires reading the spec.
 
 - The resource-id patterns of REQ-F-045 (`?`, `#`, encoded metacharacters) beyond the
   REQ-C-020 presets, which are all done
-- Conditional argument rules (REQ-C-026) and `option_placement: strict` for commands that
-  forward trailing arguments (REQ-C-027)
 - Multi-step commands with a step manifest and `completed_steps` on timeout and
   cancellation (REQ-C-008)
 - Framework-managed locks with `retry_after_ms` (REQ-F-033): done, `ctx.lock`
-- `--validate-only` (REQ-O-009) and safe-default dry run with `--live` (REQ-O-048)
 - Dependency declarations and a `doctor` built-in (REQ-O-031)
 - Token budget flags `--max-tokens` and `--fields` (REQ-O-049)
 

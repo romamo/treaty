@@ -141,12 +141,30 @@ schema's "exit 3" contradicts it). `--help` lists it through `FLAGS`.
 
 ## Tasks
 
-- [ ] `pattern_type=` on `Flag` and `Arg`; audit rule `id-pattern`
-- [ ] Refuse async handlers, hooks, and acquires; awaitable-result guard in `_invoke`
-- [ ] `_json5.py` with repair pass; `INVALID_JSON` and `corrected_input`
-- [ ] `RequiredWhen`, `Excludes`, `DefaultWhenAbsent`; `_rules.py`; manifest `requires`; audit rule
-- [ ] `option_placement=`; strict split in `_route`; forwarding; audit rule
-- [ ] `from_stdin=` and `EMPTY_STDIN`
-- [ ] `--validate-only` and `meta.validation_only`; conformance profile probe
-- [ ] `introduced_in=`, `Deprecated`, `Flag(deprecated=)`; `treaty audit --baseline` (after 03's `App.redirect`)
-- [ ] Update COMPLIANCE rows, README, HANDOFF, ROADMAP (drop the 0.3.0 bullets done here)
+- [x] `pattern_type=` on `Flag` and `Arg`; audit rule `id-pattern`
+- [x] Refuse async handlers, hooks, and acquires; awaitable-result guard in `_invoke`
+- [x] `_json5.py` with repair pass; `INVALID_JSON` and `corrected_input`. The repair is
+  the same one-pass parser run leniently (bare words, missing `:` or `,`, unclosed
+  brackets); `corrected_input` is a top-level `ErrorDetail` field and also in `context`.
+  An `exec` line that is not JSON is `INVALID_JSON`; a line that is JSON but not a
+  request stays `DISPATCH_PARSE_ERROR`
+- [x] `RequiredWhen`, `Excludes`, `DefaultWhenAbsent`; `_rules.py`; manifest `requires`;
+  audit rule. Rules name flags by their `--` spelling and refuse array flags; a violation
+  stops phase 1 before `__post_init__`, as a missing field does. "Present" is a boolean
+  that is true, or any other value that is not null
+- [x] `option_placement=`; strict split in `_route`; forwarding; audit rule. Simpler than
+  planned: `_parse.strict_argv` inserts `--` before the first positional of a strict
+  command, and the existing `--` handling does the rest
+- [x] `from_stdin=` and `EMPTY_STDIN`. Allowed on any value field but booleans and
+  secrets; a terminal on stdin is `STDIN_IS_TTY`, exit 2
+- [x] `--validate-only` and `meta.validation_only`. No conformance profile probe: the
+  profile schema has no probe kind for it. `meta.validation_only` is on the success
+  envelope only
+- [x] `introduced_in=`, `Deprecated`, `Flag(deprecated=)`; `treaty audit --baseline`
+  (rule `additive`, listed by `treaty rules`). A removal passes when the baseline marked
+  it deprecated (the manifest description of a deprecated command or flag ends in
+  "(deprecated since X; use Y)", since `CommandEntry` has no key for it), when the old
+  command path redirects, or when the major version went up. `Deprecated.replacement`
+  must be a registered command, checked with `fix_commands` in `App.check_fixes`
+- [x] Update COMPLIANCE rows, README, HANDOFF, ROADMAP (drop the 0.3.0 bullets done here).
+  F-075 stays Partial for the manifest keys and the startup check (X6, 04-D2, 04-D3)

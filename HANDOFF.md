@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1050 passed |
+| `uv run pytest` | 1100 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -289,6 +289,22 @@ The two do not share code.
 - **`App.redirect`** keeps `_redirects` (old path to `Moved`) and adds the old path to the
   target's `Command.aliases`; `App.moved` is checked only where a path failed to resolve:
   `_route`'s unknown-command branch, `_call`, and `_exec_lines`
+- **Strict placement is a `--` inserted before routing.** `_parse.strict_argv` finds the
+  path in raw argv (skipping globals), and for an `option_placement="strict"` command puts
+  `--` before its first positional; `split_globals` and `parse_command_args` already stop
+  there, so nothing after it is parsed
+- **`requires=` rules run in `_finish`** (`_rules.check_rules`) on the fields the caller
+  supplied, after the missing check and before defaults fill in; `DefaultWhenAbsent`
+  writes into those values, so `__post_init__` sees the rule's default.
+  `Invocation.given` keeps the supplied names, which `_Run._deprecations` reads for
+  `DEPRECATED_FLAG`
+- **`--validate-only` returns from `_Run.execute` and `_Run.stream`** after `_pin` and
+  the paginated cursor check, before the login token, config file, stdin payload,
+  idempotency store, and handler
+- **JSON input goes through `_json5.loads_forgiving`**: strict first, so valid JSON (and
+  its NaN, digit-limit, and nesting errors) behaves as before; the forgiving parser only
+  runs on a `JSONDecodeError`, and any repair it needs makes the input `INVALID_JSON`
+  with `corrected_input`
 - **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
   the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
 
@@ -311,7 +327,10 @@ src/treaty/
   _command.py    Command record, build_command(), handler signature inspection
   _framework.py  FLAGS: one row per per-command framework flag (parse, JSON, manifest, help)
   _context.py    Ctx handed to handlers (mode, env, timeout, color, headless, log, run, ...)
-  _dispatch.py   DispatchRequest line parser for exec
+  _dispatch.py   DispatchRequest line parser for exec, INVALID_JSON errors
+  _json5.py      loads_strict(), loads_forgiving(): JSON5 input and corrected_input
+  _rules.py      RequiredWhen, Excludes, DefaultWhenAbsent: bound at registration, checked in _finish
+  _deprecation.py  Deprecated: command and flag retirement (REQ-F-075)
   _effect.py     effect contract: registration check and per-run validation
   _envelope.py   Envelope, ErrorDetail, WarningDetail, write_envelope()
   _errors.py     TreatyError family (registration), ParseError, CliExit, Exit factory
