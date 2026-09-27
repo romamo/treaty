@@ -9,6 +9,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from . import __version__
 from ._app import App, NoArgs
 from ._atomic import write_atomic
 from ._audit import ADDITIVE, LOCK_FILE, RULES, AuditReport, Severity, audit, schema_lock
+from ._changelog import ChangelogEntry, diff, dump_changelog, load_changelog, record
 from ._context import Ctx
 from ._errors import Exit, ParseError
 from ._flags import Arg, Flag
@@ -297,6 +299,59 @@ def schema_lock_command(args: SchemaLockArgs, ctx: Ctx) -> SchemaLockOut:
     commands = lock["commands"]
     assert isinstance(commands, dict)
     return SchemaLockOut(effect, str(LOCK_FILE), len(commands))
+
+
+# changelog-add
+
+
+@dataclass(frozen=True, slots=True)
+class ChangelogAddArgs:
+    target: str = Arg(description="Import path of the App object, as module:attribute")
+
+    def __post_init__(self) -> None:
+        check_target(self.target)
+
+
+@dataclass(frozen=True, slots=True)
+class ChangelogAddOut:
+    effect: str
+    changelog: str
+    snapshot: str
+    entry: ChangelogEntry | None
+    """The entry written, None when the manifest is unchanged"""
+
+
+@cli.command(
+    "changelog-add",
+    description="Record the manifest changes since the last snapshot in the app's schema "
+    "changelog, then update the snapshot",
+    danger_level="mutating",
+    exit_codes=["NOT_FOUND", "PRECONDITION"],
+    examples=[("Record this release's schema changes", "treaty changelog-add myapp.cli:app")],
+)
+def changelog_add_command(args: ChangelogAddArgs, ctx: Ctx) -> ChangelogAddOut:
+    """The manifest snapshot ``<app>.manifest.json`` sits beside the changelog (REQ-O-029)"""
+    app = load_app(args.target)
+    path = app.schema_changelog
+    if path is None:
+        raise Exit.PRECONDITION(
+            f"App {app.name} declares no schema_changelog",
+            context={"target": args.target},
+            fix_required="pass App(..., schema_changelog=Path(__file__).parent / "
+            '"schema-changelog.json") and run this again',
+        )
+    snapshot = path.with_name(f"{app.name}.manifest.json")
+    live = app.manifest()
+    entries = load_changelog(path, app.name)
+    if entries and entries[0].etag == live["etag"]:
+        return ChangelogAddOut("noop", str(path), str(snapshot), None)
+    old = read_baseline(snapshot) if snapshot.is_file() else None
+    today = datetime.now(UTC).date()
+    entries, entry = record(entries, diff(old, live), app.version, str(live["etag"]), today)
+    effect = "updated" if path.is_file() else "created"
+    write_atomic(path, dump_changelog(entries), new_mode=0o644)
+    write_atomic(snapshot, json.dumps(live, indent=2, sort_keys=True) + "\n", new_mode=0o644)
+    return ChangelogAddOut(effect, str(path), str(snapshot), entry)
 
 
 # init

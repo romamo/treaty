@@ -577,6 +577,22 @@ def _doctor_fix(app: App) -> Iterator[Finding]:
             )
 
 
+def _schema_changelog(app: App) -> Iterator[Finding]:
+    if app.schema_changelog is None:
+        return
+    latest = app.changelog[0] if app.changelog else None
+    if latest is None or latest.etag != app.manifest()["etag"]:
+        since = "has no entries" if latest is None else f"ends at {latest.version}"
+        yield Finding(
+            "schema-changelog",
+            Severity.WARNING,
+            None,
+            f"the manifest changed since the schema changelog, which {since}, so changelog "
+            "does not tell callers what changed (REQ-O-029)",
+            "uv run treaty changelog-add module:app",
+        )
+
+
 def _required_tools(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         seen: set[str] = set()
@@ -1839,6 +1855,12 @@ RULES: tuple[Rule, ...] = (
         "Every doctor check that can fail gives a fix",
         Severity.ADVICE,
         _doctor_fix,
+    ),
+    Rule(
+        "schema-changelog",
+        "The schema changelog records the current manifest",
+        Severity.WARNING,
+        _schema_changelog,
     ),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),

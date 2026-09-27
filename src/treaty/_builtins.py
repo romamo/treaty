@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Literal
 
 from ._auth import Expired
 from ._cache import cache_dir
+from ._changelog import ChangelogEntry, version_key
 from ._config import local_config, user_config
 from ._context import Ctx
 from ._declare import SideEffect, SideEffectType
@@ -375,6 +376,45 @@ def _state_files(app: App, ctx: Ctx) -> list[dict[str, object]]:
             }
         )
     return files
+
+
+CHANGELOG_PATH = CommandPath("changelog")
+
+
+@dataclass(frozen=True, slots=True)
+class ChangelogArgs:
+    since: str | None = Flag(
+        default=None,
+        pattern_type="semver",
+        description="Only versions after this one, such as the version a caller was built against",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Changelog:
+    entries: list[ChangelogEntry] = Out(ordered=True)
+    """Newest first"""
+
+
+def register_changelog(app: App, entries: tuple[ChangelogEntry, ...]) -> CommandPath:
+    @app.command(
+        CHANGELOG_PATH.value,
+        description="The history of schema changes, newest first: each version's added, "
+        "removed, and changed field paths and whether it breaks callers",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("Every version", f"{app.name} changelog"),
+            ("What changed since 1.0.0", f"{app.name} changelog --since 1.0.0"),
+        ],
+    )
+    def changelog(args: ChangelogArgs, ctx: Ctx) -> Changelog:
+        if args.since is None:
+            return Changelog(list(entries))
+        since = version_key(args.since)
+        return Changelog([e for e in entries if version_key(e.version) > since])
+
+    return CHANGELOG_PATH
 
 
 AUDIT_LOG_PATH = CommandPath("audit-log")

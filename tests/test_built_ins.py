@@ -6,14 +6,17 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
+import pytest
 from conftest import needs_posix_permissions, spec_validator
 from test_network_and_fs import Origin, Proxy, serving
 
-from treaty import App, Check, Ctx, NoArgs, SideEffect, endpoint
+from treaty import App, Check, Ctx, NoArgs, RegistrationError, SideEffect, endpoint
 from treaty._audit import audit
+from treaty._changelog import diff
 from treaty._deps import CheckFn
 
 
@@ -448,3 +451,190 @@ def test_status_is_safe_and_reports_logged_in_with_credentials(tmp_path: Path) -
     assert app.manifest()["commands"]["status"]["danger_level"] == "safe"  # type: ignore[index]
     assert data_of(run(app, ["status"], {"TOKEN": "t"})[1])["logged_in"] is True
     assert data_of(run(app, ["status"])[1])["logged_in"] is False
+
+
+# REQ-O-029
+
+CHANGELOG = [
+    {
+        "version": "1.0.0",
+        "date": "2026-01-10",
+        "breaking": False,
+        "added": ["deploy"],
+        "removed": [],
+        "changed": [],
+        "etag": "sha256:" + "1" * 32,
+    },
+    {
+        "version": "2.0.0",
+        "date": "2026-03-01",
+        "breaking": True,
+        "added": ["deploy.output.deployed_url"],
+        "removed": ["deploy.output.url"],
+        "changed": [],
+        "etag": "sha256:" + "2" * 32,
+    },
+    {
+        "version": "1.1.0",
+        "date": "2026-02-01",
+        "breaking": False,
+        "added": ["deploy.flags.region"],
+        "removed": [],
+        "changed": [],
+        "etag": "sha256:" + "3" * 32,
+    },
+]
+
+
+def changelog_app(path: Path) -> App:
+    return App("chg", version="2.0.0", schema_changelog=path)
+
+
+def test_tool_changelog_format_json_returns_a_valid_json_array_of_version_entries(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "schema-changelog.json"
+    path.write_text(json.dumps(CHANGELOG))
+    code, envelope = run(changelog_app(path), ["changelog"])
+    assert code == 0
+    entries = data_of(envelope)["entries"]
+    assert isinstance(entries, list)
+    assert [e["version"] for e in entries] == ["2.0.0", "1.1.0", "1.0.0"]  # newest first
+
+
+def test_each_entry_includes_version_date_breaking_added_removed_changed(tmp_path: Path) -> None:
+    path = tmp_path / "schema-changelog.json"
+    path.write_text(json.dumps(CHANGELOG))
+    _, envelope = run(changelog_app(path), ["changelog"])
+    for entry in data_of(envelope)["entries"]:  # type: ignore[union-attr]
+        assert {"version", "date", "breaking", "added", "removed", "changed"} <= set(entry)
+
+
+def test_since_1_0_0_returns_only_entries_for_versions_after_1_0_0(tmp_path: Path) -> None:
+    path = tmp_path / "schema-changelog.json"
+    path.write_text(json.dumps(CHANGELOG))
+    _, envelope = run(changelog_app(path), ["changelog", "--since", "1.0.0"])
+    assert [e["version"] for e in data_of(envelope)["entries"]] == ["2.0.0", "1.1.0"]  # type: ignore[union-attr]
+    assert run(changelog_app(path), ["changelog", "--since", "one"])[0] == 2
+
+
+def test_a_malformed_schema_changelog_is_a_registration_error(tmp_path: Path) -> None:
+    path = tmp_path / "schema-changelog.json"
+    for bad in ({"entries": []}, [{"version": "1.0"}], [{**CHANGELOG[0], "date": "soon"}]):
+        path.write_text(json.dumps(bad))
+        with pytest.raises(RegistrationError, match="schema_changelog"):
+            changelog_app(path)
+    assert "changelog" not in App("none", version="1.0.0").manifest()["commands"]  # type: ignore[operator]
+
+
+def deploy_manifest(**flags: dict[str, object]) -> dict[str, object]:
+    return {
+        "commands": {
+            "deploy": {
+                "flags": flags,
+                "exit_codes": {"10": {"name": "TIMEOUT"}},
+                "output_schema": {"type": "object", "properties": {"url": {"type": "string"}}},
+            }
+        }
+    }
+
+
+def test_breaking_changes_are_correctly_flagged_as_breaking_true() -> None:
+    base = deploy_manifest(target={"type": "string", "required": False})
+    optional = deploy_manifest(
+        target={"type": "string", "required": False}, region={"type": "string"}
+    )
+    change = diff(base, optional)
+    assert change.added == ("deploy.flags.region",) and change.breaking is False
+    required = deploy_manifest(
+        target={"type": "string", "required": False},
+        region={"type": "string", "required": True},
+    )
+    assert diff(base, required).breaking is True
+    retyped = deploy_manifest(target={"type": "integer", "required": False})
+    change = diff(base, retyped)
+    assert change.changed == ("deploy.flags.target",) and change.breaking is True
+    removed = deploy_manifest()
+    change = diff(base, removed)
+    assert change.removed == ("deploy.flags.target",) and change.breaking is True
+    assert diff(None, base).added == (
+        "deploy",
+        "deploy.exit_codes.10",
+        "deploy.flags.target",
+        "deploy.output.url",
+    )
+
+
+CHG_MODULE = """
+from dataclasses import dataclass
+from pathlib import Path
+
+from treaty import App, Ctx, Flag
+
+app = App("chg", version="{version}", schema_changelog=Path(__file__).parent / "chg.json")
+
+
+@dataclass(frozen=True, slots=True)
+class Args:
+{fields}
+
+
+@app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
+def deploy(args: Args, ctx: Ctx) -> dict[str, str]:
+    return {{}}
+"""
+
+
+def treaty_cli(cwd: Path, *argv: str) -> tuple[int, dict[str, object]]:
+    done = subprocess.run(
+        [sys.executable, "-c", "from treaty._cli import main; main()", *argv, "--format", "json"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return done.returncode, json.loads(done.stdout)
+
+
+def test_changelog_add_records_the_manifest_diff_and_the_changelog_serves_it(
+    tmp_path: Path,
+) -> None:
+    module = tmp_path / "chgmod.py"
+    target = '    target: str | None = Flag(default=None, description="Where")'
+    module.write_text(CHG_MODULE.format(version="1.0.0", fields=target))
+    code, envelope = treaty_cli(tmp_path, "audit", "chgmod:app", "--all")
+    findings = [f["rule"] for f in data_of(envelope)["next_steps"]]  # type: ignore[union-attr]
+    assert "schema-changelog" in findings
+    code, envelope = treaty_cli(tmp_path, "changelog-add", "chgmod:app")
+    assert code == 0 and data_of(envelope)["effect"] == "created"
+    assert (tmp_path / "chg.manifest.json").is_file()
+    code, envelope = treaty_cli(tmp_path, "changelog-add", "chgmod:app")
+    assert code == 0 and data_of(envelope)["effect"] == "noop"
+    code, envelope = treaty_cli(tmp_path, "audit", "chgmod:app", "--all")
+    findings = [f["rule"] for f in data_of(envelope)["next_steps"]]  # type: ignore[union-attr]
+    assert "schema-changelog" not in findings
+
+    module.write_text(CHG_MODULE.format(version="2.0.0", fields="    pass"))
+    code, envelope = treaty_cli(tmp_path, "changelog-add", "chgmod:app")
+    entry = data_of(envelope)["entry"]
+    assert code == 0 and isinstance(entry, dict)
+    assert entry["version"] == "2.0.0" and entry["breaking"] is True
+    assert entry["removed"] == ["deploy.flags.target"]
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from chgmod import app; app.main()",
+            "changelog",
+            "--since",
+            "1.0.0",
+            "--format",
+            "json",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    entries = json.loads(done.stdout)["data"]["entries"]
+    assert [e["version"] for e in entries] == ["2.0.0"]

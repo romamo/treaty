@@ -51,7 +51,13 @@ from ._auth import (
     scope_set,
 )
 from ._batch import Batch, ItemError
-from ._builtins import register_audit_log, register_cleanup, register_doctor, register_status
+from ._builtins import (
+    register_audit_log,
+    register_changelog,
+    register_cleanup,
+    register_doctor,
+    register_status,
+)
 from ._cache import Cache, CachePolicy, cache_dir
 from ._cap import (
     DEFAULT_CAP,
@@ -62,6 +68,7 @@ from ._cap import (
     StdinCap,
     cap_envelope,
 )
+from ._changelog import load_changelog
 from ._command import (
     DEFAULT_HEARTBEAT_MS,
     Cleanup,
@@ -322,6 +329,7 @@ class App:
         checks: Sequence[CheckFn] = (),
         update_check: UpdateCheck | None = None,
         audit_log: AuditLog | None = DEFAULT_AUDIT_LOG,
+        schema_changelog: str | Path | None = None,
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
@@ -342,11 +350,13 @@ class App:
         Never under CI, off a terminal, with ``<APP>_NO_UPDATE``, or ``--no-update-check``
         (REQ-F-029, REQ-O-020). ``audit_log`` is where every invocation is recorded, a
         ``treaty.AuditLog``; None keeps no log and drops the ``audit-log`` built-in
-        (REQ-F-026, REQ-O-030).
+        (REQ-F-026, REQ-O-030). ``schema_changelog`` is the JSON file ``treaty
+        changelog-add`` writes, shipped with the package; it adds the ``changelog``
+        built-in (REQ-O-029).
 
-        ``doctor``, ``cleanup``, ``status``, and ``audit-log`` are built-ins that yield: an
-        app command or group of the same name replaces it (13-D1). ``manifest``, ``version``, and
-        ``exec`` are reserved."""
+        ``doctor``, ``cleanup``, ``status``, ``changelog``, and ``audit-log`` are built-ins
+        that yield: an app command or group of the same name replaces it (13-D1).
+        ``manifest``, ``version``, and ``exec`` are reserved."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -394,6 +404,10 @@ class App:
         if audit_log is not None and not isinstance(audit_log, AuditLog):
             raise RegistrationError(f"App {name}: audit_log is a treaty.AuditLog, or None")
         self.audit_log = audit_log
+        self.schema_changelog = None if schema_changelog is None else Path(schema_changelog)
+        self.changelog = (
+            () if self.schema_changelog is None else load_changelog(self.schema_changelog, name)
+        )
         self._notifier_hooks: list[Callable[[MutableMapping[str, str]], None]] = []
         self._yielding: set[CommandPath] = set()
         """Built-ins an app command of the same name replaces (13-D1)"""
@@ -1035,6 +1049,8 @@ class App:
         self._yielding.add(register_doctor(self))
         self._yielding.add(register_cleanup(self))
         self._yielding.add(register_status(self))
+        if self.schema_changelog is not None:
+            self._yielding.add(register_changelog(self, self.changelog))
         if self.audit_log is not None:
             self._yielding.add(register_audit_log(self, self.audit_log))
 
