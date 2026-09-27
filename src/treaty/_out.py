@@ -13,7 +13,7 @@ import dataclasses
 import datetime as dt
 import json
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from typing import Any
@@ -32,6 +32,10 @@ class OutSpec:
     """The handler's order is the contract; the array is not sorted"""
     volatile: bool = False
     """Differs between identical calls; left out under ``--stable-output``"""
+    high_entropy: bool | None = None
+    """Masked unless ``--unmask``: True always, False never, None by the name (REQ-F-058)"""
+    external: bool = False
+    """Holds content from outside the tool; ``data`` gets trust tags (REQ-F-035)"""
 
 
 NO_ORDER = OutSpec()
@@ -44,6 +48,8 @@ def Out(
     sort_key: str | None = None,
     ordered: bool = False,
     volatile: bool = False,
+    high_entropy: bool | None = None,
+    external: bool = False,
 ) -> Any:
     """Declare how a field of an output dataclass is written, the output ``Flag``
 
@@ -51,10 +57,18 @@ def Out(
     keeps the handler's order instead (a ranking), also of arrays inside an untyped
     (``object``) value; ``volatile=True`` marks a value that
     differs between identical calls, which ``--stable-output`` leaves out.
+    ``high_entropy=True`` masks the value unless ``--unmask``, ``False`` exempts it (a
+    content hash to compare), and the default masks it when the name says credential.
+    ``external=True`` marks content from outside the tool: when it has a value, ``data``
+    is tagged ``_trusted: false``.
     """
     if sort_key is not None and ordered:
         raise RegistrationError("Out: sort_key orders the array, ordered=True keeps it; pick one")
-    spec = OutSpec(sort_key, ordered, volatile)
+    if high_entropy is not None and not isinstance(high_entropy, bool):
+        raise RegistrationError("Out: high_entropy is True, False, or None (by the name)")
+    if not isinstance(external, bool):
+        raise RegistrationError("Out: external is True or False")
+    spec = OutSpec(sort_key, ordered, volatile, high_entropy, external)
     if default is not MISSING and default_factory is not MISSING:
         raise RegistrationError("Out: pass default or default_factory, not both")
     if default_factory is not MISSING:
@@ -90,6 +104,14 @@ def is_binary(value: object) -> bool:
         and value.get("encoding") == "base64"
         and "value" in value
     )
+
+
+def data_path(path: Sequence[str | int]) -> str:
+    """Where a value sits in the envelope, as warnings name it: ``data.items[3].token``"""
+    out = "data"
+    for key in path:
+        out += f"[{key}]" if isinstance(key, int) else f".{key}"
+    return out
 
 
 def canonical(value: object) -> str:

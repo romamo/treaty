@@ -23,6 +23,7 @@ from ._jobs import Job, descriptor_schema
 from ._mode import Format
 from ._out import NO_ORDER, OutSpec, check_order
 from ._page import DEFAULT_LIMIT, Limit, Page
+from ._protect import check_trust, with_trust_tags
 from ._resources import ResourceSpec, dependency_params, refuse_async, resource_graph
 from ._retry import Retry
 from ._rules import BoundRule, bind_rules
@@ -178,6 +179,8 @@ class Command:
     """``--resume-from STEP`` starts at a step (REQ-O-010)"""
     rollback: Rollback | None = None
     """Undoes completed steps under ``--rollback-on-failure`` (REQ-O-011)"""
+    external: bool = False
+    """``data`` is content from outside the tool: trust-tagged (REQ-F-035)"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -293,6 +296,7 @@ def build_command(
     steps: Sequence[str] = (),
     resumable: bool = False,
     rollback: Rollback | None = None,
+    external: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -452,6 +456,11 @@ def build_command(
     check_order(output_type, str(path), order)
     if ordered:
         output_schema = {**output_schema, "x-ordered": True}
+    if not isinstance(external, bool):
+        raise RegistrationError(f"{path}: external is True or False")
+    check_trust(output_type, str(path), external=external)
+    if external:
+        output_schema = with_trust_tags(output_schema)
     shims = _compat(path, compat or {}, schema_version, output_type, scalars)
     if returns_job:
         output_schema = descriptor_schema(output_schema)
@@ -517,6 +526,7 @@ def build_command(
         steps=step_names,
         resumable=resumable,
         rollback=rollback,
+        external=external,
         batch=batch,
     )
 

@@ -9,7 +9,13 @@ from collections.abc import Mapping, Sequence
 from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
 from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, app_var
 from ._exit import ExitCodeRegistry, FrameworkCode
-from ._framework import NO_STREAM_FLAG, STABLE_OUTPUT_KEY, framework_flags
+from ._framework import (
+    NO_INJECTION_FLAG,
+    NO_STREAM_FLAG,
+    STABLE_OUTPUT_KEY,
+    UNMASK_FLAG,
+    framework_flags,
+)
 from ._mode import Format
 from ._schema import JsonSchema
 from ._values import CommandPath, Etag
@@ -95,6 +101,26 @@ def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, o
     }
 
 
+# REQ-O-037, REQ-O-023: argv only; no environment variable, config file, exec line, or
+# MCP argument turns either on
+SECURITY_FLAGS: dict[str, object] = {
+    UNMASK_FLAG: {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Security: exposes sensitive values. Return tokens, keys, and base64 "
+        "blobs in data raw instead of masked; pass it only when the next step needs one",
+    },
+    NO_INJECTION_FLAG: {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Security: returns external content without untrusted markers "
+        "(_source, _trusted); only for sources the operator trusts. Each use is reported "
+        "on stderr and in warnings",
+    },
+}
+
 _FIXED_GLOBAL_FLAGS: dict[str, object] = {
     "schema": {
         "type": "boolean",
@@ -127,6 +153,7 @@ _FIXED_GLOBAL_FLAGS: dict[str, object] = {
         "description": "Byte-identical output for identical calls: meta leaves out "
         "request_id and timestamp, duration_ms is 0, and volatile data fields are dropped",
     },
+    **SECURITY_FLAGS,
     "help": {
         "type": "boolean",
         "required": False,
@@ -251,6 +278,8 @@ def command_schema(
         entry.update(command.deprecated.to_json())
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
+    # REQ-O-037, REQ-O-023: the escapes from output protection; not a ManifestResponse key
+    entry["security_flags"] = dict(SECURITY_FLAGS)
     # REQ-O-010, REQ-O-011; not ManifestResponse keys
     if command.resumable:
         entry["resumable"] = True

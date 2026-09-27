@@ -40,6 +40,7 @@ def create_item(args: Wide, ctx: Ctx) -> dict[str, object]:
     description="Fully declared",
     examples=[("Run it", "shopctl good x")],
     has_network_io=True,
+    external=True,
     cleanup=lambda: None,
     danger_level="safe",
     exit_codes=(),

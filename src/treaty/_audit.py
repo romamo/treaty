@@ -24,6 +24,7 @@ from ._env import UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
+from ._redact import secret_field
 from ._scan import ctx_calls
 from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import InvalidValue, SchemaVersion
@@ -765,6 +766,52 @@ def _stable_order(app: App) -> Iterator[Finding]:
                 )
 
 
+def _external_data(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.external or any(out_spec(f).external for _, f, _ in output_fields(c.output_type)):
+            continue
+        # A file read is too often the tool's own state to flag; a child's output and a
+        # network response come from outside by definition
+        if c.has_network_io:
+            source = "has_network_io=True"
+        elif any(call.method in ("run", "pipeline") for call in ctx_calls(c.handler)):
+            source = "runs a child process through ctx.run"
+        else:
+            continue
+        yield Finding(
+            "external-data",
+            Severity.WARNING,
+            c.path.value,
+            f"{source} but declares no external content, so what it returns reaches the "
+            "agent without _trusted: false (REQ-F-035)",
+            "external=True on the command, or treaty.Out(external=True) on the field that "
+            "holds the content; neither when it returns only values it computed",
+        )
+
+
+def _textual(tp: object) -> bool:
+    base, _ = strip_optional(resolve_alias(tp))
+    if base is str:
+        return True
+    args = typing.get_args(base)
+    return typing.get_origin(base) in (list, tuple) and bool(args) and _textual(args[0])
+
+
+def _high_entropy(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        for where, f, hint in output_fields(c.output_type):
+            if out_spec(f).high_entropy is None and secret_field(f.name) and _textual(hint):
+                yield Finding(
+                    "high-entropy",
+                    Severity.ADVICE,
+                    c.path.value,
+                    f"output field {where} is masked as [KEY: ...] unless --unmask, because "
+                    "its name says credential (REQ-F-058)",
+                    f"{f.name}: str = treaty.Out(high_entropy=False) if it is not a secret; "
+                    "treaty.Out(high_entropy=True) to keep it masked whatever its name",
+                )
+
+
 _BASE64_CALLS = frozenset(
     {"base64.b64encode", "b64encode", "base64.standard_b64encode", "base64.encodebytes"}
 )
@@ -1431,6 +1478,18 @@ RULES: tuple[Rule, ...] = (
         "Arrays of objects in output declare their order",
         Severity.ADVICE,
         _stable_order,
+    ),
+    Rule(
+        "external-data",
+        "Commands that return outside content declare it external",
+        Severity.WARNING,
+        _external_data,
+    ),
+    Rule(
+        "high-entropy",
+        "Credential-named output fields are masked on purpose",
+        Severity.ADVICE,
+        _high_entropy,
     ),
     Rule(
         "binary-output",

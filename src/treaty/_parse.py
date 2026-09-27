@@ -18,12 +18,14 @@ from ._dispatch import invalid_json
 from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
 from ._framework import (
+    NO_INJECTION_FLAG,
     RAW_PAYLOAD_FLAG,
     RESERVED_GLOBAL,
     SCHEMA_VERSION_KEY,
     STABLE_OUTPUT_FLAG,
     STABLE_OUTPUT_KEY,
     UNIMPLEMENTED,
+    UNMASK_FLAG,
     flag_named,
     framework_flags,
     reserved_flag,
@@ -117,6 +119,10 @@ class GlobalOptions:
     no_config: bool = False
     show_config: bool = False
     instance_id: str | None = None
+    unmask: bool = False
+    """``--unmask``: raw high-entropy values (REQ-O-037)"""
+    no_injection_protection: bool = False
+    """``--no-injection-protection``: external content without trust tags (REQ-O-023)"""
 
 
 def without_value(token: str) -> str:
@@ -149,7 +155,16 @@ def _repeated(flag: str) -> ParseError:
 VALUED_GLOBALS = frozenset(
     {"format", "max-output", "schema-version", "config", "context", "instance-id"}
 )
-SWITCH_GLOBALS = frozenset({"output-schema", STABLE_OUTPUT_FLAG, "no-config", "show-config"})
+SWITCH_GLOBALS = frozenset(
+    {
+        "output-schema",
+        STABLE_OUTPUT_FLAG,
+        "no-config",
+        "show-config",
+        UNMASK_FLAG,
+        NO_INJECTION_FLAG,
+    }
+)
 FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
 
 
@@ -210,6 +225,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             no_config="no-config" in switches,
             show_config="show-config" in switches,
             instance_id=valued.get("instance-id"),
+            unmask=UNMASK_FLAG in switches,
+            no_injection_protection=NO_INJECTION_FLAG in switches,
         ),
         rest,
     )

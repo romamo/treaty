@@ -37,6 +37,10 @@ SCHEMA_VERSION_KEY = "schema_version"
 STABLE_OUTPUT_FLAG = "stable-output"
 STABLE_OUTPUT_KEY = "stable_output"
 """``--stable-output`` in a JSON payload; a global flag, so no ``FLAGS`` row"""
+UNMASK_FLAG = "unmask"
+"""Raw high-entropy values in ``data`` (REQ-O-037); argv only, never the environment"""
+NO_INJECTION_FLAG = "no-injection-protection"
+"""External content without trust tags (REQ-O-023); argv only, never the environment"""
 TIMEOUT_FLAG = "timeout"
 CONFIRM_FLAG = "confirm-destructive"
 RAW_PAYLOAD_FLAG = "raw-payload"
@@ -172,6 +176,8 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "print-schema",
         "schema-version",
         "stable-output",
+        "unmask",
+        "no-injection-protection",
         "config",
         "context",
         "no-config",

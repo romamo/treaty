@@ -85,7 +85,7 @@ def test_list_is_cut_to_the_longest_prefix_that_fits() -> None:
     assert env["data"] == [{"id": i, "name": f"item-{i}"} for i in range(len(env["data"]))]
     assert meta["truncation_hint"] == f"bigctl items --max-output {meta['total_bytes'] + SLACK}"
     (warning,) = env["warnings"]
-    assert warning["code"] == "FIELD_TRUNCATED" and warning["context"]["field"] == "$"
+    assert warning["code"] == "FIELD_TRUNCATED" and warning["context"]["field"] == "data"
 
 
 def test_hint_returns_the_full_response() -> None:
@@ -111,7 +111,7 @@ def test_one_huge_item_keeps_the_item_and_cuts_its_field() -> None:
     assert record["id"] == 1 and env["data"]["source"] == "api"
     assert record["log"].endswith(MARKER) and len(record["log"]) < 50_000
     (warning,) = env["warnings"]
-    assert warning["context"]["field"] == "$.records[0].log"
+    assert warning["context"]["field"] == "data.records[0].log"
     assert warning["context"]["original_length"] == 50_000
     assert "total_count" not in env["meta"]  # data is an object, not a list
 
@@ -123,7 +123,7 @@ def test_wide_object_loses_trailing_keys() -> None:
     assert len(out.rstrip("\n").encode()) <= MIN_BYTES
     rows = env["data"]["rows"]
     assert env["data"]["name"] == "t" and set(rows) == {f"k{i}" for i in range(len(rows))}
-    assert [w["context"]["field"] for w in env["warnings"]] == ["$.rows"]
+    assert [w["context"]["field"] for w in env["warnings"]] == ["data.rows"]
 
 
 def test_env_var_raises_the_cap_and_flag_overrides_it() -> None:

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from ._env import MAX_OUTPUT_BYTES, MAX_STDIN_BYTES, app_var
 from ._envelope import Envelope, WarningDetail, serialize
 from ._errors import ParseError
-from ._out import is_binary
+from ._out import data_path, is_binary
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Position
 from ._values import CommandPath, InvalidValue
 
@@ -154,9 +154,9 @@ class _Cut:
     def warning(self) -> WarningDetail:
         return WarningDetail(
             code=TRUNCATED_CODE,
-            message=f"{_render(self.path)} cut from {self.original} to {self.kept}",
+            message=f"{data_path(self.path)} cut from {self.original} to {self.kept}",
             context={
-                "field": _render(self.path),
+                "field": data_path(self.path),
                 "original_length": self.original,
                 "truncated_length": self.kept,
             },
@@ -303,10 +303,3 @@ def _replace(data: object, path: FieldPath, value: object) -> object:
         parent = parent[key]  # type: ignore[index]
     parent[path[-1]] = value  # type: ignore[index]
     return data
-
-
-def _render(path: FieldPath) -> str:
-    out = "$"
-    for key in path:
-        out += f"[{key}]" if isinstance(key, int) else f".{key}"
-    return out

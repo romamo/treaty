@@ -15,6 +15,7 @@ from typing import Any
 from ._deprecation import Deprecated
 from ._errors import ParseError, RegistrationError
 from ._paths import PATTERN_TYPE, check_path
+from ._redact import REDACTED, secret_name
 from ._scalars import (
     PATTERN_TYPES,
     PRESET_PATTERNS,
@@ -28,9 +29,6 @@ from ._secrets import source_flags
 from ._types import Classified, FlagType, classify
 
 _META = "treaty"
-REDACTED = "[REDACTED]"
-# REQ-F-034: names containing these are treated as secrets unless declared otherwise
-SECRET_NAME_PARTS = ("token", "secret", "password", "key", "credential", "auth")
 # REQ-F-044: characters refused in text values, by their rejected_pattern name
 _CONTROL_CHARS = {"\n": "newline", "\r": "carriage_return", "\x00": "null_byte"}
 
@@ -176,8 +174,7 @@ class FieldInfo:
             return self.spec.secret
         if self.flag_type is FlagType.BOOLEAN:
             return False
-        lowered = self.name.lower()
-        return any(part in lowered for part in SECRET_NAME_PARTS)
+        return secret_name(self.name)
 
     @property
     def env_flag(self) -> str:

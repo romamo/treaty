@@ -29,9 +29,10 @@ from pathlib import Path
 from ._config import local_config, user_config
 from ._env import CONFIG, CONTEXT, INSTANCE_ID, KNOWN, app_var
 from ._errors import ParseError, RegistrationError, SchemaError
-from ._flags import REDACTED, SECRET_NAME_PARTS, coerce_text
+from ._flags import coerce_text
 from ._parse import check_json_base
 from ._paths import check_path
+from ._redact import REDACTED, secret_name
 from ._scalars import ScalarRegistry
 from ._schema import to_jsonable
 from ._types import Classified, FlagType, classify
@@ -51,10 +52,7 @@ class Setting:
     @property
     def secret(self) -> bool:
         """Inferred from the name, as for args: shown as ``[REDACTED]`` by --show-config"""
-        lowered = self.name.lower()
-        return self.classified.flag_type is not FlagType.BOOLEAN and any(
-            part in lowered for part in SECRET_NAME_PARTS
-        )
+        return self.classified.flag_type is not FlagType.BOOLEAN and secret_name(self.name)
 
 
 @dataclass(frozen=True, slots=True)

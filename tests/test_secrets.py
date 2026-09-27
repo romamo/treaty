@@ -106,7 +106,7 @@ def test_non_secret_values_are_still_echoed() -> None:
 
 def test_from_env_reads_the_variable_and_coerces() -> None:
     code, out, _ = run(
-        ["login", "acme", "--pin-from-env", "MY_PIN", "--api-key-from-env=KEY"],
+        ["login", "acme", "--pin-from-env", "MY_PIN", "--api-key-from-env=KEY", "--unmask"],
         env={"MY_PIN": "4321", "KEY": "deadbeef"},
     )
     assert code == 0
@@ -120,7 +120,9 @@ def test_from_file_reads_the_file_and_strips_one_newline(tmp_path: Path) -> None
 
 
 def test_default_variable_is_read_when_no_source_is_named() -> None:
-    code, out, _ = run(["login", "acme"], env={"VAULTCTL_PIN": "9", "VAULTCTL_API_KEY": "abcd1234"})
+    code, out, _ = run(
+        ["login", "acme", "--unmask"], env={"VAULTCTL_PIN": "9", "VAULTCTL_API_KEY": "abcd1234"}
+    )
     assert code == 0 and json.loads(out)["data"] == {
         "account": "acme",
         "pin": 9,

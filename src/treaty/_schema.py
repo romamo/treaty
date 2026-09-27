@@ -27,6 +27,7 @@ from typing import Any
 
 from ._errors import RegistrationError, SchemaError
 from ._out import Binary, out_spec
+from ._redact import secret_field
 from ._scalars import ScalarRegistry
 from ._types import is_dataclass_type, resolve_alias, strip_optional
 
@@ -190,6 +191,8 @@ def _dataclass_fields_schema(cls: type, scalars: ScalarRegistry, output: bool) -
             prop = {**prop, "x-ordered": True}
         if output and spec.volatile:
             prop = {**prop, "x-volatile": True}
+        if output and _masked(f.name, spec.high_entropy, prop):
+            prop = {**prop, "x-high-entropy": True}  # REQ-F-058: a summary unless --unmask
         properties[f.name] = prop
         if output and not spec.volatile:
             required.append(f.name)
@@ -204,6 +207,26 @@ def _dataclass_fields_schema(cls: type, scalars: ScalarRegistry, output: bool) -
     if required:
         schema["required"] = required
     return schema
+
+
+def _textual(prop: JsonSchema) -> bool:
+    """A string, or an array of them, possibly nullable"""
+    options = prop.get("anyOf")
+    if isinstance(options, list):
+        return any(isinstance(o, dict) and _textual(o) for o in options)
+    kind = prop.get("type")
+    kinds = kind if isinstance(kind, list) else [kind]
+    if "string" in kinds:
+        return True
+    items = prop.get("items")
+    return "array" in kinds and isinstance(items, dict) and _textual(items)
+
+
+def _masked(name: str, declared: bool | None, prop: JsonSchema) -> bool:
+    """Declared ``high_entropy=True``, or text under a credential's name"""
+    if declared is not None:
+        return declared
+    return secret_field(name) and _textual(prop)
 
 
 def is_payload_type(tp: object) -> bool:
