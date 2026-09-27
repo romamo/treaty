@@ -39,7 +39,7 @@ from ._resources import ResourceSpec, dependency_params, refuse_async, resource_
 from ._retry import Retry
 from ._rules import BoundRule, bind_rules
 from ._scalars import ScalarRegistry
-from ._scan import ctx_calls, shell_calls
+from ._scan import ctx_attribute, ctx_calls, shell_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
 from ._steps import STEP_KEYS, Rollback, StepName
@@ -212,6 +212,8 @@ class Command:
     """Children keep the user's locale instead of ``LC_ALL=C`` (REQ-F-066)"""
     cache: CachePolicy | None = None
     """``ctx.cache`` with ``--no-cache`` and ``--cache-ttl`` (REQ-O-018)"""
+    recursive_traversal: bool = False
+    """``ctx.walk`` with ``--no-follow-symlinks`` and ``--max-depth`` (REQ-O-040)"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -336,6 +338,7 @@ def build_command(
     background: Background | None = None,
     preserve_locale: bool = False,
     cache: CachePolicy | None = None,
+    recursive_traversal: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -411,6 +414,8 @@ def build_command(
         retry,
         step_names,
         background,
+        has_network_io,
+        recursive_traversal,
     )
     if isinstance(project_root, str) or not all(isinstance(m, str) and m for m in project_root):
         raise RegistrationError(
@@ -599,6 +604,7 @@ def build_command(
         background=background,
         preserve_locale=preserve_locale,
         cache=cache,
+        recursive_traversal=recursive_traversal,
         batch=batch,
     )
 
@@ -868,8 +874,16 @@ def _check_ctx_calls(
     retry: Retry | None,
     steps: Sequence[StepName] = (),
     background: Background | None = None,
+    has_network_io: bool = False,
+    recursive_traversal: bool = False,
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
+    line = ctx_attribute(fn, "http")
+    if line is not None and not has_network_io:
+        raise RegistrationError(
+            f"{path}: ctx.http on line {line} of the handler goes out to the network; declare "
+            "has_network_io=True, which adds --proxy, --no-proxy, and --timeout (REQ-F-036)"
+        )
     for shell in shell_calls(fn):
         raise RegistrationError(
             f"{path}: {shell.name}() on line {shell.line} of the handler runs a shell, which "
@@ -918,6 +932,11 @@ def _check_ctx_calls(
                     f"{where} starts {call.literal!r}, which is not one of steps="
                     f"{[s.value for s in steps]}"
                 )
+        if call.method == "walk" and not recursive_traversal:
+            raise RegistrationError(
+                f"{where} walks a directory tree; declare recursive_traversal=True, which adds "
+                "--no-follow-symlinks and --max-depth (REQ-O-040)"
+            )
         if call.method == "edit" and not editor_alternatives:
             raise RegistrationError(
                 f"{where} opens an editor; declare editor_alternatives=[...] naming the flags "

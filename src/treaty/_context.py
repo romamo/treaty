@@ -12,6 +12,7 @@ from ._cache import Cache
 from ._cap import MARKER, TRUNCATED_CODE
 from ._config import ConfigFile
 from ._errors import RegistrationError
+from ._http import Http
 from ._lifecycle import Teardown
 from ._locks import Locks
 from ._mode import Format
@@ -22,6 +23,7 @@ from ._session import DEFAULT_KEEP_SECONDS, Session
 from ._steps import StepTracker
 from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Processes, Spawned
 from ._timeout import Timeout
+from ._walk import Traversal, Walk
 
 LogSink = Callable[[str, Mapping[str, object]], None]
 WarnSink = Callable[[str, str, Mapping[str, object]], None]
@@ -73,6 +75,29 @@ class Ctx:
     session: Session | None = field(default=None, repr=False, compare=False)
     """The run's private temp directory and output files (REQ-F-032, REQ-F-043)"""
     _cache: Cache | None = field(default=None, repr=False, compare=False)
+    _http: Http | None = field(default=None, repr=False, compare=False)
+    _traversal: Traversal | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def http(self) -> Http:
+        """An HTTP client that honors ``HTTPS_PROXY``, ``HTTP_PROXY``, ``NO_PROXY``,
+        ``REQUESTS_CA_BUNDLE``, ``SSL_CERT_FILE``, ``--proxy``, ``--no-proxy``, and the
+        timeout: ``get(url)``, ``post(url, json=...)``, or ``request(method, url, ...)``
+        return a ``treaty.HttpResponse``. A failure ends the run with exit 12 or 10 and
+        ``error.network_context``. Needs ``has_network_io=True`` (REQ-F-036, REQ-F-037)."""
+        if self._http is None:
+            raise RegistrationError("ctx.http needs has_network_io=True on the command")
+        return self._http
+
+    def walk(self, root: Path | str) -> Walk:
+        """Every entry under ``root``, depth first in name order, as ``treaty.WalkEntry``;
+        a circular symlink exits 4 ``SYMLINK_LOOP`` and a tree deeper than ``--max-depth``
+        exits 4 ``DEPTH_EXCEEDED``. With ``--no-follow-symlinks`` no symlink is entered;
+        ``count`` and ``symlinks_skipped`` tally the walk. A relative ``root`` is under
+        ``cwd``. Needs ``recursive_traversal=True`` (REQ-F-061, REQ-O-040)."""
+        if self._traversal is None:
+            raise RegistrationError("ctx.walk needs recursive_traversal=True on the command")
+        return self._traversal.walk(self.cwd / root)
 
     @property
     def cache(self) -> Cache:

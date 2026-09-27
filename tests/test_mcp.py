@@ -80,6 +80,8 @@ def test_input_schema_replaces_secrets_and_adds_framework_keys() -> None:
         "retries",
         "timeout",
         "idempotency_key",
+        "proxy",
+        "no_proxy",
         "validate_only",
         "stable_output",
     }
@@ -278,7 +280,7 @@ def test_unknown_field_lists_only_flags_a_mapping_accepts() -> None:
     assert envelope.error is not None
     known = envelope.error.context["known"]
     # Not heartbeat-ms or output, which only argv takes
-    assert known == ["timeout", "validate-only", "stable-output"]
+    assert known == ["timeout", "proxy", "no-proxy", "validate-only", "stable-output"]
 
 
 def test_console_script_usage_errors() -> None:

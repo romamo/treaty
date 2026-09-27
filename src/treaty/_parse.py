@@ -105,8 +105,23 @@ class Invocation:
     """``--no-cache`` of a ``cache=`` command: ``ctx.cache`` reads and writes nothing"""
     cache_ttl: int | None = None
     """``--cache-ttl`` of a ``cache=`` command; None is the declared TTL (REQ-O-018)"""
+    proxy: str | None = None
+    """``--proxy`` of a network command: ``ctx.http``'s proxy, over the env (REQ-O-019)"""
+    no_proxy: bool = False
+    """``--no-proxy`` of a network command: ``ctx.http`` connects directly"""
+    no_follow_symlinks: bool = False
+    """``--no-follow-symlinks`` of a ``recursive_traversal`` command (REQ-O-040)"""
+    max_depth: int | None = None
+    """``--max-depth`` of a ``recursive_traversal`` command; None is the default, 50"""
     given: frozenset[str] = frozenset()
     """The fields the caller supplied, as opposed to defaulted"""
+
+    def __post_init__(self) -> None:
+        if self.proxy is not None and self.no_proxy:
+            raise ParseError(
+                "--proxy and --no-proxy contradict each other; pass one",
+                context={"flag": "no-proxy", "also_given": ["proxy"]},
+            )
 
 
 @dataclass(frozen=True, slots=True)

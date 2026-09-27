@@ -99,6 +99,7 @@ from ._fix import command_problem, fix_problem
 from ._flags import Arg, Flag
 from ._framework import framework_collisions
 from ._help import global_rows, render_command, render_root
+from ._http import Http, NetworkFailure, ProxyConfig
 from ._idempotency import (
     KeyBusy,
     Record,
@@ -197,6 +198,7 @@ from ._values import (
     Scope,
     ToolVersion,
 )
+from ._walk import DEFAULT_MAX_DEPTH, Traversal, TraversalStopped
 
 EXEC_PATH = CommandPath("exec")
 CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
@@ -530,6 +532,7 @@ class App:
         background: Background | None = None,
         preserve_locale: bool = False,
         cache: CachePolicy | None = None,
+        recursive_traversal: bool = False,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -606,6 +609,10 @@ class App:
         ``cache=CachePolicy(ttl_seconds=3600)`` gives ``ctx.cache``, a store of bytes by
         key under ``$XDG_CACHE_HOME/<app>/<command>/``, with ``--no-cache`` and
         ``--cache-ttl``; ``meta.cache_used`` says whether a read hit (REQ-O-018).
+        ``has_network_io=True`` gives ``ctx.http``, which honors the proxy and CA bundle
+        variables, with ``--proxy`` and ``--no-proxy`` (REQ-F-036, REQ-O-019).
+        ``recursive_traversal=True`` gives ``ctx.walk``, which stops at a circular symlink,
+        with ``--no-follow-symlinks`` and ``--max-depth`` (REQ-F-061, REQ-O-040).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
@@ -756,6 +763,7 @@ class App:
                     background=background,
                     preserve_locale=preserve_locale,
                     cache=cache,
+                    recursive_traversal=recursive_traversal,
                 )
             )
             return fn
@@ -1961,6 +1969,8 @@ class _Run:
             self.app.silence_notifiers(child_env)
         if not command.preserve_locale:
             child_env.update(C_LOCALE)  # REQ-F-066: English messages, dot decimals
+        proxies = ProxyConfig(self.env, invocation.proxy, invocation.no_proxy)
+        child_env.update(proxies.child_env())  # REQ-O-019: children go out the same way
         # REQ-O-033: --headless opens no browser even where one could be shown
         headless = self.headless or invocation.headless
         # The run's env holds TOOL_TRACE_ID, so every child inherits it (REQ-F-025)
@@ -2044,6 +2054,23 @@ class _Run:
             steps=self.steps,
             session=self.processes.session,
             _cache=self.cache_for(command, invocation),
+            _http=Http(
+                proxies,
+                deadline=deadline,
+                retrier=self.retrier,
+                declared={
+                    *command.exit_codes,
+                    *(ExitCodeName(c.name) for c in implicit_exit_codes(command)),
+                },
+            )
+            if command.has_network_io
+            else None,
+            _traversal=Traversal(
+                follow_symlinks=not invocation.no_follow_symlinks,
+                max_depth=invocation.max_depth or DEFAULT_MAX_DEPTH,
+            )
+            if command.recursive_traversal
+            else None,
         )
 
     def cache_for(self, command: Command, invocation: Invocation) -> Cache | None:
@@ -3569,9 +3596,15 @@ class _Run:
             return self._crashed(command, args, err, started, meta)
         assert isinstance(context, dict)
         # REQ-F-078: after the tool's own retries, an agent retrying on top would double them
-        retried = exc.retried if isinstance(exc, RetriesExhausted) else None
-        # 03-D1: PRECONDITION is not retryable, but nothing ran behind a held lock
-        retrying = (entry.retryable or isinstance(exc, LockHeld)) and not retried
+        retried = exc.retried if isinstance(exc, (RetriesExhausted, NetworkFailure)) else None
+        network = exc if isinstance(exc, NetworkFailure) else None
+        # 03-D1: PRECONDITION is not retryable, but nothing ran behind a held lock; a
+        # certificate failure is, whatever UNAVAILABLE says, until the CA bundle changes
+        retrying = (
+            (entry.retryable or isinstance(exc, LockHeld))
+            and not retried
+            and not (network is not None and network.permanent)
+        )
         fix = exc.fix_command
         if fix is None and not retrying:
             # A declared fix is for what a retry cannot clear: fix_command is present only
@@ -3591,13 +3624,18 @@ class _Run:
                 suggestion=exc.suggestion if exc.suggestion is not None else entry.suggestion,
                 fix_command=fix,
                 fix_required=exc.fix_required,
-                hint=None if auth is None else auth.hint,
+                hint=auth.hint
+                if auth is not None
+                else exc.hint
+                if isinstance(exc, TraversalStopped)
+                else None,
                 refresh_command=None if auth is None else auth.refresh_command,
                 expires_at=None if auth is None else auth.expires_at,
                 required_permission=None if auth is None else auth.required_permission,
                 retry_after_ms=retry_after if retrying else None,
                 retry_strategy=strategy if retrying else None,
                 conflict_id=exc.conflict_id,
+                network_context=None if network is None else network.network,
                 phase="execution",
             ),
             started=started,

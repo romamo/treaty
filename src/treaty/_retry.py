@@ -108,14 +108,25 @@ class Retrier:
         self.deadline = deadline
         self.count = 0
 
-    def call(self, fn: Callable[[], T]) -> T:
+    def call(
+        self,
+        fn: Callable[[], T],
+        *,
+        on: tuple[type[BaseException], ...] | None = None,
+        give_up: Callable[[BaseException, int], BaseException] | None = None,
+    ) -> T:
+        """``fn`` under the budget; ``on`` and ``give_up`` replace the policy's exceptions
+        and ``RetriesExhausted``, for ``ctx.http``, whose failures carry their own error"""
         retried = 0
+        retry_on = self.policy.on if on is None else on
         while True:
             try:
                 return fn()
-            except self.policy.on as exc:
+            except retry_on as exc:
                 late = self.deadline is not None and time.monotonic() + self.delay >= self.deadline
                 if retried >= self.retries or late:
+                    if give_up is not None:
+                        raise give_up(exc, retried) from exc
                     raise RetriesExhausted(self.policy, exc, retried) from exc
             time.sleep(self.delay)
             retried += 1

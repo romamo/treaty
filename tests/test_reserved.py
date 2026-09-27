@@ -96,9 +96,9 @@ def test_a_reserved_global_is_reserved_before_the_command_path_too() -> None:
     assert code == 2 and env["error"]["code"] == "RESERVED_FLAG"
 
 
-def test_an_unimplemented_opt_in_name_exits_2_on_a_command_that_opts_in() -> None:
+def test_an_opt_in_name_is_a_flag_only_on_a_command_that_opts_in() -> None:
     code, env = _run(_app(), ["fetch", "--proxy", "http://p"])
-    assert code == 2 and env["error"]["code"] == "RESERVED_FLAG"
+    assert code == 0
     code, env = _run(_app(), ["show", "--proxy", "http://p"])
     assert code == 2 and env["error"]["code"] == "ARG_ERROR"  # an unknown flag there
 

@@ -55,8 +55,8 @@ def test_rollback_entry_contents(app: App) -> None:
     }
     assert flags["tags"]["type"] == "array" and flags["tags"]["default"] == []
     # 6: idempotency key reuse; 4, shared by every command: a stray input(), or an
-    # unusable state directory or record
-    assert set(entry["exit_codes"]) == {"6", "79", "80"}
+    # unusable state directory or record; 12, a network command's ctx.http failure
+    assert set(entry["exit_codes"]) == {"6", "12", "79", "80"}
     assert flags["idempotency-key"]["type"] == "string"
     assert set(manifest["exit_codes"]) == {"0", "1", "2", "4", "10", "130", "141", "143"}
     assert manifest["exit_codes"]["143"] == {
@@ -107,6 +107,7 @@ def test_schema_entry_keeps_full_exit_table(app: App) -> None:
         "4",
         "6",
         "10",
+        "12",
         "79",
         "80",
         "130",

@@ -34,13 +34,17 @@ _ALWAYS = (
 
 def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
     """The codes a command may exit with undeclared: the shared ones, CONFLICT for a
-    reused idempotency key on a non-safe command, and 7 and 8 behind the credential gate"""
+    reused idempotency key on a non-safe command, 7 and 8 behind the credential gate, and
+    12 when ``ctx.http`` can fail"""
     codes = list(_ALWAYS)
     if command.danger_level is not DangerLevel.SAFE:
         codes.append(FrameworkCode.CONFLICT)
     if command.requires_auth:
         # Not logged in, or the credential lacks a required scope (REQ-C-029)
         codes += (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED)
+    if command.has_network_io:
+        # ctx.http: a connection or TLS failure, or 502 to 504 upstream (REQ-F-037)
+        codes.append(FrameworkCode.UNAVAILABLE)
     if command.steps or command.batch:
         # A step failed after one completed, or some items of a batch failed
         codes.append(FrameworkCode.PARTIAL_FAILURE)

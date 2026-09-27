@@ -32,6 +32,8 @@ UNPREFIXED = frozenset(
         "http_proxy",
         "https_proxy",
         "no_proxy",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_FILE",
         "GITHUB_ACTIONS",
         "JENKINS_URL",
         "TOOL_TRACE_ID",

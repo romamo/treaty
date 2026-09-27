@@ -63,6 +63,13 @@ def probes_for(app: App) -> list[Probe]:
             # REQ-O-010: a step the command does not declare exits 2 before anything runs
             bad = (*argv, "--resume-from", "no-such-step")
             probes.append(Probe(f"{label} --resume-from unknown step", bad, "invalid"))
+        if command.has_network_io:
+            # REQ-O-019: urllib has no SOCKS, so --proxy refuses one before anything runs
+            socks = (*argv, "--proxy", "socks5://127.0.0.1:1080")
+            probes.append(Probe(f"{label} --proxy socks5", socks, "invalid"))
+        if command.recursive_traversal:
+            # REQ-O-040: a walk of no levels is not a limit
+            probes.append(Probe(f"{label} --max-depth 0", (*argv, "--max-depth", "0"), "invalid"))
         if command.danger_level is DangerLevel.DESTRUCTIVE:
             # A safe_default command previews and exits 0 on its own; --live is what the
             # confirmation gate refuses

@@ -389,6 +389,85 @@ def _cache_declared(app: App) -> Iterator[Finding]:
             )
 
 
+_TREE_CALLS = frozenset(
+    {"os.walk", "os.fwalk", "shutil.rmtree", "shutil.copytree", "rmtree", "copytree"}
+)
+
+
+def traversal_calls(handler: Callable[..., object]) -> list[str]:
+    """Recursive walks in the handler's source that ``ctx.walk`` would protect from a
+    circular symlink and a runaway depth (REQ-F-061, heuristic)"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return []
+    params = list(inspect.signature(handler).parameters)
+    ctx_name = params[1] if len(params) > 1 else None
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        attr = func.attr if isinstance(func, ast.Attribute) else _dotted(func) or ""
+        name = _dotted(func) or attr
+        if isinstance(func, ast.Attribute) and _dotted(func.value) == ctx_name:
+            continue  # ctx.walk itself
+        recursive_glob = attr in ("glob", "iglob") and any(
+            k.arg == "recursive" and not (isinstance(k.value, ast.Constant) and not k.value.value)
+            for k in node.keywords
+        )
+        if name in _TREE_CALLS or attr in ("rglob", "walk") or recursive_glob:
+            found.append(name)
+    return found
+
+
+def _recursive_traversal(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        calls = traversal_calls(c.handler)
+        if calls:
+            declare = "" if c.recursive_traversal else "recursive_traversal=True, then "
+            yield Finding(
+                "recursive-traversal",
+                Severity.WARNING,
+                c.path.value,
+                f"{calls[0]}() walks a directory tree that a circular symlink can loop and "
+                "no --max-depth bounds (REQ-F-061, REQ-O-040, heuristic)",
+                f"{declare}for entry in ctx.walk(root): ...",
+            )
+
+
+def direct_http_calls(handler: Callable[..., object]) -> list[str]:
+    """HTTP calls in the handler's source that bypass ``ctx.http`` (REQ-F-037)"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return []
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted(node.func) or ""
+        parts = name.split(".")
+        if parts[-1] == "urlopen" or (len(parts) > 1 and parts[0] in _NETWORK_MODULES):
+            found.append(name)
+    return found
+
+
+def _http_client(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if not c.has_network_io:
+            continue
+        calls = direct_http_calls(c.handler)
+        if calls:
+            yield Finding(
+                "http-client",
+                Severity.WARNING,
+                c.path.value,
+                f"{calls[0]}() skips ctx.http, so --proxy, --no-proxy, and the CA bundle "
+                "variables do not reach it and a failure has no error.network_context "
+                "(REQ-F-036, REQ-F-037)",
+                "response = ctx.http.get(url)",
+            )
+
+
 def _declared_commands(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         for problem in app.named_commands(c):
@@ -1625,6 +1704,18 @@ RULES: tuple[Rule, ...] = (
         "Caches are declared with cache=",
         Severity.WARNING,
         _cache_declared,
+    ),
+    Rule(
+        "recursive-traversal",
+        "Recursive walks use ctx.walk",
+        Severity.WARNING,
+        _recursive_traversal,
+    ),
+    Rule(
+        "http-client",
+        "Network commands use ctx.http",
+        Severity.WARNING,
+        _http_client,
     ),
     Rule(
         "declared-commands",

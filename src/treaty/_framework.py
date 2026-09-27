@@ -25,6 +25,7 @@ from ._command import (
 )
 from ._config import GLOBAL_FLAG, ConfigScope
 from ._errors import ParseError
+from ._http import NO_PROXY_FLAG, PROXY_FLAG, parse_proxy
 from ._idempotency import IdempotencyKey
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path
@@ -32,6 +33,7 @@ from ._retry import RETRIES_FLAG, RETRY_DELAY_FLAG, parse_delay, parse_retries
 from ._steps import StepName
 from ._timeout import Timeout
 from ._types import FlagType
+from ._walk import DEFAULT_MAX_DEPTH, MAX_DEPTH_FLAG, NO_FOLLOW_FLAG, parse_max_depth
 
 SCHEMA_VERSION_KEY = "schema_version"
 """``--schema-version`` in a JSON payload; a global flag, so no ``FLAGS`` row"""
@@ -121,11 +123,6 @@ def flag_named(command: Command, name: str, *, json: bool = False) -> FrameworkF
     return next((f for f in framework_flags(command, json=json) if f.name == name), None)
 
 
-def _never(command: Command) -> bool:
-    """For an opt-in keyword that does not exist yet: no command can declare it"""
-    return False
-
-
 # REQ-F-079: flag names treaty keeps for itself, so no app field takes one; reserving a
 # name after 1.0 would break the apps that did. A name leaves UNIMPLEMENTED when its
 # feature lands; until then, passing it exits 2 as reserved.
@@ -166,8 +163,8 @@ RESERVED_OPT_IN: Mapping[str, Callable[[Command], bool]] = {
     "rollback-on-failure": lambda c: c.rollback is not None,
     "proxy": lambda c: c.has_network_io,
     "no-proxy": lambda c: c.has_network_io,
-    "no-follow-symlinks": _never,  # recursive_traversal= (10)
-    "max-depth": _never,  # recursive_traversal= (10)
+    "no-follow-symlinks": lambda c: c.recursive_traversal,
+    "max-depth": lambda c: c.recursive_traversal,
 }
 """Reserved on the commands that opt in to the feature"""
 
@@ -191,6 +188,10 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "rollback-on-failure",
         "cwd",
         "no-update-check",
+        "proxy",
+        "no-proxy",
+        "no-follow-symlinks",
+        "max-depth",
     }
 )
 UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED
@@ -532,6 +533,42 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         metavar="SECONDS",
         entry=lambda c: {"default": c.cache.ttl_seconds if c.cache else None},
         json_extra={"minimum": 0},
+    ),
+    FrameworkFlag(
+        PROXY_FLAG,
+        "proxy",
+        lambda c: c.has_network_io,
+        "string",
+        "Send ctx.http requests through this http:// or https:// proxy instead of "
+        "HTTPS_PROXY and HTTP_PROXY; children get it too",
+        parse=lambda v, c: parse_proxy(v),
+        from_json=lambda v, c: parse_proxy(v),
+        metavar="URL",
+        entry=lambda c: {"pattern_type": "url"},
+    ),
+    _switch(
+        NO_PROXY_FLAG,
+        "no_proxy",
+        lambda c: c.has_network_io,
+        "Connect directly, whatever HTTPS_PROXY and HTTP_PROXY say",
+    ),
+    _switch(
+        NO_FOLLOW_FLAG,
+        "no_follow_symlinks",
+        lambda c: c.recursive_traversal,
+        "Walk without entering symlinks; they are listed and counted as skipped",
+    ),
+    FrameworkFlag(
+        MAX_DEPTH_FLAG,
+        "max_depth",
+        lambda c: c.recursive_traversal,
+        "integer",
+        "Most directory levels to walk; a deeper tree exits 4 with DEPTH_EXCEEDED",
+        parse=lambda v, c: parse_max_depth(v),
+        from_json=lambda v, c: parse_max_depth(v),
+        metavar="N",
+        entry=lambda c: {"default": DEFAULT_MAX_DEPTH},
+        json_extra={"minimum": 1},
     ),
     _switch(
         VALIDATE_ONLY_FLAG,

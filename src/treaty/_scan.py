@@ -74,6 +74,26 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     return calls
 
 
+def ctx_attribute(fn: Callable[..., object], name: str) -> int | None:
+    """The first line of the handler reading ``<ctx>.<name>``, such as ``ctx.http``"""
+    params = list(inspect.signature(fn).parameters)
+    if len(params) < 2:
+        return None
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    except OSError, TypeError:
+        return None
+    lines = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and node.attr == name
+        and isinstance(node.value, ast.Name)
+        and node.value.id == params[1]
+    ]
+    return min(lines, default=None)
+
+
 def _reads(args_name: str, *nodes: ast.expr) -> tuple[str, ...]:
     """The ``<args>.<field>`` reads under ``nodes``, each once, in order"""
     return tuple(

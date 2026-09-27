@@ -24,6 +24,7 @@ from ._errors import (
 )
 from ._exit import ExitCodeEntry, FrameworkCode, RetryStrategy, SideEffects
 from ._flags import Arg, Flag
+from ._http import HttpResponse
 from ._init import Init
 from ._jobs import Job, JobStore
 from ._mode import Format
@@ -39,6 +40,7 @@ from ._table import table
 from ._timeout import Timeout
 from ._update import UpdateCheck
 from ._values import CommandPath, ExitCode, ExitCodeName, SchemaVersion, Scope
+from ._walk import WalkEntry
 
 __version__ = version("treaty")
 
@@ -51,6 +53,7 @@ __all__ = [
     "Binary",
     "CachePolicy",
     "CliExit",
+    "HttpResponse",
     "CommandPath",
     "DefaultWhenAbsent",
     "Dependency",
@@ -104,6 +107,7 @@ __all__ = [
     "Timeout",
     "TreatyError",
     "UpdateCheck",
+    "WalkEntry",
     "WarningDetail",
     "already_exists",
     "intercept_stdout",
