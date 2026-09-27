@@ -174,7 +174,7 @@ class Resolver:
                 f"not {cls.__qualname__}"
             )
         self._cache[cls] = value
-        teardown = self._ctx.teardown
+        teardown = self._ctx._teardown
         if spec.releases and teardown is not None:
             teardown.add(f"{cls.__qualname__}.release", getattr(value, "release"))  # noqa: B009
         return value

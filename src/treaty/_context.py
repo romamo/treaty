@@ -49,10 +49,10 @@ class Ctx:
     """The directory relative paths resolve against: ``--cwd``, else the working
     directory, as ``meta.cwd`` reports it. Build paths from it; never ``os.chdir``, which
     the run undoes with a ``CWD_CHANGED`` warning (REQ-O-017, REQ-F-041)"""
-    log_sink: LogSink = field(repr=False, compare=False)
-    processes: Processes = field(repr=False, compare=False)
-    prompter: Prompter = field(repr=False, compare=False)
-    warn_sink: WarnSink = field(repr=False, compare=False)
+    _log_sink: LogSink = field(repr=False, compare=False)
+    _processes: Processes = field(repr=False, compare=False)
+    _prompter: Prompter = field(repr=False, compare=False)
+    _warn_sink: WarnSink = field(repr=False, compare=False)
     idempotency_key: str | None = None
     stdin_text: str | None = None
     """The payload of a ``stdin_input=True`` command: stdin, capped, or ``--input-file``"""
@@ -68,12 +68,12 @@ class Ctx:
     """``TOOL_TRACE_ID`` of the run, when set; children inherit it (REQ-F-025)"""
     project_root: Path | None = None
     """The nearest directory, from the cwd up, holding a ``project_root=`` marker"""
-    retrier: Retrier | None = field(default=None, repr=False, compare=False)
-    locks: Locks | None = field(default=None, repr=False, compare=False)
-    teardown: Teardown | None = field(default=None, repr=False, compare=False)
+    _retrier: Retrier | None = field(default=None, repr=False, compare=False)
+    _locks: Locks | None = field(default=None, repr=False, compare=False)
+    _teardown: Teardown | None = field(default=None, repr=False, compare=False)
     """What the run releases when it ends: resources' ``release``, then ``cleanup=``"""
-    steps: StepTracker | None = field(default=None, repr=False, compare=False)
-    session: Session | None = field(default=None, repr=False, compare=False)
+    _steps: StepTracker | None = field(default=None, repr=False, compare=False)
+    _session: Session | None = field(default=None, repr=False, compare=False)
     """The run's private temp directory and output files (REQ-F-032, REQ-F-043)"""
     _cache: Cache | None = field(default=None, repr=False, compare=False)
     _http: Http | None = field(default=None, repr=False, compare=False)
@@ -115,41 +115,41 @@ class Ctx:
         """This run's own temp directory, ``0700``, made on first use and removed when the
         run ends, on any exit; children of ``ctx.run`` get it as ``TMPDIR``. Two runs,
         even in parallel, never share one (REQ-F-032)"""
-        return self._session().directory()
+        return self._run_session().directory()
 
     def temp_file(self, suffix: str = "") -> Path:
         """A new, empty ``0600`` file in ``tmp_dir``, removed with it"""
-        return self._session().temp_file(suffix)
+        return self._run_session().temp_file(suffix)
 
     def output_file(self, name: str, *, keep_seconds: int = DEFAULT_KEEP_SECONDS) -> Path:
         """A new, empty ``0600`` file named ``name`` for the caller to read after the run.
         It outlives the run: an object ``data`` gets ``cleanup``, with the shell
         ``command`` that deletes it and ``auto_cleanup_after_seconds``, after which a
         later run of the tool deletes it (REQ-F-043)"""
-        return self._session().output_file(name, keep_seconds)
+        return self._run_session().output_file(name, keep_seconds)
 
-    def _session(self) -> Session:
-        if self.session is None:
+    def _run_session(self) -> Session:
+        if self._session is None:
             raise RegistrationError("the temp directory exists only while a command runs")
-        return self.session
+        return self._session
 
     def step(self, name: str) -> bool:
         """Complete the step in progress and start ``name``, the next of the command's
         ``steps=`` to run; the last completes when the handler returns. Returns False for a
         step before ``--resume-from``, so ``if ctx.step("backup"):`` skips it. The response
         lists ``completed_steps``, ``failed_step``, and ``skipped_steps`` (REQ-C-008)."""
-        if self.steps is None:
+        if self._steps is None:
             raise RegistrationError("ctx.step needs steps=[...] on the command")
-        return self.steps.step(name)
+        return self._steps.step(name)
 
     def retry(self, fn: Callable[[], T]) -> T:
         """Call ``fn``, and again after ``--retry-delay`` while it raises one of the
         command's ``Retry.on`` exceptions, up to ``--retries`` times and never past the
         timeout; then the run exits with ``Retry.exhausted``. Needs ``retry=`` on the
         command; the retries made are ``meta.retries`` (REQ-F-078)."""
-        if self.retrier is None:
+        if self._retrier is None:
             raise RegistrationError("ctx.retry needs retry=treaty.Retry(...) on the command")
-        return self.retrier.call(fn)
+        return self._retrier.call(fn)
 
     def lock(
         self, name: str, *, wait: float | None = None, retry_after_ms: int = 1000
@@ -158,7 +158,7 @@ class Ctx:
         that cannot take it within ``wait`` seconds (default: what is left of the
         timeout) exits 4 with ``LOCK_HELD``, the holder's pid and age, and
         ``retry_after_ms`` (REQ-F-033). A holder that exits or is killed releases it."""
-        locks = self.locks if self.locks is not None else Locks(None, None)
+        locks = self._locks if self._locks is not None else Locks(None, None)
         return locks.hold(name, wait=wait, retry_after_ms=retry_after_ms)
 
     @property
@@ -183,25 +183,25 @@ class Ctx:
         (REQ-F-038). Declared secrets and fields named like credentials (token,
         password, api_key, Authorization, ...) are written as ``[REDACTED]`` (REQ-F-051).
         """
-        self.log_sink(Level.INFO, message, fields)
+        self._log_sink(Level.INFO, message, fields)
 
     def log_error(self, message: str, **fields: object) -> None:
         """Like ``log``, at ERROR: written at every verbosity but ``--quiet``"""
-        self.log_sink(Level.ERROR, message, fields)
+        self._log_sink(Level.ERROR, message, fields)
 
     def debug(self, message: str, **fields: object) -> None:
         """Like ``log``, at DEBUG: written only under ``--debug`` (REQ-O-008)"""
-        self.log_sink(Level.DEBUG, message, fields)
+        self._log_sink(Level.DEBUG, message, fields)
 
     def progress(self, message: str, *, done: int | None = None, total: int | None = None) -> None:
         """A progress line, such as ``done=3 total=10``: shown where ``log`` is, never off
         a terminal without ``--verbose`` (REQ-F-038)"""
         fields = {k: v for k, v in (("done", done), ("total", total)) if v is not None}
-        self.log_sink(Level.PROGRESS, message, fields)
+        self._log_sink(Level.PROGRESS, message, fields)
 
     def warn(self, code: str, message: str, **context: object) -> None:
         """Add an entry to the response's ``warnings``; the run still succeeds"""
-        self.warn_sink(code, message, context)
+        self._warn_sink(code, message, context)
 
     def truncated(self, value: str, *, field: str, original_length: int | None = None) -> str:
         """A value a backend already cut, such as a column limit: returned with the
@@ -231,7 +231,9 @@ class Ctx:
         ``SUBPROCESS_FAILED`` (exit 1) unless ``check=False``; running out of time
         stops the child and raises ``TIMEOUT``.
         """
-        return self.processes.run(argv, input=input, cwd=cwd, env=env, timeout=timeout, check=check)
+        return self._processes.run(
+            argv, input=input, cwd=cwd, env=env, timeout=timeout, check=check
+        )
 
     def pipeline(
         self,
@@ -245,7 +247,7 @@ class Ctx:
     ) -> Completed:
         """``a | b | c`` with OS pipes and no shell; a failure in any stage fails the
         pipeline, the first failing stage named in ``context.stage`` (REQ-F-065)"""
-        return self.processes.pipeline(
+        return self._processes.pipeline(
             stages, input=input, cwd=cwd, env=env, timeout=timeout, check=check
         )
 
@@ -259,15 +261,15 @@ class Ctx:
         ``max_lifetime_seconds`` are up. Needs ``background=treaty.Background(...)``,
         whose output carries ``background_pid`` and ``cleanup_command`` (REQ-C-010).
         """
-        return self.processes.spawn(argv, cwd=cwd, env=env)
+        return self._processes.spawn(argv, cwd=cwd, env=env)
 
     def open_url(self, url: str) -> bool:
         """Open ``url`` in a browser and return True; when headless, open nothing and return
         False, and the command's ``headless_behavior`` says what happens instead: the URL
         in ``data.open_url``, a ``GUI_SKIPPED`` warning, or exit 4 (REQ-F-057, REQ-C-024)"""
-        opened = self.processes.open_url(url)
-        skipped = self.processes.headless_behavior is HeadlessBehavior.SKIP
-        if self.processes.headless and skipped:
+        opened = self._processes.open_url(url)
+        skipped = self._processes.headless_behavior is HeadlessBehavior.SKIP
+        if self._processes.headless and skipped:
             self.warn(GUI_SKIPPED, "Headless: the browser was not opened", url=url)
         return opened
 
@@ -278,12 +280,12 @@ class Ctx:
         run ends with exit 4, ``INPUT_REQUIRED``, and a suggestion naming ``--<flag>``.
         Needs ``interactive=True`` on the command (REQ-F-009, REQ-C-005).
         """
-        return self.prompter.prompt(text, flag=flag)
+        return self._prompter.prompt(text, flag=flag)
 
     def confirm(self, text: str) -> bool:
         """Ask a yes-or-no question; ``--yes`` answers yes without asking, and off a
         terminal without it the run ends with exit 4, ``INPUT_REQUIRED``"""
-        return self.prompter.confirm(text)
+        return self._prompter.confirm(text)
 
     def edit(self, initial: str = "") -> str:
         """Let a person edit ``initial`` in ``$VISUAL`` or ``$EDITOR`` and return the text
@@ -291,4 +293,4 @@ class Ctx:
         Off a terminal the run ends with exit 4, ``EDITOR_REQUIRED``, and ``alternatives``
         listing the command's ``editor_alternatives`` flags (REQ-F-055, REQ-C-023).
         """
-        return self.prompter.edit(initial)
+        return self._prompter.edit(initial)

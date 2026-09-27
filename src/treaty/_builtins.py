@@ -248,10 +248,10 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     found: dict[str, SideEffectType] = {}
     for _, effect, _, matches in declared(app, ctx.env.get("HOME")):
         found.update(dict.fromkeys(matches, effect.kind))
-    if ctx.session is not None:
+    if ctx._session is not None:
         # REQ-F-043: ctx.output_file files; running sessions remove their own
         found.update(
-            dict.fromkeys((str(p) for p in outputs(ctx.session.root.path)), SideEffectType.TEMP)
+            dict.fromkeys((str(p) for p in outputs(ctx._session.root.path)), SideEffectType.TEMP)
         )
     for command_path, command in app.commands.items():
         where = None if command.cache is None else cache_dir(app.name, command_path.value, ctx.env)

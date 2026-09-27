@@ -1,0 +1,978 @@
+{
+  "env": {
+    "prefixed": [
+      "AUDIT_LOG",
+      "CONFIG",
+      "CONTEXT",
+      "FORMAT",
+      "INSTANCE_ID",
+      "MAX_OUTPUT_BYTES",
+      "MAX_STDIN_BYTES",
+      "NO_UPDATE",
+      "SESSION",
+      "STATE_DIR"
+    ],
+    "unprefixed": [
+      "CI",
+      "GITHUB_ACTIONS",
+      "HOME",
+      "HTTPS_PROXY",
+      "HTTP_PROXY",
+      "JENKINS_URL",
+      "NO_COLOR",
+      "NO_PROXY",
+      "PATH",
+      "PWD",
+      "REQUESTS_CA_BUNDLE",
+      "SHELL",
+      "SSL_CERT_FILE",
+      "TERM",
+      "TOOL_TRACE_ID",
+      "USER",
+      "XDG_CACHE_HOME",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME",
+      "XDG_STATE_HOME",
+      "http_proxy",
+      "https_proxy",
+      "no_proxy"
+    ]
+  },
+  "envelope": {
+    "error": [
+      "code",
+      "message",
+      "retryable",
+      "detail",
+      "cause",
+      "context",
+      "suggestion",
+      "fix_command",
+      "retry_after_ms",
+      "fix_required",
+      "phase",
+      "errors",
+      "alternatives",
+      "hint",
+      "auth_methods",
+      "retries_exhausted",
+      "retry_strategy",
+      "conflict_id",
+      "refresh_command",
+      "expires_at",
+      "required_permission",
+      "network_context",
+      "redirect",
+      "corrected_input"
+    ],
+    "fields": [
+      "exit_code",
+      "data",
+      "error",
+      "meta",
+      "warnings",
+      "extra_meta"
+    ],
+    "keys": [
+      "data",
+      "error",
+      "meta",
+      "ok",
+      "warnings"
+    ],
+    "meta": [
+      "duration_ms",
+      "request_id",
+      "command",
+      "timestamp",
+      "schema_version",
+      "tool_version",
+      "cwd",
+      "trace_id",
+      "project_root",
+      "retries"
+    ],
+    "warning": [
+      "code",
+      "message",
+      "context"
+    ]
+  },
+  "exit_codes": {
+    "ARG_ERROR": 2,
+    "AUTH_REQUIRED": 8,
+    "CONFLICT": 6,
+    "GENERAL_ERROR": 1,
+    "NOT_FOUND": 5,
+    "PARTIAL_FAILURE": 3,
+    "PAYMENT_REQUIRED": 9,
+    "PERMISSION_DENIED": 7,
+    "PRECONDITION": 4,
+    "RATE_LIMITED": 11,
+    "REDIRECTED": 13,
+    "SUCCESS": 0,
+    "TIMEOUT": 10,
+    "UNAVAILABLE": 12
+  },
+  "exports": {
+    "Affects": {
+      "fields": [
+        "summary",
+        "resources",
+        "count"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "App": {
+      "kind": "class",
+      "methods": [
+        "builtins",
+        "call",
+        "command",
+        "commands",
+        "environment",
+        "exit_code",
+        "format",
+        "formats",
+        "group",
+        "main",
+        "manifest",
+        "redirect",
+        "run",
+        "scalar",
+        "shadowed_builtins",
+        "suppress_update_notifier",
+        "tokenizer"
+      ]
+    },
+    "Arg": {
+      "kind": "function",
+      "signature": "(*, description: 'str', pattern: 'str | None' = None, secret: 'bool | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False) -> 'Any'"
+    },
+    "AuditLog": {
+      "fields": [
+        "path",
+        "max_bytes",
+        "keep",
+        "max_age_days"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Background": {
+      "fields": [
+        "cleanup_command",
+        "max_lifetime_seconds"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "Batch": {
+      "fields": [
+        "items"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Binary": {
+      "fields": [
+        "data",
+        "content_type"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "CachePolicy": {
+      "fields": [
+        "ttl_seconds"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Check": {
+      "fields": [
+        "name",
+        "ok",
+        "fix",
+        "version",
+        "required",
+        "error",
+        "network"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "CliExit": {
+      "kind": "class",
+      "methods": []
+    },
+    "CommandPath": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": [
+        "child",
+        "is_ancestor_of",
+        "is_direct_child_of",
+        "parent",
+        "parts"
+      ]
+    },
+    "Completed": {
+      "fields": [
+        "argv",
+        "returncode",
+        "stdout",
+        "stderr",
+        "duration_ms",
+        "stage"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Credentials": {
+      "kind": "class",
+      "methods": [
+        "active_scopes"
+      ]
+    },
+    "Ctx": {
+      "fields": [
+        "app_name",
+        "version",
+        "mode",
+        "request_id",
+        "env",
+        "state",
+        "timeout",
+        "color",
+        "headless",
+        "cwd",
+        "idempotency_key",
+        "stdin_text",
+        "page",
+        "token",
+        "trace_id",
+        "project_root"
+      ],
+      "kind": "class",
+      "methods": [
+        "cache",
+        "config_path",
+        "confirm",
+        "debug",
+        "edit",
+        "http",
+        "lock",
+        "log",
+        "log_error",
+        "open_url",
+        "output_file",
+        "pipeline",
+        "progress",
+        "prompt",
+        "retry",
+        "run",
+        "spawn",
+        "step",
+        "temp_file",
+        "tmp_dir",
+        "truncated",
+        "walk",
+        "warn",
+        "write_config"
+      ]
+    },
+    "DangerLevel": {
+      "kind": "enum",
+      "members": [
+        "SAFE",
+        "MUTATING",
+        "DESTRUCTIVE"
+      ]
+    },
+    "DefaultWhenAbsent": {
+      "fields": [
+        "flag",
+        "target",
+        "default"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Dependency": {
+      "fields": [
+        "name",
+        "check_command",
+        "min_version",
+        "fix_command",
+        "version_regex",
+        "max_version"
+      ],
+      "kind": "class",
+      "methods": [
+        "maximum",
+        "minimum",
+        "to_json"
+      ]
+    },
+    "Deprecated": {
+      "fields": [
+        "since",
+        "replacement",
+        "removed_in"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "Envelope": {
+      "fields": [
+        "exit_code",
+        "data",
+        "error",
+        "meta",
+        "warnings",
+        "extra_meta"
+      ],
+      "kind": "class",
+      "methods": [
+        "cleaned",
+        "ok",
+        "to_json"
+      ]
+    },
+    "ErrorDetail": {
+      "fields": [
+        "code",
+        "message",
+        "retryable",
+        "detail",
+        "cause",
+        "context",
+        "suggestion",
+        "fix_command",
+        "retry_after_ms",
+        "fix_required",
+        "phase",
+        "errors",
+        "alternatives",
+        "hint",
+        "auth_methods",
+        "retries_exhausted",
+        "retry_strategy",
+        "conflict_id",
+        "refresh_command",
+        "expires_at",
+        "required_permission",
+        "network_context",
+        "redirect",
+        "corrected_input"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "Example": {
+      "fields": [
+        "description",
+        "command"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "Excludes": {
+      "fields": [
+        "flag",
+        "prohibited"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Exit": {
+      "kind": "_ExitFactory"
+    },
+    "ExitCode": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": [
+        "is_command_specific",
+        "is_framework",
+        "is_signal"
+      ]
+    },
+    "ExitCodeEntry": {
+      "fields": [
+        "name",
+        "code",
+        "description",
+        "retryable",
+        "side_effects",
+        "suggestion",
+        "retry_after_ms",
+        "retry_strategy"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "ExitCodeName": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Expired": {
+      "fields": [
+        "at"
+      ],
+      "kind": "class",
+      "methods": [
+        "iso"
+      ]
+    },
+    "Flag": {
+      "kind": "function",
+      "signature": "(*, description: 'str', default: 'Any' = <dataclasses._MISSING_TYPE object>, short: 'str | None' = None, pattern: 'str | None' = None, secret: 'bool | None' = None, multiline: 'bool' = False, max_bytes: 'int | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, deprecated: 'Deprecated | None' = None) -> 'Any'"
+    },
+    "Format": {
+      "kind": "enum",
+      "members": [
+        "PLAIN",
+        "JSON",
+        "JSONL",
+        "CSV",
+        "TSV",
+        "YAML",
+        "MARKDOWN",
+        "ID"
+      ]
+    },
+    "FrameworkCode": {
+      "kind": "enum",
+      "members": [
+        "SUCCESS",
+        "GENERAL_ERROR",
+        "ARG_ERROR",
+        "PARTIAL_FAILURE",
+        "PRECONDITION",
+        "NOT_FOUND",
+        "CONFLICT",
+        "PERMISSION_DENIED",
+        "AUTH_REQUIRED",
+        "PAYMENT_REQUIRED",
+        "TIMEOUT",
+        "RATE_LIMITED",
+        "UNAVAILABLE",
+        "REDIRECTED"
+      ]
+    },
+    "Group": {
+      "kind": "class",
+      "methods": [
+        "command",
+        "group"
+      ]
+    },
+    "HttpResponse": {
+      "fields": [
+        "status",
+        "headers",
+        "body"
+      ],
+      "kind": "class",
+      "methods": [
+        "json",
+        "text"
+      ]
+    },
+    "Init": {
+      "kind": "class",
+      "methods": [
+        "initialized",
+        "run"
+      ]
+    },
+    "Item": {
+      "fields": [
+        "id",
+        "value",
+        "error"
+      ],
+      "kind": "class",
+      "methods": [
+        "ok"
+      ]
+    },
+    "ItemError": {
+      "fields": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "Job": {
+      "fields": [
+        "job_id",
+        "status",
+        "poll_interval_ms",
+        "timeout_ms",
+        "effect"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "JobStore": {
+      "kind": "class",
+      "methods": [
+        "cancel",
+        "status"
+      ]
+    },
+    "Meta": {
+      "fields": [
+        "duration_ms",
+        "request_id",
+        "command",
+        "timestamp",
+        "schema_version",
+        "tool_version",
+        "cwd",
+        "trace_id",
+        "project_root",
+        "retries"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "NetworkContext": {
+      "fields": [
+        "url",
+        "proxy_used",
+        "proxy_source",
+        "no_proxy",
+        "ssl_verify",
+        "suggestion",
+        "status_code"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "NoArgs": {
+      "fields": [],
+      "kind": "class",
+      "methods": []
+    },
+    "Out": {
+      "kind": "function",
+      "signature": "(*, default: 'Any' = <dataclasses._MISSING_TYPE object>, default_factory: 'Callable[[], Any] | Any' = <dataclasses._MISSING_TYPE object>, sort_key: 'str | None' = None, ordered: 'bool' = False, volatile: 'bool' = False, high_entropy: 'bool | None' = None, external: 'bool' = False) -> 'Any'"
+    },
+    "Page": {
+      "fields": [
+        "items",
+        "next_cursor",
+        "total"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "PageRequest": {
+      "fields": [
+        "limit",
+        "cursor"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "ParseError": {
+      "kind": "class",
+      "methods": [
+        "field",
+        "items"
+      ]
+    },
+    "Redirect": {
+      "fields": [
+        "command",
+        "permanent",
+        "reason"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "RegistrationError": {
+      "kind": "class",
+      "methods": []
+    },
+    "Renderer": {
+      "kind": "alias",
+      "value": "collections.abc.Callable[[typing.Any], str]"
+    },
+    "RequiredWhen": {
+      "fields": [
+        "flag",
+        "value",
+        "then"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Retry": {
+      "fields": [
+        "retries",
+        "delay_ms",
+        "on",
+        "exhausted"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "RetryStrategy": {
+      "kind": "enum",
+      "members": [
+        "IMMEDIATE",
+        "LINEAR_BACKOFF",
+        "EXPONENTIAL_BACKOFF"
+      ]
+    },
+    "Rollback": {
+      "kind": "alias",
+      "value": "collections.abc.Callable[[typing.Any, 'Ctx', 'tuple[StepName, ...]'], None]"
+    },
+    "ScalarSpec": {
+      "fields": [
+        "cls",
+        "parse",
+        "serialize",
+        "base",
+        "pattern",
+        "pattern_type",
+        "minimum",
+        "maximum"
+      ],
+      "kind": "class",
+      "methods": [
+        "json_schema",
+        "json_type",
+        "violation"
+      ]
+    },
+    "SchemaError": {
+      "kind": "class",
+      "methods": []
+    },
+    "SchemaVersion": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": [
+        "key",
+        "major",
+        "minor"
+      ]
+    },
+    "Scope": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "SideEffect": {
+      "fields": [
+        "path",
+        "type",
+        "ttl_seconds",
+        "clearable_with"
+      ],
+      "kind": "class",
+      "methods": [
+        "kind",
+        "pattern",
+        "to_json"
+      ]
+    },
+    "SideEffects": {
+      "kind": "enum",
+      "members": [
+        "NONE",
+        "PARTIAL",
+        "COMPLETE"
+      ]
+    },
+    "Spawned": {
+      "fields": [
+        "pid",
+        "log_path",
+        "pid_file"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "StepName": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "Subprocess": {
+      "fields": [
+        "binary",
+        "user_controlled_args",
+        "hardcoded_args"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "Timeout": {
+      "fields": [
+        "seconds"
+      ],
+      "kind": "class",
+      "methods": [
+        "milliseconds"
+      ]
+    },
+    "TreatyError": {
+      "kind": "class",
+      "methods": []
+    },
+    "UpdateCheck": {
+      "kind": "class",
+      "methods": [
+        "latest"
+      ]
+    },
+    "WalkEntry": {
+      "fields": [
+        "path",
+        "depth",
+        "is_dir",
+        "is_symlink"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "WarningDetail": {
+      "fields": [
+        "code",
+        "message",
+        "context"
+      ],
+      "kind": "class",
+      "methods": [
+        "to_json"
+      ]
+    },
+    "already_exists": {
+      "kind": "function",
+      "signature": "(existing: 'object', *, conflict_id: 'str', message: 'str | None' = None) -> 'CliExit'"
+    },
+    "endpoint": {
+      "kind": "function",
+      "signature": "(url: 'str', *, fix: 'str', name: 'str | None' = None) -> 'Endpoint'"
+    },
+    "intercept_stdout": {
+      "kind": "function",
+      "signature": "() -> 'Interceptor'"
+    },
+    "table": {
+      "kind": "function",
+      "signature": "(delimiter: 'str') -> 'Renderer'"
+    }
+  },
+  "group_methods": [
+    "command",
+    "group"
+  ],
+  "keywords": {
+    "App": [
+      "name",
+      "version",
+      "description",
+      "state",
+      "default_timeout",
+      "max_output_bytes",
+      "max_stdin_bytes",
+      "state_dir",
+      "enable_exec",
+      "credentials",
+      "jobs",
+      "settings",
+      "init",
+      "companions",
+      "dependencies",
+      "checks",
+      "update_check",
+      "audit_log",
+      "schema_changelog"
+    ],
+    "App.command": [
+      "path",
+      "description",
+      "danger_level",
+      "required_scopes",
+      "exit_codes",
+      "examples",
+      "has_network_io",
+      "timeout",
+      "supports_raw_payload",
+      "cleanup",
+      "renderers",
+      "streaming",
+      "safe_default",
+      "gui_operations",
+      "headless_behavior",
+      "interactive",
+      "editor_alternatives",
+      "paginated",
+      "default_limit",
+      "cursor_check",
+      "heartbeat",
+      "stdin_input",
+      "output_file",
+      "requires_auth",
+      "auth",
+      "token_env_vars",
+      "async_job",
+      "config_write_scope",
+      "schema_version",
+      "compat",
+      "project_root",
+      "retry",
+      "sort_key",
+      "ordered",
+      "fix_commands",
+      "refreshes_auth",
+      "requires",
+      "option_placement",
+      "introduced_in",
+      "deprecated",
+      "steps",
+      "resumable",
+      "rollback",
+      "external",
+      "subprocess",
+      "platform",
+      "required_tools",
+      "filesystem_side_effects",
+      "background",
+      "preserve_locale",
+      "cache",
+      "recursive_traversal",
+      "id_field"
+    ],
+    "App.run": [
+      "argv",
+      "stdin",
+      "stdout",
+      "stderr",
+      "env",
+      "isatty"
+    ],
+    "Arg": [
+      "description",
+      "pattern",
+      "secret",
+      "pattern_type",
+      "from_stdin"
+    ],
+    "Deprecated": [
+      "since",
+      "replacement",
+      "removed_in"
+    ],
+    "Flag": [
+      "description",
+      "default",
+      "short",
+      "pattern",
+      "secret",
+      "multiline",
+      "max_bytes",
+      "pattern_type",
+      "from_stdin",
+      "deprecated"
+    ],
+    "Group.command": [
+      "name",
+      "**App.command"
+    ]
+  },
+  "manifest": {
+    "command_entry": [
+      "danger_level",
+      "description",
+      "exit_codes",
+      "flags",
+      "option_placement",
+      "output_schema",
+      "required_scopes"
+    ],
+    "flags": [
+      "config",
+      "context",
+      "cwd",
+      "debug",
+      "fields",
+      "format",
+      "help",
+      "instance-id",
+      "max-output",
+      "no-config",
+      "no-injection-protection",
+      "no-update-check",
+      "output-schema",
+      "print-schema",
+      "quiet",
+      "schema",
+      "schema-version",
+      "show-config",
+      "stable-output",
+      "stream",
+      "token-count",
+      "token-limit",
+      "token-offset",
+      "tokenizer",
+      "unmask",
+      "verbose",
+      "warnings-as-errors"
+    ],
+    "keys": [
+      "commands",
+      "etag",
+      "exit_codes",
+      "flags",
+      "framework_version",
+      "schema_version"
+    ]
+  }
+}

@@ -2,7 +2,7 @@
 
 from importlib.metadata import version
 
-from ._app import App, ExecArgs, Group, NoArgs
+from ._app import App, Group, NoArgs
 from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
 from ._cache import CachePolicy
@@ -69,7 +69,6 @@ __all__ = [
     "ErrorDetail",
     "Example",
     "Excludes",
-    "ExecArgs",
     "Expired",
     "Exit",
     "ExitCode",
