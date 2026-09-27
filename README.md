@@ -159,6 +159,20 @@ A command flag placed before the path fails with `ARG_ERROR`, names the command 
 words resolve to in `context.command`, and puts the corrected order in `suggestion`. Plain
 mode prints every error's suggestion as a final `hint:` line on stderr.
 
+## Renamed commands
+
+A command that moves keeps answering at its old path, with exit `13`:
+
+```python
+app.redirect("deploy.undo", to="deploy.rollback")  # reason="renamed", permanent=True
+```
+
+`deployctl deploy undo api --to 1.3.9` exits `13` with `REDIRECTED` and
+`error.redirect.command` set to `deployctl deploy rollback api --to 1.3.9`, the same
+arguments under the new path, ready to run as is. In `exec` and MCP the replacement is the
+new path. The target lists `deploy.undo` in its manifest `aliases`; registering a redirect
+to a missing command or from a live path is a `RegistrationError`.
+
 ## Output formats
 
 `--format` takes `json`, `jsonl`, `plain`, `tsv`, and any format the app registers. With no flag,

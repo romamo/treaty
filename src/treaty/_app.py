@@ -68,6 +68,8 @@ from ._envelope import (
     Envelope,
     ErrorDetail,
     Meta,
+    Redirect,
+    RedirectReason,
     WarningDetail,
     clean,
     json_safe,
@@ -278,6 +280,7 @@ class App:
             )
         self.companions = frozenset(companions)
         self._fixes_checked = False
+        self._redirects: dict[CommandPath, Moved] = {}
         self._register_builtins(enable_exec)
         self._builtins = frozenset(self._commands)
 
@@ -378,6 +381,8 @@ class App:
         prefix = CommandPath(path)
         if prefix in self._commands:
             raise RegistrationError(f"{prefix} is already a command")
+        if any(r == prefix or r.is_ancestor_of(prefix) for r in self._redirects):
+            raise RegistrationError(f"{prefix} overlaps a redirected path; it answers exit 13")
         self._check_nesting(prefix)
         if not description:
             raise RegistrationError(f"group {prefix} needs a description")
@@ -587,6 +592,10 @@ class App:
             raise RegistrationError(f"{path} is already registered")
         if path in self._groups:
             raise RegistrationError(f"{path} is already a group")
+        if any(
+            r == path or r.is_ancestor_of(path) or path.is_ancestor_of(r) for r in self._redirects
+        ):
+            raise RegistrationError(f"{path} overlaps a redirected path; it answers exit 13")
         self._check_nesting(path)
         for name in command.exit_codes:
             if name not in self.exits:
@@ -610,6 +619,48 @@ class App:
                 raise RegistrationError(f"{path}: a refresh command cannot be destructive")
         self._commands[path] = command
         self._fixes_checked = False
+
+    def redirect(
+        self, old: str, *, to: str, reason: str = "renamed", permanent: bool = True
+    ) -> None:
+        """Answer the retired path ``old`` with exit 13 ``REDIRECTED`` and
+        ``error.redirect.command``, the same invocation under ``to``, verbatim; ``to``
+        lists ``old`` in its manifest ``aliases``. ``reason`` is ``renamed``,
+        ``restructured``, ``deprecated``, or ``typo_corrected``; ``permanent=False``
+        tells an agent not to remember the mapping."""
+        source, target = CommandPath(old), CommandPath(to)
+        if reason not in RedirectReason:
+            reasons = ", ".join(RedirectReason)
+            raise RegistrationError(f"redirect {source}: reason={reason!r} is not one of {reasons}")
+        if not isinstance(permanent, bool):
+            raise RegistrationError(f"redirect {source}: permanent is True or False")
+        command = self._commands.get(target)
+        if command is None:
+            raise RegistrationError(
+                f"redirect {source}: {target} is not a registered command; register it first"
+            )
+        # A group may hold the old path; a command above it would take it as arguments
+        live = [
+            str(p)
+            for p in (*self._commands, *self._groups)
+            if p == source
+            or source.is_ancestor_of(p)
+            or (p in self._commands and p.is_ancestor_of(source))
+        ]
+        if live or source in self._redirects:
+            raise RegistrationError(
+                f"redirect {source}: the path is still in use ({', '.join(live) or 'redirect'})"
+            )
+        self._redirects[source] = Moved(target, RedirectReason(reason), permanent)
+        self._commands[target] = dataclasses.replace(command, aliases=(*command.aliases, source))
+
+    def moved(self, words: Sequence[str]) -> tuple[CommandPath, Moved, tuple[str, ...]] | None:
+        """The redirect whose old path starts ``words``, with the words after it"""
+        for source, moved in self._redirects.items():
+            n = len(source.parts)
+            if tuple(words[:n]) == source.parts:
+                return source, moved, tuple(words[n:])
+        return None
 
     def check_fixes(self) -> None:
         """Every declared ``fix_commands`` value names a command that exists and is not
@@ -967,6 +1018,9 @@ class App:
         except InvalidValue as exc:
             return run.arg_error(ParseError(str(exc), context={"_cmd": path}), meta=meta)
         command = self._commands.get(command_path)
+        if command is None and (found := self.moved(command_path.parts)) is not None:
+            source, moved, _ = found
+            return run.redirected(source, moved, moved.to.value, meta=meta)
         if command is None or command_path == EXEC_PATH:
             available = sorted(p.value for p in self._commands if p != EXEC_PATH)
             return run.arg_error(
@@ -1115,6 +1169,10 @@ class App:
         if route.path is None and not route.prefix and route.tokens == ("--version",):
             # Root-only alias so a command's own --version flag is never shadowed
             route = Route(path=VERSION_PATH, prefix=VERSION_PATH.parts, tokens=())
+        if route.path is None and route.tokens and (found := self.moved(rest)) is not None:
+            source, moved, remaining = found
+            replacement = shlex.join([self.name, *moved.to.parts, *remaining])
+            return run.emit(mode, run.redirected(source, moved, replacement))
         if route.path is None and route.tokens:
             # An unroutable path is an error even with --help or --schema, which would
             # otherwise answer with exit 0 about the enclosing group
@@ -1187,6 +1245,15 @@ class App:
 _guard_lock = threading.Lock()
 _guarded = 0
 _unguarded: tuple[TextIO, TextIO] = (sys.stdout, sys.stdin)
+
+
+@dataclass(frozen=True, slots=True)
+class Moved:
+    """Where ``App.redirect`` sends a retired path"""
+
+    to: CommandPath
+    reason: RedirectReason
+    permanent: bool
 
 
 def _invoke(
@@ -1722,6 +1789,30 @@ class _Run:
                 errors=exc.items(),
             ),
             **kw,
+        )
+
+    def redirected(
+        self,
+        source: CommandPath,
+        moved: Moved,
+        replacement: str,
+        *,
+        meta: Mapping[str, object] | None = None,
+    ) -> Envelope:
+        """Exit 13: ``source`` is retired; ``replacement`` is what to run instead"""
+        entry = self.app.exits.framework(FrameworkCode.REDIRECTED)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="REDIRECTED",
+                message=f"{source} is now {moved.to}",
+                retryable=False,
+                context={"from": source.value, "to": moved.to.value},
+                suggestion=f"run {replacement} instead",
+                phase="validation",
+                redirect=Redirect(replacement, moved.permanent, moved.reason),
+            ),
+            meta=meta,
         )
 
     def args_crashed(
@@ -3215,6 +3306,11 @@ class _Run:
                 continue
             meta["_cmd"] = request.path.value
             command = self.app.commands.get(request.path)
+            if command is None and (found := self.app.moved(request.path.parts)) is not None:
+                source, moved, _ = found
+                # A plan line names the command by its path, so that is what it resends
+                yield line_no, self.redirected(source, moved, moved.to.value, meta=meta)
+                continue
             if command is None or request.path == EXEC_PATH:
                 yield (
                     line_no,

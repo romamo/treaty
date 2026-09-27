@@ -187,6 +187,9 @@ def command_entry(
     children = sorted(p.value for p in all_paths if p.is_direct_child_of(command.path))
     if children:
         out["subcommands"] = children
+    if command.aliases:
+        # Old paths that answer exit 13 with this command in error.redirect
+        out["aliases"] = sorted(a.value for a in command.aliases)
     if command.examples:
         out["examples"] = [e.to_json() for e in command.examples]
     if command.has_network_io:

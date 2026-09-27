@@ -763,3 +763,85 @@ def test_an_auto_generated_idempotency_key_is_deterministic_within_a_session(
     # Without the variable nothing is deduplicated, and nothing is reported
     _, plain = run(app, ["tag", "a"])
     assert "idempotency_key" not in plain["meta"] and calls == ["a", "b", "a", "a"]
+
+
+# REDIRECTED (exit 13)
+
+
+@dataclass(frozen=True, slots=True)
+class Rollback:
+    service: str = Arg(description="Service")
+    to: str = Flag(default="previous", description="Release")
+
+
+def moved_app() -> App:
+    app = App("dc", version="1.0.0")
+    deploy = app.group("deploy", description="Deployments")
+
+    @deploy.command("rollback", description="Roll back", danger_level="safe", exit_codes=())
+    def rollback(args: Rollback, ctx: Ctx) -> dict[str, str]:
+        return {"service": args.service, "to": args.to}
+
+    app.redirect("deploy.undo", to="deploy.rollback")
+    app.redirect("revert", to="deploy.rollback", reason="restructured", permanent=False)
+    return app
+
+
+def test_a_retired_path_exits_13_with_the_verbatim_replacement() -> None:
+    app = moved_app()
+    code, envelope = run(app, ["deploy", "undo", "api", "--to", "1.2.3"])
+    error = envelope["error"]
+    assert code == 13 and error["code"] == "REDIRECTED" and error["retryable"] is False
+    assert error["redirect"] == {
+        "command": "dc deploy rollback api --to 1.2.3",
+        "permanent": True,
+        "reason": "renamed",
+    }
+    words = shlex.split(error["redirect"]["command"])
+    code, envelope = run(app, words[1:])
+    assert code == 0 and envelope["data"] == {"service": "api", "to": "1.2.3"}
+    _, envelope = run(app, ["revert", "api"])
+    assert envelope["error"]["redirect"]["permanent"] is False
+    assert envelope["error"]["redirect"]["reason"] == "restructured"
+
+
+def test_help_and_schema_on_a_retired_path_redirect_too() -> None:
+    code, envelope = run(moved_app(), ["deploy", "undo", "--schema"])
+    assert code == 13 and envelope["error"]["redirect"]["command"] == "dc deploy rollback"
+
+
+def test_exec_and_call_redirect_by_path() -> None:
+    app = moved_app()
+    envelope = app.call("deploy.undo", {"service": "api"}, env={})
+    assert envelope.exit_code == 13 and envelope.error is not None
+    assert envelope.error.redirect is not None
+    assert envelope.error.redirect.command == "deploy.rollback"
+    out = io.StringIO()
+    plan = io.StringIO('{"_cmd": "deploy.undo", "service": "api"}\n')
+    app.run(["exec"], stdin=plan, stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+    line = json.loads(out.getvalue().splitlines()[0])
+    assert line["meta"]["exit_code"] == 13
+    assert line["error"]["redirect"]["command"] == "deploy.rollback"
+
+
+def test_the_target_lists_retired_paths_in_manifest_aliases() -> None:
+    manifest = moved_app().manifest()
+    spec_validator("manifest-response").validate(manifest)
+    assert manifest["commands"]["deploy.rollback"]["aliases"] == ["deploy.undo", "revert"]
+
+
+def test_a_redirect_needs_a_registered_target_and_a_free_path() -> None:
+    app = moved_app()
+    with pytest.raises(RegistrationError, match="not a registered command"):
+        app.redirect("old", to="nowhere")
+    with pytest.raises(RegistrationError, match="still in use"):
+        app.redirect("deploy.rollback", to="deploy.rollback")
+    with pytest.raises(RegistrationError, match="still in use"):
+        app.redirect("deploy", to="deploy.rollback")
+    with pytest.raises(RegistrationError, match="reason"):
+        app.redirect("older", to="deploy.rollback", reason="moved")
+    with pytest.raises(RegistrationError, match="redirected"):
+
+        @app.command("revert", description="R", danger_level="safe", exit_codes=())
+        def revert(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+            return {}

@@ -147,6 +147,8 @@ class Command:
     """``error.code`` to the invocation that fixes it, when the raise gives none (REQ-C-030)"""
     refreshes_auth: bool = False
     """Renews expired credentials: ``error.refresh_command`` of ``CREDENTIALS_EXPIRED``"""
+    aliases: tuple[CommandPath, ...] = ()
+    """Old paths that redirect here with exit 13 (``App.redirect``); manifest ``aliases``"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
