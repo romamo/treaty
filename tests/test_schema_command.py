@@ -64,6 +64,7 @@ def test_raw_payload_schema_only_when_supported(app: App) -> None:
         "idempotency_key",
         "validate_only",
         "stable_output",
+        "fields",
     }
     assert raw["additionalProperties"] is False
 

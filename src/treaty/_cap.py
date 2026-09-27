@@ -20,7 +20,7 @@ import dataclasses
 import itertools
 import json
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ._env import MAX_OUTPUT_BYTES, MAX_STDIN_BYTES, app_var
@@ -146,7 +146,7 @@ DEFAULT_STDIN_CAP = StdinCap(65_536)
 
 
 @dataclass(frozen=True, slots=True)
-class _Cut:
+class Cut:
     path: FieldPath
     original: int
     kept: int
@@ -175,14 +175,25 @@ def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
         # Error or meta alone exceed the cap, which cutting data cannot fix; data still
         # gets the cap as its own budget, so the envelope stays bounded
         return cap_envelope(envelope, OutputCap(base + cap.bytes), rerun)
-    data: object = copy.deepcopy(envelope.data)
-    cuts: list[_Cut] = []
-    visited: set[FieldPath] = set()
 
-    def fits(candidate: object, pending: list[_Cut]) -> bool:
+    def fits(candidate: object, pending: list[Cut]) -> bool:
         trial = _truncated(envelope, candidate, pending, total, rerun)
         return len(serialize(trial).encode()) <= cap.bytes
 
+    shrunk = shrink(envelope.data, fits)
+    if shrunk is None:
+        return _truncated(envelope, None, [Cut((), total, 0)], total, rerun)
+    return _truncated(envelope, *shrunk, total, rerun)
+
+
+def shrink(
+    data: object, fits: Callable[[object, list[Cut]], bool]
+) -> tuple[object, list[Cut]] | None:
+    """A copy of ``data`` cut until ``fits`` accepts it, with the cuts made; None when
+    even the smallest cut does not fit. ``fits`` sees the candidate and its cuts."""
+    data = copy.deepcopy(data)
+    cuts: list[Cut] = []
+    visited: set[FieldPath] = set()
     while (target := _target(data, visited)) is not None:
         path, node = target
         visited.add(path)
@@ -192,20 +203,20 @@ def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
         while lo <= hi:
             mid = (lo + hi) // 2
             data = _replace(data, path, _prefix(node, mid))
-            if fits(data, [*cuts, _Cut(path, len(node), mid)]):
+            if fits(data, [*cuts, Cut(path, len(node), mid)]):
                 best, lo = mid, mid + 1
             else:
                 hi = mid - 1
         kept = floor if best is None else best
         data = _replace(data, path, _prefix(node, kept))
-        cuts.append(_Cut(path, len(node), kept))
+        cuts.append(Cut(path, len(node), kept))
         if best is not None:
-            return _truncated(envelope, data, cuts, total, rerun)
-    return _truncated(envelope, None, [_Cut((), total, 0)], total, rerun)
+            return data, cuts
+    return None
 
 
 def _truncated(
-    envelope: Envelope, data: object, cuts: list[_Cut], total: int, rerun: Rerun
+    envelope: Envelope, data: object, cuts: list[Cut], total: int, rerun: Rerun
 ) -> Envelope:
     meta: dict[str, object] = {**envelope.extra_meta, "truncated": True, "total_bytes": total}
     root = next((c for c in cuts if c.path == ()), None)

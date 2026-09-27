@@ -21,6 +21,8 @@ class Format(StrEnum):
     TSV = "tsv"
     YAML = "yaml"
     MARKDOWN = "markdown"
+    ID = "id"
+    """The bare primary identifier per line, for piping (REQ-O-005)"""
 
 
 def resolve_mode(

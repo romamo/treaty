@@ -29,6 +29,9 @@ treaty-mcp = "treaty._mcp:main"
 mcp = [
     "mcp>=2,<3",
 ]
+tiktoken = [
+    "tiktoken>=0.7",
+]
 
 [dependency-groups]
 dev = [

@@ -964,6 +964,34 @@ def _id_like(cls: type) -> str:
     return names[0] if names else "id"
 
 
+_ID_SUFFIXES = ("_id", "uuid", "slug")
+
+
+def _id_field(app: App) -> Iterator[Finding]:
+    """REQ-O-005: an output whose one identifier is not named ``id`` declares it, so
+    ``--format id`` can pipe it"""
+    for c in user_commands(app):
+        if c.id_field is not None or c.batch:
+            continue
+        schema = c.output_schema
+        item = schema.get("items", {}) if schema.get("type") == "array" else schema
+        properties = item.get("properties") or {}
+        named = [
+            name
+            for name, prop in properties.items()
+            if name.endswith(_ID_SUFFIXES) and prop.get("type") in ("string", "integer")
+        ]
+        if len(named) == 1:
+            yield Finding(
+                "id-field",
+                Severity.ADVICE,
+                c.path.value,
+                f"output field {named[0]} looks like the primary id, but --format id cannot "
+                "write it until it is declared",
+                f'id_field="{named[0]}"',
+            )
+
+
 def _stable_order(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         item = _object_items(c.output_type)
@@ -1820,6 +1848,12 @@ RULES: tuple[Rule, ...] = (
         "Output data carries no per-call values",
         Severity.WARNING,
         _volatile_data,
+    ),
+    Rule(
+        "id-field",
+        "An output's primary id is declared for --format id",
+        Severity.ADVICE,
+        _id_field,
     ),
     Rule(
         "stable-order",

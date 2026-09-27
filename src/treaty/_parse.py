@@ -45,6 +45,17 @@ from ._secrets import (
     resolve_secret,
     split_source_flag,
 )
+from ._select import (
+    FIELDS_FLAG,
+    FIELDS_KEY,
+    STREAM_FLAG,
+    TOKEN_COUNT_FLAG,
+    TOKEN_LIMIT_FLAG,
+    TOKEN_OFFSET_FLAG,
+    TOKENIZER_FLAG,
+    parse_fields,
+    token_number,
+)
 from ._steps import StepName
 from ._timeout import Timeout
 from ._types import Classified, FlagType
@@ -114,6 +125,11 @@ class Invocation:
     """``--no-follow-symlinks`` of a ``recursive_traversal`` command (REQ-O-040)"""
     max_depth: int | None = None
     """``--max-depth`` of a ``recursive_traversal`` command; None is the default, 50"""
+    heartbeat_interval: float | None = None
+    """``--heartbeat-interval`` of a ``heartbeat=True`` command: seconds between progress
+    lines on stderr; None is off (REQ-O-012)"""
+    fields: tuple[str, ...] | None = None
+    """``fields`` of an exec line or MCP call: the ``--fields`` global (REQ-O-002)"""
     given: frozenset[str] = frozenset()
     """The fields the caller supplied, as opposed to defaulted"""
 
@@ -152,6 +168,15 @@ class GlobalOptions:
     """Which of ``--quiet``, ``--verbose``, ``--debug`` were given (REQ-O-008)"""
     warnings_as_errors: bool = False
     """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
+    fields: tuple[str, ...] | None = None
+    """``--fields``: the top-level keys of ``data`` to keep (REQ-O-002)"""
+    stream: bool = False
+    """``--stream``: JSONL events; a warning on a command that cannot stream (REQ-O-004)"""
+    token_limit: int | None = None
+    token_offset: int | None = None
+    token_count: bool = False
+    tokenizer: str | None = None
+    """The token budget flags (REQ-O-049)"""
 
 
 def without_value(token: str) -> str:
@@ -182,7 +207,19 @@ def _repeated(flag: str) -> ParseError:
 
 
 VALUED_GLOBALS = frozenset(
-    {"format", "max-output", "schema-version", "config", "context", "instance-id", "cwd"}
+    {
+        "format",
+        "max-output",
+        "schema-version",
+        "config",
+        "context",
+        "instance-id",
+        "cwd",
+        FIELDS_FLAG,
+        TOKEN_LIMIT_FLAG,
+        TOKEN_OFFSET_FLAG,
+        TOKENIZER_FLAG,
+    }
 )
 SWITCH_GLOBALS = frozenset(
     {
@@ -197,6 +234,8 @@ SWITCH_GLOBALS = frozenset(
         VERBOSE_FLAG,
         DEBUG_FLAG,
         WARNINGS_AS_ERRORS_FLAG,
+        STREAM_FLAG,
+        TOKEN_COUNT_FLAG,
     }
 )
 FORMAT_GUESSES = frozenset({"--output", "--output-format", "--json"})
@@ -245,6 +284,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
         else:
             rest.append(tok)
         i += 1
+    fields = valued.get(FIELDS_FLAG)
+    limit, offset = valued.get(TOKEN_LIMIT_FLAG), valued.get(TOKEN_OFFSET_FLAG)
     return (
         GlobalOptions(
             format=valued.get("format"),
@@ -265,6 +306,12 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             no_update_check="no-update-check" in switches,
             verbosity=frozenset(switches & {QUIET_FLAG, VERBOSE_FLAG, DEBUG_FLAG}),
             warnings_as_errors=WARNINGS_AS_ERRORS_FLAG in switches,
+            fields=None if fields is None else parse_fields(fields),
+            stream=STREAM_FLAG in switches,
+            token_limit=None if limit is None else token_number(limit, TOKEN_LIMIT_FLAG),
+            token_offset=None if offset is None else token_number(offset, TOKEN_OFFSET_FLAG),
+            token_count=TOKEN_COUNT_FLAG in switches,
+            tokenizer=valued.get(TOKENIZER_FLAG),
         ),
         rest,
     )
@@ -664,7 +711,7 @@ def known_flags(command: Command, *, argv: bool = True) -> list[str]:
     the unknown-field error of ``exec``, MCP, and ``--raw-payload``"""
     flags = [name for f in command.fields for name in f.exposed_flags()]
     flags += [f.name for f in framework_flags(command, json=not argv)]
-    return flags if argv else [*flags, STABLE_OUTPUT_FLAG]
+    return flags if argv else [*flags, STABLE_OUTPUT_FLAG, FIELDS_FLAG]
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
@@ -733,6 +780,9 @@ def build_from_mapping(
                 continue
             if key == STABLE_OUTPUT_KEY:
                 framework["stable_output"] = switch_value(value, key)
+                continue
+            if key == FIELDS_KEY:
+                framework["fields"] = parse_fields(value)
                 continue
             flag = key.replace("_", "-")
             spec = flag_named(command, flag, json=True)

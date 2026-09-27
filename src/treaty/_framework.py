@@ -8,6 +8,7 @@ all iterate ``FLAGS`` instead of spelling the flags out.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -196,6 +197,12 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "verbose",
         "debug",
         "warnings-as-errors",
+        "fields",
+        "stream",
+        "token-limit",
+        "token-offset",
+        "token-count",
+        "tokenizer",
     }
 )
 UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED
@@ -274,6 +281,23 @@ def parse_heartbeat(raw: str) -> int:
     value = whole_number(raw, HEARTBEAT_FLAG, expects)
     if value > 86_400_000:
         raise ParseError(f"'heartbeat-ms' expects {expects}", context={"flag": HEARTBEAT_FLAG})
+    return value
+
+
+HEARTBEAT_INTERVAL_FLAG = "heartbeat-interval"
+
+
+def parse_heartbeat_interval(raw: str) -> float:
+    """``--heartbeat-interval``: seconds, more than 0 and at most a day (REQ-O-012)"""
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not 0 < value <= 86_400:
+        raise ParseError(
+            "'heartbeat-interval' expects seconds, more than 0 and at most 86400",
+            context={"flag": HEARTBEAT_INTERVAL_FLAG, "value": raw[:32]},
+        )
     return value
 
 
@@ -436,6 +460,16 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         parse=lambda v, c: parse_heartbeat(str(v)),
         metavar="MS",
         entry=lambda c: {"default": DEFAULT_HEARTBEAT_MS},
+    ),
+    FrameworkFlag(
+        HEARTBEAT_INTERVAL_FLAG,
+        "heartbeat_interval",
+        lambda c: c.heartbeat,
+        "number",
+        "Seconds between plain-text progress lines on stderr, '[<elapsed>s] <status>' with "
+        "the latest ctx.progress() message; off unless given, and silent under --quiet",
+        parse=lambda v, c: parse_heartbeat_interval(str(v)),
+        metavar="SECONDS",
     ),
     _switch(
         YES_FLAG,

@@ -17,7 +17,7 @@ import contextvars
 import math
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 
@@ -117,7 +117,7 @@ def call_with_timeout[T](
     running: Callable[[Pending], None] | None = None,
     interruptible: Callable[[], AbstractContextManager[None]] = nullcontext,
     context: contextvars.Context | None = None,
-    heartbeat: Heartbeat | None = None,
+    heartbeats: Sequence[Heartbeat] = (),
 ) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
 
@@ -127,9 +127,10 @@ def call_with_timeout[T](
     an exception raised while ``Thread.start`` holds its internal locks corrupts them.
     The worker runs in ``context``, or a copy of the caller's: contextvars the host set
     reach the handler, and a stream passing one context keeps what its generator set.
-    ``heartbeat`` ticks between waits, outside ``interruptible()``.
+    Each of ``heartbeats`` ticks on its own interval between waits, outside
+    ``interruptible()``.
     """
-    if timeout.seconds is None and heartbeat is None:
+    if timeout.seconds is None and not heartbeats:
         with interruptible():
             return fn()
     slot = Outcome()
@@ -147,19 +148,23 @@ def call_with_timeout[T](
     worker.start()
     if running is not None:
         running(pending)
-    deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
+    start = time.monotonic()
+    deadline = None if timeout.seconds is None else start + timeout.seconds
+    due = [start + h.seconds for h in heartbeats]
     while True:
-        wait = None if deadline is None else max(0.0, deadline - time.monotonic())
-        if heartbeat is not None:
-            wait = heartbeat.seconds if wait is None else min(wait, heartbeat.seconds)
+        until = min(due, default=None) if deadline is None else min([deadline, *due])
+        wait = None if until is None else max(0.0, until - time.monotonic())
         with interruptible():
             worker.join(wait)
         if not worker.is_alive():
             break
-        if deadline is not None and time.monotonic() >= deadline:
+        now = time.monotonic()
+        if deadline is not None and now >= deadline:
             raise TimeoutExpired(timeout, pending)
-        if heartbeat is not None:
-            heartbeat.tick()
+        for i, heartbeat in enumerate(heartbeats):
+            if now >= due[i]:
+                heartbeat.tick()
+                due[i] += heartbeat.seconds
     if slot.exc is not None:
         raise slot.exc
     return slot.result  # type: ignore[return-value]

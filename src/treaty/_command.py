@@ -217,6 +217,8 @@ class Command:
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
+    id_field: str | None = None
+    """The output's primary identifier, which ``--format id`` writes (REQ-O-005)"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -339,6 +341,7 @@ def build_command(
     preserve_locale: bool = False,
     cache: CachePolicy | None = None,
     recursive_traversal: bool = False,
+    id_field: str | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -505,6 +508,7 @@ def build_command(
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
     output_schema = schema_for(output_type, scalars, output=True)
+    id_field = _id_field(path, output_schema, id_field, batch)
     if sort_key is not None and ordered:
         raise RegistrationError(
             f"{path}: sort_key orders the output array, ordered=True keeps it; pick one"
@@ -606,6 +610,46 @@ def build_command(
         cache=cache,
         recursive_traversal=recursive_traversal,
         batch=batch,
+        id_field=id_field,
+    )
+
+
+_ID_TYPES = ("string", "integer")
+
+
+def _id_field(
+    path: CommandPath, schema: JsonSchema, declared: str | None, batch: bool
+) -> str | None:
+    """The field ``--format id`` writes: ``id_field=``, else ``id`` when the output (or
+    each item of it) has one; a string, integer, UUID, or string scalar (REQ-O-005)"""
+    if declared is not None and (not isinstance(declared, str) or not declared):
+        raise RegistrationError(f'{path}: id_field names a field of the output, such as "id"')
+    if batch:
+        if declared is not None:
+            raise RegistrationError(f"{path}: a treaty.Batch has no one id; drop id_field=")
+        return None
+    item = schema.get("items", {}) if schema.get("type") == "array" else schema
+    properties = item.get("properties")
+    if properties is None:
+        if declared is not None and item.get("type") != "object":
+            raise RegistrationError(
+                f"{path}: id_field={declared!r} needs an object output, or a list of objects"
+            )
+        return declared  # an open object, such as dict[str, object]: checked as it answers
+    name = "id" if declared is None else declared
+    kind = properties.get(name, {}).get("type")
+    if kind in _ID_TYPES:
+        return name
+    if declared is None:
+        return None
+    if name not in properties:
+        raise RegistrationError(
+            f"{path}: id_field={declared!r} is not a field of the output; it has "
+            f"{', '.join(sorted(properties))}"
+        )
+    raise RegistrationError(
+        f"{path}: id_field={declared!r} must be a str, int, UUID, or string scalar, and "
+        "never None, so each id is one pipeable word"
     )
 
 

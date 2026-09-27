@@ -139,12 +139,14 @@ from ._page import (
     CURSOR_FLAG,
     DEFAULT_LIMIT,
     PageRequest,
+    Pagination,
     Position,
     invalid_cursor,
     request,
     take,
 )
 from ._parse import (
+    GlobalOptions,
     Invocation,
     Route,
     build_from_mapping,
@@ -172,6 +174,18 @@ from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
+from ._select import (
+    APPROX,
+    STREAMING_NOT_SUPPORTED,
+    TokenBudget,
+    Tokenizer,
+    approx,
+    check_tokenizer,
+    id_lines,
+    id_problem,
+    project,
+    resolve_tokenizer,
+)
 from ._session import Session, SessionRoot, prune
 from ._settings import EMPTY as EMPTY_SETTINGS
 from ._settings import ConfigOptions, Resolved, SettingsSpec
@@ -332,6 +346,9 @@ class App:
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
         self._renderers: dict[Format, Renderer] = {}
+        self._tokenizers: dict[str, Tokenizer] = {APPROX: Tokenizer(APPROX, approx)}
+        self.default_tokenizer = APPROX
+        """What the token budget flags count with unless ``--tokenizer`` names another"""
         self.credentials = credentials
         self.jobs = jobs
         self.settings = None if settings is None else SettingsSpec.inspect(settings, self.scalars)
@@ -466,10 +483,28 @@ class App:
     def formats(self) -> tuple[Format, ...]:
         """The ``--format`` values this app offers, in ``Format`` order"""
         built_in = (Format.PLAIN, Format.JSON, Format.JSONL, Format.TSV)
-        return tuple(m for m in Format if m in built_in or m in self._renderers)
+        ids = any(c.id_field is not None for c in self._commands.values())
+        return tuple(
+            m for m in Format if m in built_in or m in self._renderers or (m is Format.ID and ids)
+        )
+
+    def tokenizer(self, name: str, *, count: Callable[[str], int], default: bool = False) -> None:
+        """Offer ``--tokenizer <name>``, counting the tokens of a text with ``count``;
+        ``default=True`` makes it what the token budget flags use without ``--tokenizer``.
+        The built-in ``approx`` is UTF-8 bytes over four; ``cl100k_base`` and
+        ``o200k_base`` need the ``treaty[tiktoken]`` extra (REQ-O-049)."""
+        refuse_async(count, f"tokenizer {name}")
+        if name in self._tokenizers:
+            raise RegistrationError(f"tokenizer {name} is already registered")
+        self._tokenizers[name] = check_tokenizer(name, count)
+        if default:
+            self.default_tokenizer = name
 
     def renderer(self, command: Command, mode: Format) -> Renderer | None:
         """The command's renderer for a text mode, else the app's; None is plain's built-in"""
+        if mode is Format.ID:
+            assert command.id_field is not None
+            return functools.partial(id_lines, field=command.id_field)
         if command.path == MANIFEST_PATH:
             # The manifest is for agents: every text mode keeps it JSON, indented for reading
             return _json_text
@@ -543,6 +578,7 @@ class App:
         preserve_locale: bool = False,
         cache: CachePolicy | None = None,
         recursive_traversal: bool = False,
+        id_field: str | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -626,6 +662,9 @@ class App:
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
+        ``id_field="user_id"`` names the output's primary identifier, which ``--format id``
+        writes alone, one per line, for piping; an output with an ``id`` field needs no
+        declaration (REQ-O-005).
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -774,6 +813,7 @@ class App:
                     preserve_locale=preserve_locale,
                     cache=cache,
                     recursive_traversal=recursive_traversal,
+                    id_field=id_field,
                 )
             )
             return fn
@@ -1173,6 +1213,42 @@ class App:
             paths = list(self._commands)
         return sorted(f"{self.name} {' '.join(p.parts)}" for p in paths)
 
+    def _budget(self, globals_: GlobalOptions) -> TokenBudget | None:
+        """The run's token budget (REQ-O-049); None when no token flag was given"""
+        given = (
+            globals_.token_limit is not None
+            or globals_.token_offset is not None
+            or globals_.token_count
+            or globals_.tokenizer is not None
+        )
+        if not given:
+            return None
+        name = globals_.tokenizer or self.default_tokenizer
+        return TokenBudget(
+            resolve_tokenizer(name, self._tokenizers),
+            limit=globals_.token_limit,
+            offset=globals_.token_offset,
+            count_only=globals_.token_count,
+        )
+
+    def _refused_selection(
+        self, command: Command, invocation: Invocation, globals_: GlobalOptions, mode: Format
+    ) -> ParseError | None:
+        """``--stream`` against ``--no-stream`` (REQ-O-004), or ``--format id`` on a
+        command without an id (REQ-O-005)"""
+        if globals_.stream and invocation.no_stream:
+            return ParseError(
+                "--stream and --no-stream contradict each other; pass one",
+                context={"flag": "stream", "also_given": ["no-stream"]},
+            )
+        if mode is Format.ID and command.id_field is None:
+            return ParseError(
+                f"--format id writes a command's primary id, and {command.path} declares none",
+                context={"flag": "format", "value": "id", "command": command.path.value},
+                suggestion="use --format json; the command author adds id_field= to offer id",
+            )
+        return None
+
     def _misplaced_flag(self, route: Route) -> ParseError:
         """A flag given before the command path: command flags are parsed only after it"""
         flag = without_value(route.tokens[0])
@@ -1420,9 +1496,12 @@ class App:
             run.warnings_as_errors = globals_.warnings_as_errors
             mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
             requested = mode
-            if mode is Format.JSONL:
-                mode = Format.JSON  # every JSON envelope is already one compact line
+            if mode is Format.JSONL or globals_.token_count:
+                # Every JSON envelope is already one compact line; a token count is JSON
+                # whatever --format says (REQ-O-049)
+                mode = Format.JSON
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
+            run.budget = self._budget(globals_)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
         run.mode = mode
@@ -1434,6 +1513,7 @@ class App:
             audit_log=None if run.journal is None else str(run.journal.path),
         )
         run.stable = run.stable_all = globals_.stable_output
+        run.fields = run.fields_all = globals_.fields
         run.unmask, run.unprotected = globals_.unmask, globals_.no_injection_protection
         if globals_.cwd is not None:
             try:
@@ -1518,6 +1598,9 @@ class App:
             return run.emit(mode, run.args_crashed(command, exc))
         if pinned is not None:
             invocation = dataclasses.replace(invocation, schema_version=pinned)
+        refused = self._refused_selection(command, invocation, globals_, mode)
+        if refused is not None:
+            return run.emit(Format.JSON, run.arg_error(refused, meta=_mode_meta(command)))
         invocation = run.rooted(command, invocation)
         if run.unprotected:
             run.unprotected_record()
@@ -1536,6 +1619,15 @@ class App:
                 run.in_flight = command
                 return run.emit_stream(mode, envelopes, render=render)
             envelope = run.execute(command, invocation, mode)
+            if globals_.stream:
+                # REQ-O-004: answered buffered, as the command cannot stream
+                warning = WarningDetail(
+                    STREAMING_NOT_SUPPORTED,
+                    f"{shlex.join([self.name, *command.path.parts])} does not stream; "
+                    "the response is one buffered envelope",
+                    context={"command": command.path.value},
+                )
+                envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
             if invocation.output is not None:
                 # REQ-O-001: the file gets the representation; stdout gets the envelope
                 written = run.to_file(invocation.output, requested, envelope, render)
@@ -1611,6 +1703,8 @@ def _call(
 
 
 CLEANUP_FAILED = "CLEANUP_FAILED"
+STATUS_CHARS = 200
+"""Longest ``ctx.progress`` status a ``--heartbeat-interval`` line repeats"""
 WARNINGS_AS_ERRORS = "WARNINGS_AS_ERRORS"
 AUDIT_DATA_BYTES = 4096
 """Larger ``data`` is left out of the audit entry, which keeps its size instead"""
@@ -1780,6 +1874,8 @@ def _check_renderer(where: str, mode: object, render: object) -> None:
         raise RegistrationError(f"{where}: {mode!r} is not a Format member")
     if mode in (Format.JSON, Format.JSONL):
         raise RegistrationError(f"{where}: {mode} is the response envelope and takes no renderer")
+    if mode is Format.ID:
+        raise RegistrationError(f"{where}: {mode} writes the id_field= value and takes no renderer")
     if not callable(render):
         raise RegistrationError(f"{where}: the {mode} renderer is not callable")
 
@@ -1850,7 +1946,7 @@ def buffer_stream(envelopes: Generator[Envelope]) -> Envelope:
             events.append(last.data)
             warnings += last.warnings
     assert last is not None, "a stream always ends with a terminal envelope"
-    meta = {k: v for k, v in last.extra_meta.items() if k not in ("seq", "end")}
+    meta = {k: v for k, v in last.extra_meta.items() if k not in ("seq", "end", "pagination")}
     merged = list(last.warnings)
     for warning in warnings:
         if warning not in merged:
@@ -1953,6 +2049,14 @@ class _Run:
         """``--unmask``: high-entropy values in ``data`` stay raw (REQ-O-037)"""
         self.unprotected = False
         """``--no-injection-protection``: no trust tags on external content (REQ-O-023)"""
+        self.fields_all: tuple[str, ...] | None = None
+        """``--fields`` on argv: the keys of ``data`` every envelope keeps (REQ-O-002)"""
+        self.fields: tuple[str, ...] | None = None
+        """The keys the current envelope keeps: an exec line's ``fields``, else argv's"""
+        self.budget: TokenBudget | None = None
+        """The token budget flags of the run (REQ-O-049)"""
+        self.status: str | None = None
+        """The latest ``ctx.progress`` message, for ``--heartbeat-interval`` (REQ-O-012)"""
         self._roots: dict[tuple[str, ...], Path | None] = {}
         self.session: Session | None = None
         self.cache: Cache | None = None
@@ -2029,6 +2133,8 @@ class _Run:
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         if settle:
             envelope = self.settle(envelope)
+        if self.budget is not None:
+            envelope = self.budget.apply(envelope)
         write_envelope(cap_envelope(envelope, self.cap, Rerun(self.argv, self.page)), self.out)
         self.delivered = True
         return envelope.exit_code
@@ -2400,6 +2506,10 @@ class _Run:
         (REQ-F-006, REQ-F-038, REQ-F-051)"""
 
         def write(level: Level, message: str, fields: Mapping[str, object]) -> None:
+            if level is Level.PROGRESS:
+                # The status --heartbeat-interval repeats (REQ-O-012), one plain line
+                status = self._redactor(command, args)(message)
+                self.status = " ".join(str(clean(status)).split())[:STATUS_CHARS]
             if self.err.shows(level):
                 # Built per call, inside the handler: a secret scalar's serialize= is user code
                 self._log_line(level, message, fields, self._redactor(command, args), mode)
@@ -2602,10 +2712,24 @@ class _Run:
     def _present(self, command: Command, envelope: Envelope) -> Envelope:
         """What every sink writes of a command's envelope: high-entropy values masked
         unless ``--unmask`` (REQ-F-058), then external content tagged unless
-        ``--no-injection-protection`` (REQ-F-035, REQ-O-023). Built-ins answer about the
-        tool itself, so only app commands pass through."""
-        if command.path in self.app.builtins:
-            return envelope
+        ``--no-injection-protection`` (REQ-F-035, REQ-O-023); built-ins answer about the
+        tool itself, so only app commands pass through those. Then ``--fields`` keeps the
+        named keys (REQ-O-002); the token budget and the byte cap follow as it is written."""
+        if command.path not in self.app.builtins:
+            envelope = self._protected(command, envelope)
+        if self.fields is not None and envelope.ok and envelope.data is not None:
+            envelope = dataclasses.replace(envelope, data=project(envelope.data, self.fields))
+        if self.mode is Format.ID and envelope.ok and envelope.data is not None:
+            assert command.id_field is not None
+            problem = id_problem(envelope.data, command.id_field)
+            if problem is not None:
+                message = f"Command {command.path} answered an id --format id cannot write: "
+                return self._broken(
+                    command, "INVALID_OUTPUT", message + problem, self.started, envelope.extra_meta
+                )
+        return envelope
+
+    def _protected(self, command: Command, envelope: Envelope) -> Envelope:
         data, warnings = envelope.data, list(envelope.warnings)
         extra = dict(envelope.extra_meta)
         if data is not None:
@@ -2741,6 +2865,7 @@ class _Run:
         deprecated, which a warning says (REQ-O-014). ``stable_output`` of an exec line
         or MCP call applies to that call only."""
         self.stable = self.stable_all or invocation.stable_output
+        self.fields = self.fields_all if invocation.fields is None else invocation.fields
         self._deprecations(command, invocation)
         self.pinned = invocation.schema_version
         if self.pinned is not None:
@@ -3189,7 +3314,7 @@ class _Run:
                     timeout,
                     running.append,
                     self.cancellation.armed,
-                    heartbeat=self._heartbeat(command, invocation, mode, started),
+                    heartbeats=self._heartbeats(command, invocation, mode, started),
                 )
             finally:
                 self._restore_cwd(before)
@@ -3479,11 +3604,13 @@ class _Run:
                     0, data=data, started=started, meta={**full_meta, "seq": seq}
                 )
                 yield self._present(command, event)
+            # REQ-O-004: the summary line carries the stream's pagination
+            summary = Pagination(total=seq, returned=seq, next_cursor=None).to_json()
             terminal = functools.partial(
                 self._envelope,
                 0,
                 started=started,
-                meta={**full_meta, "seq": seq, "end": True, "total": seq},
+                meta={**full_meta, "seq": seq, "end": True, "total": seq, "pagination": summary},
             )
         except CliExit as exc:
             terminal = functools.partial(
@@ -3547,6 +3674,24 @@ class _Run:
             self._restore_cwd(before)
         # Built after the teardown, so a CLEANUP_FAILED warning reaches it
         yield self._present(command, terminal())
+
+    def _heartbeats(
+        self, command: Command, invocation: Invocation, mode: Format, started: float
+    ) -> list[Heartbeat]:
+        """JSON heartbeat lines on stdout (REQ-F-053) and ``--heartbeat-interval`` progress
+        lines on stderr (REQ-O-012), each on its own interval"""
+        beats = [self._heartbeat(command, invocation, mode, started)]
+        interval = invocation.heartbeat_interval
+        if interval is not None and command.heartbeat:
+
+            def progress() -> None:
+                elapsed = int(time.perf_counter() - started)
+                # Asked for, so written like an error: all but --quiet
+                self.err.write(f"[{elapsed}s] {self.status or 'running'}\n")
+                self.err.flush()
+
+            beats.append(Heartbeat(interval, progress))
+        return [b for b in beats if b is not None]
 
     def _heartbeat(
         self, command: Command, invocation: Invocation, mode: Format, started: float
@@ -4122,7 +4267,13 @@ class _Run:
         """Data through the renderer on stdout, errors as prose on stderr"""
         if settle:
             envelope = self.settle(envelope)
+        if self.budget is not None:
+            envelope = self.budget.apply(envelope)
         code = envelope.exit_code
+        pagination = envelope.extra_meta.get("pagination")
+        if mode is Format.ID and isinstance(pagination, dict) and pagination.get("has_more"):
+            # The ids stay pipeable; the way to the next page goes to stderr
+            self.err.write(f"next: --cursor {pagination['next_cursor']}\n", Level.WARN)
         if envelope.data is not None and render is not None:
             try:
                 text = render(envelope.data)

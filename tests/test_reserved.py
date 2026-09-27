@@ -91,9 +91,9 @@ def test_an_unimplemented_reserved_global_exits_2_as_reserved(name: str) -> None
     assert env["error"]["context"]["flag"] == name
 
 
-def test_a_reserved_global_is_reserved_before_the_command_path_too() -> None:
-    code, env = _run(_app(), ["--fields", "show"])
-    assert code == 2 and env["error"]["code"] == "RESERVED_FLAG"
+def test_a_reserved_global_is_a_global_before_the_command_path_too() -> None:
+    code, env = _run(_app(), ["--fields", "name", "show"])
+    assert code == 0 and env["data"] == {"name": "a"}
 
 
 def test_an_opt_in_name_is_a_flag_only_on_a_command_that_opts_in() -> None:

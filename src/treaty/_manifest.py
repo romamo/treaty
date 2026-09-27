@@ -18,6 +18,7 @@ from ._framework import (
 )
 from ._mode import Format
 from ._schema import JsonSchema
+from ._select import FIELDS_KEY
 from ._values import CommandPath, Etag
 
 SCHEMA_VERSION = "3.0"
@@ -200,6 +201,47 @@ _FIXED_GLOBAL_FLAGS: dict[str, object] = {
         "description": "Exit 1 with WARNINGS_AS_ERRORS when the command succeeds with any "
         "warning; the warnings and data stay in the response",
     },
+    "fields": {
+        "type": "string",
+        "required": False,
+        "description": "Comma-separated top-level keys of data to keep, of the object or of "
+        "each item of an array, such as id,name; unknown names are ignored, and ok, error, "
+        "warnings, and meta are never filtered",
+    },
+    "stream": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "One JSON line per event as it is produced, ending with a summary "
+        "line carrying pagination; commands with streaming_default already stream, and "
+        "any other answers buffered with a STREAMING_NOT_SUPPORTED warning",
+    },
+    "token-limit": {
+        "type": "integer",
+        "required": False,
+        "description": "Most tokens of data to return, cut on item and field boundaries; "
+        "meta.truncated, meta.token_limit, and meta.next_token_offset say what was cut",
+    },
+    "token-offset": {
+        "type": "integer",
+        "required": False,
+        "description": "Start data at the first item ending after this many tokens; with "
+        "--token-limit, pass the previous meta.next_token_offset for the next window",
+    },
+    "token-count": {
+        "type": "boolean",
+        "required": False,
+        "default": False,
+        "description": "Run the command, then return data null and meta.token_count, the "
+        "tokens data would take; the response is JSON whatever --format says",
+    },
+    "tokenizer": {
+        "type": "string",
+        "required": False,
+        "description": "How the token flags count: approx (UTF-8 bytes over 4, the default "
+        "unless the app sets one), cl100k_base or o200k_base with treaty[tiktoken], or a "
+        "tokenizer the app registers",
+    },
     "help": {
         "type": "boolean",
         "required": False,
@@ -278,6 +320,8 @@ def command_entry(
         out["has_network_io"] = True
     if command.streaming:
         out["streaming_default"] = True
+    if command.id_field is not None:
+        out["output_formats"] = [Format.ID.value]  # REQ-O-005: beyond the defaults
     if command.safe_default:
         out["safe_default"] = True
     if command.interactive:
@@ -390,6 +434,11 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         "type": "boolean",
         "default": False,
         "description": "Byte-identical output for identical calls (--stable-output)",
+    }
+    properties[FIELDS_KEY] = {
+        "type": "string",
+        "description": "Comma-separated top-level keys of data to keep, such as id,name "
+        "(--fields); the kept data may then lack keys output_schema requires",
     }
     if command.compat:
         majors = [c.version.major for c in command.compat] + [command.schema_version.major]
