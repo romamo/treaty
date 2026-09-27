@@ -59,10 +59,10 @@ with Phase A:
 | Task | From | Why it cannot wait |
 |------|------|--------------------|
 | Reserve global names (see below) | 01, 02, 04, 05, 07, 09, 11, 12 | A reserved name collides with app fields (REQ-F-079); adding one after 1.0 breaks apps |
-| `os.system`, `os.popen`, `shell=True` in a handler is a `RegistrationError` | 08 (C-019) | Refuses registration of apps that pass today |
-| `gui_operations` requires `headless_behavior=` | 08 (C-024) | New required keyword |
+| `os.system`, `os.popen`, `shell=True` in a handler is a `RegistrationError` (landed) | 08 (C-019) | Refuses registration of apps that pass today |
+| `gui_operations` requires `headless_behavior=` (landed) | 08 (C-024) | New required keyword |
 | `ctx.log` and stray `print()` silent off a TTY or under `CI` | 11 (F-038) | Default behavior change |
-| Built-in name rule: new built-ins yield to a same-named app command | 13 (13-D1) | Decides which names apps may use |
+| Built-in name rule: new built-ins yield to a same-named app command (landed with 08's `doctor` and `cleanup`) | 13 (13-D1) | Decides which names apps may use |
 | `LC_ALL=C` for children unless `preserve_locale=True` | 09 (F-066) | Changes child output that apps may parse |
 
 ### Reserved names (one commit, first in Phase A)

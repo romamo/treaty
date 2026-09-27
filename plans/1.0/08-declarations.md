@@ -123,11 +123,31 @@ that both files compare with. `fix_command` is published verbatim for the agent 
 
 ## Tasks
 
-- [ ] Move `shell_calls` to `_scan.py`; refuse shell calls at registration; migrate examples
-- [ ] `headless_behavior=` required with `gui_operations`; `skip` and `error` paths
-- [ ] `Subprocess` derivation, `subprocess=`, metacharacter check; audit rule
-- [ ] `Version` in `_deps.py`; manifest root `dependencies` (after 13's `Dependency`)
-- [ ] `platform=`, `required_tools=`, `UNSUPPORTED_PLATFORM`; `doctor` tool checks; audit rule
-- [ ] Manifest `filesystem_side_effects`, `clearable_with`; audit rule `fs-side-effects`
-- [ ] `Background`, `ctx.spawn`, pid files and reaping; audit rule
-- [ ] Update COMPLIANCE rows, README, HANDOFF, ROADMAP
+- [x] Move `shell_calls` to `_scan.py`; refuse shell calls at registration; migrate examples.
+  The `no-shell` audit rule is removed, since registration now refuses what it flagged;
+  `shell=` counts only on `run`, `call`, `check_call`, `check_output`, and `Popen`, so
+  `ctx.log(..., shell="bash")` still registers
+- [x] `headless_behavior=` required with `gui_operations`; `skip` and `error` paths. `error`
+  uses code `GUI_UNAVAILABLE`
+- [x] `Subprocess` derivation, `subprocess=`, metacharacter check; audit rule. Derived only
+  when every `ctx.run` is a list literal starting with the same literal binary; any
+  `ctx.pipeline` leaves it underived. The manifest lists flag names
+- [x] `Version` in `_deps.py`; manifest root `dependencies`. 13 had not landed, so 08 builds
+  `Dependency`, `App(dependencies=)`, and `doctor` with `data.dependencies`, `data.checks`
+  (required tools only; 13 adds its own checks), the `max_version` warning
+  (`DEPENDENCY_ABOVE_MAX`), and `DOCTOR_CHECKS_FAILED`
+- [x] `platform=`, `required_tools=`, `UNSUPPORTED_PLATFORM`; `doctor` tool checks; audit rule
+- [x] Manifest `filesystem_side_effects`, `clearable_with`; audit rule `fs-side-effects`. 08
+  builds `SideEffect` and a `cleanup` built-in (destructive, `--dry-run`) removing declared
+  `temp` and `cache` paths; `status --show-side-effects` is left to 13 (13-D2). The audit
+  rule flags safe commands only: a mutating command's writes may be its effect, as with
+  `treaty init`. A `declared-commands` audit rule reports a `clearable_with` or
+  `cleanup_command` naming no command (08-D2)
+- [x] `Background`, `ctx.spawn`, pid files and reaping; audit rule. Kept minimal:
+  `cleanup_command` is a full invocation checked like `clearable_with`; reaping happens on
+  the next `ctx.spawn` of the command, not in `cleanup`; the handler returns
+  `background_pid` and `cleanup_command` itself
+- [x] Built-in naming (13-D1, pulled forward): `doctor` and `cleanup` are on every app and
+  yield to an app command, group, or redirect of the same name; audit rule
+  `builtin-shadowed`
+- [x] Update COMPLIANCE rows, README, HANDOFF, ROADMAP. C-011 stays Partial until `status`

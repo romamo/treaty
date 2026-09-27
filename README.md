@@ -134,7 +134,9 @@ uv add --editable /path/to/treaty
 
 ## Built-ins
 
-Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`);
+Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`),
+plus `doctor` and `cleanup` (see Declarations), which yield: an app command or group of the
+same name replaces them, and the `builtin-shadowed` audit rule says so.
 `App(credentials=...)` adds `check-permissions` (see Credentials) and `App(jobs=...)` adds
 `job status` and `job cancel` (see Async jobs).
 `<app> --version` at the root is an alias for `<app> version`; a command's own `--version`
@@ -391,6 +393,58 @@ what happens instead:
   `error.context.url`
 
 `ctx.headless` tells the handler.
+
+## Declarations
+
+Optional keywords on `app.command` tell an agent, before it runs a command, what the
+command needs and what it leaves behind. Each is in the manifest and `--schema`:
+
+```python
+from treaty import Background, Dependency, SideEffect, Subprocess
+
+app = App("tool", version="1.0.0", dependencies=[
+    Dependency("terraform", check_command=("terraform", "version"), min_version="1.5.0",
+               fix_command="brew install terraform", version_regex=r"Terraform v([\d.]+)"),
+])
+
+@app.command(
+    "package",
+    description="Build a Debian package",
+    danger_level="safe",
+    exit_codes=(),
+    platform=["linux"],
+    required_tools={"dpkg-deb": "1.19.0"},
+    subprocess=Subprocess("dpkg-deb", user_controlled_args=("source",), hardcoded_args=("--build",)),
+    filesystem_side_effects=[SideEffect("~/.cache/tool/", "cache", ttl_seconds=3600)],
+)
+def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
+```
+
+- `subprocess=` names the child binary, the fields that become its arguments, and the
+  arguments always passed (REQ-C-019). A declared field holding `; | & $ ( ) < >`, a
+  backtick, a line break, or a leading `-` exits `2` with `SHELL_METACHARACTER` before the
+  handler runs. Without it the manifest's `subprocess` is derived from `ctx.run([...])`
+  list literals, unchecked, and the `subprocess-declared` audit rule flags a command whose
+  argument list cannot be read
+- `platform=` lists `sys.platform` values; elsewhere the command still runs, with an
+  `UNSUPPORTED_PLATFORM` warning. `required_tools=` maps each program the command runs to
+  its minimum version (REQ-C-018)
+- `App(dependencies=[...])` lists the tool's external dependencies at the manifest root
+  (REQ-O-031); `check_command` is an argument list, shown with `shlex.join`
+- `doctor` checks every dependency and required tool: `data.dependencies` with
+  `found_version` and `ok`, `data.checks` with each tool's `version`, `required`, and a
+  `fix`. A failure exits `4` with `DOCTOR_CHECKS_FAILED`; a version above `max_version`
+  is a `DEPENDENCY_ABOVE_MAX` warning
+- `filesystem_side_effects=` lists where the command writes: `path` (absolute or `~/`,
+  with `{placeholders}` matching any segment), `type` (`cache`, `log`, `temp`,
+  `credential`, `config`), `ttl_seconds`, and `clearable_with`, an invocation checked to
+  name a command (REQ-C-011). `cleanup` (destructive; `--dry-run` lists) removes every
+  declared `temp` and `cache` path
+- `background=Background("tool stop-watcher", max_lifetime_seconds=3600)` allows
+  `ctx.spawn(argv)`, which starts a child in its own session with output to a log under
+  the state directory and leaves it running when the run ends; the output carries
+  `background_pid` and `cleanup_command` (REQ-C-010). A later spawn of the command stops
+  entries past their lifetime
 
 ## Prompts
 

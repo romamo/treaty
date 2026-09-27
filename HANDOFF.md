@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1180 passed |
+| `uv run pytest` | 1254 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -338,6 +338,17 @@ The two do not share code.
   REQ-F-034's list plus `cookie` and a `pass` segment) for inputs, settings, logs, and
   stderr, where over-redaction is harmless; `secret_field` (the last word) for masking
   output, where it is not (`author`, `token_count`)
+- **Yielding built-ins** (13-D1): `doctor` and `cleanup` (`_builtins.py`) are registered
+  on every app and listed in `App._yielding`; `_yield_to` drops one when an app command,
+  group, or redirect takes its path, and `shadowed_builtins` feeds the `builtin-shadowed`
+  audit rule. `manifest`, `version`, and `exec` stay reserved. Workstream 13 adds its
+  built-ins the same way
+- **Commands a declaration names are checked late** (08-D2): `clearable_with` and
+  `Background.cleanup_command` go through `App.named_commands` in `check_fixes`, when the
+  manifest is built or the first run starts, and in the `declared-commands` audit rule
+- **`ctx.spawn` children are not in `Processes._live`**, so the run's teardown leaves
+  them; their pid and deadline go to `<state>/background/<command>.pids`, and each later
+  spawn of the command SIGTERMs expired entries whose pid still leads its process group
 
 ## Layout
 
@@ -354,6 +365,9 @@ src/treaty/
   _lifecycle.py  Teardown: one run's release hooks, then cleanup=, once on every exit
   _steps.py      StepName, StepTracker, Rollback: steps=, ctx.step, resume and rollback
   _batch.py      Batch, Item, ItemError, batch_schema(): per-item results (REQ-C-009)
+  _declare.py    Subprocess, SideEffect, Background, platform=: 08's declarations
+  _deps.py       Version, Dependency, doctor's dependency and required-tool checks
+  _builtins.py   doctor and cleanup: built-ins that yield to an app command (13-D1)
   _redact.py     SECRET_NAME, secret_field(), scrub(): what a secret name is (REQ-F-034)
   _protect.py    protect(), tagged(): masking and trust tags of data (REQ-F-058, F-035)
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
@@ -391,9 +405,10 @@ src/treaty/
   _jobs.py       Job descriptor, JobStore protocol, descriptor schema and links
   _config.py     ConfigScope, project and user config paths, ConfigFile (ctx.write_config)
   _atomic.py     write_atomic() and the advisory file locks idempotency and config share
-  _scan.py       registration-time scan of a handler's ctx.<method>() calls
+  _scan.py       registration-time scan of a handler's ctx.<method>() calls and shell calls
   _prompt.py     Prompter (ctx.prompt, ctx.confirm, ctx.edit), InputRequired, stdin guard
-  _subprocess.py Processes (ctx.run, ctx.pipeline, ctx.open_url), Completed, group kill
+  _subprocess.py Processes (ctx.run, ctx.pipeline, ctx.spawn, ctx.open_url), Completed,
+                 HeadlessBehavior, group kill
   _signals.py    SIGINT/SIGTERM handlers, Cancellation (armed windows, held signals)
   _timeout.py    Timeout VO, call_with_timeout()
   _types.py      annotation classification shared by _flags and _schema
@@ -429,9 +444,10 @@ F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-0
 F-025 (not the audit log), F-027, F-028, F-031, F-034 (not the audit log), F-035, F-040, F-044, F-045 (paths),
 F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-062, F-064, F-065, F-069,
 F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
-C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-012, C-013, C-015, C-016, C-017,
-C-020 (all presets), C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-007, O-010, O-011, O-013, O-014, O-015, O-016, O-021, O-022,
-O-023 (not the audit log), O-024, O-032, O-033, O-036, O-037, O-039, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
+C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-010, C-011 (not `status`), C-012,
+C-013, C-015, C-016, C-017, C-018, C-019,
+C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-003, O-007, O-010, O-011, O-013, O-014, O-015, O-016, O-021, O-022,
+O-023 (not the audit log), O-024, O-031, O-032, O-033, O-036, O-037, O-039, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),

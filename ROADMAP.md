@@ -154,6 +154,17 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   global names `unmask` and `no-injection-protection`, fields named `_source` or
   `_trusted`, more names inferred secret (`cookie`, a `pass` segment), and truncation
   warnings name `data.x` instead of `$.x`
+- 1.0 plan, additional command declarations (`plans/1.0/08-declarations.md`):
+  `subprocess=treaty.Subprocess(...)` (derived from `ctx.run` literals otherwise) with
+  `SHELL_METACHARACTER` on declared fields, `platform=` and `required_tools=`,
+  `filesystem_side_effects=[treaty.SideEffect(...)]`, `background=treaty.Background(...)`
+  with `ctx.spawn`, `App(dependencies=[treaty.Dependency(...)])` at the manifest root,
+  and the `doctor` and `cleanup` built-ins, which yield to an app command of the same
+  name; audit rules `subprocess-declared`, `background-declared`, `fs-side-effects`,
+  `declared-commands`, `required-tools`, and `builtin-shadowed`. Breaking: `os.system`,
+  `os.popen`, and `shell=True` in a handler fail registration (the `no-shell` rule is
+  gone); `gui_operations` requires `headless_behavior=`, and `"emit_in_output"` keeps
+  today's behavior; every app lists `doctor` and `cleanup`, so every etag changes once
 
 ## 0.1.x: after the first minor release
 
