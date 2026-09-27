@@ -13,7 +13,7 @@ from dataclasses import MISSING, dataclass, replace
 from pathlib import Path
 from typing import Any, NoReturn
 
-from ._command import Command
+from ._command import Command, OptionPlacement
 from ._dispatch import invalid_json
 from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
@@ -204,6 +204,60 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
         ),
         rest,
     )
+
+
+def _takes_value(command: Command, tok: str) -> bool:
+    """Whether the option ``tok`` consumes the next token as its value"""
+    if tok.startswith("--"):
+        name, eq, _ = tok[2:].partition("=")
+        if eq or name in SWITCH_GLOBALS:
+            return False
+        if name in VALUED_GLOBALS:
+            return True
+        spec = flag_named(command, name)
+        if spec is not None:
+            return not spec.switch
+        found = command.field_by_flag(name)
+        if found is None and split_source_flag(name) is not None:
+            return True
+        return found is not None and found.flag_type is not FlagType.BOOLEAN
+    found = command.field_by_short(tok[1:]) if len(tok) == 2 else None
+    return found is not None and found.flag_type is not FlagType.BOOLEAN
+
+
+def strict_argv(argv: list[str], known: Mapping[CommandPath, Command]) -> list[str]:
+    """REQ-C-027: for a ``strict`` command, a ``--`` before its first positional, so
+    every later token reaches its positionals verbatim, a global's name included; any
+    other argv comes back unchanged"""
+    prefixes = {p.parts[:n] for p in known for n in range(1, len(p.parts) + 1)}
+    consumed: tuple[str, ...] = ()
+    i = 0
+    while i < len(argv) and argv[i] != "--":
+        tok = argv[i]
+        if tok.startswith("-") and tok != "-":
+            name, eq, _ = tok[2:].partition("=")
+            if tok in ("-h", "--help", "--schema", "--print-schema") or name in SWITCH_GLOBALS:
+                i += 1
+            elif tok.startswith("--") and name in VALUED_GLOBALS:
+                i += 1 if eq else 2
+            else:
+                break  # a command's own option: the path ended before it
+            continue
+        if (*consumed, tok) not in prefixes:
+            break
+        consumed = (*consumed, tok)
+        i += 1
+    command = known.get(CommandPath(".".join(consumed))) if consumed else None
+    if command is None or command.option_placement is not OptionPlacement.STRICT:
+        return argv
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            return argv
+        if not tok.startswith("-") or tok == "-" or _is_negative(tok, command):
+            return [*argv[:i], "--", *argv[i:]]
+        i += 2 if _takes_value(command, tok) else 1
+    return argv
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,6 +22,8 @@ class CtxCall:
     """Line in the handler's source, 1 for the ``def`` or its first decorator"""
     shell: bool
     """A shell string where ``ctx.run`` or ``ctx.pipeline`` takes an argument list"""
+    fields: tuple[str, ...] = ()
+    """The ``args.<field>`` reads among the call's arguments"""
 
 
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
@@ -48,7 +50,17 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
             first = node.args[0]
             stages = first.elts if method == "pipeline" and isinstance(first, ast.List) else [first]
             shell = any(_text(stage) for stage in stages)
-        calls.append(CtxCall(method, node.lineno, shell))
+        fields = tuple(
+            dict.fromkeys(
+                n.attr
+                for arg in (*node.args, *(k.value for k in node.keywords))
+                for n in ast.walk(arg)
+                if isinstance(n, ast.Attribute)
+                and isinstance(n.value, ast.Name)
+                and n.value.id == params[0]
+            )
+        )
+        calls.append(CtxCall(method, node.lineno, shell, fields))
     return calls
 
 

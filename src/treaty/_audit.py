@@ -19,11 +19,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ._command import Command, DangerLevel
+from ._command import Command, DangerLevel, OptionPlacement
 from ._env import UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
+from ._scan import ctx_calls
 from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import InvalidValue, SchemaVersion
 
@@ -594,6 +595,28 @@ def _conditional_rules(app: App) -> Iterator[Finding]:
                 "so an agent learns the rule from a failing call (heuristic, REQ-C-026)",
                 f"{fix}, if that is the rule; then drop the check from __post_init__",
             )
+
+
+def _option_placement(app: App) -> Iterator[Finding]:
+    """REQ-C-027: a variadic positional passed on to a child is where an agent's
+    ``--child-flag`` goes; under ``any`` treaty parses it instead"""
+    for c in user_commands(app):
+        if c.option_placement is OptionPlacement.STRICT:
+            continue
+        variadic = {f.name for f in c.fields if f.positional and f.flag_type is FlagType.ARRAY}
+        for call in ctx_calls(c.handler):
+            forwarded = [f for f in call.fields if f in variadic]
+            if call.method in ("run", "pipeline") and forwarded:
+                yield Finding(
+                    "option-placement",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"ctx.{call.method}() on line {call.line} forwards {forwarded[0]} to a "
+                    "child, but options among those values are parsed as the command's own",
+                    'option_placement="strict", so options end at the first positional and '
+                    "the rest reach the child verbatim",
+                )
+                break
 
 
 # REQ-F-021: names of values that differ on every call; created_at is a fact of the record
@@ -1296,6 +1319,12 @@ RULES: tuple[Rule, ...] = (
     Rule("no-shell", "Handlers never run a shell", Severity.WARNING, _no_shell),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
     Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),
+    Rule(
+        "option-placement",
+        "Commands that forward arguments declare strict placement",
+        Severity.WARNING,
+        _option_placement,
+    ),
     Rule(
         "conditional-rules",
         "Cross-field checks are declared with requires=",

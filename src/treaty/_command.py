@@ -42,6 +42,15 @@ Shim = Callable[[Any], Any]
 DEFAULT_SCHEMA_VERSION = SchemaVersion("1.0")
 
 
+class OptionPlacement(StrEnum):
+    """REQ-C-027: where options may go on a command's argv"""
+
+    ANY = "any"
+    """Anywhere after the path, among positionals too (REQ-F-067)"""
+    STRICT = "strict"
+    """Before the first positional; it and everything after it are taken verbatim"""
+
+
 class DangerLevel(StrEnum):
     SAFE = "safe"
     MUTATING = "mutating"
@@ -152,6 +161,9 @@ class Command:
     """Old paths that redirect here with exit 13 (``App.redirect``); manifest ``aliases``"""
     requires: tuple[BoundRule, ...] = ()
     """Conditional argument rules, checked in phase 1 (REQ-C-026); manifest ``requires``"""
+    option_placement: OptionPlacement = OptionPlacement.ANY
+    """``strict``: options end at the first positional, for a command that forwards the
+    rest of argv to a child verbatim (REQ-C-027)"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -258,6 +270,7 @@ def build_command(
     fix_commands: Mapping[str, str] | None = None,
     refreshes_auth: bool = False,
     requires: Sequence[object] = (),
+    option_placement: OptionPlacement = OptionPlacement.ANY,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -313,6 +326,8 @@ def build_command(
         )
     fields = inspect_fields(args_type, scalars)
     rules = bind_rules(requires, fields, f"{path}")
+    if option_placement is OptionPlacement.STRICT:
+        _check_strict(path, fields)
     flags = {f.flag for f in fields}
     unknown = [name for name in editor_alternatives if name not in flags]
     if unknown:
@@ -433,7 +448,21 @@ def build_command(
         fix_commands=dict(fix_commands or {}),
         refreshes_auth=refreshes_auth,
         requires=rules,
+        option_placement=option_placement,
     )
+
+
+def _check_strict(path: CommandPath, fields: Sequence[FieldInfo]) -> None:
+    """Strict placement forwards the tail of argv, which needs a place to go"""
+    positionals = [f for f in fields if f.positional]
+    last = positionals[-1] if positionals else None
+    item = None if last is None else last.classified.item
+    if item is None or item.flag_type is not FlagType.STRING or item.path or item.scalar:
+        raise RegistrationError(
+            f'{path}: option_placement="strict" forwards everything from the first '
+            "positional on, so the last positional must be a variadic tuple[str, ...], "
+            'such as child_args: tuple[str, ...] = Arg(description="Passed to the child")'
+        )
 
 
 def _with_max_bytes(schema: JsonSchema, fields: Sequence[FieldInfo]) -> JsonSchema:

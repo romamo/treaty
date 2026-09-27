@@ -19,6 +19,7 @@ from treaty import (
     Excludes,
     Flag,
     NoArgs,
+    Out,
     ParseError,
     RegistrationError,
     RequiredWhen,
@@ -438,3 +439,145 @@ def test_audit_suggests_requires_for_a_cross_field_post_init_check() -> None:
 
     [finding] = findings(app, "conditional-rules")
     assert 'RequiredWhen("layout", \'csv\', then=("separator",))' in finding.fix
+
+
+# REQ-C-027 and REQ-F-067
+
+
+@dataclass(frozen=True, slots=True)
+class RunArgs:
+    target: str = Arg(description="Script to run")
+    child_args: tuple[str, ...] | None = Arg(description="Passed to the script verbatim")
+    loud: bool = Flag(default=False, description="Say more")
+    env: str = Flag(default="dev", description="Environment")
+
+
+@dataclass(frozen=True, slots=True)
+class ListArgs:
+    kind: str = Arg(description="What to list")
+    limit_to: int = Flag(default=10, description="Most items")
+
+
+@dataclass(frozen=True, slots=True)
+class RunOut:
+    target: str
+    loud: bool
+    env: str
+    child: tuple[str, ...] = Out(default=(), ordered=True)
+
+
+def placement_app() -> App:
+    app = App("tool", version="1.0.0")
+
+    @app.command(
+        "run",
+        description="Run a script, forwarding the rest",
+        danger_level="safe",
+        exit_codes=(),
+        option_placement="strict",
+    )
+    def run_(args: RunArgs, ctx: Ctx) -> RunOut:
+        return RunOut(args.target, args.loud, args.env, args.child_args or ())
+
+    @app.command("list", description="List things", danger_level="safe", exit_codes=())
+    def list_(args: ListArgs, ctx: Ctx) -> dict[str, object]:
+        return {"kind": args.kind, "limit_to": args.limit_to}
+
+    return app
+
+
+def test_commands_forwarding_args_to_a_subprocess_declare_strict_at_registration() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Forward:
+        rest: tuple[str, ...] = Arg(description="Arguments for git")
+
+    app = App("fw", version="1.0.0")
+
+    @app.command("git", description="Git", danger_level="safe", exit_codes=())
+    def git(args: Forward, ctx: Ctx) -> dict[str, str]:
+        ctx.run(["git", *args.rest])
+        return {}
+
+    [finding] = findings(app, "option-placement")
+    assert 'option_placement="strict"' in finding.fix
+    assert findings(placement_app(), "option-placement") == []
+    with pytest.raises(RegistrationError, match="variadic"):
+        app.command(
+            "x", description="X", danger_level="safe", exit_codes=(), option_placement="strict"
+        )(list_handler)
+    with pytest.raises(RegistrationError, match="not one of"):
+        app.command(
+            "y", description="Y", danger_level="safe", exit_codes=(), option_placement="loose"
+        )(list_handler)
+
+
+def list_handler(args: ListArgs, ctx: Ctx) -> dict[str, object]:
+    return {}
+
+
+def test_tool_manifest_includes_an_option_placement_field_for_every_command() -> None:
+    manifest = placement_app().manifest()
+    assert all("option_placement" in entry for entry in manifest["commands"].values())
+    assert manifest["commands"]["run"]["option_placement"] == "strict"
+    spec_validator("manifest-response").validate(manifest)
+
+
+def test_commands_without_the_declaration_default_to_any() -> None:
+    assert placement_app().manifest()["commands"]["list"]["option_placement"] == "any"
+    code, envelope = run(placement_app(), ["list", "things", "--limit-to", "3"])
+    assert code == 0 and envelope["data"] == {"kind": "things", "limit_to": 3}
+
+
+def test_under_strict_format_is_parsed_and_child_flags_are_forwarded() -> None:
+    code, envelope = run(placement_app(), ["run", "--format", "json", "./script", "--child-flag"])
+    assert code == 0 and envelope["data"]["child"] == ["--child-flag"]
+    code, envelope = run(placement_app(), ["run", "--format", "json", "--", "./script"])
+    assert code == 0 and envelope["data"]["target"] == "./script"
+    code, envelope = run(placement_app(), ["--env", "prod", "run"])
+    assert code == 2  # a local option still goes after the path
+
+
+def test_under_strict_an_option_after_the_first_positional_reaches_the_child_verbatim() -> None:
+    argv = ["--format", "json", "run", "--env", "prod", "./s", "--format", "plain", "--loud"]
+    code, envelope = run(placement_app(), argv)
+    assert code == 0 and envelope["data"] == {
+        "target": "./s",
+        "child": ["--format", "plain", "--loud"],
+        "loud": False,
+        "env": "prod",
+    }
+    code, envelope = run(placement_app(), ["run", "./s", "--", "-x", "--help"])
+    assert code == 0 and envelope["data"]["child"] == ["--", "-x", "--help"]
+
+
+def test_positional_then_flag_and_flag_then_positional_produce_identical_output() -> None:
+    first = run(placement_app(), ["list", "things", "--limit-to", "5", "--stable-output"])
+    second = run(placement_app(), ["list", "--limit-to", "5", "things", "--stable-output"])
+    assert first == second and first[0] == 0
+
+
+def test_options_after_positionals_are_never_silently_treated_as_positional_values() -> None:
+    code, envelope = run(placement_app(), ["list", "things", "--bogus", "x"])
+    assert code == 2 and envelope["error"]["context"]["flag"] == "bogus"
+
+
+def test_global_options_are_accepted_after_the_command_path_and_after_positionals() -> None:
+    code, envelope = run(placement_app(), ["list", "things", "--format", "json"])
+    assert code == 0 and envelope["data"]["kind"] == "things"
+
+
+def test_a_double_dash_passes_a_dash_value_as_a_positional() -> None:
+    code, envelope = run(placement_app(), ["list", "--", "-value"])
+    assert code == 0 and envelope["data"]["kind"] == "-value"
+
+
+def test_a_conflicting_global_repeat_exits_2_naming_format_and_a_same_repeat_succeeds() -> None:
+    code, envelope = run(placement_app(), ["--format", "json", "list", "x", "--format", "plain"])
+    assert code == 2 and envelope["error"]["context"]["flag"] == "format"
+    code, envelope = run(placement_app(), ["--format", "json", "list", "x", "--format", "json"])
+    assert code == 0
+
+
+def test_a_command_that_cannot_intersperse_declares_strict_in_its_manifest() -> None:
+    code, envelope = run(placement_app(), ["run", "--schema"])
+    assert code == 0 and envelope["data"]["option_placement"] == "strict"

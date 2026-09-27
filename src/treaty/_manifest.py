@@ -177,6 +177,7 @@ def command_entry(
         "description": command.description,
         "danger_level": command.danger_level.value,
         "required_scopes": [s.value for s in command.required_scopes],
+        "option_placement": command.option_placement.value,  # REQ-C-027: on every entry
         "flags": flags,
         "exit_codes": exit_codes,
         "output_schema": command.output_schema,

@@ -55,6 +55,7 @@ from ._command import (
     DangerLevel,
     Example,
     Handler,
+    OptionPlacement,
     Renderer,
     Shim,
     build_command,
@@ -130,6 +131,7 @@ from ._parse import (
     parse_command_args,
     resolve_path,
     split_globals,
+    strict_argv,
     without_value,
 )
 from ._plain import render_event, render_plain
@@ -430,6 +432,7 @@ class App:
         fix_commands: Mapping[str, str] | None = None,
         refreshes_auth: bool = False,
         requires: Sequence[RequiredWhen | Excludes | DefaultWhenAbsent] = (),
+        option_placement: str = "any",
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -467,6 +470,9 @@ class App:
         ``requires=[RequiredWhen("format", "csv", then=("separator",)), Excludes("output",
         prohibited=("stdout",))]`` declares cross-field rules, checked before the args
         ``__post_init__`` and listed in the manifest (REQ-C-026).
+        ``option_placement="strict"`` is for a command that forwards the rest of argv to a
+        child: options go before the first positional, and it and every token after it
+        reach the positionals verbatim, the last a ``tuple[str, ...]`` (REQ-C-027).
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -503,6 +509,11 @@ class App:
             raise RegistrationError(
                 f"{cmd_path}: async_job=True needs App(jobs=...), which answers job status and "
                 "job cancel for the jobs it starts"
+            )
+        if option_placement not in OptionPlacement:
+            placements = ", ".join(p.value for p in OptionPlacement)
+            raise RegistrationError(
+                f"{cmd_path}: option_placement={option_placement!r} is not one of {placements}"
             )
         if config_write_scope is not None and config_write_scope not in ConfigScope:
             scopes = ", ".join(c.value for c in ConfigScope)
@@ -581,6 +592,7 @@ class App:
                     fix_commands=fixes,
                     refreshes_auth=refreshes_auth,
                     requires=requires,
+                    option_placement=OptionPlacement(option_placement),
                 )
             )
             return fn
@@ -1141,7 +1153,7 @@ class App:
     ) -> int:
         out = run.out
         try:
-            globals_, rest = split_globals(argv)
+            globals_, rest = split_globals(strict_argv(argv, self._commands))
             mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
             requested = mode
             if mode is Format.JSONL:
