@@ -8,7 +8,7 @@ uv run -m examples.hello manifest
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from treaty import App, Arg, Ctx, Flag
+from treaty import App, Arg, Ctx, Flag, Format
 
 from .greetings import Greeting, Name, greet
 
@@ -22,14 +22,14 @@ class Greet:
     shout: bool = Flag(default=False, description="Print the greeting in upper case")
 
 
-def greet_text(data: Mapping[str, str]) -> str:
+def render_greet(data: Mapping[str, str]) -> str:
     return f"{Greeting(**data).message}\n"
 
 
 @app.command(
     "greet",
     description="Say hello",
-    plain=greet_text,
+    renderers={Format.PLAIN: render_greet},
     examples=[
         ("Greet the world", "hello greet world"),
         ("Greet Ada loudly", "hello greet Ada --shout"),

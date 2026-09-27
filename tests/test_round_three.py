@@ -13,7 +13,17 @@ from pathlib import Path
 import pytest
 from conftest import needs_posix_signals
 
-from treaty import App, Arg, Ctx, Flag, NoArgs, ParseError, RegistrationError, SchemaError
+from treaty import (
+    App,
+    Arg,
+    Ctx,
+    Flag,
+    Format,
+    NoArgs,
+    ParseError,
+    RegistrationError,
+    SchemaError,
+)
 from treaty._help import render_command
 from treaty._profile import probes_for
 from treaty._scaffold import ProjectName
@@ -157,7 +167,12 @@ def hooks_app(cleanup_fails: bool = False) -> App:
         signal.raise_signal(signal.SIGTERM)
         return {}
 
-    @app.command("tick", description="Events", streaming=True, plain=lambda e: f"n={e['n']}\n")
+    @app.command(
+        "tick",
+        description="Events",
+        streaming=True,
+        renderers={Format.PLAIN: lambda e: f"n={e['n']}\n"},
+    )
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         yield {"n": 2}
@@ -387,7 +402,7 @@ def test_failing_plain_renderer_on_a_stream_exits_1_with_one_traceback() -> None
     def broken(event: object) -> str:
         raise KeyError("renderer bug")
 
-    @app.command("tick", description="Events", streaming=True, plain=broken)
+    @app.command("tick", description="Events", streaming=True, renderers={Format.PLAIN: broken})
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         yield {"n": 2}

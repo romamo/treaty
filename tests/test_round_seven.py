@@ -13,7 +13,7 @@ from typing import Protocol
 
 import pytest
 
-from treaty import App, Arg, Ctx, Exit, Flag, NoArgs, RegistrationError
+from treaty import App, Arg, Ctx, Exit, Flag, Format, NoArgs, RegistrationError
 from treaty._idempotency import fingerprint
 from treaty._values import CommandPath
 
@@ -130,7 +130,7 @@ def test_closed_reader_on_builtins_and_errors_exits_141(argv: list[str]) -> None
 def plain_app(events: list[str]) -> App:
     app = App("hum", version="1")
 
-    @app.command("show", description="Show", plain=lambda d: f"{d['n']}\n")
+    @app.command("show", description="Show", renderers={Format.PLAIN: lambda d: f"{d['n']}\n"})
     def show(args: NoArgs, ctx: Ctx) -> dict[str, int]:
         return {"n": 1}
 

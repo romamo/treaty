@@ -108,21 +108,39 @@ mode prints every error's suggestion as a final `hint:` line on stderr.
 
 ## Output formats
 
-`--format` takes `json` or `plain`. With no flag, `TREATY_FORMAT` decides; without that,
-the format is `json` when stdout is not a terminal or `CI` is set, and `plain` otherwise.
+`--format` takes `json`, `plain`, and any format the app registers. With no flag,
+`TREATY_FORMAT` decides; without that, the format is `json` when stdout is not a terminal
+or `CI` is set, and `plain` otherwise.
 
-`json` writes the full response envelope. `plain` writes the result data as text and
-errors as prose on stderr. A command renders its own text with `plain=`, which receives
-`data` as JSON values (dicts and lists, after secret redaction):
+`json` writes the full response envelope; it is the contract agents read and takes no
+renderer. Every other format writes the result data as text and errors as prose on stderr.
+A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
+returns the text. Formats are `Format` members, never strings:
 
 ```python
-@app.command("greet", description="Say hello", plain=lambda data: f"{data['message']}\n")
+from treaty import App, Format
+
+app = App("hello", version="0.1")
+app.format(Format.CSV, render=render_csv)  # offers --format csv to every command
+
+
+@app.command("greet", description="Say hello", renderers={Format.PLAIN: render_greet})
 ```
 
-Without `plain=`, the result prints as flat lines, one item each: `key: value`, with dotted
+A command's `renderers=` overrides the app's renderer for that format. `app.format()` must
+come before the commands that override it, and a command can only override a format the
+app offers. `Format` lists every format treaty knows (`plain`, `json`, `csv`, `tsv`,
+`yaml`, `markdown`); an app offers `plain`, `json`, and the ones it registers, and the
+manifest and `--help` list exactly those. Any other value exits `2` listing them.
+
+Without a renderer, `plain` prints flat lines, one item each: `key: value`, with dotted
 paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. An
 array prints each element as its own block, the way a stream prints its events.
-`manifest` and `--schema` stay JSON in plain mode, since they are read by programs.
+`app.format(Format.PLAIN, render=...)` replaces those lines for the whole app.
+`manifest` and `--schema` stay JSON in every text format, since they are read by programs.
+
+Breaking after 0.0.4: `renderers={Format.PLAIN: ...}` replaces `plain=`, which is no
+longer accepted, and `Format` replaces `OutputMode`.
 
 Breaking after 0.0.3: `plain` replaces `human`, and `plain=` replaces `human=`. `human` is no
 longer accepted anywhere; `--format human` exits `2` listing the allowed values.
@@ -284,7 +302,7 @@ The manifest declares `streaming_default: true` and a `--no-stream` flag (REQ-O-
 which returns one envelope with every event in `data` and `meta.total`; a failure under
 `--no-stream` keeps the events seen so far in `data`. In `exec`, each event line carries
 `_line` and `_cmd`. Streaming commands must be `safe`: the effect and idempotency
-contracts describe one response. In plain mode `plain=` renders each event.
+contracts describe one response. In a text format the renderer gets one event per call.
 
 ## Destructive commands
 

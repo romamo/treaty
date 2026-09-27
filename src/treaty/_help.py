@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from ._command import Command, DangerLevel
+from ._mode import Format
 from ._values import CommandPath
 
 
@@ -13,6 +14,7 @@ def render_root(
     description: str,
     commands: Mapping[CommandPath, Command],
     groups: Mapping[CommandPath, str],
+    formats: Sequence[Format],
     prefix: tuple[str, ...] = (),
 ) -> str:
     lines = [f"{name}: {description}" if description else name, ""]
@@ -62,7 +64,8 @@ def render_root(
             lines.append(f"  {p.parts[-1]:<{width}}  {c.description}")
         lines.append("")
     lines.append("Global flags")
-    lines.append(f"  {'--format':<{width}}  Output mode: plain or json (default: json when piped)")
+    modes = ", ".join(m.value for m in formats)
+    lines.append(f"  {'--format':<{width}}  Output mode: {modes} (default: json when piped)")
     lines.append(f"  {'--help':<{width}}  Show help for a command")
     lines.append(f"  {'--max-output':<{width}}  Byte cap on JSON output (default: 1 MiB)")
     lines.append(f"  {'--schema':<{width}}  Print parameters and output schema as JSON")

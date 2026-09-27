@@ -14,6 +14,7 @@ from typing import Any
 from ._effect import can_carry_effect, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
+from ._mode import Format
 from ._resources import ResourceSpec, dependency_params, resource_graph
 from ._scalars import ScalarRegistry
 from ._schema import JsonSchema, is_payload_type, schema_for
@@ -25,7 +26,8 @@ from ._values import CommandPath, ExitCodeName, Scope
 Handler = Callable[..., Any]
 """``(args, ctx, *resources)``: extra parameters are annotated with resource classes"""
 Cleanup = Callable[[], None]
-PlainRenderer = Callable[[Any], str]
+Renderer = Callable[[Any], str]
+"""Text for one result, or one stream event, from its JSON-ready ``data``"""
 
 
 class DangerLevel(StrEnum):
@@ -70,7 +72,8 @@ class Command:
     timeout: Timeout | None
     supports_raw_payload: bool
     cleanup: Cleanup | None
-    plain: PlainRenderer | None
+    renderers: Mapping[Format, Renderer]
+    """Per-format overrides of the app's renderers"""
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
     streaming: bool
@@ -117,7 +120,7 @@ def build_command(
     timeout: Timeout | None,
     supports_raw_payload: bool,
     cleanup: Cleanup | None,
-    plain: PlainRenderer | None,
+    renderers: Mapping[Format, Renderer],
     scalars: ScalarRegistry,
     streaming: bool = False,
 ) -> Command:
@@ -204,7 +207,7 @@ def build_command(
         timeout=timeout,
         supports_raw_payload=supports_raw_payload,
         cleanup=cleanup,
-        plain=plain,
+        renderers=dict(renderers),
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
         streaming=streaming,
         resources=resources,
