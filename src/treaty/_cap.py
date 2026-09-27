@@ -169,7 +169,9 @@ class _Cut:
 
 
 def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
-    """``envelope`` within ``cap``, with the command that gets the rest in its ``meta``"""
+    """``envelope`` within ``cap``, with the command that gets the rest in its ``meta``;
+    ``data`` is cleaned of terminal escapes first, as every envelope written is"""
+    envelope = envelope.cleaned()
     total = len(serialize(envelope).encode())
     if total <= cap.bytes or envelope.data is None:
         return envelope

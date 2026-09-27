@@ -5,7 +5,8 @@ A command that asks a person declares ``interactive=True`` and asks through
 replace it with ``editor_alternatives=`` and calls ``ctx.edit``. They ask only when stdin
 and stdout are both terminals and ``--non-interactive`` is absent; otherwise the run
 ends with exit 4 and an error naming the flag that answers instead (REQ-F-009,
-REQ-C-005, REQ-F-055). A stray ``input()`` off a terminal ends the same way (REQ-F-047).
+REQ-C-005, REQ-F-055). A stray ``input()`` that no one can answer ends the same way
+(REQ-F-047).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 from ._errors import RegistrationError
 
@@ -46,46 +47,57 @@ class InputRequired(BaseException):
         self.alternatives = tuple(alternatives)
 
 
-def blocked_read() -> InputRequired:
+def blocked_read(call: str) -> InputRequired:
     return InputRequired(
         "INTERACTIVE_BLOCKED",
-        "Command requires interactive input but stdin is not a TTY",
+        "Command requires interactive input, and no one can answer in this run",
         suggestion="no flag supplies this input; run it in a terminal, or ask the command "
         "author to declare interactive=True and read it with ctx.prompt(..., flag=...)",
-        context={"call": "readline"},
+        context={"call": call},
     )
 
 
 class NoPromptStdin:
-    """``sys.stdin`` while a handler runs off a terminal: ``input()`` and ``readline()``
-    raise ``INTERACTIVE_BLOCKED``; ``read()``, line iteration, and ``buffer`` still read
-    piped data"""
+    """``sys.stdin`` while a run cannot prompt (REQ-F-047). A terminal is never read, since
+    no one was asked; piped data reads as usual, except that a ``readline()`` finding stdin
+    empty before any line raises ``INTERACTIVE_BLOCKED``, so ``input()`` on ``/dev/null``
+    exits 4 while ``fileinput`` still ends a pipe normally. Everything else is the wrapped
+    stream's."""
 
     def __init__(self, stream: IO[str]) -> None:
         self._stream = stream
+        self._lines = False
+        """Whether ``readline`` returned a line: an empty one after it is the pipe's end"""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
 
     def isatty(self) -> bool:
-        return False
-
-    def fileno(self) -> int:
-        return self._stream.fileno()
-
-    @property
-    def buffer(self) -> object:
-        return getattr(self._stream, "buffer")  # noqa: B009 - IO[str] does not declare it
-
-    @property
-    def encoding(self) -> str:
-        return str(getattr(self._stream, "encoding", "utf-8"))
+        return self._stream.isatty()
 
     def read(self, size: int | None = -1, /) -> str:
+        self._refuse_terminal("read")
         return self._stream.read(-1 if size is None else size)
 
     def readline(self, size: int | None = -1, /) -> str:
-        raise blocked_read()
+        self._refuse_terminal("readline")
+        line = self._stream.readline(-1 if size is None else size)
+        if not line and size != 0 and not self._lines:
+            raise blocked_read("readline")
+        self._lines = self._lines or bool(line)
+        return line
+
+    def readlines(self, hint: int = -1, /) -> list[str]:
+        self._refuse_terminal("readlines")
+        return self._stream.readlines(hint)
 
     def __iter__(self) -> Iterator[str]:
+        self._refuse_terminal("iteration")
         return iter(self._stream)
+
+    def _refuse_terminal(self, call: str) -> None:
+        if self._stream.isatty():
+            raise blocked_read(call)
 
 
 @dataclass(frozen=True, slots=True)

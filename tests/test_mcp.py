@@ -219,6 +219,49 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
     assert unknown["error"]["code"] == "UNKNOWN_TOOL"
 
 
+def test_stdio_server_turns_a_stray_input_into_exit_4() -> None:
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object]]:
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "treaty._mcp", "fixture_prompt_app:app"],
+            cwd=str(Path(__file__).resolve().parent),
+        )
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            asked = await session.call_tool("ask", {})
+            after = await session.call_tool("version", {})
+            return asked.structured_content, after.structured_content  # type: ignore[return-value]
+
+    asked, after = asyncio.run(scenario())
+    assert asked["error"]["code"] == "INTERACTIVE_BLOCKED"  # type: ignore[index]
+    assert asked["meta"]["exit_code"] == 4  # type: ignore[index]
+    assert after["ok"] is True
+
+
+def test_unknown_field_lists_only_flags_a_mapping_accepts() -> None:
+    app = App("files", version="1")
+
+    @app.command(
+        "dump",
+        description="Dump",
+        danger_level="safe",
+        exit_codes=(),
+        heartbeat=True,
+        output_file=True,
+        has_network_io=True,
+    )
+    def dump(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": 1}
+
+    envelope = app.call("dump", {"nope": 1})
+    assert envelope.error is not None
+    known = envelope.error.context["known"]
+    assert known == ["timeout"]  # not heartbeat-ms or output, which only argv takes
+
+
 def test_console_script_usage_errors() -> None:
     from treaty._mcp import main
 

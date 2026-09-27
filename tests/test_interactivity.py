@@ -144,11 +144,56 @@ def test_a_real_pseudo_terminal_prompts_and_reads_the_answer() -> None:
 # F-047: stray input() and empty invocations
 
 
-def test_input_under_a_pipe_exits_4_even_inside_except_exception() -> None:
-    code, env, _ = run(["ask"], stdin=io.StringIO("yes\n"))
+def test_input_at_the_end_of_stdin_exits_4_even_inside_except_exception() -> None:
+    code, env, _ = run(["ask"], stdin=io.StringIO(""))
     error = error_of(env)
     assert code == 4 and error["code"] == "INTERACTIVE_BLOCKED"
     assert "interactive=True" in str(error["suggestion"])
+
+
+def test_input_reads_piped_data() -> None:
+    code, env, _ = run(["ask"], stdin=io.StringIO("yes\n"))
+    assert code == 0 and env["data"] == {"answer": "yes"}
+
+
+def test_input_never_reads_a_terminal_it_cannot_prompt_on() -> None:
+    # stdin is a terminal, stdout is not: no one sees a question
+    code, env, _ = run(["ask"], stdin=Terminal("yes\n"))
+    assert code == 4 and error_of(env)["code"] == "INTERACTIVE_BLOCKED"
+
+
+def test_piped_lines_read_through_every_api() -> None:
+    lines_app = App("lines", version="1")
+
+    @lines_app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        first = sys.stdin.readline()
+        return {"first": first, "rest": sys.stdin.readlines(), "tty": sys.stdin.isatty()}
+
+    out = io.StringIO()
+    code = lines_app.run(
+        ["x", "--format", "json"], stdin=io.StringIO("a\nb\nc\n"), stdout=out, env=BASE_ENV
+    )
+    assert code == 0
+    assert json.loads(out.getvalue())["data"] == {
+        "first": "a\n",
+        "rest": ["b\n", "c\n"],
+        "tty": False,
+    }
+
+
+def test_fileinput_reads_a_piped_stdin_to_its_end() -> None:
+    proc = subprocess.run(
+        [sys.executable, str(ASKCTL), "cat"],
+        input="a\nb\n",
+        capture_output=True,
+        text=True,
+        env=BASE_ENV,
+        timeout=10,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["data"] == {"lines": ["a\n", "b\n"]}
 
 
 def test_piped_data_is_still_readable() -> None:
@@ -255,7 +300,7 @@ def test_manifest_and_schema_declare_prompts_and_editors() -> None:
     init = commands["init"]
     assert init["interactive"] is True
     assert {"yes", "non-interactive"} <= set(init["flags"])
-    assert "4" in init["exit_codes"]
+    assert "4" in manifest["exit_codes"]  # shared: a stray input() exits 4 on any command
     assert commands["commit"]["requires_editor"] is True
     assert commands["commit"]["non_interactive_alternatives"] == ["message"]
     assert "interactive" not in commands["ask"]

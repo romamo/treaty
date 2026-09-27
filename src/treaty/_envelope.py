@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import re
@@ -40,19 +41,20 @@ def json_safe(value: object, depth: int = 0) -> object:
 
 
 # REQ-F-007: CSI (colors, cursor movement), OSC (titles, links), other two-byte escapes,
-# a stray ESC, and carriage returns
-_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?|\r")
+# and a stray ESC
+_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?")
 # REQ-F-016: a null byte or a lone surrogate is not valid UTF-8 text
 _INVALID = re.compile(r"[\x00\ud800-\udfff]")
 
 
 def clean(value: object) -> object:
-    """Every string of a JSON value without terminal escapes, and valid UTF-8 once encoded:
-    whatever a handler or a library returned, the envelope stays plain text"""
+    """Every string value of a JSON value without terminal escapes, and valid UTF-8 once
+    encoded: whatever a handler or a library returned, the envelope stays plain text. Keys
+    are left alone, so two keys never collapse into one"""
     if isinstance(value, str):
         return _INVALID.sub("\ufffd", _ESCAPES.sub("", value))
     if isinstance(value, dict):
-        return {clean(k): clean(v) for k, v in value.items()}
+        return {k: clean(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [clean(v) for v in value]
     return value
@@ -174,6 +176,10 @@ class Envelope:
     def ok(self) -> bool:
         return self.exit_code == 0
 
+    def cleaned(self) -> Envelope:
+        """``data`` as ``clean`` leaves it; the rest is cleaned by ``to_json``"""
+        return dataclasses.replace(self, data=clean(self.data))
+
     def to_json(self) -> dict[str, object]:
         meta: dict[str, object] = {
             "exit_code": self.exit_code,
@@ -183,7 +189,8 @@ class Envelope:
         meta.update(self.extra_meta)
         return {
             "ok": self.ok,
-            "data": clean(self.data),
+            # Cleaned once in cleaned(), before the byte cap serializes it again and again
+            "data": self.data,
             "error": None if self.error is None else clean(self.error.to_json()),
             "warnings": clean([w.to_json() for w in self.warnings]),
             "meta": clean(meta),

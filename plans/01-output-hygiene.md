@@ -101,15 +101,18 @@ date-time`, `date`, `time`, and `pattern` for decimals.
 - `suggestion`: `ErrorDetail` fills it from `fix_required`, else a generic retry step, so
   every recoverable error has one; no per-code defaults in the framework table. The
   `exit-code-suggestion` rule is advice, since the fallback already meets the spec
-- No `OUTPUT_SANITIZED` warning: the spec asks only for stripping. Cleaning happens in
-  `Envelope.to_json`, not `to_jsonable`, so error messages, context, and meta are covered
-  too, and it also removes carriage returns and null bytes (REQ-F-007, REQ-F-016)
+- No `OUTPUT_SANITIZED` warning: the spec asks only for stripping. Cleaning happens on
+  the written envelope (`cap_envelope` for `data`, `Envelope.to_json` for the rest), not
+  in `to_jsonable`, so error messages, context, and meta are covered too, and it also
+  replaces null bytes (REQ-F-007, REQ-F-016). Keys and carriage returns are kept
 - `ctx.log` redaction also matches `pass`, `cookie`, and `API_*` names (REQ-F-051 lists
   them) and walks nested mappings, so header and env dicts are covered
 - `App.main()` overrides `PAGER` and `GIT_PAGER` always, as REQ-F-010 says, and sets
   `NO_COLOR=1` when color is off; it does not set `TERM=dumb`, which no criterion needs
 - `App.call` (MCP) gets no stdout swap: MCP calls run concurrently on threads, and a
-  process-wide swap is not safe there
+  per-call process-wide swap is not safe there; `treaty-mcp` swaps once for the process
+- `App.main()` also points descriptor 1 at stderr for the run, so children and C code
+  cannot write ahead of the envelope; `App.run()` stays Python-level for embedders
 
 ## Tests
 

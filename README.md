@@ -54,8 +54,8 @@ Every command declares `danger_level=` (`safe`, `mutating`, or `destructive`) an
 is always part of the map. Breaking after 0.0.6: both used to default to `safe` and `()`.
 
 A handler raises only the exit codes its manifest entry lists: the ones in `exit_codes=`,
-plus `GENERAL_ERROR`, `ARG_ERROR`, and `TIMEOUT` everywhere and `CONFLICT` and
-`PRECONDITION` on mutating commands. Anything else, including framework names such as
+plus `GENERAL_ERROR`, `ARG_ERROR`, `TIMEOUT`, and `PRECONDITION` everywhere and `CONFLICT`
+on mutating commands. Anything else, including framework names such as
 `Exit.NOT_FOUND`, must be declared, or the run exits `1` with `UNDECLARED_EXIT_CODE`.
 
 ## Validation
@@ -241,16 +241,18 @@ while its handler runs, in JSON mode from argv; the envelope is still the last l
 
 Stdout carries only envelopes (REQ-F-006). While a command runs, `sys.stdout` points at
 stderr, so a stray `print()` from the handler or a library lands there and the envelope
-gets a `THIRD_PARTY_STDOUT` warning with the byte count; writes straight to file
-descriptor 1 (C extensions, child processes) are not caught. Handlers log with
+gets a `THIRD_PARTY_STDOUT` warning with the byte count. Under `App.main()` file
+descriptor 1 points at stderr too, so a child process, `os.system`, or a C extension
+cannot write ahead of the envelope; `App.run()` swaps only `sys.stdout`. Under
+`treaty-mcp` the swap lasts the whole process. Handlers log with
 `ctx.log("connecting", host=host)`: one line on stderr, a JSON object with `level`,
 `message`, and `fields` in JSON mode and `message key=value` otherwise. Declared secrets
 and fields named like credentials (`token`, `password`, `API_KEY`, `DB_PASS`,
 `Authorization`, `Cookie`, at any depth) print as `[REDACTED]` (REQ-F-051).
 
-In JSON mode every string is cleaned before it is written: ANSI escape sequences and
-carriage returns are removed, and null bytes and lone surrogates become U+FFFD (REQ-F-007,
-REQ-F-016). Plain mode prints text as returned. `ctx.color` tells a renderer whether it may
+In JSON mode every string value is cleaned before it is written: ANSI escape sequences
+are removed, and null bytes and lone surrogates become U+FFFD (REQ-F-007, REQ-F-016).
+Object keys and carriage returns are left as returned. Plain mode prints text as returned. `ctx.color` tells a renderer whether it may
 color: never in JSON mode, under `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`,
 `JENKINS_URL`, or `TERM=dumb`, or when stdout is not a terminal (REQ-F-008). `App.main()`
 sets `PAGER=cat` and `GIT_PAGER=cat` for every child process, and `NO_COLOR=1` whenever
@@ -334,14 +336,15 @@ def init(args: InitArgs, ctx: Ctx) -> Project:
   `editor_alternatives=["message"]`, the flags that replace the editor; off a terminal
   the run exits `4` with `EDITOR_REQUIRED` and those flags in `error.alternatives`
   (REQ-F-055, REQ-C-023)
-- Off a terminal, `input()` and `sys.stdin.readline()` in a handler exit `4` with
-  `INTERACTIVE_BLOCKED`, even inside `except Exception` (REQ-F-047); `sys.stdin.read()`
-  and line iteration still read piped data
+- When no one can answer, `input()` exits `4` with `INTERACTIVE_BLOCKED`, even inside
+  `except Exception` (REQ-F-047): a terminal stdin is never read, and an empty stdin
+  (`/dev/null`) fails its first `readline()`. Piped data reads as usual through `input()`,
+  `readline()`, `read()`, `readlines()`, iteration, and `fileinput`
 
 Calling `ctx.prompt`, `ctx.confirm`, or `ctx.edit` without the declaration is a
 `RegistrationError` when the handler's source shows it. The manifest lists
-`interactive`, `requires_editor`, and `non_interactive_alternatives`, and exit `4` for
-these commands. Running with no arguments prints help and exits `0`; treaty has no REPL.
+`interactive`, `requires_editor`, and `non_interactive_alternatives`; exit `4` is in
+every command's map. Running with no arguments prints help and exits `0`; treaty has no REPL.
 
 ## Output size
 

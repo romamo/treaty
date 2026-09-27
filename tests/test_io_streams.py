@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import spec_validator
+from conftest import needs_posix_signals, spec_validator
 
 from treaty import App, Ctx, Format, NoArgs, table
 
@@ -291,3 +292,96 @@ def test_o001_json_modes_written_to_a_file_parse(tmp_path: Path, mode: str) -> N
     text = target.read_text()
     rows = json.loads(text) if mode == "json" else [json.loads(x) for x in text.splitlines()]
     assert code == 0 and [r["name"] for r in rows] == ["a", "b\tc"]
+
+
+# Review fixes: closed descriptors, fd-level stdout, cleanup order, finished streams
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="closes descriptors with /bin/sh")
+def test_a_closed_stdout_or_stdin_is_not_a_crash() -> None:
+    def closed(redirect: str, *argv: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["sh", "-c", f'exec "$@" {redirect}', "_", sys.executable, str(IOCTL), *argv],
+            capture_output=True,
+            text=True,
+            env=BASE_ENV,
+            timeout=10,
+            check=False,
+        )
+
+    no_stdout = closed(">&-", "env")
+    assert no_stdout.returncode == 0 and "Traceback" not in no_stdout.stderr
+    no_stdin = closed("<&-", "payload")
+    envelope = json.loads(no_stdin.stdout)
+    assert no_stdin.returncode == 2, no_stdin.stderr
+    assert envelope["error"]["code"] == "STDIN_UNAVAILABLE"
+    assert envelope["error"]["message"] == "Stdin is closed, so there is no payload to read."
+
+
+def test_fd_level_writes_under_main_reach_stderr_not_stdout() -> None:
+    proc = subprocess.run(
+        [sys.executable, str(IOCTL), "leaky"], capture_output=True, text=True, env=BASE_ENV
+    )
+    envelope = json.loads(proc.stdout)  # one JSON document: nothing leaked ahead of it
+    assert proc.returncode == 0 and envelope["data"] == {"done": True}
+    for leak in ("from-child", "from-fd", "from-buffer"):
+        assert leak in proc.stderr
+
+
+@needs_posix_signals
+def test_a_signal_lets_the_handler_finish_before_cleanup(tmp_path: Path) -> None:
+    log = tmp_path / "log"
+    proc = subprocess.Popen(
+        [sys.executable, str(IOCTL), "ordered"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**BASE_ENV, "IOCTL_LOG": str(log)},
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not (log.exists() and "started" in log.read_text()):
+            assert time.monotonic() < deadline, "the handler never started"
+            time.sleep(0.02)
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=10)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert proc.returncode == 143
+    assert log.read_text().split() == ["started", "handler", "cleanup"]
+
+
+class Dead(io.StringIO):
+    """A stream whose reader is gone after ``live`` writes"""
+
+    def __init__(self, live: int) -> None:
+        super().__init__()
+        self.live = live
+
+    def write(self, text: str) -> int:
+        if self.live <= 0:
+            raise BrokenPipeError(32, "Broken pipe")
+        self.live -= 1
+        return super().write(text)
+
+
+def test_a_finished_stream_skips_cleanup_when_its_last_line_is_lost() -> None:
+    cleaned: list[bool] = []
+    app = App("streamy", version="1")
+
+    @app.command(
+        "two",
+        description="Two events",
+        danger_level="safe",
+        exit_codes=(),
+        streaming=True,
+        cleanup=lambda: cleaned.append(True),
+    )
+    def two(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        yield {"n": 1}
+        yield {"n": 2}
+
+    # Each envelope is two writes: the JSON and its newline; the terminal one fails
+    code = app.run(["two", "--format", "json"], stdout=Dead(4), stderr=io.StringIO(), env={})
+    assert code == 0 and cleaned == []

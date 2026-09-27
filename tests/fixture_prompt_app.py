@@ -1,5 +1,6 @@
 """An app whose commands ask a person, for interactivity tests; runnable as a tool."""
 
+import fileinput
 import sys
 from dataclasses import dataclass
 
@@ -71,6 +72,11 @@ def ask(args: NoArgs, ctx: Ctx) -> dict[str, str]:
 @app.command("slurp", description="Read piped data", danger_level="safe", exit_codes=())
 def slurp(args: NoArgs, ctx: Ctx) -> dict[str, list[str]]:
     return {"lines": sys.stdin.read().splitlines()}
+
+
+@app.command("cat", description="Read stdin with fileinput", danger_level="safe", exit_codes=())
+def cat(args: NoArgs, ctx: Ctx) -> dict[str, list[str]]:
+    return {"lines": list(fileinput.input(files=["-"]))}
 
 
 if __name__ == "__main__":

@@ -650,7 +650,9 @@ def _decode_raw_payload(raw: str) -> Mapping[str, object]:
     return decoded
 
 
-def known_flags(command: Command) -> list[str]:
+def known_flags(command: Command, *, argv: bool = True) -> list[str]:
+    """The flags a command accepts; ``argv=False`` leaves out those only argv takes, for
+    the unknown-field error of ``exec``, MCP, and ``--raw-payload``"""
     flags = [name for f in command.fields for name in f.exposed_flags()]
     if command.supports_raw_payload:
         flags.append(RAW_PAYLOAD_FLAG)
@@ -668,11 +670,11 @@ def known_flags(command: Command) -> list[str]:
         flags.extend((YES_FLAG, NON_INTERACTIVE_FLAG))
     if command.paginated:
         flags.extend((LIMIT_FLAG, CURSOR_FLAG))
-    if command.heartbeat:
+    if command.heartbeat and argv:
         flags.append(HEARTBEAT_FLAG)
     if command.stdin_input:
         flags.append(INPUT_FILE_FLAG)
-    if command.output_file:
+    if command.output_file and argv:
         flags.append(OUTPUT_FLAG)
     if command.auth is not None:
         flags.extend((HEADLESS_FLAG, TOKEN_ENV_FLAG))
@@ -823,7 +825,7 @@ def build_from_mapping(
                     context={
                         "field": key,
                         "command": command.path.value,
-                        "known": known_flags(command),
+                        "known": known_flags(command, argv=False),
                     },
                 )
             if found.name in values:

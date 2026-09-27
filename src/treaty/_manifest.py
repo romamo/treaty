@@ -36,13 +36,27 @@ CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
 IDEMPOTENCY_KEY = IDEMPOTENCY_FLAG.replace("-", "_")
 NO_STREAM_KEY = NO_STREAM_FLAG.replace("-", "_")
 TIMEOUT_KEY = TIMEOUT_FLAG
-# TIMEOUT is shared: every handler runs under a deadline unless it is set to 0
+# TIMEOUT is shared: every handler runs under a deadline unless it is set to 0.
+# PRECONDITION too: a stray input() no one can answer exits 4 on any command (REQ-F-047)
 _ALWAYS = (
     FrameworkCode.SUCCESS,
     FrameworkCode.GENERAL_ERROR,
     FrameworkCode.ARG_ERROR,
     FrameworkCode.TIMEOUT,
+    FrameworkCode.PRECONDITION,
 )
+
+
+def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
+    """The codes a command may exit with undeclared: the shared ones, CONFLICT for a
+    reused idempotency key on a non-safe command, and 7 and 8 behind the credential gate"""
+    codes = list(_ALWAYS)
+    if command.danger_level is not DangerLevel.SAFE:
+        codes.append(FrameworkCode.CONFLICT)
+    if command.requires_auth:
+        # Not logged in, or the credential lacks a required scope (REQ-C-029)
+        codes += (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED)
+    return tuple(codes)
 
 
 def global_flag_entries(formats: Sequence[Format]) -> dict[str, object]:
@@ -109,6 +123,9 @@ def command_entry(
     for name in command.exit_codes:
         entry = exits.by_name(name)
         exit_codes[str(entry.code.value)] = entry.to_json()
+    for code in implicit_exit_codes(command):
+        entry = exits.framework(code)
+        exit_codes.setdefault(str(entry.code.value), entry.to_json())
     if shared is not None:
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
     flags: dict[str, object] = {}
@@ -135,10 +152,6 @@ def command_entry(
             "description": "Repeat calls with the same key return the original result "
             "with effect noop instead of running again",
         }
-        # A reused key is CONFLICT; an unusable state directory or record is PRECONDITION
-        for code in (FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION):
-            entry = exits.framework(code)
-            exit_codes.setdefault(str(entry.code.value), entry.to_json())
     if command.streaming:
         flags["no-stream"] = {
             "type": "boolean",
@@ -167,15 +180,6 @@ def command_entry(
             "default": False,
             "description": "Never prompt, even on a terminal; a needed answer exits 4",
         }
-    if command.interactive or command.editor_alternatives or command.auth is not None:
-        # INPUT_REQUIRED or EDITOR_REQUIRED when no one can answer; TOKEN_REQUIRED
-        entry = exits.framework(FrameworkCode.PRECONDITION)
-        exit_codes.setdefault(str(entry.code.value), entry.to_json())
-    if command.requires_auth:
-        # Not logged in, or the credential lacks a required scope (REQ-C-029)
-        for code in (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED):
-            entry = exits.framework(code)
-            exit_codes.setdefault(str(entry.code.value), entry.to_json())
     if command.config_write_scope is not None:
         only_global = command.config_write_scope is ConfigScope.GLOBAL
         entry_global: dict[str, object] = {

@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 703 passed |
+| `uv run pytest` | 729 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -123,18 +123,23 @@ The two do not share code.
   where user code runs: the handler, a scalar's `parse=`/`serialize=`, `cleanup=`,
   `plain=`, and an exception's `__str__`. Nowhere else
 - **Exit codes must be declared.** A handler raises only what its manifest entry lists:
-  `exit_codes=`, plus `GENERAL_ERROR`, `ARG_ERROR`, `TIMEOUT`, and on mutating commands
-  `CONFLICT` and `PRECONDITION`. Anything else is `UNDECLARED_EXIT_CODE`
-- **Stdout hygiene is a process-wide swap, not an fd redirect.** `App.run` points
-  `sys.stdout` at stderr for the whole run (handlers run on worker threads, so a
-  context-local redirect would miss them) and restores it after; `_Run._write` adds a
-  `THIRD_PARTY_STDOUT` warning to the next envelope. Fd-level writes are not caught.
-  `App.call` (MCP) has no swap, because MCP calls run concurrently on threads.
+  `exit_codes=`, plus `_manifest.implicit_exit_codes`: `GENERAL_ERROR`, `ARG_ERROR`,
+  `TIMEOUT`, and `PRECONDITION` (a stray `input()`) everywhere, `CONFLICT` on mutating
+  commands, 7 and 8 on gated ones. Anything else is `UNDECLARED_EXIT_CODE`
+- **Stdout hygiene is a process-wide swap.** `App.run` points `sys.stdout` at stderr for
+  the whole run (handlers run on worker threads, so a context-local redirect would miss
+  them) and restores it after; `_Run._write` adds a `THIRD_PARTY_STDOUT` warning to the
+  next envelope. A module-level count in `guard_streams` lets overlapping runs on threads
+  restore the original streams, the last one out. Only `App.main()` also redirects
+  descriptor 1 to stderr and writes envelopes to a saved copy of it, so children and C
+  code cannot leak either. `App.call` (MCP) has no swap, because MCP calls run
+  concurrently on threads; `_mcp.serve` swaps both streams once for the whole process.
   `App.main()`, not `App.run()`, writes `PAGER`, `GIT_PAGER`, and `NO_COLOR` into
-  `os.environ` so children inherit them
-- **`Envelope.to_json` cleans every string** (ANSI escapes and `\r` removed, null bytes
-  and lone surrogates to U+FFFD), so JSON stdout and MCP structured content agree; plain
-  mode never passes through it. `ErrorDetail.__post_init__` turns `message` into a
+  `os.environ` so children inherit them; a stream closed at startup (None) is tolerated
+- **Every written envelope is cleaned** (ANSI escapes removed, null bytes and lone
+  surrogates to U+FFFD; keys and `\r` kept), so JSON stdout and MCP structured content
+  agree; `cap_envelope` cleans `data` once before its byte loop and `to_json` cleans the
+  rest. Plain mode never passes through it. `ErrorDetail.__post_init__` turns `message` into a
   sentence and fills `suggestion` for recoverable errors, which covers author messages and
   every framework path at once instead of a style rule on each message; framework messages
   that began with a command path now begin with `Command <path>` so capitalizing keeps
@@ -167,8 +172,9 @@ The two do not share code.
   built per run in `_Run._ctx`; `InputRequired` is a `BaseException`, caught in `_execute`
   and `stream` next to `Cancelled`, and becomes `PRECONDITION` (4) with `INPUT_REQUIRED`,
   `EDITOR_REQUIRED` (plus `error.alternatives`), or `INTERACTIVE_BLOCKED`.
-  `_Run.guard_streams` swaps `sys.stdin` for `NoPromptStdin` in non-interactive runs:
-  `readline` (which `input()` calls) raises, `read`, iteration, and `buffer` pass through.
+  `_Run.guard_streams` swaps `sys.stdin` for `NoPromptStdin` in non-interactive runs: it
+  delegates to the wrapped stream, refuses to read a terminal, and raises when the first
+  `readline` (what `input()` calls) finds stdin empty; piped data reads normally.
   `App.call` swaps neither stream. `--yes` and `--non-interactive` exist only on
   `interactive=True` commands
 - **The framework slices every page.** A `paginated=True` handler returns the whole

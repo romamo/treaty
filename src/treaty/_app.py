@@ -12,6 +12,7 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -53,7 +54,7 @@ from ._flags import REDACTED, Arg, Flag
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._jobs import Job, JobStore, with_links
-from ._manifest import build_manifest, command_schema
+from ._manifest import build_manifest, command_schema, implicit_exit_codes
 from ._mode import (
     Format,
     child_settings,
@@ -732,16 +733,36 @@ class App:
         return run.execute(command, invocation, Format.JSON, meta=meta)
 
     def main(self) -> NoReturn:
+        # A standard stream whose descriptor was closed at startup is None
+        stdout, stdin = sys.stdout, sys.stdin
         # Only the console entry point changes os.environ, which every child inherits;
         # run() callers such as tests and embedders pass their own env
         quiet_children(
-            os.environ, stdout_isatty=sys.stdout.isatty(), stdin_isatty=sys.stdin.isatty()
+            os.environ,
+            stdout_isatty=stdout is not None and stdout.isatty(),
+            stdin_isatty=stdin is not None and stdin.isatty(),
         )
         # REQ-F-053: every line reaches a pipe reader as it is written, here and in children
         os.environ["PYTHONUNBUFFERED"] = "1"
-        if not sys.stdout.isatty() and isinstance(sys.stdout, io.TextIOWrapper):
-            sys.stdout.reconfigure(line_buffering=True)
-        sys.exit(self.run(sys.argv[1:]))
+        if stdout is None or sys.stderr is None:
+            sys.exit(self.run(sys.argv[1:]))
+        # REQ-F-006 below Python: for the run, descriptor 1 is stderr, so a child or C code
+        # writing to it cannot corrupt the envelope, which goes to a copy of the original
+        stdout.flush()
+        saved = os.dup(1)
+        os.dup2(sys.stderr.fileno(), 1)
+        envelopes = open(  # noqa: SIM115 - closed below, after descriptor 1 is restored
+            saved, "w", encoding=stdout.encoding, errors=stdout.errors, buffering=1
+        )
+        sys.stdout = envelopes
+        try:
+            code = self.run(sys.argv[1:])
+        finally:
+            sys.stdout = stdout
+            envelopes.flush()
+            os.dup2(saved, 1)
+            envelopes.close()
+        sys.exit(code)
 
     def run(
         self,
@@ -753,13 +774,17 @@ class App:
         env: Mapping[str, str] | None = None,
         isatty: bool | None = None,
     ) -> int:
-        out = stdout if stdout is not None else sys.stdout
-        err = stderr if stderr is not None else sys.stderr
+        # A closed descriptor leaves its sys stream None: then only the exit code answers,
+        # and stdin reads as empty
+        out = stdout if stdout is not None else sys.stdout or io.StringIO()
+        err = stderr if stderr is not None else sys.stderr or io.StringIO()
         inp = stdin if stdin is not None else sys.stdin
         environ = env if env is not None else os.environ
         tty = out.isatty() if isatty is None else isatty
         run = _Run(self, out, err, environ, tty=tty, stdin=inp)
         run.argv = (self.name, *argv)
+        if inp is None:
+            run.no_payload = "stdin is closed, so there is no payload to read"
         try:
             with run.guard_streams():
                 return self._route(run, list(argv), environ)
@@ -841,6 +866,13 @@ class App:
             return run.emit(mode, envelope, render=render)
 
 
+# Runs that swapped sys.stdout and sys.stdin now, and the streams from before the first:
+# with runs on several threads, or an abandoned handler's run, the last one out restores
+_guard_lock = threading.Lock()
+_guarded = 0
+_unguarded: tuple[TextIO, TextIO] = (sys.stdout, sys.stdin)
+
+
 def _invoke(app: App, command: Command, args: object, ctx: Ctx) -> object:
     """Check the credential, acquire the handler's resources, each once and in dependency
     order, then run it; ``active_scopes`` is app code, so it runs where the handler does"""
@@ -899,6 +931,15 @@ class _StrayStdout(io.TextIOBase):
 
     def writable(self) -> bool:
         return True
+
+    @property
+    def buffer(self) -> Any:
+        """Bytes written here reach stderr too, uncounted"""
+        return getattr(self._err.stream, "buffer")  # noqa: B009 - IO[str] does not declare it
+
+    @property
+    def encoding(self) -> Any:  # type: ignore[override]  # read-only, like a real stream's
+        return getattr(self._err.stream, "encoding", None) or "utf-8"
 
     def write(self, text: str, /) -> int:
         self._err.write(text)
@@ -1090,6 +1131,8 @@ class _Run:
         """Whether a complete envelope, event, or rendered result was written and flushed"""
         self.payload_stdin: IO[str] | None = stdin
         """Where a ``stdin_input`` command reads its payload; None in ``App.call``"""
+        self.no_payload = "stdin carries the plan or the call here, not a payload"
+        """Why ``payload_stdin`` is None"""
         self.warnings: list[WarningDetail] = []
         """``ctx.warn`` entries of the command that runs now, added to its envelopes"""
         self.token: str | None = None
@@ -1102,15 +1145,29 @@ class _Run:
         """Point ``sys.stdout`` at stderr for the run, and, off a terminal, ``sys.stdin`` at
         a reader that refuses ``input()`` (REQ-F-047). Process-wide, not a context-local
         redirect, because handlers run on worker threads; one run owns the process."""
-        saved, saved_in = sys.stdout, sys.stdin
+        global _guarded, _unguarded
         self.stray = _StrayStdout(self.err)
-        sys.stdout = cast(TextIO, self.stray)
-        if not self.interactive:
-            sys.stdin = cast(TextIO, NoPromptStdin(self.stdin))
+        with _guard_lock:
+            if not _guarded:
+                _unguarded = (sys.stdout, sys.stdin)
+            _guarded += 1
+            saved = (sys.stdout, sys.stdin)
+            ours = (
+                cast(TextIO, self.stray),
+                sys.stdin if self.interactive else cast(TextIO, NoPromptStdin(self.stdin)),
+            )
+            sys.stdout, sys.stdin = ours
         try:
             yield
         finally:
-            sys.stdout, sys.stdin = saved, saved_in
+            with _guard_lock:
+                _guarded -= 1
+                if not _guarded:
+                    sys.stdout, sys.stdin = _unguarded
+                elif sys.stdout is ours[0]:
+                    # A run nested in another's handler: give back what it found. A run
+                    # that another swapped over leaves the streams to the last one out.
+                    sys.stdout, sys.stdin = saved
 
     def _write(self, envelope: Envelope) -> None:
         """One JSON envelope on stdout, warning when text was printed there since the last"""
@@ -1638,10 +1695,13 @@ class _Run:
             self.abandoned = _still_running(running)
             # A held signal raised before fn() or before the worker started: nothing ran
             ran = not exc.held or bool(running)
-            return self._cancelled(command, exc.signal, started, full_meta, handler_started=ran)
+            return self._cancelled(
+                command, exc.signal, started, full_meta, handler_started=ran, running=running
+            )
         except KeyboardInterrupt:
             self.abandoned = _still_running(running)
-            return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
+            sig = CancelSignal("SIGINT", 130)
+            return self._cancelled(command, sig, started, full_meta, running=running)
         except InputRequired as exc:
             return self._input_required(exc, started, full_meta)
         except GeneratorExit:
@@ -1747,7 +1807,6 @@ class _Run:
             return {**full_meta, "seq": seq, "partial": seq > 0}
 
         running: list[Pending] = []
-        cancelled = False
         # One context for every next(): what the generator sets survives between events
         stream_context = contextvars.copy_context()
 
@@ -1783,6 +1842,7 @@ class _Run:
                     stream_context,
                 )
                 if event is _END:
+                    self.in_flight = None  # the handler finished; nothing is left to clean up
                     break
                 seq += 1
                 data = self._payload(event)
@@ -1811,15 +1871,16 @@ class _Run:
             )
             return
         except Cancelled as exc:
-            cancelled = True
             ran = events is not None or not exc.held or bool(running)
             meta_now = {**full_meta, "seq": seq}
-            yield self._cancelled(command, exc.signal, started, meta_now, handler_started=ran)
+            yield self._cancelled(
+                command, exc.signal, started, meta_now, handler_started=ran, running=running
+            )
             return
         except KeyboardInterrupt:
-            cancelled = True
             sig = CancelSignal("SIGINT", 130)
-            yield self._cancelled(command, sig, started, {**full_meta, "seq": seq})
+            meta_now = {**full_meta, "seq": seq}
+            yield self._cancelled(command, sig, started, meta_now, running=running)
             return
         except InputRequired as exc:
             yield self._input_required(exc, started, partial())
@@ -1834,11 +1895,6 @@ class _Run:
             yield self._crashed(command, args, exc, started, partial())
             return
         finally:
-            if cancelled:
-                # A cancelled worker is waiting for its next event, not stuck: give it
-                # the children's grace to hand the generator back so it can be closed
-                for pending in running:
-                    pending.worker.join(GRACE_SECONDS)
             # Run the handler's finally blocks now, unless a timed-out worker still holds it
             held = any(p.worker.is_alive() for p in running)
             if events is not None and not held and isinstance(events, Generator):
@@ -1921,14 +1977,22 @@ class _Run:
         meta: Mapping[str, object],
         *,
         handler_started: bool = True,
+        running: Sequence[Pending] = (),
     ) -> Envelope:
         """Run the cleanup hook, then build the CANCELLED envelope (REQ-F-013, REQ-F-069)
 
         Before the handler started there is nothing to clean up and nothing partial.
+        ``running`` holds the handler's worker, which gets the children's grace to finish
+        before the cleanup hook runs beside it.
         """
         context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
         # Children first, so the envelope is written after they were signaled (REQ-F-031)
         self._stop_children(sig)
+        for pending in running:
+            # Waiting on a child or its next event, not stuck: a stream's generator is
+            # handed back so it can be closed, and cleanup never races the handler
+            pending.worker.join(GRACE_SECONDS)
+        self.in_flight = None  # cleaned up here; a closed stdout must not clean up again
         if handler_started and command.cleanup is not None:
             try:
                 command.cleanup()
@@ -1972,15 +2036,7 @@ class _Run:
             return self.after_start(rejected, started=started, meta=meta)
         # The codes the manifest lists for this command without a declaration; any other
         # framework code (NOT_FOUND, RATE_LIMITED, ...) must be declared like a custom one
-        implicit = {FrameworkCode.SUCCESS, FrameworkCode.GENERAL_ERROR, FrameworkCode.ARG_ERROR}
-        implicit.add(FrameworkCode.TIMEOUT)
-        if command.danger_level is not DangerLevel.SAFE:
-            implicit |= {FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION}
-        if command.interactive or command.editor_alternatives or command.auth is not None:
-            implicit.add(FrameworkCode.PRECONDITION)
-        if command.requires_auth:
-            implicit |= {FrameworkCode.AUTH_REQUIRED, FrameworkCode.PERMISSION_DENIED}
-        allowed = {ExitCodeName(c.name) for c in implicit}
+        allowed = {ExitCodeName(c.name) for c in implicit_exit_codes(command)}
         if exc.name not in command.exit_codes and exc.name not in allowed:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
             return self._envelope(
@@ -2434,7 +2490,7 @@ class _Run:
         if stdin is None:
             return self._stream_error(
                 "STDIN_UNAVAILABLE",
-                "stdin carries the plan or the call here, not a payload",
+                self.no_payload,
                 context={},
                 fix_required="pass input_file with the path of the payload",
                 meta=meta,

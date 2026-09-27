@@ -83,16 +83,16 @@ free) and get the `alternatives` list in the manifest. 04 makes children ignore 
   flag of the command. C-023's "`requires_editor` without an alternative" cannot be
   written, so it needs no error. No `--<flag>-from-file` is invented; the alternatives are
   the command's own flags
-- The stdin guard refuses only `readline` (what `input()` calls); `read()`, line
-  iteration, and `buffer` pass through, so a handler reading piped data keeps working.
-  It is installed for the whole `App.run` of a non-interactive run, like the stdout swap,
-  and wraps the run's `stdin=`; `App.call` (MCP) swaps neither stream
+- The stdin guard delegates to the wrapped stream: it never reads a terminal, and raises
+  when the first `readline` (what `input()` calls) finds stdin empty, so piped data keeps
+  working through every API, `input()` and `fileinput` included. It is installed for the
+  whole `App.run` of a non-interactive run, like the stdout swap, and wraps the run's
+  `stdin=`; `App.call` (MCP) swaps neither stream, and `treaty-mcp` swaps both once
 - `--yes` and `--non-interactive` exist only on `interactive=True` commands, as C-005
   says; on other commands they are unknown flags (exit 2). "`--yes` on a command that
   never prompts" is tested on an interactive command whose run does not ask
-- A stray `input()` in a command without `interactive=True` exits 4 although that
-  command's manifest does not list 4: it is a command bug reported as the spec asks, like
-  `HANDLER_CRASHED` on 1
+- A stray `input()` in a command without `interactive=True` exits 4, so `PRECONDITION`
+  is in every command's exit-code map
 - The PTY test is one; `--non-interactive` on a terminal and the terminal answer path use
   a `StringIO` whose `isatty()` is true, passed as `App.run(stdin=...)`
 - F-047's "no arguments would drop into a REPL" does not apply: treaty has no REPL, and no

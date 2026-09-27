@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -139,9 +140,10 @@ def test_log_redacts_declared_secrets_and_credential_names() -> None:
 
 def test_escape_sequences_are_stripped_in_json() -> None:
     code, out, _ = run(["colored"])
-    assert code == 0 and "\\u001b" not in out and "\x1b" not in out and "\\r" not in out
+    assert code == 0 and "\\u001b" not in out and "\x1b" not in out
     data = data_of(json.loads(out))
-    assert data["text"] == "red" and data["progress"] == "50%100%"
+    # A carriage return is data, not a terminal escape
+    assert data["text"] == "red" and data["progress"] == "50%\r100%"
 
 
 def test_null_bytes_and_lone_surrogates_become_replacement_characters() -> None:
@@ -330,3 +332,70 @@ def test_a_declared_suggestion_fills_the_error() -> None:
 def test_a_retryable_error_without_a_declared_suggestion_gets_a_retry_step() -> None:
     _, env, _ = envelope(["busy"], env={"DOWN": "1"})
     assert error_of(env)["suggestion"] == "retry the same command; it had no side effects"
+
+
+def test_keys_are_never_rewritten_so_none_collide() -> None:
+    app = App("keys", version="1")
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"\x1b[1mk\x1b[0m": 1, "k": 2}
+
+    out = io.StringIO()
+    assert app.run(["x", "--format", "json"], stdout=out, stderr=io.StringIO(), env={}) == 0
+    assert json.loads(out.getvalue())["data"] == {"\x1b[1mk\x1b[0m": 1, "k": 2}
+
+
+# The stdout swap across runs
+
+
+def quiet_run(app: App, argv: list[str]) -> int:
+    return app.run([*argv, "--format", "json"], stdout=io.StringIO(), stderr=io.StringIO(), env={})
+
+
+def test_overlapping_runs_on_threads_restore_the_original_streams() -> None:
+    first_in, second_in = threading.Event(), threading.Event()
+    release_first, release_second = threading.Event(), threading.Event()
+    app = App("overlap", version="1")
+
+    @app.command("a", description="a", danger_level="safe", exit_codes=())
+    def a(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        first_in.set()
+        return {"released": release_first.wait(10)}
+
+    @app.command("b", description="b", danger_level="safe", exit_codes=())
+    def b(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        second_in.set()
+        return {"released": release_second.wait(10)}
+
+    before = (sys.stdout, sys.stdin)
+    first = threading.Thread(target=quiet_run, args=(app, ["a"]))
+    second = threading.Thread(target=quiet_run, args=(app, ["b"]))
+    first.start()
+    assert first_in.wait(10)
+    second.start()
+    assert second_in.wait(10)
+    release_first.set()  # the first run ends while the second still holds the swap
+    first.join(10)
+    release_second.set()
+    second.join(10)
+    assert (sys.stdout, sys.stdin) == before
+
+
+def test_a_run_nested_in_a_handler_gives_back_the_outer_swap() -> None:
+    app = App("nested", version="1")
+
+    @app.command("inner", description="inner", danger_level="safe", exit_codes=())
+    def inner(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        return {}
+
+    @app.command("outer", description="outer", danger_level="safe", exit_codes=())
+    def outer(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        swapped = sys.stdout
+        quiet_run(app, ["inner"])
+        return {"kept": sys.stdout is swapped}
+
+    before = sys.stdout
+    out = io.StringIO()
+    app.run(["outer", "--format", "json"], stdout=out, stderr=io.StringIO(), env={})
+    assert json.loads(out.getvalue())["data"] == {"kept": True} and sys.stdout is before
