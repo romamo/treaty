@@ -1,19 +1,24 @@
 """Example of credential-gated commands. Run: AUTHCTL_TOKEN=t uv run examples/authctl.py repos list
 
-The fake credential store reads the token from AUTHCTL_TOKEN and its scopes from
-AUTHCTL_SCOPES (comma-separated, default repo:read). A real app asks its keychain or API.
+The fake credential store reads the token from AUTHCTL_TOKEN, its scopes from
+AUTHCTL_SCOPES (comma-separated, default repo:read), and an expiry from
+AUTHCTL_EXPIRED_AT (ISO 8601). A real app asks its keychain or API.
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 
-from treaty import App, Ctx, NoArgs
+from treaty import App, Ctx, Expired, NoArgs
 
 
 class EnvCredentials:
-    def active_scopes(self, ctx: Ctx) -> Iterable[str] | None:
+    def active_scopes(self, ctx: Ctx) -> Iterable[str] | Expired | None:
         if not ctx.env.get("AUTHCTL_TOKEN"):
             return None
+        expired_at = ctx.env.get("AUTHCTL_EXPIRED_AT")
+        if expired_at:
+            return Expired(at=datetime.fromisoformat(expired_at))
         return ctx.env.get("AUTHCTL_SCOPES", "repo:read").split(",")
 
 
@@ -34,6 +39,7 @@ class Session:
     danger_level="safe",
     exit_codes=(),
     auth="browser",
+    refreshes_auth=True,
     gui_operations=["browser_open"],
     examples=[("Log in without a browser", "authctl login --headless")],
 )

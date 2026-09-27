@@ -3,7 +3,7 @@
 from importlib.metadata import version
 
 from ._app import App, ExecArgs, Group, NoArgs
-from ._auth import Credentials
+from ._auth import Credentials, Expired
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
 from ._effect import Affects
@@ -48,6 +48,7 @@ __all__ = [
     "ErrorDetail",
     "Example",
     "ExecArgs",
+    "Expired",
     "Exit",
     "ExitCode",
     "ExitCodeEntry",

@@ -445,6 +445,22 @@ def _auth_declared(app: App) -> Iterator[Finding]:
             )
 
 
+def _refresh_declared(app: App) -> Iterator[Finding]:
+    if app.credentials is None or any(c.refreshes_auth for c in app.commands.values()):
+        return
+    logins = [c for c in user_commands(app) if c.auth is not None]
+    target = logins[0].path.value if logins else None
+    yield Finding(
+        "refresh-declared",
+        Severity.ADVICE,
+        target,
+        "no command declares refreshes_auth=True, so CREDENTIALS_EXPIRED carries no "
+        "refresh_command (REQ-F-063)",
+        "refreshes_auth=True on the command that renews the credential"
+        + (f", such as {target}" if target else ""),
+    )
+
+
 _ASYNC_VERBS = frozenset({"start", "submit", "enqueue", "launch", "trigger"})
 
 
@@ -1164,6 +1180,12 @@ RULES: tuple[Rule, ...] = (
     Rule("cleanup", "Network commands register a cleanup hook", Severity.ADVICE, _cleanup),
     Rule("broad-scope", "Required scopes are narrow", Severity.WARNING, _broad_scope),
     Rule("auth-declared", "Login commands declare auth", Severity.WARNING, _auth_declared),
+    Rule(
+        "refresh-declared",
+        "Expired credentials name the command that renews them",
+        Severity.ADVICE,
+        _refresh_declared,
+    ),
     Rule("async-job", "Commands that start work return a job", Severity.ADVICE, _async_job),
     Rule(
         "config-write-scope",

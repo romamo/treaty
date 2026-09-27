@@ -428,11 +428,12 @@ DEPLOYCTL_TOKEN=... deployctl push                 # the default variable
 ## Credentials
 
 Treaty never stores or refreshes a token. The app tells it which scopes the active
-credential holds, or `None` when no one is logged in:
+credential holds, `None` when no one is logged in, or `treaty.Expired(at=...)` when the
+credential has expired:
 
 ```python
 class Keychain:
-    def active_scopes(self, ctx: Ctx) -> Iterable[str] | None: ...
+    def active_scopes(self, ctx: Ctx) -> Iterable[str] | Expired | None: ...
 
 app = App("authctl", version="1.0.0", credentials=Keychain())
 
@@ -441,9 +442,11 @@ app = App("authctl", version="1.0.0", credentials=Keychain())
 ```
 
 A `requires_auth=True` command must list its scopes (REQ-C-029). Before its handler runs,
-no credential exits `8` (`AUTH_REQUIRED`), a missing scope exits `7` with
-`INSUFFICIENT_SCOPES` and `context.missing_scopes`, and scopes beyond the required ones add
-a `CREDENTIAL_OVER_PRIVILEGED` warning (REQ-O-047). `check-permissions --for <command>`
+no credential exits `8` with `UNAUTHENTICATED` and `hint` naming the login command; an
+expired one exits `8` with `CREDENTIALS_EXPIRED`, `expires_at`, and `refresh_command`
+(the command registered with `refreshes_auth=True`); a missing scope exits `7` with
+`PERMISSION_DENIED`, `required_permission`, and `context.missing_scopes` (REQ-F-063).
+Scopes beyond the required ones add a `CREDENTIAL_OVER_PRIVILEGED` warning (REQ-O-047). `check-permissions --for <command>`
 reports `required_scopes`, `active_scopes`, and `over_privileged`; without `--for` it maps
 every gated command to its coverage. The `broad-scope` audit rule flags `admin`, `owner`,
 `root`, and `*` scopes the description does not name.

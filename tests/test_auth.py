@@ -122,14 +122,14 @@ def test_required_scopes_is_in_every_schema() -> None:
 def test_not_logged_in_exits_8() -> None:
     code, env, _ = run(authctl, ["repos", "list"])
     error = error_of(env)
-    assert code == 8 and error["code"] == "AUTH_REQUIRED"
+    assert code == 8 and error["code"] == "UNAUTHENTICATED"
     assert "authctl login" in str(error["suggestion"])
 
 
 def test_a_missing_scope_exits_7_with_missing_scopes() -> None:
     code, env, _ = run(authctl, ["repos", "list"], {**LOGGED_IN, "AUTHCTL_SCOPES": "issues:read"})
     error = error_of(env)
-    assert code == 7 and error["code"] == "INSUFFICIENT_SCOPES"
+    assert code == 7 and error["code"] == "PERMISSION_DENIED"
     assert error["context"]["missing_scopes"] == ["repo:read"]  # type: ignore[index]
 
 
@@ -401,4 +401,4 @@ def test_an_idempotent_replay_still_checks_the_credential(tmp_path: Path) -> Non
     assert code == 0 and env["meta"]["idempotency_hit"] is True  # type: ignore[index]
     credentials.scopes = None
     code, env, _ = run(app, argv)
-    assert code == 8 and error_of(env)["code"] == "AUTH_REQUIRED"
+    assert code == 8 and error_of(env)["code"] == "UNAUTHENTICATED"

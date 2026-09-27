@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
@@ -32,11 +33,28 @@ OVER_PRIVILEGED = "CREDENTIAL_OVER_PRIVILEGED"
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
+@dataclass(frozen=True, slots=True)
+class Expired:
+    """What ``active_scopes`` returns for a credential past its expiry (REQ-F-063)"""
+
+    at: datetime
+    """When it expired; timezone-aware"""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.at, datetime) or self.at.tzinfo is None:
+            raise TypeError("Expired(at=...) takes a timezone-aware datetime")
+
+    @property
+    def iso(self) -> str:
+        return self.at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 class Credentials(Protocol):
     """The app's view of the active credential; user code, like a handler"""
 
-    def active_scopes(self, ctx: Ctx) -> Iterable[Scope | str] | None:
-        """The scopes the active credential holds; None when no one is logged in"""
+    def active_scopes(self, ctx: Ctx) -> Iterable[Scope | str] | Expired | None:
+        """The scopes the active credential holds; None when no one is logged in, and
+        ``treaty.Expired(at=...)`` when its credential has expired"""
         ...
 
 
@@ -56,10 +74,10 @@ def is_env_var_name(name: str) -> bool:
     return _ENV_NAME.fullmatch(name) is not None
 
 
-def scope_set(value: Iterable[Scope | str] | None) -> frozenset[Scope] | None:
+def scope_set(value: Iterable[Scope | str] | Expired | None) -> frozenset[Scope] | Expired | None:
     """``active_scopes`` as value objects; a bare string would be read letter by letter"""
-    if value is None:
-        return None
+    if value is None or isinstance(value, Expired):
+        return value
     if isinstance(value, str):
         raise TypeError("active_scopes returned a str; return a collection of scopes")
     return frozenset(s if isinstance(s, Scope) else Scope(s) for s in value)
@@ -99,25 +117,77 @@ class Coverage:
         }
 
 
-def not_logged_in(path: str, login: Sequence[str]) -> CliExit:
+class AuthFailure(CliExit):
+    """A credential failure from the framework's gate, with the fields only it sets
+    (REQ-F-063): the login ``hint``, and the expiry and refresh command, or the missing
+    permission"""
+
+    def __init__(
+        self,
+        name: str,
+        message: str,
+        *,
+        code: str,
+        context: dict[str, object],
+        fix_required: str,
+        hint: str | None = None,
+        refresh_command: str | None = None,
+        expires_at: str | None = None,
+        required_permission: str | None = None,
+    ) -> None:
+        super().__init__(
+            ExitCodeName(name),
+            message,
+            code=code,
+            context=context,
+            fix_required=fix_required,
+            fix_command=refresh_command,
+        )
+        self.hint = hint
+        self.refresh_command = refresh_command
+        self.expires_at = expires_at
+        self.required_permission = required_permission
+
+
+def not_logged_in(path: str, login: Sequence[str]) -> AuthFailure:
+    """Never authenticated: exit 8, ``UNAUTHENTICATED``, ``hint`` the login command"""
     fix = f"log in with: {login[0]}" if login else "log in, then retry"
-    return CliExit(
-        ExitCodeName("AUTH_REQUIRED"),
+    return AuthFailure(
+        "AUTH_REQUIRED",
         f"Command {path} needs a logged-in credential, and there is none",
+        code="UNAUTHENTICATED",
         context={"command": path},
         fix_required=fix,
+        hint=login[0] if login else None,
     )
 
 
-def insufficient(path: str, coverage: Coverage, exit_name: str) -> CliExit:
-    """``PERMISSION_DENIED`` when a command runs, ``AUTH_REQUIRED`` from check-permissions"""
+def expired(path: str, credential: Expired, refresh: str | None) -> AuthFailure:
+    """Expired: exit 8, ``CREDENTIALS_EXPIRED``, ``expires_at``, and the refresh command
+    when the app registered one with ``refreshes_auth=True``"""
+    fix = f"renew the credential with: {refresh}" if refresh else "renew the credential"
+    return AuthFailure(
+        "AUTH_REQUIRED",
+        f"The credential {path} needs expired at {credential.iso}",
+        code="CREDENTIALS_EXPIRED",
+        context={"command": path, "expires_at": credential.iso},
+        fix_required=fix,
+        refresh_command=refresh,
+        expires_at=credential.iso,
+    )
+
+
+def insufficient(path: str, coverage: Coverage, exit_name: str, code: str) -> AuthFailure:
+    """``PERMISSION_DENIED`` (exit 7) when a command runs, ``INSUFFICIENT_SCOPES`` under
+    ``AUTH_REQUIRED`` from check-permissions"""
     missing = [s.value for s in coverage.missing]
-    return CliExit(
-        ExitCodeName(exit_name),
+    return AuthFailure(
+        exit_name,
         f"The active credential lacks {', '.join(missing)}, which {path} requires",
-        code="INSUFFICIENT_SCOPES",
+        code=code,
         context={**coverage.report(path), "missing_scopes": missing},
         fix_required=f"use a credential granted {', '.join(missing)}",
+        required_permission=missing[0],
     )
 
 

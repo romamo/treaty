@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import shlex
 import sys
 import threading
 import time
@@ -26,9 +27,12 @@ from typing import IO, Any, NoReturn, TextIO, cast
 from ._atomic import write_atomic
 from ._auth import (
     OVER_PRIVILEGED,
+    AuthFailure,
     AuthKind,
     Coverage,
     Credentials,
+    Expired,
+    expired,
     insufficient,
     names,
     not_logged_in,
@@ -689,6 +693,8 @@ class App:
             active = scope_set(credentials.active_scopes(ctx))
             if active is None:
                 raise not_logged_in(CHECK_PERMISSIONS_PATH.value, self._logins())
+            if isinstance(active, Expired):
+                raise expired(CHECK_PERMISSIONS_PATH.value, active, self._refresh())
             if args.for_ is None:
                 gated = sorted(
                     (
@@ -719,7 +725,9 @@ class App:
             target = self._command_named(args.for_)
             coverage = Coverage(target.required_scopes if target.requires_auth else (), active)
             if coverage.missing:
-                raise insufficient(target.path.value, coverage, "AUTH_REQUIRED")
+                raise insufficient(
+                    target.path.value, coverage, "AUTH_REQUIRED", "INSUFFICIENT_SCOPES"
+                )
             flagged = target.requires_auth and coverage.over_privileged
             if flagged:
                 self._warn_excess(ctx, target, coverage)
@@ -803,6 +811,13 @@ class App:
             f"{self.name} {' '.join(p.parts)}" for p, c in self._commands.items() if c.auth
         )
 
+    def _refresh(self) -> str | None:
+        """The command that renews expired credentials, as an agent types it"""
+        for path, command in self._commands.items():
+            if command.refreshes_auth:
+                return shlex.join([self.name, *path.parts])
+        return None
+
     @staticmethod
     def _warn_excess(ctx: Ctx, command: Command, coverage: Coverage) -> None:
         ctx.warn(
@@ -819,9 +834,13 @@ class App:
         active = scope_set(self.credentials.active_scopes(ctx))
         if active is None:
             raise not_logged_in(command.path.value, self._logins())
+        if isinstance(active, Expired):
+            raise expired(command.path.value, active, self._refresh())
         coverage = Coverage(command.required_scopes, active)
         if coverage.missing:
-            raise insufficient(command.path.value, coverage, "PERMISSION_DENIED")
+            raise insufficient(
+                command.path.value, coverage, "PERMISSION_DENIED", "PERMISSION_DENIED"
+            )
         if coverage.over_privileged:
             self._warn_excess(ctx, command, coverage)  # REQ-O-047
 
@@ -2594,6 +2613,7 @@ class _Run:
         # REQ-F-078: after the tool's own retries, an agent retrying on top would double them
         retried = exc.retried if isinstance(exc, RetriesExhausted) else None
         retrying = entry.retryable and not retried
+        auth = exc if isinstance(exc, AuthFailure) else None  # REQ-F-063: the gate's fields
         return self._envelope(
             entry.code.value,
             data=data,
@@ -2607,6 +2627,10 @@ class _Run:
                 suggestion=exc.suggestion if exc.suggestion is not None else entry.suggestion,
                 fix_command=fix,
                 fix_required=exc.fix_required,
+                hint=None if auth is None else auth.hint,
+                refresh_command=None if auth is None else auth.refresh_command,
+                expires_at=None if auth is None else auth.expires_at,
+                required_permission=None if auth is None else auth.required_permission,
                 retry_after_ms=retry_after if retrying else None,
                 retry_strategy=strategy if retrying else None,
                 conflict_id=exc.conflict_id,

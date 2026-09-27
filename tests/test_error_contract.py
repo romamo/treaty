@@ -4,7 +4,9 @@ import io
 import json
 import shlex
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -17,6 +19,7 @@ from treaty import (
     Ctx,
     ErrorDetail,
     Exit,
+    Expired,
     Flag,
     NetworkContext,
     NoArgs,
@@ -490,3 +493,112 @@ def test_audit_asks_to_declare_a_fixed_fix_command() -> None:
     assert [f.fix for f in rule.findings] == [
         "fix_commands={'STORE_MISSING': 'fx init'}, and drop fix_command= from the raise"
     ]
+
+
+# REQ-F-063
+
+
+class Holder:
+    def __init__(self, state: Iterable[str] | Expired | None) -> None:
+        self.state = state
+
+    def active_scopes(self, ctx: Ctx) -> Iterable[str] | Expired | None:
+        return self.state
+
+
+def gated_app(state: Iterable[str] | Expired | None, *, refresh: bool = True) -> App:
+    app = App("gh", version="1.0.0", credentials=Holder(state))
+
+    @app.command(
+        "login",
+        description="Log in",
+        danger_level="safe",
+        exit_codes=(),
+        auth="device",
+        refreshes_auth=refresh,
+    )
+    def login(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        return {"logged_in": True}
+
+    @app.command(
+        "repos",
+        description="Repos",
+        danger_level="safe",
+        exit_codes=(),
+        requires_auth=True,
+        required_scopes=["repo:read", "repo:list"],
+    )
+    def repos(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"repos": 2}
+
+    return app
+
+
+EXPIRY = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+
+
+def test_an_expired_token_produces_exit_8_with_credentials_expired_and_refresh_command() -> None:
+    code, envelope = run(gated_app(Expired(at=EXPIRY)), ["repos"])
+    error = envelope["error"]
+    assert code == 8 and error["code"] == "CREDENTIALS_EXPIRED"
+    assert error["refresh_command"] == error["fix_command"] == "gh login"
+    assert error["expires_at"] == "2026-01-02T03:04:05Z" and error["retryable"] is False
+    # Without a refresh command the condition is prose only
+    _, envelope = run(gated_app(Expired(at=EXPIRY), refresh=False), ["repos"])
+    assert "refresh_command" not in envelope["error"] and envelope["error"]["fix_required"]
+    with pytest.raises(TypeError):
+        Expired(at=datetime(2026, 1, 2))  # noqa: DTZ001 - naive on purpose
+
+
+def test_a_missing_token_produces_exit_8_with_unauthenticated_and_hint() -> None:
+    code, envelope = run(gated_app(None), ["repos"])
+    error = envelope["error"]
+    assert code == 8 and error["code"] == "UNAUTHENTICATED" and error["hint"] == "gh login"
+
+
+def test_insufficient_scope_produces_exit_7_with_permission_denied_and_required_permission() -> (
+    None
+):
+    code, envelope = run(gated_app(["repo:read"]), ["repos"])
+    error = envelope["error"]
+    assert code == 7 and error["code"] == "PERMISSION_DENIED"
+    assert error["required_permission"] == "repo:list"
+
+
+def test_an_agent_tells_the_three_apart_by_exit_code_and_error_code_alone() -> None:
+    outcomes = {
+        (code, envelope["error"]["code"])
+        for code, envelope in (
+            run(gated_app(None), ["repos"]),
+            run(gated_app(Expired(at=EXPIRY)), ["repos"]),
+            run(gated_app(["repo:read"]), ["repos"]),
+        )
+    }
+    assert outcomes == {
+        (8, "UNAUTHENTICATED"),
+        (8, "CREDENTIALS_EXPIRED"),
+        (7, "PERMISSION_DENIED"),
+    }
+
+
+def test_one_command_refreshes_credentials() -> None:
+    app = gated_app(None)
+    with pytest.raises(RegistrationError, match="refreshes_auth"):
+
+        @app.command(
+            "renew", description="Renew", danger_level="safe", exit_codes=(), refreshes_auth=True
+        )
+        def renew(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+            return {}
+
+
+def test_audit_asks_for_a_refresh_command() -> None:
+    [rule] = [
+        r
+        for r in audit(gated_app(None, refresh=False), "gh", limit=3).rules
+        if r.id == "refresh-declared"
+    ]
+    assert [f.command for f in rule.findings] == ["login"]
+    assert "refreshes_auth=True" in rule.findings[0].fix
+    [rule] = [r for r in audit(gated_app(None), "gh", limit=3).rules if r.id == "refresh-declared"]
+    assert rule.passed
