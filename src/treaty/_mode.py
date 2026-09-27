@@ -14,6 +14,8 @@ class Format(StrEnum):
 
     PLAIN = "plain"
     JSON = "json"
+    JSONL = "jsonl"
+    """One compact envelope per line: what ``json`` writes, named for readers that ask"""
     CSV = "csv"
     TSV = "tsv"
     YAML = "yaml"

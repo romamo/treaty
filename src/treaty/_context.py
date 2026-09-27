@@ -33,6 +33,8 @@ class Ctx:
     processes: Processes = field(repr=False, compare=False)
     prompter: Prompter = field(repr=False, compare=False)
     idempotency_key: str | None = None
+    stdin_text: str | None = None
+    """The payload of a ``stdin_input=True`` command: stdin, capped, or ``--input-file``"""
     page: PageRequest | None = None
     """The page a list command is asked for (``paginated=True``), else None; a handler
     that loads its whole list can ignore it and return the list"""

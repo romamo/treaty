@@ -12,6 +12,7 @@ from ._mode import Format
 from ._page import Page, PageRequest
 from ._scalars import ScalarSpec
 from ._subprocess import Completed
+from ._table import table
 from ._timeout import Timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, Scope
 
@@ -49,4 +50,5 @@ __all__ = [
     "Timeout",
     "TreatyError",
     "WarningDetail",
+    "table",
 ]

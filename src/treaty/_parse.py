@@ -11,9 +11,10 @@ import math
 import re
 from collections.abc import Collection, Mapping
 from dataclasses import MISSING, dataclass
+from pathlib import Path
 from typing import NoReturn
 
-from ._command import Command, DangerLevel
+from ._command import HEARTBEAT_FLAG, INPUT_FILE_FLAG, OUTPUT_FLAG, Command, DangerLevel
 from ._dispatch import loads_strict
 from ._errors import ParseError
 from ._flags import FieldInfo, apply_scalar
@@ -61,6 +62,14 @@ class Invocation:
     """``--limit`` of a list command; None takes the command's default"""
     cursor: Position | None = None
     """``--cursor`` of a list command, decoded; None is the first page"""
+    heartbeat_ms: int | None = None
+    """``--heartbeat-ms`` of a ``heartbeat=True`` command; None is the default, 0 is off"""
+    input_file: Path | None = None
+    """``--input-file`` of a ``stdin_input`` command; None or ``-`` reads stdin"""
+    stdin_text: str | None = None
+    """The payload of a ``stdin_input`` command, read before the handler runs"""
+    output: Path | None = None
+    """``--output`` of an ``output_file`` command: where the rendered ``data`` goes"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +237,9 @@ def parse_command_args(
     switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
     limit: Limit | None = None
     cursor: Position | None = None
+    heartbeat_ms: int | None = None
+    input_file: Path | None = None
+    output: Path | None = None
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -313,6 +325,29 @@ def parse_command_args(
                     if limit is not None and limit != parsed_limit:
                         raise _repeated(LIMIT_FLAG)
                     limit = parsed_limit
+                    i += 1
+                    continue
+                if name == OUTPUT_FLAG and command.output_file:
+                    parsed_output = output_path(value_after(tok, OUTPUT_FLAG, has_eq, inline))
+                    if output is not None and output != parsed_output:
+                        raise _repeated(OUTPUT_FLAG)
+                    output = parsed_output
+                    i += 1
+                    continue
+                if name == INPUT_FILE_FLAG and command.stdin_input:
+                    parsed_path = check_path(
+                        value_after(tok, INPUT_FILE_FLAG, has_eq, inline), INPUT_FILE_FLAG
+                    )
+                    if input_file is not None and input_file != parsed_path:
+                        raise _repeated(INPUT_FILE_FLAG)
+                    input_file = parsed_path
+                    i += 1
+                    continue
+                if name == HEARTBEAT_FLAG and command.heartbeat:
+                    parsed_ms = parse_heartbeat(value_after(tok, HEARTBEAT_FLAG, has_eq, inline))
+                    if heartbeat_ms is not None and heartbeat_ms != parsed_ms:
+                        raise _repeated(HEARTBEAT_FLAG)
+                    heartbeat_ms = parsed_ms
                     i += 1
                     continue
                 if name == CURSOR_FLAG and command.paginated:
@@ -464,6 +499,9 @@ def parse_command_args(
             non_interactive=switches[NON_INTERACTIVE_FLAG] or built.non_interactive,
             limit=limit if limit is not None else built.limit,
             cursor=cursor if cursor is not None else built.cursor,
+            heartbeat_ms=heartbeat_ms,
+            input_file=input_file if input_file is not None else built.input_file,
+            output=output,
         )
     _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
@@ -477,7 +515,35 @@ def parse_command_args(
         non_interactive=switches[NON_INTERACTIVE_FLAG],
         limit=limit,
         cursor=cursor,
+        heartbeat_ms=heartbeat_ms,
+        input_file=input_file,
+        output=output,
     )
+
+
+# REQ-O-001: names an agent may pass to --output meaning a representation, not a file
+_FORMAT_NAMES = frozenset({"json", "jsonl", "tsv", "csv", "plain", "table", "id", "yaml"})
+
+
+def output_path(raw: str) -> Path:
+    """``--output``: a file path, never a format name such as ``json``"""
+    if raw in _FORMAT_NAMES:
+        raise ParseError(
+            f"--output takes a file path, not the format {raw!r}",
+            context={"flag": OUTPUT_FLAG, "value": raw},
+            suggestion=f"use --format {raw} to choose the representation",
+        )
+    return check_path(raw, OUTPUT_FLAG)
+
+
+def parse_heartbeat(raw: str) -> int:
+    """``--heartbeat-ms``: whole milliseconds; 0 turns heartbeats off"""
+    if not (raw.isascii() and raw.isdigit()) or int(raw) > 86_400_000:
+        raise ParseError(
+            "'heartbeat-ms' expects whole milliseconds, at most a day; 0 turns heartbeats off",
+            context={"flag": HEARTBEAT_FLAG, "value": raw},
+        )
+    return int(raw)
 
 
 def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
@@ -549,6 +615,12 @@ def known_flags(command: Command) -> list[str]:
         flags.extend((YES_FLAG, NON_INTERACTIVE_FLAG))
     if command.paginated:
         flags.extend((LIMIT_FLAG, CURSOR_FLAG))
+    if command.heartbeat:
+        flags.append(HEARTBEAT_FLAG)
+    if command.stdin_input:
+        flags.append(INPUT_FILE_FLAG)
+    if command.output_file:
+        flags.append(OUTPUT_FLAG)
     return flags
 
 
@@ -602,6 +674,7 @@ def build_from_mapping(
     switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
     limit: Limit | None = None
     cursor: Position | None = None
+    input_file: Path | None = None
     errors = _Collector()
     for key, value in mapping.items():
         try:
@@ -611,6 +684,11 @@ def build_from_mapping(
                 continue
             if flag == LIMIT_FLAG and command.paginated:
                 limit = Limit.parse(value)
+                continue
+            if flag == INPUT_FILE_FLAG and command.stdin_input:
+                if not isinstance(value, str):
+                    raise ParseError(f"{key!r} expects a path", context={"field": key})
+                input_file = check_path(value, INPUT_FILE_FLAG)
                 continue
             if flag == CURSOR_FLAG and command.paginated:
                 # null is the first page, as a JSON caller spells an absent cursor
@@ -689,6 +767,7 @@ def build_from_mapping(
         non_interactive=switches[NON_INTERACTIVE_FLAG],
         limit=limit,
         cursor=cursor,
+        input_file=input_file,
     )
 
 

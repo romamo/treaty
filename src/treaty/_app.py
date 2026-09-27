@@ -22,6 +22,7 @@ from typing import IO, Any, NoReturn, TextIO, cast
 
 from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, Rerun, StdinCap, cap_envelope
 from ._command import (
+    DEFAULT_HEARTBEAT_MS,
     Cleanup,
     Command,
     DangerLevel,
@@ -66,8 +67,9 @@ from ._resources import Resolver
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
-from ._subprocess import BROWSER_OPEN, Processes
-from ._timeout import Pending, Timeout, TimeoutExpired, call_with_timeout
+from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, Processes
+from ._table import table
+from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
 
 EXEC_PATH = CommandPath("exec")
@@ -212,8 +214,9 @@ class App:
         """Offer ``--format <mode>``, written by ``render`` for every command without its own
         renderer for it; declare it before the commands overriding it
 
-        ``plain`` is always offered, and registering it replaces the built-in ``key: value``
-        lines. ``json`` is the response envelope agents read, so it takes no renderer.
+        ``plain`` and ``tsv`` are always offered, and registering one replaces its built-in
+        renderer. ``json`` and ``jsonl`` are the response envelope agents read, so they take
+        no renderer.
         """
         _check_renderer("app.format", mode, render)
         if mode in self._renderers:
@@ -223,7 +226,7 @@ class App:
     @property
     def formats(self) -> tuple[Format, ...]:
         """The ``--format`` values this app offers, in ``Format`` order"""
-        built_in = (Format.PLAIN, Format.JSON)
+        built_in = (Format.PLAIN, Format.JSON, Format.JSONL, Format.TSV)
         return tuple(m for m in Format if m in built_in or m in self._renderers)
 
     def renderer(self, command: Command, mode: Format) -> Renderer | None:
@@ -231,7 +234,7 @@ class App:
         if command.path == MANIFEST_PATH:
             # The manifest is for agents: every text mode keeps it JSON, indented for reading
             return _json_text
-        return command.renderers.get(mode, self._renderers.get(mode))
+        return command.renderers.get(mode, self._renderers.get(mode, _BUILT_IN.get(mode)))
 
     def group(self, path: str, *, description: str) -> Group:
         prefix = CommandPath(path)
@@ -264,12 +267,20 @@ class App:
         editor_alternatives: Sequence[str] = (),
         paginated: bool = False,
         default_limit: int = DEFAULT_LIMIT,
+        heartbeat: bool = False,
+        stdin_input: bool = False,
+        output_file: bool = False,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
 
         ``paginated=True`` makes a list command: it returns ``list[T]`` or ``Page[T]``, and
         gets ``--limit`` (``default_limit`` items, 0 for all) and ``--cursor``.
+        ``heartbeat=True`` writes a heartbeat line to stdout every ``--heartbeat-ms``
+        (10 s) while the handler runs, in JSON mode. ``stdin_input=True`` reads a payload
+        into ``ctx.stdin_text`` before the handler runs: stdin up to the stdin cap, or any
+        size from ``--input-file``. ``output_file=True`` adds ``--output PATH``, which
+        writes ``data`` there in the ``--format`` representation and the envelope to stdout.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -291,11 +302,8 @@ class App:
                     f"{cmd_path}: --format {mode} is not offered; "
                     f"register it first with app.format(Format.{mode.name}, render=...)"
                 )
-        if isinstance(timeout, _Inherit):
-            # A stream serves until told to stop; the app default is for one-shot handlers
-            command_timeout = Timeout(None) if streaming else None
-        else:
-            command_timeout = Timeout(timeout)
+        # A stream's timeout is an idle limit: the wait for each event (REQ-F-011)
+        command_timeout = None if isinstance(timeout, _Inherit) else Timeout(timeout)
 
         def register(fn: Handler) -> Handler:
             self._register(
@@ -321,6 +329,9 @@ class App:
                     editor_alternatives=editor_alternatives,
                     paginated=paginated,
                     default_limit=default_limit,
+                    heartbeat=heartbeat,
+                    stdin_input=stdin_input,
+                    output_file=output_file,
                 )
             )
             return fn
@@ -491,7 +502,9 @@ class App:
                 )
             if invocation.timeout is None and self.effective_timeout(command, None).seconds is None:
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
-            return buffer_stream(run.stream(command, invocation, Format.JSON, meta=meta))
+            return buffer_stream(
+                run.stream(command, invocation, Format.JSON, meta=meta, whole=True)
+            )
         return run.execute(command, invocation, Format.JSON, meta=meta)
 
     def main(self) -> NoReturn:
@@ -500,6 +513,10 @@ class App:
         quiet_children(
             os.environ, stdout_isatty=sys.stdout.isatty(), stdin_isatty=sys.stdin.isatty()
         )
+        # REQ-F-053: every line reaches a pipe reader as it is written, here and in children
+        os.environ["PYTHONUNBUFFERED"] = "1"
+        if not sys.stdout.isatty() and isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout.reconfigure(line_buffering=True)
         sys.exit(self.run(sys.argv[1:]))
 
     def run(
@@ -521,7 +538,7 @@ class App:
         run.argv = (self.name, *argv)
         try:
             with run.guard_streams():
-                return self._route(run, list(argv), inp, environ)
+                return self._route(run, list(argv), environ)
         except OSError as exc:
             if not _closed_pipe(exc):
                 raise
@@ -532,13 +549,15 @@ class App:
         self,
         run: _Run,
         argv: list[str],
-        inp: IO[str],
         environ: Mapping[str, str],
     ) -> int:
         out = run.out
         try:
             globals_, rest = split_globals(argv)
             mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
+            requested = mode
+            if mode is Format.JSONL:
+                mode = Format.JSON  # every JSON envelope is already one compact line
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
@@ -581,15 +600,21 @@ class App:
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
                 run.argv = None  # a line's hint cannot rerun the whole plan
-                return run.exec(invocation.args, inp)
+                return run.exec(invocation.args)
             render = self.renderer(command, mode)
             if command.streaming:
-                envelopes = run.stream(command, invocation, mode)
                 if invocation.no_stream:
+                    envelopes = run.stream(command, invocation, mode, whole=True)
                     return run.emit(mode, buffer_stream(envelopes), render=_each(render))
+                envelopes = run.stream(command, invocation, mode)
                 run.in_flight = command
                 return run.emit_stream(mode, envelopes, render=render)
-            return run.emit(mode, run.execute(command, invocation, mode), render=render)
+            envelope = run.execute(command, invocation, mode)
+            if invocation.output is not None:
+                # REQ-O-001: the file gets the representation; stdout gets the envelope
+                written = run.to_file(invocation.output, requested, envelope, render)
+                return run.emit(Format.JSON, written)
+            return run.emit(mode, envelope, render=render)
 
 
 def _invoke(command: Command, args: object, ctx: Ctx) -> object:
@@ -710,6 +735,9 @@ def _warned(envelope: Envelope, code: str, message: str, command: Command) -> En
     return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
 
 
+_BUILT_IN: Mapping[Format, Renderer] = {Format.TSV: table("\t")}
+
+
 def _json_text(data: Any) -> str:
     """Machine output in a text mode: the data alone, indented, without the envelope"""
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
@@ -718,8 +746,8 @@ def _json_text(data: Any) -> str:
 def _check_renderer(where: str, mode: object, render: object) -> None:
     if not isinstance(mode, Format):
         raise RegistrationError(f"{where}: {mode!r} is not a Format member")
-    if mode is Format.JSON:
-        raise RegistrationError(f"{where}: json is the response envelope and takes no renderer")
+    if mode in (Format.JSON, Format.JSONL):
+        raise RegistrationError(f"{where}: {mode} is the response envelope and takes no renderer")
     if not callable(render):
         raise RegistrationError(f"{where}: the {mode} renderer is not callable")
 
@@ -820,6 +848,10 @@ class _Run:
         """Where the list page ``_execute`` last answered started, to resume after a cut"""
         self.argv: tuple[str, ...] | None = None
         """The invocation as typed, app name first; None where it cannot be rerun (exec)"""
+        self.delivered = False
+        """Whether a complete envelope, event, or rendered result was written and flushed"""
+        self.payload_stdin: IO[str] | None = stdin
+        """Where a ``stdin_input`` command reads its payload; None in ``App.call``"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -847,6 +879,7 @@ class _Run:
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         write_envelope(cap_envelope(envelope, self.cap, Rerun(self.argv, self.page)), self.out)
+        self.delivered = True
 
     def _ctx(
         self,
@@ -891,6 +924,7 @@ class _Run:
                 env=self.env,
             ),
             idempotency_key=idempotency_key,
+            stdin_text=invocation.stdin_text,
             page=page,
         )
 
@@ -987,6 +1021,16 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen"""
+        if command.stdin_input:
+            try:
+                payload = self._read_input(invocation.input_file, meta=meta)
+            except Cancelled as exc:
+                return self._cancelled(
+                    command, exc.signal, self.started, meta or {}, handler_started=False
+                )
+            if isinstance(payload, Envelope):
+                return payload
+            invocation = dataclasses.replace(invocation, stdin_text=payload)
         if not command.safe_default:
             return self._keyed(command, invocation, mode, meta=meta)
         # REQ-O-048: a dry run unless --live; --dry-run still wins, as a preview is safe
@@ -1223,6 +1267,7 @@ class _Run:
                 timeout,
                 running.append,
                 self.cancellation.armed,
+                heartbeat=self._heartbeat(command, invocation, mode, started),
             )
         except CliExit as exc:
             return self._exit_envelope(command, args, exc, started, full_meta)
@@ -1324,13 +1369,17 @@ class _Run:
         mode: Format,
         *,
         meta: Mapping[str, object] | None = None,
+        whole: bool = False,
     ) -> Generator[Envelope]:
         """Run a generator handler: one envelope per event, then a terminal one (REQ-O-004)
 
-        A timeout is a deadline for the whole stream. A failure after some events keeps
+        The timeout limits the wait for each event, so a stream runs as long as it keeps
+        producing (REQ-F-011); ``whole`` makes it a deadline for the whole stream, for a
+        caller that sees nothing until the stream ends. A failure after some events keeps
         their count in ``meta.seq`` and marks the response ``partial``.
         """
         started = time.perf_counter()
+        waiting_since = started
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
         ctx = self._ctx(command, invocation.args, mode, timeout, invocation=invocation)
@@ -1341,7 +1390,7 @@ class _Run:
         def remaining() -> Timeout:
             if timeout.seconds is None:
                 return timeout
-            left = timeout.seconds - (time.perf_counter() - started)
+            left = timeout.seconds - (time.perf_counter() - (started if whole else waiting_since))
             if left <= 0:
                 raise TimeoutExpired(timeout)
             return Timeout(left)
@@ -1351,6 +1400,7 @@ class _Run:
             return {**full_meta, "seq": seq, "partial": seq > 0}
 
         running: list[Pending] = []
+        cancelled = False
         # One context for every next(): what the generator sets survives between events
         stream_context = contextvars.copy_context()
 
@@ -1377,6 +1427,7 @@ class _Run:
             events = produced
             while True:
                 self.cancellation.check()
+                waiting_since = time.perf_counter()
                 event = call_with_timeout(
                     lambda: next(produced, _END),
                     remaining(),
@@ -1398,11 +1449,12 @@ class _Run:
         except TimeoutExpired:
             self._stop_children()
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
+            what = "timeout" if whole else "timeout waiting for its next event"
             yield self._envelope(
                 entry.code.value,
                 error=ErrorDetail(
                     code="TIMEOUT",
-                    message=f"Command {command.path} exceeded its {timeout.seconds}s timeout",
+                    message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
                     retryable=entry.retryable,
                     context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
                     phase="execution",
@@ -1412,11 +1464,13 @@ class _Run:
             )
             return
         except Cancelled as exc:
+            cancelled = True
             ran = events is not None or not exc.held or bool(running)
             meta_now = {**full_meta, "seq": seq}
             yield self._cancelled(command, exc.signal, started, meta_now, handler_started=ran)
             return
         except KeyboardInterrupt:
+            cancelled = True
             sig = CancelSignal("SIGINT", 130)
             yield self._cancelled(command, sig, started, {**full_meta, "seq": seq})
             return
@@ -1433,6 +1487,11 @@ class _Run:
             yield self._crashed(command, args, exc, started, partial())
             return
         finally:
+            if cancelled:
+                # A cancelled worker is waiting for its next event, not stuck: give it
+                # the children's grace to hand the generator back so it can be closed
+                for pending in running:
+                    pending.worker.join(GRACE_SECONDS)
             # Run the handler's finally blocks now, unless a timed-out worker still holds it
             held = any(p.worker.is_alive() for p in running)
             if events is not None and not held and isinstance(events, Generator):
@@ -1444,6 +1503,33 @@ class _Run:
         yield self._envelope(
             0, started=started, meta={**full_meta, "seq": seq, "end": True, "total": seq}
         )
+
+    def _heartbeat(
+        self, command: Command, invocation: Invocation, mode: Format, started: float
+    ) -> Heartbeat | None:
+        """Heartbeat lines for a JSON run from argv (REQ-F-053); an exec plan and an MCP
+        call have one reader for many results, and plain output is for a person"""
+        ms = invocation.heartbeat_ms
+        if ms is None:
+            ms = DEFAULT_HEARTBEAT_MS
+        if not command.heartbeat or not ms or mode is not Format.JSON or self.argv is None:
+            return None
+        beating = [True]
+
+        def tick() -> None:
+            if not beating[0]:
+                return
+            elapsed = int((time.perf_counter() - started) * 1000)
+            line = {"status": "running", "heartbeat": True, "elapsed_ms": elapsed}
+            try:
+                self.out.write(json.dumps(line, separators=(",", ":")) + "\n")
+                self.out.flush()
+            except OSError as exc:
+                if not _closed_pipe(exc):
+                    raise
+                beating[0] = False  # the envelope write reports the closed pipe
+
+        return Heartbeat(ms / 1000, tick)
 
     def _input_required(
         self, exc: InputRequired, started: float, meta: Mapping[str, object]
@@ -1725,9 +1811,11 @@ class _Run:
         return self._emit_text(mode, envelope, render)
 
     def output_closed(self) -> int:
-        """The reader went away (``tool logs | head``): nothing more can be written, so exit
-        141, the SIGPIPE convention. A stream cut off mid-way runs its cleanup hook like a
-        cancellation; a finished handler has nothing left to clean up."""
+        """The reader went away: nothing more can be written, and nothing goes to stderr.
+        After a complete envelope or event (``tool logs | head -1``) the reader got what it
+        wanted, so exit 0 (REQ-F-014); before any, it got no answer, so exit 141, the SIGPIPE
+        convention (``OUTPUT_CLOSED``). A stream cut off mid-way runs its cleanup hook like
+        a cancellation; a finished handler has nothing left to clean up."""
         command, self.in_flight = self.in_flight, None
         if command is not None and command.cleanup is not None:
             try:
@@ -1739,7 +1827,54 @@ class _Run:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stdout.fileno())
             os.close(devnull)
-        return 141
+        return 0 if self.delivered else 141
+
+    def to_file(
+        self, path: Path, mode: Format, envelope: Envelope, render: Renderer | None
+    ) -> Envelope:
+        """Write a successful result's ``data`` to ``path``; the envelope then describes
+        the write. A failed run writes no file."""
+        if not envelope.ok or envelope.data is None:
+            return envelope
+        data = envelope.data
+        if mode is Format.JSONL:
+            items = data if isinstance(data, list) else [data]
+            text = "".join(
+                json.dumps(i, separators=(",", ":"), sort_keys=True) + "\n" for i in items
+            )
+        elif mode is Format.JSON:
+            text = _json_text(data)
+        else:
+            try:
+                text = render(data) if render is not None else render_plain(data)
+            except Exception as exc:  # noqa: BLE001 - a renderer is user code
+                self.err.write(_traceback(exc))
+                return self._file_error(
+                    envelope, "RENDER_FAILED", f"the {mode} renderer failed", path
+                )
+        try:
+            path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return self._file_error(
+                envelope, "OUTPUT_UNWRITABLE", f"cannot write --output: {exc.strerror}", path
+            )
+        written = {"path": str(path), "bytes": len(text.encode("utf-8"))}
+        return dataclasses.replace(envelope, data=written)
+
+    def _file_error(self, envelope: Envelope, code: str, message: str, path: Path) -> Envelope:
+        """The result stays in ``data``, so a run that could not write its file loses nothing"""
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        return dataclasses.replace(
+            envelope,
+            exit_code=entry.code.value,
+            error=ErrorDetail(
+                code=code,
+                message=message,
+                retryable=False,
+                context={"output": str(path)},
+                phase="execution",
+            ),
+        )
 
     def emit_stream(
         self,
@@ -1811,6 +1946,7 @@ class _Run:
             if envelope.error.suggestion is not None:
                 self.err.write(f"hint: {envelope.error.suggestion}\n")
         self.out.flush()
+        self.delivered = True
         self.err.flush()
         return code
 
@@ -1853,9 +1989,10 @@ class _Run:
 
     # exec (REQ-O-050)
 
-    def exec(self, args: ExecArgs, stdin: IO[str]) -> int:
+    def exec(self, args: ExecArgs) -> int:
         """Dispatch each plan line in-process; JSONL envelopes out; 0, 1, or 2"""
-        text = self._read_plan(args, stdin)
+        text = self._read_plan(args)
+        self.payload_stdin = None  # the plan is stdin; a line's payload needs input_file
         if isinstance(text, Envelope):
             return self.emit(Format.JSON, text)
         # Only \n ends a JSONL line: splitlines() would also break on U+2028, U+2029,
@@ -1907,49 +2044,74 @@ class _Run:
             meta={"partial": lines_run > 0},
         )
 
-    def _read_plan(self, args: ExecArgs, stdin: IO[str]) -> str | Envelope:
+    def _read_plan(self, args: ExecArgs) -> str | Envelope:
         """The whole plan, read before dispatch so a write-then-read caller cannot deadlock"""
-        if args.input_file is not None and args.input_file != Path("-"):
+        try:
+            return self._read_input(args.input_file)
+        except Cancelled as exc:
+            return self._plan_cancelled(exc.signal, 0)
+
+    def _read_input(
+        self, input_file: Path | None, *, meta: Mapping[str, object] | None = None
+    ) -> str | Envelope:
+        """A payload from ``--input-file``, of any size, or from stdin up to the stdin cap
+        (REQ-F-054); ``Cancelled`` when a signal ends the wait for a slow writer"""
+        if input_file is not None and input_file != Path("-"):
             try:
-                return args.input_file.read_text(encoding="utf-8-sig")  # tolerate a BOM
+                return input_file.read_text(encoding="utf-8-sig")  # tolerate a BOM
             except (OSError, UnicodeDecodeError) as exc:
                 return self._stream_error(
                     "INPUT_FILE_UNREADABLE",
                     f"cannot read --input-file: {exc}",
-                    context={"input_file": str(args.input_file)},
+                    context={"input_file": str(input_file)},
                     fix_required="pass a readable UTF-8 file, or - to read stdin",
+                    meta=meta,
                 )
+        stdin = self.payload_stdin
+        if stdin is None:
+            return self._stream_error(
+                "STDIN_UNAVAILABLE",
+                "stdin carries the plan or the call here, not a payload",
+                context={},
+                fix_required="pass input_file with the path of the payload",
+                meta=meta,
+            )
         if stdin.isatty():
             # Reading a terminal would block until the user types EOF
             return self._stream_error(
-                "STDIN_IS_TTY", "exec reads JSONL from stdin, not a terminal", context={"lines": 0}
+                "STDIN_IS_TTY",
+                "the input is read from stdin, not a terminal",
+                context={"lines": 0},
+                fix_required="pipe the input into stdin, or pass --input-file",
+                meta=meta,
             )
         try:
-            cap = StdinCap.resolve(self.env, self.app.max_stdin)
+            cap = StdinCap.resolve(self.env, self.app.max_stdin, self.app.name)
         except ParseError as exc:
-            return self.arg_error(exc)
+            return self.arg_error(exc, meta=meta)
         # One more character than the cap is always more bytes than the cap
         try:
             # A writer that keeps the pipe open must still be able to cancel the read
             with self.cancellation.armed():
                 text = stdin.read(cap.bytes + 1)
             size = len(text.encode("utf-8"))
-        except Cancelled as exc:
-            return self._plan_cancelled(exc.signal, 0)
         except (UnicodeDecodeError, UnicodeEncodeError) as exc:
             # A strict stdin fails to decode; a surrogateescape one fails to re-encode
             return self._stream_error(
                 "STDIN_NOT_UTF8",
-                f"stdin plan is not valid UTF-8: {exc.reason}",
+                f"stdin is not valid UTF-8: {exc.reason}",
                 context={"lines": 0},
-                fix_required="pipe UTF-8 JSONL into exec, or pass --input-file",
+                fix_required="pipe UTF-8 into stdin, or pass --input-file",
+                meta=meta,
             )
         if size > cap.bytes:
             return self._stream_error(
                 "STDIN_TOO_LARGE",
-                f"stdin plan exceeds the {cap.bytes}-byte limit",
+                f"stdin exceeds the {cap.bytes}-byte limit",
                 context={"limit_bytes": cap.bytes},
-                fix_required="write the plan to a file and pass --input-file <path>",
+                fix_required="write the input to a file and pass --input-file <path>",
+                hint="--input-file <path> reads the input from a file, with no size limit",
+                meta=meta,
             )
         return text
 
@@ -1961,6 +2123,8 @@ class _Run:
         context: Mapping[str, object],
         fix_required: str = "pipe one DispatchRequest JSON object per line into exec, "
         "or pass --input-file",
+        hint: str | None = None,
+        meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
         return self._envelope(
@@ -1972,7 +2136,9 @@ class _Run:
                 context=context,
                 phase="validation",
                 fix_required=fix_required,
+                hint=hint,
             ),
+            meta=meta,
         )
 
     def _exec_lines(self, args: ExecArgs, plan: list[str]) -> Generator[tuple[int, Envelope]]:
@@ -2015,10 +2181,11 @@ class _Run:
                 yield line_no, self.arg_error(exc, started=started, meta=failed)
                 continue
             if command.streaming:
-                envelopes = self.stream(command, invocation, Format.JSON, meta=meta)
                 if invocation.no_stream:
+                    envelopes = self.stream(command, invocation, Format.JSON, meta=meta, whole=True)
                     yield line_no, buffer_stream(envelopes)
                     continue
+                envelopes = self.stream(command, invocation, Format.JSON, meta=meta)
                 self.in_flight = command
                 with contextlib.closing(envelopes):
                     for envelope in envelopes:

@@ -6,7 +6,14 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
-from ._command import Command, DangerLevel
+from ._command import (
+    DEFAULT_HEARTBEAT_MS,
+    HEARTBEAT_FLAG,
+    INPUT_FILE_FLAG,
+    OUTPUT_FLAG,
+    Command,
+    DangerLevel,
+)
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._mode import Format
 from ._page import CURSOR_FLAG, LIMIT_FLAG
@@ -109,7 +116,9 @@ def command_entry(
         flags["timeout"] = {
             "type": "number",
             "required": False,
-            "description": "Seconds before the framework aborts with TIMEOUT; 0 disables the limit",
+            "description": "Seconds to wait for each event before TIMEOUT; 0 disables the limit"
+            if command.streaming
+            else "Seconds before the framework aborts with TIMEOUT; 0 disables the limit",
         }
     if command.supports_raw_payload:
         flags["raw-payload"] = {
@@ -172,6 +181,30 @@ def command_entry(
             "required": False,
             "description": "meta.pagination.next_cursor of the previous page, to get the next",
         }
+    if command.stdin_input:
+        flags[INPUT_FILE_FLAG] = {
+            "type": "string",
+            "required": False,
+            "pattern_type": "filepath",
+            "description": "Read the input from this file, of any size, instead of stdin; "
+            "- is stdin, capped",
+        }
+    if command.output_file:
+        flags[OUTPUT_FLAG] = {
+            "type": "string",
+            "required": False,
+            "pattern_type": "filepath",
+            "description": "Write the result to this file in the --format representation; "
+            "stdout gets the envelope",
+        }
+    if command.heartbeat:
+        flags[HEARTBEAT_FLAG] = {
+            "type": "integer",
+            "required": False,
+            "default": DEFAULT_HEARTBEAT_MS,
+            "description": "Milliseconds between heartbeat lines on stdout while the command "
+            "runs; 0 turns them off",
+        }
     if command.safe_default:
         flags[LIVE_FLAG] = {
             "type": "boolean",
@@ -228,6 +261,13 @@ def command_schema(
         entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
     if command.supports_raw_payload:
         entry["raw_payload_schema"] = payload_schema(command)
+    if command.stdin_input:
+        entry["stdin_input"] = True  # REQ-F-054; not a ManifestResponse key
+    if command.heartbeat:
+        # REQ-F-053: lines an agent skips before the envelope; not a ManifestResponse key
+        entry["heartbeat_ms"] = DEFAULT_HEARTBEAT_MS
+    if command.streaming:
+        entry["timeout_kind"] = "idle"  # REQ-F-011: the limit restarts with every event
     if command.paginated:
         # REQ-F-019; not ManifestResponse keys, whose --limit flag shows the same default
         entry["paginated"] = True
@@ -304,6 +344,11 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         properties[CURSOR_FLAG] = {
             "type": ["string", "null"],
             "description": "meta.pagination.next_cursor of the previous page, to get the next",
+        }
+    if command.stdin_input:
+        properties[INPUT_FILE_FLAG.replace("-", "_")] = {
+            "type": "string",
+            "description": "Path of the file holding the input",
         }
     if command.streaming and stream_key:
         properties[NO_STREAM_KEY] = {

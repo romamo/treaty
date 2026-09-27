@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextvars
 import math
 import threading
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
@@ -71,6 +72,18 @@ def _shown(raw: int | float | str) -> str:
     return str(raw)[:32]
 
 
+@dataclass(frozen=True, slots=True)
+class Heartbeat:
+    """``tick`` runs on the waiting thread every ``seconds`` while the handler runs"""
+
+    seconds: float
+    tick: Callable[[], None]
+
+    def __post_init__(self) -> None:
+        if not 0 < self.seconds <= MAX_SECONDS:
+            raise InvalidValue(f"heartbeat seconds must be in (0, {MAX_SECONDS:g}]")
+
+
 class TimeoutExpired(Exception):
     """The handler did not finish within its timeout"""
 
@@ -104,6 +117,7 @@ def call_with_timeout[T](
     running: Callable[[Pending], None] | None = None,
     interruptible: Callable[[], AbstractContextManager[None]] = nullcontext,
     context: contextvars.Context | None = None,
+    heartbeat: Heartbeat | None = None,
 ) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
 
@@ -113,8 +127,9 @@ def call_with_timeout[T](
     an exception raised while ``Thread.start`` holds its internal locks corrupts them.
     The worker runs in ``context``, or a copy of the caller's: contextvars the host set
     reach the handler, and a stream passing one context keeps what its generator set.
+    ``heartbeat`` ticks between waits, outside ``interruptible()``.
     """
-    if timeout.seconds is None:
+    if timeout.seconds is None and heartbeat is None:
         with interruptible():
             return fn()
     slot = Outcome()
@@ -132,10 +147,19 @@ def call_with_timeout[T](
     worker.start()
     if running is not None:
         running(pending)
-    with interruptible():
-        worker.join(timeout.seconds)
-    if worker.is_alive():
-        raise TimeoutExpired(timeout, pending)
+    deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
+    while True:
+        wait = None if deadline is None else max(0.0, deadline - time.monotonic())
+        if heartbeat is not None:
+            wait = heartbeat.seconds if wait is None else min(wait, heartbeat.seconds)
+        with interruptible():
+            worker.join(wait)
+        if not worker.is_alive():
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutExpired(timeout, pending)
+        if heartbeat is not None:
+            heartbeat.tick()
     if slot.exc is not None:
         raise slot.exc
     return slot.result  # type: ignore[return-value]

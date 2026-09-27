@@ -119,7 +119,8 @@ STDIN_ENV_VAR = "TREATY_MAX_STDIN_BYTES"
 
 @dataclass(frozen=True, slots=True)
 class StdinCap:
-    """Most bytes ``exec`` reads from a pipe (REQ-F-054); ``--input-file`` has no cap"""
+    """Most bytes read from a piped stdin by ``exec`` and ``stdin_input`` commands
+    (REQ-F-054); ``--input-file`` has no cap"""
 
     bytes: int
 
@@ -128,16 +129,21 @@ class StdinCap:
             raise InvalidValue("stdin cap must be at least 1 byte")
 
     @classmethod
-    def resolve(cls, env: Mapping[str, str], default: StdinCap) -> StdinCap:
-        raw = env.get(STDIN_ENV_VAR)
-        if raw is None:
+    def resolve(cls, env: Mapping[str, str], default: StdinCap, app_name: str) -> StdinCap:
+        """``<APP>_MAX_STDIN_BYTES``, then ``TREATY_MAX_STDIN_BYTES``, then the App default"""
+        source = next(
+            (v for v in (default_env_var(app_name, "max_stdin_bytes"), STDIN_ENV_VAR) if v in env),
+            None,
+        )
+        if source is None:
             return default
+        raw = env[source]
         try:
             return cls(int(raw))
         except ValueError:
             raise ParseError(
-                f"{STDIN_ENV_VAR} must be a whole number of bytes, at least 1",
-                context={"source": STDIN_ENV_VAR, "value": raw},
+                f"{source} must be a whole number of bytes, at least 1",
+                context={"source": source, "value": raw},
             ) from None
 
 

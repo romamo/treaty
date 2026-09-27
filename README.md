@@ -123,6 +123,11 @@ printf '%s\n' '{"_cmd":"deploy.rollback","service":"api","_opts":{"to":"1.3.9"}}
   | deployctl exec --ignore-errors --dry-run
 ```
 
+Any command can read a payload the same way: `stdin_input=True` adds `--input-file` and puts
+the text in `ctx.stdin_text` before the handler runs; over the cap (`<APP>_MAX_STDIN_BYTES`
+also sets it) the run exits `2` with `STDIN_TOO_LARGE` and a `hint` naming `--input-file`.
+In `exec` and MCP, where stdin is taken, such a command needs `input_file`.
+
 ## Flag order
 
 `--format`, `--help`, `--schema`, and `--max-output` are global: they are accepted anywhere
@@ -147,12 +152,16 @@ mode prints every error's suggestion as a final `hint:` line on stderr.
 
 ## Output formats
 
-`--format` takes `json`, `plain`, and any format the app registers. With no flag,
+`--format` takes `json`, `jsonl`, `plain`, `tsv`, and any format the app registers. With no flag,
 `TREATY_FORMAT` decides; without that, the format is `json` when stdout is not a terminal
 or `CI` is set, and `plain` otherwise.
 
-`json` writes the full response envelope; it is the contract agents read and takes no
-renderer. Every other format writes the result data as text and errors as prose on stderr.
+`json` writes the full response envelope, one compact line per envelope; it is the contract
+agents read and takes no renderer. `jsonl` is the same output under the name line-oriented
+readers ask for. Every other format writes the result data as text and errors as prose on
+stderr. `tsv` is built in: a header row, then one row per item (nested values as compact
+JSON); `treaty.table(",")` is the same renderer for CSV, `app.format(Format.CSV,
+render=table(","))`.
 A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
 returns the text. Formats are `Format` members, never strings:
 
@@ -174,9 +183,15 @@ app.format(Format.CSV, render=render_csv)  # offers --format csv to every comman
 
 A command's `renderers=` overrides the app's renderer for that format. `app.format()` must
 come before the commands that override it, and a command can only override a format the
-app offers. `Format` lists every format treaty knows (`plain`, `json`, `csv`, `tsv`,
-`yaml`, `markdown`); an app offers `plain`, `json`, and the ones it registers, and the
-manifest and `--help` list exactly those. Any other value exits `2` listing them.
+app offers. `Format` lists every format treaty knows (`plain`, `json`, `jsonl`, `csv`,
+`tsv`, `yaml`, `markdown`); an app offers `plain`, `json`, `jsonl`, `tsv`, and the ones it
+registers, and the manifest and `--help` list exactly those. Any other value exits `2`
+listing them, before anything runs or any file is written.
+
+A command declared `output_file=True` takes `--output PATH`: the result goes to the file in
+the `--format` representation, and stdout gets the JSON envelope with `data: {"path": ...,
+"bytes": N}`. A failed run writes no file. `--output json` (any format name) exits `2`
+suggesting `--format json`; `--output` never selects a representation.
 
 Without a renderer, `plain` prints flat lines, one item each: `key: value`, with dotted
 paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. An
@@ -210,6 +225,15 @@ record exits `4` (`STATE_DIR_UNWRITABLE`, `IDEMPOTENCY_RECORD_CORRUPT`).
 A handler that raises anything else exits `1` with `HANDLER_CRASHED`, naming the exception;
 the traceback goes to stderr with secret values redacted. A result or `Exit` payload the
 framework cannot serialize exits `1` with `INVALID_OUTPUT` or `INVALID_EXIT`.
+
+## Long-running commands
+
+`App.main()` sets `PYTHONUNBUFFERED=1` for children and makes stdout line-buffered when it is
+not a terminal, so a reader gets each envelope and event as it is written (REQ-F-053). A
+command declared `heartbeat=True` also writes `{"status": "running", "heartbeat": true,
+"elapsed_ms": N}` lines to stdout every `--heartbeat-ms` (default 10 000, `0` for none)
+while its handler runs, in JSON mode from argv; the envelope is still the last line.
+`--schema` shows `heartbeat_ms` so an agent knows which lines to skip.
 
 ## Stdout hygiene
 
@@ -479,8 +503,10 @@ def serve(args: ServeArgs, ctx: Ctx) -> Iterator[ServeEvent]:
 
 A `CliExit`, `ParseError`, timeout, or signal after some events writes the matching failure
 envelope as the last line, with `meta.seq` at the last delivered event and `meta.partial`.
-Streaming commands default to no timeout; an explicit `timeout=` or `--timeout` is a
-deadline for the whole stream. Cancellation runs `cleanup=` and the handler's `finally`
+A stream's timeout, the app default unless `timeout=` or `--timeout` says otherwise, limits
+the wait for each event, so a stream runs as long as it keeps producing and one that goes
+silent ends with `TIMEOUT` (REQ-F-011); `--schema` says `timeout_kind: idle`. Under
+`--no-stream` and in `App.call` it is a deadline for the whole stream. Cancellation runs `cleanup=` and the handler's `finally`
 blocks, then ends the stream with the normal `CANCELLED` envelope and exit `130` or `143`.
 The manifest declares `streaming_default: true` and a `--no-stream` flag (REQ-O-004),
 which returns one envelope with every event in `data` and `meta.total`; a failure under
@@ -529,8 +555,10 @@ retry waiting for an idempotency key is interrupted too. A signal that arrives a
 handler returned is held: the finished result is written with its own exit code, since
 the work it reports did happen. An `exec` plan stops at the first signal, even with
 `--ignore-errors`, and exits `130` or `143`. A reader that closes stdout early
-(`tool logs | head`) ends the run with `141` (`OUTPUT_CLOSED`): the cleanup hook runs and
-nothing more is written. All three codes appear in every command's `exit_codes` map.
+(`tool logs | head -1`) ends the run silently: the cleanup hook runs, nothing more is
+written, and the exit is `0` once a complete envelope or event reached the reader, since it
+got what it wanted (REQ-F-014), or `141` (`OUTPUT_CLOSED`) when it left before any. All three
+signal codes appear in every command's `exit_codes` map.
 
 ## Raw payloads
 

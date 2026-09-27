@@ -98,6 +98,12 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
         default = command.default_limit.count or 0
         rows.append(("--limit N", f"Most items to return (default: {default}); 0 returns all"))
         rows.append(("--cursor TOKEN", "Next page: meta.pagination.next_cursor of the last one"))
+    if command.output_file:
+        rows.append(("--output PATH", "Write the result to PATH; stdout gets the envelope"))
+    if command.stdin_input:
+        rows.append(("--input-file PATH", "Read the input from PATH instead of stdin"))
+    if command.heartbeat:
+        rows.append(("--heartbeat-ms MS", "Heartbeat lines while running (default: 10000)"))
     if command.interactive:
         rows.append(("--yes", "Answer yes to every confirmation"))
         rows.append(("--non-interactive", "Never prompt; a needed answer exits 4"))

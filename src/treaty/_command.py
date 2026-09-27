@@ -97,6 +97,12 @@ class Command:
     """A list command: ``--limit``, ``--cursor``, and ``meta.pagination`` (REQ-F-018)"""
     default_limit: Limit = Limit(DEFAULT_LIMIT)
     """Items per page without ``--limit`` (REQ-F-019)"""
+    heartbeat: bool = False
+    """JSON runs write heartbeat lines to stdout while the handler runs (REQ-F-053)"""
+    stdin_input: bool = False
+    """The handler reads a payload, ``ctx.stdin_text``, from stdin or ``--input-file``"""
+    output_file: bool = False
+    """``--output PATH`` writes the rendered ``data`` to a file (REQ-O-001)"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -115,6 +121,11 @@ class Command:
                 return f
         return None
 
+
+HEARTBEAT_FLAG = "heartbeat-ms"
+INPUT_FILE_FLAG = "input-file"
+OUTPUT_FLAG = "output"
+DEFAULT_HEARTBEAT_MS = 10_000
 
 # Consumed by split_globals before any command sees its tokens
 GLOBAL_FLAGS = frozenset({"format", "help", "max-output", "schema"})
@@ -144,12 +155,23 @@ def build_command(
     editor_alternatives: Sequence[str] = (),
     paginated: bool = False,
     default_limit: int = DEFAULT_LIMIT,
+    heartbeat: bool = False,
+    stdin_input: bool = False,
+    output_file: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
     if paginated and streaming:
         raise RegistrationError(
             f"{path}: a stream has no pages; drop paginated=True or streaming=True"
+        )
+    if output_file and streaming:
+        raise RegistrationError(
+            f"{path}: a stream writes events as they come; drop output_file=True or streaming=True"
+        )
+    if heartbeat and streaming:
+        raise RegistrationError(
+            f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
         )
     args_type, output_type, resources = _inspect_handler(fn, path, streaming, paginated)
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
@@ -201,6 +223,9 @@ def build_command(
         "non-interactive": interactive,
         LIMIT_FLAG: paginated,
         CURSOR_FLAG: paginated,
+        HEARTBEAT_FLAG: heartbeat,
+        INPUT_FILE_FLAG: stdin_input,
+        OUTPUT_FLAG: output_file,
     }
     taken = sorted(
         f.flag
@@ -270,6 +295,9 @@ def build_command(
         editor_alternatives=tuple(editor_alternatives),
         paginated=paginated,
         default_limit=Limit(default_limit or None),
+        heartbeat=heartbeat,
+        stdin_input=stdin_input,
+        output_file=output_file,
     )
 
 

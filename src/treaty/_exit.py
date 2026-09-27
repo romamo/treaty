@@ -149,7 +149,7 @@ _SIGNALS: tuple[tuple[str, int, str], ...] = (
     (
         "OUTPUT_CLOSED",
         141,
-        "The reader closed stdout (SIGPIPE); output was cut short, state may be partial",
+        "The reader closed stdout (SIGPIPE) before any complete envelope; state may be partial",
     ),
 )
 

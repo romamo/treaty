@@ -43,7 +43,8 @@ def test_asyncio_cancelled_error_in_a_handler_still_writes_an_envelope() -> None
     assert code == 1 and env["error"]["context"]["exception"] == "CancelledError"
 
 
-def test_closed_stdout_exits_141_without_a_traceback() -> None:
+def test_closed_stdout_after_an_event_exits_0_without_a_traceback() -> None:
+    """``| head -n 1``: the reader got a complete event, so this is success (REQ-F-014)"""
     proc = subprocess.Popen(
         [sys.executable, str(SLOWCTL), "serve", "--interval", "0.01"],
         stdout=subprocess.PIPE,
@@ -54,7 +55,7 @@ def test_closed_stdout_exits_141_without_a_traceback() -> None:
     proc.stdout.close()  # the reader goes away, as `| head -n 1` does
     code = proc.wait(timeout=10)
     err = proc.stderr.read().decode()
-    assert code == 141 and "Traceback" not in err, err
+    assert code == 0 and "Traceback" not in err and "BrokenPipe" not in err, err
 
 
 def test_handler_and_stream_see_the_callers_contextvars() -> None:

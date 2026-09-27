@@ -167,22 +167,31 @@ def test_plain_mode_failure_goes_to_stderr_after_rendered_events() -> None:
 # Timeouts
 
 
-def test_streaming_commands_default_to_no_timeout() -> None:
+def test_f011_streams_inherit_the_default_as_an_idle_limit() -> None:
+    """0.3 s between events, four events: longer than the limit in all, never idle past it"""
     app = stream_app()
-    code, lines, _ = run(["tail", "2", "--sleep", "0.2"], app=app)
-    assert code == 0
-    assert lines[0]["meta"]["timeout_ms"] is None
+    code, lines, _ = run(["tail", "4", "--sleep", "0.2"], app=app)
+    assert code == 0 and len(lines) == 5
+    assert lines[0]["meta"]["timeout_ms"] == 300
     assert app.manifest()["commands"]["tail"]["streaming_default"] is True
 
 
-def test_explicit_timeout_is_a_deadline_for_the_whole_stream() -> None:
+def test_f011_a_stream_idle_past_its_timeout_ends_with_timeout() -> None:
     app = stream_app(timeout=0.25)
-    code, lines, _ = run(["tail", "10", "--sleep", "0.1"], app=app)
+    code, lines, _ = run(["tail", "3", "--sleep", "0.5"], app=app)
     assert code == 10
     assert lines[-1]["error"]["code"] == "TIMEOUT"
-    assert lines[-1]["meta"]["partial"] is True
-    assert 1 <= lines[-1]["meta"]["seq"] <= 3
+    assert "next event" in lines[-1]["error"]["message"]
+    assert lines[-1]["meta"]["seq"] == 0
     assert lines[-1]["meta"]["timeout_ms"] == 250
+
+
+def test_no_stream_timeout_is_a_deadline_for_the_whole_stream() -> None:
+    app = stream_app(timeout=0.25)
+    code, lines, _ = run(["tail", "10", "--sleep", "0.1", "--no-stream"], app=app)
+    (line,) = lines
+    assert code == 10 and line["error"]["code"] == "TIMEOUT"
+    assert 1 <= len(line["data"]) <= 3
 
 
 # Exec

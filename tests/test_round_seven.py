@@ -170,7 +170,8 @@ def test_closed_stdout_during_exec_closes_and_cleans_up_the_step() -> None:
     code = plain_app(events).run(
         ["exec"], stdin=plan, stdout=Dead(live=2), stderr=io.StringIO(), env={}
     )
-    assert code == 141 and events == ["finally", "cleanup"]
+    # One complete line reached the reader before it left (REQ-F-014)
+    assert code == 0 and events == ["finally", "cleanup"]
 
 
 def test_closed_stderr_keeps_the_crash_envelope() -> None:

@@ -51,7 +51,8 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   envelope path (a `ParseError` there is `VALIDATION_AFTER_START`); cycles and missing `acquire` fail at registration
 - Streaming handlers (cloudfall gap 3, REQ-O-004): `streaming=True` with an `Iterator[T]`
   handler; one envelope per yield with `meta.seq`, a terminal envelope with `end` and
-  `total`, failures mark `partial`; no timeout by default, else a whole-stream deadline;
+  `total`, failures mark `partial`; the timeout limits the wait for each event (it was a
+  whole-stream deadline, with none by default, until plan 07);
   `streaming_default` in the manifest and `--help`; `--no-stream` buffers; works in `exec`
 - MCP adapter (cloudfall gap 4, `treaty[mcp]`): `treaty-mcp module:app` serves one tool
   per command in-process over stdio; input schema from the args schema plus framework
@@ -88,6 +89,10 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `--cursor`, `meta.pagination`, `treaty.Page` and `ctx.page`, `INVALID_CURSOR`; a cut
   page's `truncation_hint` is the command for the next page; `<APP>_MAX_OUTPUT_BYTES`;
   `paginated-list` audit rule
+- I/O and streams (REQ-F-011, F-014, F-053, F-054, O-001): idle timeouts for streams,
+  exit `0` when the reader leaves after a complete envelope, `PYTHONUNBUFFERED` and
+  `heartbeat=True`, `stdin_input=True` with `--input-file` and `hint`, `--format jsonl`,
+  built-in `tsv` and `treaty.table`, `output_file=True` with `--output PATH`
 
 ## 0.1.0: first release
 

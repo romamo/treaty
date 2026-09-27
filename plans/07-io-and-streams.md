@@ -59,11 +59,11 @@ exit 2, `STDIN_TOO_LARGE`, with a `hint` field naming `--input-file`. Add `hint`
 
 ## Tasks
 
-- [ ] Idle timeout for streams; `timeout_kind` in the manifest
-- [ ] SIGPIPE exit rule per D1
-- [ ] `PYTHONUNBUFFERED`, line buffering, heartbeat thread-free loop in `_execute`
-- [ ] `stdin_input=`, `--input-file`, `hint`; `exec` refactor onto it
-- [ ] `Format.JSONL`; `output_file=` and `--output`; built-in tabular renderer
+- [x] Idle timeout for streams; `timeout_kind` in `--schema` (see deviations)
+- [x] SIGPIPE exit rule per D1
+- [x] `PYTHONUNBUFFERED`, line buffering, heartbeat thread-free loop in `_execute`
+- [x] `stdin_input=`, `--input-file`, `hint`; `exec` refactor onto it
+- [x] `Format.JSONL`; `output_file=` and `--output`; built-in tabular renderer
 
 ## Tests
 
@@ -74,3 +74,41 @@ exit 2, `STDIN_TOO_LARGE`, with a `hint` field naming `--input-file`. Add `hint`
 - 65 537 bytes on stdin exits 2 with `hint` naming `--input-file`; 65 535 bytes succeeds
 - `--format jsonl` on a normal command, a stream, and `exec` parses line by line
 - `--format csv --output r.csv` writes the file and a JSON envelope on stdout
+
+## Deviations as built
+
+- **Manifest keys go to `--schema`.** `CommandEntry` admits no extra keys, so
+  `timeout_kind: idle`, `heartbeat_ms`, and `stdin_input` are in `--schema` only; the
+  manifest carries the `--heartbeat-ms` and `--input-file` flag entries with their defaults
+- **A buffered stream keeps a whole-stream deadline.** Under `--no-stream` and in
+  `App.call` (MCP) nothing reaches the reader before the end, so there the timeout still
+  bounds the whole stream; a live stream's timeout is the idle limit
+- **A cancelled stream waits `GRACE_SECONDS` for its worker.** With streams now under a
+  timeout, `next()` runs on a worker thread; a signal would otherwise leave the generator
+  unclosed and its `finally` unrun
+- **Heartbeats are opt-in per command, JSON mode, argv only.** `heartbeat=True` adds
+  `--heartbeat-ms` (default 10 000, `0` off). No `App(heartbeat_ms=...)` and no automatic
+  heartbeat for `has_network_io` commands: an agent that does not expect the extra lines
+  would misread them. `exec` and `App.call` never beat, since they have one reader for
+  many results. Heartbeats do not count as delivered output for D1
+- **`jsonl` is mapped to `json`** right after the mode is resolved: treaty's JSON output is
+  already one compact envelope per line. Handlers see `ctx.mode` as `json`; only
+  `--output` writes a different file (one compact item per line)
+- **`tsv` is built in, `csv` is not.** O-001 names `tsv` as a minimum, so every app offers
+  it; `treaty.table(delimiter)` is the renderer, and `app.format(Format.CSV,
+  render=table(","))` is the one line for CSV. Both use the `csv` module's quoting, so a
+  tab or quote inside a value round-trips through `csv.reader`. In a stream every event is
+  rendered on its own, header included
+- **`stdin_input` reads in `_Run.execute`**, before the idempotency and safe-default paths,
+  and passes the text as `ctx.stdin_text` (no `StdinPayload` resource). In `exec` and
+  `App.call` stdin is not the payload's, so those need `input_file` and otherwise exit `2`
+  with `STDIN_UNAVAILABLE`. `<APP>_MAX_STDIN_BYTES` joins `TREATY_MAX_STDIN_BYTES`
+- **`--output` is argv-only**, and stdout gets the JSON envelope in every format. A failed
+  run writes no file; a renderer failure (`RENDER_FAILED`) or an unwritable path
+  (`OUTPUT_UNWRITABLE`) exits `1` with the result kept in `data`. Format names refused as
+  `--output` values: `json`, `jsonl`, `tsv`, `csv`, `plain`, `table`, `id`, `yaml`
+- **An unknown `--format` still writes the `ARG_ERROR` envelope to stdout.** O-001 says such
+  a run "writes nothing to stdout"; F-004 requires an envelope on every exit, so treaty
+  reads the criterion as no result output and no file
+- `hint` is a new `ErrorDetail` field (the envelope schema allows extra keys); `fix_required`
+  stays on the same errors

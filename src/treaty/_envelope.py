@@ -90,6 +90,8 @@ class ErrorDetail:
     """Every validation failure of the run (REQ-F-015); present on validation errors only"""
     alternatives: Sequence[Mapping[str, str]] | None = None
     """Flags that replace an editor the run could not open (REQ-F-055)"""
+    hint: str | None = None
+    """The flag that avoids this failure, such as ``--input-file`` (REQ-F-054)"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
@@ -124,6 +126,8 @@ class ErrorDetail:
             out["retry_after_ms"] = self.retry_after_ms
         if self.fix_required is not None:
             out["fix_required"] = self.fix_required
+        if self.hint is not None:
+            out["hint"] = self.hint
         if self.phase is not None:
             out["phase"] = self.phase
         if self.errors is not None:

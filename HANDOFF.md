@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 624 passed |
+| `uv run pytest` | 648 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -104,9 +104,12 @@ The two do not share code.
   terminal envelope (`end`, `total`), because `exec` already speaks envelope lines and a
   mid-stream failure needs an `error`. `_Run.stream` is a generator; `drain()` throws a
   signal that lands between events back into it so the CANCELLED envelope is produced in
-  one place; a timeout is a whole-stream deadline enforced per `next()` on a worker
-  thread. The handler generator is closed when no worker holds it. Streaming commands
-  must be `safe`; `--no-stream` folds the stream into one envelope via `buffer_stream`
+  one place; a timeout is an idle limit, the wait for each `next()` on a worker thread
+  (REQ-F-011), and a whole-stream deadline only when buffered (`whole=True`: `--no-stream`,
+  `App.call`). Streams inherit the app default like any command. The handler generator is
+  closed when no worker holds it; on a signal the worker gets `GRACE_SECONDS` to hand it
+  back first, so its `finally` runs. Streaming commands must be `safe`; `--no-stream`
+  folds the stream into one envelope via `buffer_stream`
 - **MCP is a separate console script, not a `treaty` subcommand.** A stdio MCP server
   owns stdout, and every `treaty` command ends by writing an envelope there, so
   `treaty-mcp module:app` in `_mcp.py` bypasses the App runner. Only `build_server`,
@@ -173,6 +176,22 @@ The two do not share code.
   `meta.pagination` holds exactly the five spec keys (`additionalProperties: false`);
   `paginated` and `default_limit` are only in `--schema`. Streams are not paginated.
   `ParseError(code=...)` sets `error.code` for a single error (`INVALID_CURSOR`)
+- **A closed stdout exits 0 after a delivered envelope (D1).** `_Run.delivered` turns true
+  once an envelope, event, or rendered result was written and flushed; `output_closed`
+  then returns `0` (REQ-F-014), else `141` (`OUTPUT_CLOSED`). Heartbeats do not count
+- **Heartbeats tick on the waiting thread.** `call_with_timeout(heartbeat=...)` joins the
+  worker in slices and calls `Heartbeat.tick` between them, outside the armed window; only
+  `heartbeat=True` commands, in JSON mode, from argv (`_Run.argv` is None in `exec` and
+  `App.call`). `App.main()` sets `PYTHONUNBUFFERED=1` and line-buffers a piped stdout
+- **Payloads are read in `_Run.execute`, before anything else.** `stdin_input=True` reads
+  `--input-file` or the capped stdin through `_read_input`, which `exec` shares; the text
+  reaches the handler as `ctx.stdin_text`. `_Run.payload_stdin` is None in `App.call` and
+  after `exec` read its plan, so those need `input_file`. `ErrorDetail.hint` names the flag
+- **`jsonl` is `json` under another name.** `_route` maps it to `Format.JSON` right after
+  resolving the mode, so handlers see `json`; only `--output` keeps the distinction (one
+  item per line in the file). `tsv` is built in (`_table.table("\t")`), replaceable with
+  `app.format`. `--output PATH` exists only on `output_file=True` commands and only from
+  argv; the stdout envelope is always JSON
 
 ## Layout
 
@@ -189,6 +208,7 @@ src/treaty/
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
+  _table.py      table(): delimited rows under a header, the built-in tsv renderer
   _command.py    Command record, build_command(), handler signature inspection
   _context.py    Ctx handed to handlers (mode, env, timeout, color, headless, log, run, ...)
   _dispatch.py   DispatchRequest line parser for exec
@@ -237,16 +257,18 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
-F-011, F-012, F-013, F-015, F-016, F-018, F-019, F-031, F-034, F-044, F-045 (paths), F-046,
-F-047, F-048, F-051, F-052, F-055, F-057, F-062, F-065, F-069, C-001, C-002, C-003, C-004, C-005, C-007, C-012,
-C-013, C-015, C-016, C-020 (all presets), C-023, O-003, O-021, O-022, O-032, O-039, O-041,
-O-048, O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
+F-011, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-031, F-034, F-044, F-045 (paths),
+F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-065, F-069, C-001,
+C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets), C-023,
+O-001, O-003, O-021, O-022, O-032, O-039, O-041, O-048, O-050. See `COMPLIANCE.md` for
+the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
-`--cursor` (`paginated=True`), and
+`--cursor` (`paginated=True`), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
+(`stdin_input=True`), `--output` (`output_file=True`), and
 `--<name>-from-env` / `--<name>-from-file` for each secret field.
 
 ## Gotchas
