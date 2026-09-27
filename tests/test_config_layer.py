@@ -15,7 +15,7 @@ import fixture_config_app
 import pytest
 from conftest import WINDOWS
 
-from treaty import App, Ctx, NoArgs, RegistrationError
+from treaty import App, Ctx, Init, NoArgs, RegistrationError
 from treaty._audit import audit
 from treaty._idempotency import state_dir
 from treaty._values import InstanceId
@@ -493,3 +493,117 @@ def test_instance_id_namespaces_the_state_dir(tmp_path: Path) -> None:
 def test_a_malformed_instance_id_exits_2() -> None:
     code, envelope = configctl(["show", "--instance-id", "../up"])
     assert code == 2 and envelope["error"]["context"]["flag"] == "instance-id"
+
+
+# REQ-F-076
+
+
+class MarkerInit:
+    """Setup that writes one marker file; ``fail`` makes ``run`` raise it instead"""
+
+    def __init__(self, marker: Path, fail: OSError | None = None) -> None:
+        self.marker = marker
+        self.fail = fail
+        self.runs = 0
+
+    def initialized(self, ctx: Ctx) -> bool:
+        return self.marker.exists()
+
+    def run(self, ctx: Ctx) -> None:
+        self.runs += 1
+        if self.fail is not None:
+            raise self.fail
+        self.marker.write_text("ok")
+
+
+def init_app(setup: Init) -> App:
+    app = App("keyctl", version="1.0.0", init=setup)
+
+    @app.command("sign", description="Sign", danger_level="safe", exit_codes=())
+    def sign(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"signed": "yes"}
+
+    return app
+
+
+def keyctl(app: App, argv: list[str]) -> tuple[int, dict[str, Any]]:
+    out = io.StringIO()
+    code = app.run([*argv, "--stable-output"], stdout=out, stderr=io.StringIO(), env={})
+    return code, json.loads(out.getvalue())
+
+
+def test_first_invocation_of_a_non_init_command_is_identical_to_the_hundredth(
+    tmp_path: Path,
+) -> None:
+    home = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "cfg")}
+    runs = [configctl(["show", "--stable-output"], home) for _ in range(3)]
+    assert runs[0] == runs[1] == runs[2] and runs[0][0] == 0
+    assert list(tmp_path.iterdir()) == []  # reading config created nothing
+    app = init_app(MarkerInit(tmp_path / "marker"))
+    assert keyctl(app, ["sign"]) == keyctl(app, ["sign"])
+
+
+def test_initialization_that_requires_network_access_is_gated_behind_init(
+    tmp_path: Path,
+) -> None:
+    setup = MarkerInit(tmp_path / "marker")
+    app = init_app(setup)
+    keyctl(app, ["sign"])
+    assert setup.runs == 0  # only the init command runs setup
+    assert keyctl(app, ["init"])[0] == 0 and setup.runs == 1
+
+
+def test_tool_init_is_idempotent_and_exits_0_with_already_initialized(tmp_path: Path) -> None:
+    setup = MarkerInit(tmp_path / "marker")
+    app = init_app(setup)
+    code, first = keyctl(app, ["init"])
+    assert code == 0 and first["data"]["already_initialized"] is False
+    code, again = keyctl(app, ["init"])
+    assert code == 0 and again["data"] == {
+        "effect": "noop",
+        "initialized": True,
+        "already_initialized": True,
+    }
+    assert setup.runs == 1 and keyctl(app, ["sign"])[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (PermissionError(13, "Permission denied"), "permissions"),
+        (ConnectionError("refused"), "network"),
+        (OSError(28, "No space left on device"), "disk"),
+    ],
+)
+def test_a_failed_tool_init_exits_non_zero_with_the_specific_failure(
+    tmp_path: Path, error: OSError, reason: str
+) -> None:
+    code, envelope = keyctl(init_app(MarkerInit(tmp_path / "marker", error)), ["init"])
+    assert code == 1 and envelope["error"]["code"] == "INIT_FAILED"
+    assert envelope["error"]["context"]["reason"] == reason
+
+
+def test_first_invocation_in_a_clean_environment_exits_init_required_pointing_to_init(
+    tmp_path: Path,
+) -> None:
+    app = init_app(MarkerInit(tmp_path / "marker"))
+    code, envelope = keyctl(app, ["sign"])
+    error = envelope["error"]
+    assert code == 4 and error["code"] == "INIT_REQUIRED"
+    assert error["fix_command"] == "keyctl init"
+    assert keyctl(app, ["version"])[0] == 0  # built-ins never need init
+
+
+def test_audit_flags_first_run_setup_inside_a_command(tmp_path: Path) -> None:
+    app = make_app()
+
+    @app.command("store", description="Store", danger_level="mutating", exit_codes=())
+    def store(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        home = Path("~/.my-tool").expanduser()
+        if not home.exists():
+            home.mkdir()
+        return {"effect": "noop"}
+
+    report = audit(app, "my-tool", limit=3)
+    [rule] = [r for r in report.rules if r.id == "init-isolated"]
+    assert [f.command for f in rule.findings] == ["store"] and "App(init=" in rule.findings[0].fix

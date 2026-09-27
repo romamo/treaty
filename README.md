@@ -525,10 +525,27 @@ none) and `meta.effective_config_hash` (12 hex of the merged settings), plus
 `file:/abs/path`, or `default`), and `precedence_order`. The `settings-declared` audit rule
 flags handlers that parse a config file with `tomllib` themselves.
 
+## First-run setup
+
+Treaty does no first-run work of its own: reading config creates nothing, and the state
+directory appears only when a keyed run needs it. An app whose setup can fail (a directory,
+a keypair, a download) passes it as `App(init=Setup())`, an object with
+`initialized(ctx) -> bool` and `run(ctx) -> None`. That adds an `init` built-in, which exits
+`0` with `already_initialized: true` once set up; until then every other command exits `4`
+with `INIT_REQUIRED` and `fix_command: "<app> init"`. An `OSError` from `run` exits `1`
+with `INIT_FAILED` and `context.reason`: `permissions`, `network`, `disk`, or `io`. The
+`init-isolated` audit rule flags handlers that `mkdir` or write under an
+`if not path.exists():` guard.
+
+## Environment variables
+
 Every variable treaty reads carries the app's prefix (`DEPLOYCTL_FORMAT`,
 `DEPLOYCTL_MAX_OUTPUT_BYTES`, `DEPLOYCTL_STATE_DIR`, ...), and `--help` lists them under
-Environment. The `env-prefix` audit rule flags handlers that read an unprefixed variable
-such as `DEBUG`.
+Environment; in the manifest, each global flag's description names its variable (the spec's
+manifest has no `environment` key yet). Unprefixed, treaty reads only shared conventions:
+`CI`, `NO_COLOR`, `TERM`, `HOME`, `XDG_*`, `GITHUB_ACTIONS`, `JENKINS_URL`, and
+`TOOL_TRACE_ID`. The `env-prefix` audit rule flags handlers that read an unprefixed
+variable such as `DEBUG`.
 
 ## Validation errors
 

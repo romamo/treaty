@@ -75,6 +75,8 @@ from ._flags import REDACTED, Arg, Flag
 from ._framework import framework_collisions
 from ._help import global_rows, render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
+from ._init import INIT_COMMAND, Init, Initialized, run_init
+from ._init import required as init_required
 from ._jobs import Job, JobStore, with_links
 from ._manifest import (
     build_manifest,
@@ -215,13 +217,16 @@ class App:
         credentials: Credentials | None = None,
         jobs: JobStore | None = None,
         settings: type | None = None,
+        init: Init | None = None,
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
         ``jobs`` looks up the jobs ``async_job=True`` commands start, for the ``job status``
         and ``job cancel`` built-ins. ``settings`` is a frozen dataclass read from the
         config files and ``<APP>_<FIELD>`` variables; a handler gets it by annotating a
-        parameter with the class (REQ-F-028)."""
+        parameter with the class (REQ-F-028). ``init`` is the app's one-time setup: it
+        adds the ``init`` built-in, and other commands exit 4 with ``INIT_REQUIRED``
+        until it has run (REQ-F-076)."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -245,7 +250,9 @@ class App:
         self.credentials = credentials
         self.jobs = jobs
         self.settings = None if settings is None else SettingsSpec.inspect(settings, self.scalars)
+        self.init = init
         self._register_builtins(enable_exec)
+        self._builtins = frozenset(self._commands)
 
     # Registration
 
@@ -568,6 +575,19 @@ class App:
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {"name": self.name, "version": self.version}
 
+        if self.init is not None:
+            setup = self.init
+
+            @self.command(
+                INIT_COMMAND,
+                description="Set up what the tool needs before first use; safe to repeat",
+                danger_level="mutating",
+                exit_codes=(),
+                examples=[("Set up once", f"{self.name} init")],
+            )
+            def init(args: NoArgs, ctx: Ctx) -> Initialized:
+                return run_init(setup, self.name, ctx)
+
         if self.credentials is not None:
             self._register_check_permissions(self.credentials)
         if self.jobs is not None:
@@ -764,6 +784,11 @@ class App:
             context=context,
             suggestion=f"flags go after the command: {command} [arguments] {flag}",
         )
+
+    @property
+    def builtins(self) -> frozenset[CommandPath]:
+        """The commands treaty registered itself, such as ``manifest`` and ``init``"""
+        return self._builtins
 
     @property
     def commands(self) -> Mapping[CommandPath, Command]:
@@ -1058,6 +1083,8 @@ def _invoke(
     ``provided`` holds what the run already has, such as the settings."""
     if command.requires_auth:
         app._gate(command, ctx)
+    if app.init is not None and command.path not in app.builtins and not app.init.initialized(ctx):
+        raise init_required(app.name)
     resolver = Resolver(command.resource_graph, args, ctx, provided)
     return command.handler(args, ctx, *resolver.all(command.resources))
 

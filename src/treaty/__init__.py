@@ -11,6 +11,7 @@ from ._envelope import Envelope, ErrorDetail, Meta, WarningDetail
 from ._errors import CliExit, Exit, ParseError, RegistrationError, SchemaError, TreatyError
 from ._exit import ExitCodeEntry, FrameworkCode, SideEffects
 from ._flags import Arg, Flag
+from ._init import Init
 from ._jobs import Job, JobStore
 from ._mode import Format
 from ._out import Binary, Out
@@ -46,6 +47,7 @@ __all__ = [
     "Flag",
     "FrameworkCode",
     "Group",
+    "Init",
     "Job",
     "JobStore",
     "Meta",

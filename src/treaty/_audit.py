@@ -30,9 +30,6 @@ from ._values import InvalidValue, SchemaVersion
 if TYPE_CHECKING:
     from ._app import App
 
-BUILTINS = frozenset(
-    {"manifest", "version", "exec", "check-permissions", "job.status", "job.cancel"}
-)
 _DESTRUCTIVE_VERBS = ("delete", "remove", "destroy", "drop", "purge", "reset", "rollback", "wipe")
 _MUTATING_VERBS = ("create", "update", "set", "add", "apply", "deploy", "write", "push", "start")
 _NETWORK_HINTS = re.compile(r"\b(socket|http\.client|urllib|requests|httpx|aiohttp|grpc)\b")
@@ -89,7 +86,7 @@ def user_commands(app: App) -> list[Command]:
     return [
         c
         for p, c in sorted(app.commands.items(), key=lambda kv: kv[0].value)
-        if p.value not in BUILTINS
+        if p not in app.builtins
     ]
 
 
@@ -903,6 +900,48 @@ def _settings_declared(app: App) -> Iterator[Finding]:
             )
 
 
+_SETUP_CALLS = frozenset({"mkdir", "makedirs", "write_text", "write_bytes", "write_config"})
+
+
+def first_run_setup(fn: Callable[..., object]) -> str | None:
+    """A setup call ``fn`` makes under ``if not <x>.exists():``, the shape of a silent
+    first-run init; None when it has none"""
+    tree = _handler_tree(fn)
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if not (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)):
+            continue
+        probe = test.operand
+        if not (isinstance(probe, ast.Call) and isinstance(probe.func, ast.Attribute)):
+            continue
+        if probe.func.attr not in ("exists", "is_file", "is_dir"):
+            continue
+        for inner in (n for stmt in node.body for n in ast.walk(stmt)):
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute):
+                if inner.func.attr in _SETUP_CALLS:
+                    return inner.func.attr
+    return None
+
+
+def _init_isolated(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        call = first_run_setup(c.handler)
+        if call is not None:
+            yield Finding(
+                "init-isolated",
+                Severity.WARNING,
+                c.path.value,
+                f"handler calls {call} the first time it runs, so a first-run failure looks "
+                "like a failure of this command (REQ-F-076, heuristic)",
+                "move the setup into App(init=Setup()), whose initialized() checks and run() "
+                "creates; the init built-in runs it and other commands exit INIT_REQUIRED",
+            )
+
+
 _SLEEPS = frozenset({"time.sleep", "sleep"})
 
 
@@ -1056,6 +1095,12 @@ RULES: tuple[Rule, ...] = (
         "Config files are read through App(settings=)",
         Severity.WARNING,
         _settings_declared,
+    ),
+    Rule(
+        "init-isolated",
+        "First-run setup is an explicit init command",
+        Severity.WARNING,
+        _init_isolated,
     ),
     Rule(
         "env-prefix",
