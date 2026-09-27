@@ -25,31 +25,56 @@ class Login:
 def crash_app(*, default_timeout: float | None = 60.0) -> App:
     app = App("crashctl", version="1", default_timeout=default_timeout)
 
-    @app.command("boom", description="Raises a bug")
+    @app.command("boom", description="Raises a bug", danger_level="safe", exit_codes=())
     def boom(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise RuntimeError("handler bug")
 
-    @app.command("login", description="Leaks its secret into an exception")
+    @app.command(
+        "login",
+        description="Leaks its secret into an exception",
+        danger_level="safe",
+        exit_codes=(),
+    )
     def login(args: Login, ctx: Ctx) -> dict[str, str]:
         raise RuntimeError(f"bad token {args.token}")
 
-    @app.command("opaque", description="Returns something JSON cannot hold")
+    @app.command(
+        "opaque",
+        description="Returns something JSON cannot hold",
+        danger_level="safe",
+        exit_codes=(),
+    )
     def opaque(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"x": object()}
 
-    @app.command("where", description="Exits with a Path in its context", exit_codes=["NOT_FOUND"])
+    @app.command(
+        "where",
+        description="Exits with a Path in its context",
+        exit_codes=["NOT_FOUND"],
+        danger_level="safe",
+    )
     def where(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise Exit.NOT_FOUND("missing", context={"path": Path("/srv/app")})
 
-    @app.command("done", description="Raises SUCCESS")
+    @app.command("done", description="Raises SUCCESS", danger_level="safe", exit_codes=())
     def done(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise Exit.SUCCESS("done")
 
-    @app.command("scalar", description="Exits with scalar data", exit_codes=["NOT_FOUND"])
+    @app.command(
+        "scalar",
+        description="Exits with scalar data",
+        exit_codes=["NOT_FOUND"],
+        danger_level="safe",
+    )
     def scalar(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise CliExit(ExitCodeName("NOT_FOUND"), "missing", data="oops")
 
-    @app.command("swallow", description="Catches everything while being cancelled")
+    @app.command(
+        "swallow",
+        description="Catches everything while being cancelled",
+        danger_level="safe",
+        exit_codes=(),
+    )
     def swallow(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         try:
             signal.raise_signal(signal.SIGTERM)
@@ -57,7 +82,9 @@ def crash_app(*, default_timeout: float | None = 60.0) -> App:
             return {"swallowed": "yes"}
         return {"swallowed": "no"}
 
-    @app.command("tail", description="Crashes mid-stream", streaming=True)
+    @app.command(
+        "tail", description="Crashes mid-stream", streaming=True, danger_level="safe", exit_codes=()
+    )
     def tail(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         raise RuntimeError("stream bug")
@@ -146,7 +173,9 @@ def test_out_of_range_timeout_is_arg_error(value: str) -> None:
     class Host:
         host: str = Arg(description="Host")
 
-    @app.command("ping", description="Ping", has_network_io=True)
+    @app.command(
+        "ping", description="Ping", has_network_io=True, danger_level="safe", exit_codes=()
+    )
     def ping(args: Host, ctx: Ctx) -> dict[str, str]:
         return {"host": args.host}
 
@@ -165,7 +194,13 @@ def test_example_that_is_not_a_shell_command_is_rejected() -> None:
     app = App("t", version="1")
     with pytest.raises(RegistrationError, match="not a valid shell command"):
 
-        @app.command("x", description="X", examples=[("Broken", "t x --name 'unclosed")])
+        @app.command(
+            "x",
+            description="X",
+            examples=[("Broken", "t x --name 'unclosed")],
+            danger_level="safe",
+            exit_codes=(),
+        )
         def x(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {}
 
@@ -174,7 +209,7 @@ def test_example_that_is_not_a_shell_command_is_rejected() -> None:
 def test_signal_ends_an_exec_plan_even_with_ignore_errors(default_timeout: float | None) -> None:
     app = crash_app(default_timeout=default_timeout)
 
-    @app.command("kill", description="Signals its own process")
+    @app.command("kill", description="Signals its own process", danger_level="safe", exit_codes=())
     def kill(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         signal.raise_signal(signal.SIGTERM)
         time.sleep(1)  # a worker thread keeps running until the main thread reacts
@@ -198,7 +233,7 @@ def test_crash_redacts_value_object_and_escaped_secrets() -> None:
     class Auth:
         api_key: ApiKey = Flag(description="Key")
 
-    @app.command("auth", description="Leaks a value object")
+    @app.command("auth", description="Leaks a value object", danger_level="safe", exit_codes=())
     def auth(args: Auth, ctx: Ctx) -> dict[str, str]:
         raise KeyError(args.api_key.value)
 
@@ -228,7 +263,7 @@ def test_scalar_parser_error_does_not_echo_a_secret() -> None:
     class Auth:
         api_key: ApiKey = Flag(description="Key")
 
-    @app.command("auth", description="Parses a secret")
+    @app.command("auth", description="Parses a secret", danger_level="safe", exit_codes=())
     def auth(args: Auth, ctx: Ctx) -> dict[str, str]:
         return {}
 

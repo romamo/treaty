@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from ._command import Command, DangerLevel
+from ._command import Command
+from ._framework import framework_flags
 from ._mode import Format
 from ._values import CommandPath
 
@@ -80,17 +81,10 @@ def _under(commands: Mapping[CommandPath, Command], parts: tuple[str, ...]) -> l
 
 def _framework_rows(command: Command) -> list[tuple[str, str]]:
     """The flags treaty adds to this command, so a person can find how to apply it"""
-    rows: list[tuple[str, str]] = []
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        rows.append(("--confirm-destructive", "Apply; without it the command only previews"))
-    if command.danger_level is not DangerLevel.SAFE:
-        rows.append(("--idempotency-key KEY", "Repeat calls with KEY replay the first result"))
-    if command.accepts_timeout:
-        rows.append(("--timeout SECONDS", "Abort with TIMEOUT after SECONDS; 0 disables it"))
-    if command.supports_raw_payload:
-        rows.append(("--raw-payload JSON", "All field values as one JSON object"))
-    if command.streaming:
-        rows.append(("--no-stream", "One envelope with every event instead of JSONL"))
+    rows = [f.help_row(command) for f in framework_flags(command)]
+    rows.extend(
+        (f"${v}", "Token read when no --token-env-var is given") for v in command.token_env_vars
+    )
     return rows
 
 

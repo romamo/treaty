@@ -28,7 +28,7 @@ class CopyOut:
 def path_app() -> App:
     app = App("cpctl", version="1")
 
-    @app.command("copy", description="Copy a file")
+    @app.command("copy", description="Copy a file", danger_level="safe", exit_codes=())
     def copy(args: CopyArgs, ctx: Ctx) -> CopyOut:
         assert isinstance(args.source, Path)
         return CopyOut(args.source, args.dest, args.extra)
@@ -62,6 +62,8 @@ def test_valid_paths_pass_unchanged_and_serialize_as_strings(tmp_path: Path) -> 
         ("%2e%2e/etc/passwd", "percent_encoded"),
         ("files%2fetc", "percent_encoded"),
         ("a\x00b", "null_byte"),
+        ("a\nb", "newline"),
+        ("a\rb", "carriage_return"),
     ],
 )
 def test_hallucination_patterns_are_rejected_before_the_handler(raw: str, pattern: str) -> None:
@@ -74,7 +76,9 @@ def test_hallucination_patterns_are_rejected_before_the_handler(raw: str, patter
         assert code == 2 and error["code"] == "ARG_ERROR" and error["phase"] == "validation"
         context = error["context"]
         assert isinstance(context, dict)
-        assert context["rejected_pattern"] == pattern and context["value"] == raw
+        # A null byte is echoed as U+FFFD: the envelope is valid UTF-8 text (REQ-F-016)
+        echoed = raw.replace("\x00", "\ufffd")
+        assert context["rejected_pattern"] == pattern and context["value"] == echoed
 
 
 def test_suggestions_give_the_decoded_or_absolute_form() -> None:
@@ -120,6 +124,6 @@ def test_pattern_is_refused_on_path_fields() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="filepath preset"):
 
-        @app.command("go", description="Go")
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: Bad, ctx: Ctx) -> None:
             return None

@@ -43,6 +43,9 @@ class ExitCodeEntry:
     description: str
     retryable: bool
     side_effects: SideEffects
+    suggestion: str | None = None
+    """The next step an agent takes after this failure, used when the raise gives none
+    (REQ-C-013); not part of the manifest entry, whose schema is closed"""
 
     def __post_init__(self) -> None:
         if self.retryable and self.side_effects is not SideEffects.NONE:
@@ -146,7 +149,7 @@ _SIGNALS: tuple[tuple[str, int, str], ...] = (
     (
         "OUTPUT_CLOSED",
         141,
-        "The reader closed stdout (SIGPIPE); output was cut short, state may be partial",
+        "The reader closed stdout (SIGPIPE) before any complete envelope; state may be partial",
     ),
 )
 

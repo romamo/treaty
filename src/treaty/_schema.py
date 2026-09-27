@@ -3,16 +3,19 @@
 Supports the subset the framework needs: scalars, ``Literal`` strings, string or
 integer ``Enum``, ``X | None``, ``list[T]``, ``tuple[T, ...]``, fixed ``tuple[A, B]``,
 ``dict[str, T]``,
-``object`` for unconstrained values, and nested dataclasses.
+``object`` for unconstrained values, nested dataclasses, and ``datetime``, ``date``,
+``time``, and ``Decimal`` as strings.
 """
 
 from __future__ import annotations
 
 import contextvars
 import dataclasses
+import datetime as dt
 import math
 import types
 import typing
+from decimal import Decimal
 from enum import Enum, Flag
 from pathlib import Path
 from typing import Any
@@ -72,6 +75,10 @@ def _schema_for_base(base: object, scalars: ScalarRegistry) -> JsonSchema:
             return {"type": "number"}
         if base is str or base is Path:
             return {"type": "string"}
+        if base in _TEMPORAL:
+            return {"type": "string", "format": _TEMPORAL[base]}
+        if base is Decimal:
+            return {"type": "string", "pattern": DECIMAL_PATTERN}
         if (spec := scalars.get(base)) is not None:
             return spec.json_schema()
         if issubclass(base, Enum):
@@ -79,6 +86,28 @@ def _schema_for_base(base: object, scalars: ScalarRegistry) -> JsonSchema:
         if dataclasses.is_dataclass(base):
             return _dataclass_schema(base, scalars)
     raise SchemaError(f"unsupported annotation {base!r}; register a class with app.scalar(...)")
+
+
+# REQ-F-005: dates and times travel as ISO 8601 text, keyed by exact class
+_TEMPORAL: dict[object, str] = {dt.datetime: "date-time", dt.date: "date", dt.time: "time"}
+# A Decimal is written as fixed-point text, so no float rounding touches it
+DECIMAL_PATTERN = r"^-?[0-9]+(\.[0-9]+)?$"
+
+
+def _temporal(value: dt.date | dt.time) -> str:
+    """ISO 8601, with ``Z`` for UTC; a naive datetime names no instant, so it is refused"""
+    if isinstance(value, dt.datetime) and value.utcoffset() is None:
+        raise SchemaError(
+            f"a naive datetime {value.isoformat()}; give it a tzinfo, such as datetime.UTC"
+        )
+    text = value.isoformat()
+    return text.removesuffix("+00:00") + "Z" if text.endswith("+00:00") else text
+
+
+def _decimal(value: Decimal) -> str:
+    if not value.is_finite():
+        raise SchemaError(f"{value!r} is not a finite number, and JSON has no NaN or Infinity")
+    return format(value, "f")
 
 
 def _enum_schema(cls: type[Enum]) -> JsonSchema:
@@ -156,6 +185,10 @@ def to_jsonable(value: object, scalars: ScalarRegistry) -> object:
         return value
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, (dt.date, dt.time)):
+        return _temporal(value)
+    if isinstance(value, Decimal):
+        return _decimal(value)
     if isinstance(value, (list, tuple)):
         return [to_jsonable(v, scalars) for v in value]
     if isinstance(value, dict):

@@ -1,6 +1,6 @@
 # Handoff
 
-Status as of 2026-09-26. Read this before touching the code.
+Status as of 2026-09-27. Read this before touching the code.
 
 ## What this is
 
@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 413 passed |
+| `uv run pytest` | 757 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -44,8 +44,33 @@ The two do not share code.
   and can be passed as `--name=value`, because `FlagEntry` has no positional marker
 - **In-house parser.** `argparse` is not used anywhere; every parse failure is a
   `ParseError` with structured context and becomes exit `2`
+- **Exit 2 only before user code (D2).** The args `__post_init__` is phase 1: `_finish`
+  calls it whenever every field has a value and adds its `ParseError` (or the entries of a
+  `ParseError.combine`, or an `InvalidValue` from a value object) to the collected errors;
+  any other exception is `ArgsCrashed`, which every parse site reports as `HANDLER_CRASHED`. A `ParseError` or `Exit.ARG_ERROR` from a
+  handler or `acquire` is `VALIDATION_AFTER_START`, exit 1, `phase: execution`
+  (`_Run.after_start`). F-015's "execute hook registered before validate hooks" cannot
+  happen: the framework owns the order and there are no hooks to register
+- **Text arguments are single-line.** `FieldInfo.check_text` refuses `\n`, `\r`, and NUL
+  in `str` values on both parse routes (REQ-F-044), except secrets; `Flag(multiline=True)`
+  allows line breaks. `FlagEntry` admits no extra keys, so the manifest states the opt-out
+  in the flag's description instead of a `multiline` field
 - **Unconfirmed destructive commands exit 2**, running the handler in dry-run mode and
-  returning the preview as `data` with error code `CONFIRMATION_REQUIRED` (REQ-O-021)
+  returning the preview as `data` with error code `CONFIRMATION_REQUIRED` (REQ-O-021),
+  whose message quotes `would_affect.summary`
+- **Declarations are required (D3).** `App.command` raises `RegistrationError` when
+  `exit_codes=` or `danger_level=` is left out (an `_Unset` sentinel, so the error names the
+  command and the fix instead of a `TypeError`). The built-ins declare `safe` and `()`
+- **Destructive outputs carry `would_affect`.** Registration requires the field on the
+  output type (dict outputs are checked per run); `effect_problem` fails a destructive dry
+  run whose `would_affect.summary` is missing. Mutating dry runs (from `exec --dry-run`)
+  need no `would_affect`
+- **`safe_default=True` is decided in `_Run.execute`**, before the idempotency path: no
+  `--live`, or `--dry-run`, turns `dry_run` on, so the rest of the pipeline sees an
+  ordinary dry run; `--live` alone sets `confirmed`, since it is the explicit confirmation
+  (O-048), while `requires_confirmation` stays true in `--schema`. `--dry-run` wins over `--live` because the kit previews a destructive
+  probe by appending `--dry-run` to its argv. `meta.dry_run` is added to every envelope of
+  the command, argument errors included; `meta.confirmed` only to an applied live run
 - **Timeouts use a daemon thread**, not `SIGALRM`, so they work on Windows, off the main
   thread, and inside blocking C calls. A timed-out handler is abandoned, not killed
 - **`--format` is `json` or `plain`**, named for the representation, not the reader
@@ -81,9 +106,12 @@ The two do not share code.
   terminal envelope (`end`, `total`), because `exec` already speaks envelope lines and a
   mid-stream failure needs an `error`. `_Run.stream` is a generator; `drain()` throws a
   signal that lands between events back into it so the CANCELLED envelope is produced in
-  one place; a timeout is a whole-stream deadline enforced per `next()` on a worker
-  thread. The handler generator is closed when no worker holds it. Streaming commands
-  must be `safe`; `--no-stream` folds the stream into one envelope via `buffer_stream`
+  one place; a timeout is an idle limit, the wait for each `next()` on a worker thread
+  (REQ-F-011), and a whole-stream deadline only when buffered (`whole=True`: `--no-stream`,
+  `App.call`). Streams inherit the app default like any command. The handler generator is
+  closed when no worker holds it; on a signal the worker gets `GRACE_SECONDS` to hand it
+  back first, so its `finally` runs. Streaming commands must be `safe`; `--no-stream`
+  folds the stream into one envelope via `buffer_stream`
 - **MCP is a separate console script, not a `treaty` subcommand.** A stdio MCP server
   owns stdout, and every `treaty` command ends by writing an envelope there, so
   `treaty-mcp module:app` in `_mcp.py` bypasses the App runner. Only `build_server`,
@@ -95,14 +123,120 @@ The two do not share code.
 - **Every exit writes an envelope.** A handler exception becomes `HANDLER_CRASHED`
   (exit 1) with the redacted traceback on stderr. Broad `except Exception` exists only
   where user code runs: the handler, a scalar's `parse=`/`serialize=`, `cleanup=`,
-  `plain=`, and an exception's `__str__`. Nowhere else
+  `plain=`, `cursor_check=`, an args `__post_init__`, and an exception's `__str__`.
+  Nowhere else
 - **Exit codes must be declared.** A handler raises only what its manifest entry lists:
-  `exit_codes=`, plus `GENERAL_ERROR`, `ARG_ERROR`, `TIMEOUT`, and on mutating commands
-  `CONFLICT` and `PRECONDITION`. Anything else is `UNDECLARED_EXIT_CODE`
+  `exit_codes=`, plus `_manifest.implicit_exit_codes`: `GENERAL_ERROR`, `ARG_ERROR`,
+  `TIMEOUT`, and `PRECONDITION` (a stray `input()`) everywhere, `CONFLICT` on mutating
+  commands, 7 and 8 on gated ones. Anything else is `UNDECLARED_EXIT_CODE`
+- **Stdout hygiene is a process-wide swap.** `App.run` points `sys.stdout` at stderr for
+  the whole run (handlers run on worker threads, so a context-local redirect would miss
+  them) and restores it after; `_Run._write` adds a `THIRD_PARTY_STDOUT` warning to the
+  next envelope. A module-level count in `guard_streams` lets overlapping runs on threads
+  restore the original streams, the last one out. Only `App.main()` also redirects
+  descriptor 1 to stderr and writes envelopes to a saved copy of it, so children and C
+  code cannot leak either. `App.call` (MCP) has no swap, because MCP calls run
+  concurrently on threads; `_mcp.serve` swaps both streams once for the whole process.
+  `App.main()`, not `App.run()`, writes `PAGER`, `GIT_PAGER`, and `NO_COLOR` into
+  `os.environ` so children inherit them; a stream closed at startup (None) is tolerated
+- **Every written envelope is cleaned** (ANSI escapes removed, null bytes and lone
+  surrogates to U+FFFD; keys and `\r` kept), so JSON stdout and MCP structured content
+  agree; `cap_envelope` cleans `data` once before its byte loop and `to_json` cleans the
+  rest. Plain mode never passes through it. `ErrorDetail.__post_init__` turns `message` into a
+  sentence and fills `suggestion` for recoverable errors, which covers author messages and
+  every framework path at once instead of a style rule on each message; framework messages
+  that began with a command path now begin with `Command <path>` so capitalizing keeps
+  the path intact
 - **Signals interrupt only a running handler.** `Cancellation.armed()` windows cover the
   handler, the wait for its worker, the idempotency-key wait, and the exec stdin read; a
   signal elsewhere is held and raised at the next window, so a finished result is still
   written. An exec plan stops at the first signal whatever `--ignore-errors` says
+
+- **Children run from argument lists, in their own session.** `_subprocess.Processes` is
+  built per handler run in `_Run._ctx` with the hardened env (`_mode.child_settings`), the
+  command's deadline, and the headless flag; `_Run.processes` points at the current one so
+  `_cancelled` and both `TimeoutExpired` paths call `terminate()` (SIGTERM to each process
+  group, exited leader or not, SIGKILL after 2 s) before the envelope is built; after it
+  `_spawn` refuses new children, so an abandoned handler starts none. A failing child is
+  a `CliExit` on `GENERAL_ERROR` with code `SUBPROCESS_FAILED`, so no new exit code and no
+  declaration; its deadline expiry is a `CliExit` on the implicit `TIMEOUT`, and an
+  explicit `timeout=` is capped by the deadline. `_exit_envelope` runs the redactor over
+  every `CliExit` message and context string. Stage stderr goes to anonymous temp files,
+  so a pipeline needs no reader threads. Windows stops only the child, not grandchildren
+- **Registration scans handler source.** `_scan.ctx_calls` parses the handler and lists
+  calls on its second parameter; `build_command` refuses a shell string in
+  `ctx.run`/`ctx.pipeline` (REQ-F-062 asks for registration time) and an undeclared
+  `ctx.open_url`. Handlers without source are skipped; the same checks run at call time
+- **Headless is decided once per run** (`_mode.is_headless`) and adds `meta.headless:
+  true` in `_Run._envelope`, so every envelope of the run carries it. A headless
+  `ctx.open_url` records the URL and `_execute` fills `data.open_url` when the handler
+  left it `None`
+- **Prompts run through `ctx`, and exit 4 when no one can answer.** `_prompt.Prompter` is
+  built per run in `_Run._ctx`; `InputRequired` is a `BaseException`, caught in `_execute`
+  and `stream` next to `Cancelled`, and becomes `PRECONDITION` (4) with `INPUT_REQUIRED`,
+  `EDITOR_REQUIRED` (plus `error.alternatives`), or `INTERACTIVE_BLOCKED`.
+  `_Run.guard_streams` swaps `sys.stdin` for `NoPromptStdin` in non-interactive runs: it
+  delegates to the wrapped stream, refuses to read a terminal, and raises when the first
+  `readline` (what `input()` calls) finds stdin empty; piped data reads normally.
+  `App.call` swaps neither stream. `--yes` and `--non-interactive` exist only on
+  `interactive=True` commands
+- **Every list output is paginated.** `paginated=None` (the default) makes any
+  non-streaming `list[T]` or `Page[T]` output a list command (REQ-F-018 is
+  framework-automatic); `paginated=False` opts a `list[T]` out, and the `paginated-list`
+  audit rule is advice on those opt-outs
+- **The framework slices every page.** A paginated handler returns the whole
+  `list[T]` or one `Page[T]` batch; `_page.take` cuts it to the limit. The cursor is
+  base64url JSON of the command path, a digest of the non-secret args (checked in
+  `_Run._position` with the command's `cursor_check`, before user code), the handler's own
+  cursor, and a skip count into the batch that cursor returns, so one shape resumes a sliced batch, a handler batch, and a
+  page the byte cap cut (`_cap.Rerun` carries the position and the argv for the hint).
+  `meta.pagination` holds exactly the five spec keys (`additionalProperties: false`);
+  `paginated` and `default_limit` are only in `--schema`. Streams are not paginated.
+  `ParseError(code=...)` sets `error.code` for a single error (`INVALID_CURSOR`)
+- **A closed stdout exits 0 after a delivered envelope (D1).** `_Run.delivered` turns true
+  once an envelope, event, or rendered result was written and flushed; `output_closed`
+  then returns `0` (REQ-F-014), else `141` (`OUTPUT_CLOSED`). Heartbeats do not count
+- **Heartbeats tick on the waiting thread.** `call_with_timeout(heartbeat=...)` joins the
+  worker in slices and calls `Heartbeat.tick` between them, outside the armed window; only
+  `heartbeat=True` commands, in JSON mode, from argv (`_Run.argv` is None in `exec` and
+  `App.call`). `App.main()` sets `PYTHONUNBUFFERED=1` and line-buffers a piped stdout
+- **Payloads are read in `_Run.execute`, before anything else.** `stdin_input=True` reads
+  `--input-file` or the capped stdin through `_read_input`, which `exec` shares; the text
+  reaches the handler as `ctx.stdin_text`. `_Run.payload_stdin` is None in `App.call` and
+  after `exec` read its plan, so those need `input_file`. `ErrorDetail.hint` names the flag
+- **`jsonl` is `json` under another name.** `_route` maps it to `Format.JSON` right after
+  resolving the mode, so handlers see `json`; only `--output` keeps the distinction (one
+  item per line in the file). `tsv` is built in (`_table.table("\t")`), replaceable with
+  `app.format`. `--output PATH` exists only on `output_file=True` commands and only from
+  argv; the stdout envelope is always JSON
+- **Credentials are one app method, called where the handler runs.** `App(credentials=)`
+  takes an object with `active_scopes(ctx)`; `_invoke` calls `App._gate` before resources
+  for `requires_auth` commands, on the worker thread and under the timeout, so its
+  `AUTH_REQUIRED` (8) or `PERMISSION_DENIED` (7) is an ordinary `CliExit` and an exception
+  from it is `HANDLER_CRASHED`. Both codes are implicit for gated commands and listed in
+  their manifest entry. `check-permissions` exists only with `credentials=`
+- **Warnings collect on the run.** `ctx.warn` appends to `_Run.warnings`, and `_envelope`
+  adds them to every envelope built afterwards; `exec` clears them, and the login token,
+  per line
+- **A login token is read in `_Run.execute`**, before idempotency, like a payload:
+  `--token-env-var NAME`, else the first set variable of `Command.token_env_vars`
+  (`<APP>_TOKEN` first). A browser login in a headless run, or a named variable that is
+  empty, exits 4 with `TOKEN_REQUIRED` and `ErrorDetail.auth_methods`. `_Run.token` joins
+  the redactor's spellings. `--headless` also makes `ctx.headless` and `ctx.open_url`
+  headless, but not `meta.headless`, which describes the environment
+- **A `Job` in data gets its links in `_Run._payload`.** Any `treaty.Job` result or exit
+  `data` (the built-ins' too) gains `terminal`, `status_command`, and `cancel_command`;
+  `descriptor_schema` adds them to the output schema, which the manifest also serves as
+  `job_descriptor_schema`. `job status` reuses framework codes: 3 is `PARTIAL_FAILURE`
+  (`JOB_RUNNING`), 4 `PRECONDITION` (`JOB_FAILED`, `JOB_CANCELLED`), 5 `NOT_FOUND`, each
+  with the job as `data`. `App(jobs=)` registers the `job` group before any user command
+- **Config paths are decided in `_Run.execute`**, before idempotency: the project file is
+  `Path.cwd() / .<app>.toml`, the user file comes from the run's env. `ConfigFile` reaches
+  the handler as `ctx.config`; only a global write locks (`<file>.lock`, left in place)
+  and warns. `_atomic.write_atomic` (mkstemp in the target's directory, fsync, rename) is
+  shared by idempotency records, config writes, and `--output`
+- **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
+  the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
 
 ## Layout
 
@@ -118,8 +252,11 @@ src/treaty/
   _resources.py  ResourceSpec, resource_graph(), Resolver: typed handler resources
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
+  _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
+  _table.py      table(): delimited rows under a header, the built-in tsv renderer
   _command.py    Command record, build_command(), handler signature inspection
-  _context.py    Ctx handed to handlers (mode, request_id, env, state, timeout, idempotency_key)
+  _framework.py  FLAGS: one row per per-command framework flag (parse, JSON, manifest, help)
+  _context.py    Ctx handed to handlers (mode, env, timeout, color, headless, log, run, ...)
   _dispatch.py   DispatchRequest line parser for exec
   _effect.py     effect contract: registration check and per-run validation
   _envelope.py   Envelope, ErrorDetail, WarningDetail, write_envelope()
@@ -135,11 +272,20 @@ src/treaty/
   _schema.py     annotation to draft-07 schema, to_jsonable()
   _paths.py      check_path(): null bytes, percent-encoding, and .. in Path flags
   _secrets.py    secret sources (--x-from-env, --x-from-file) and their resolution
+  _auth.py       Credentials protocol, AuthKind, scope coverage for the gate and check-permissions
+  _jobs.py       Job descriptor, JobStore protocol, descriptor schema and links
+  _config.py     ConfigScope, project and user config paths, ConfigFile (ctx.write_config)
+  _atomic.py     write_atomic() and the advisory file locks idempotency and config share
+  _scan.py       registration-time scan of a handler's ctx.<method>() calls
+  _prompt.py     Prompter (ctx.prompt, ctx.confirm, ctx.edit), InputRequired, stdin guard
+  _subprocess.py Processes (ctx.run, ctx.pipeline, ctx.open_url), Completed, group kill
   _signals.py    SIGINT/SIGTERM handlers, Cancellation (armed windows, held signals)
   _timeout.py    Timeout VO, call_with_timeout()
   _types.py      annotation classification shared by _flags and _schema
   _values.py     CommandPath, ExitCodeName, ExitCode, Scope, Etag
-examples/        deployctl.py (destructive, raw payload), slowctl.py (timeout, cleanup)
+examples/        deployctl.py (destructive, raw payload, async job, config write),
+                 slowctl.py (timeout, cleanup),
+                 authctl.py (credentials, login)
 conformance/     deployctl.json profile and launcher for the spec kit
 tests/           one file per feature; conftest.py holds the shared app fixture
 ```
@@ -162,14 +308,27 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 ## Spec coverage
 
-Implemented: REQ-F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-011, F-012,
-F-013, F-015, F-034, F-045 (paths), F-048, F-051, F-069, C-001, C-002, C-003, C-004, C-007, C-012,
-C-015, C-016, C-020 (all presets), O-021, O-022, O-032, O-039, O-041, O-050.
+Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
+F-011, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-031, F-034, F-044, F-045 (paths),
+F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-065, F-069, F-070,
+C-001, C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
+C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-021, O-022, O-032, O-033, O-039, O-041,
+O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
+the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
-`--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), and
-`--<name>-from-env` / `--<name>-from-file` for each secret field.
+`--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
+(`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
+`--cursor` (list outputs), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
+(`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
+(`auth=`), `--global` (`config_write_scope=`), and
+`--<name>-from-env` / `--<name>-from-file` for each secret field. The per-command ones are
+rows of `_framework.FLAGS`: argv parsing, the JSON routes, the `--raw-payload` merge (one
+"given twice with different values" check; `--limit` and `--cursor` from argv win),
+`known_flags`, the field collision check in `App._register`, the manifest entry, the
+payload schema, and the help all iterate it. A new framework flag is one row plus an
+`Invocation` field.
 
 ## Gotchas
 
@@ -180,7 +339,7 @@ command `--timeout` (network and streaming), `--confirm-destructive` (destructiv
 - `ruff --fix` once rewrote a deliberate `getattr` into attribute access and broke mypy;
   check the diff after autofix
 - `tests/fixture_audit_app.py` is a deliberately flawed app; the audit tests count its
-  findings exactly, so adding a rule means updating `failed == 8` there
+  findings exactly, so adding a rule means updating `failed == 9` there
 - The kit resolves a `command` path containing a slash against the profile's directory;
   `_profile.build_profile` makes a relative `--command` absolute (with `absolute()`, so a
   venv's `bin/python` symlink survives) and keeps the scaffold's `./<name>` launcher,

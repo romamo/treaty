@@ -52,10 +52,11 @@ def test_rollback_entry_contents(app: App) -> None:
         "enum_values": ["fast", "safe"],
     }
     assert flags["tags"]["type"] == "array" and flags["tags"]["default"] == []
-    # 6: idempotency key reuse; 4: unusable state directory or record
-    assert set(entry["exit_codes"]) == {"4", "6", "79", "80"}
+    # 6: idempotency key reuse; 4, shared by every command: a stray input(), or an
+    # unusable state directory or record
+    assert set(entry["exit_codes"]) == {"6", "79", "80"}
     assert flags["idempotency-key"]["type"] == "string"
-    assert set(manifest["exit_codes"]) == {"0", "1", "2", "10", "130", "141", "143"}
+    assert set(manifest["exit_codes"]) == {"0", "1", "2", "4", "10", "130", "141", "143"}
     assert manifest["exit_codes"]["143"] == {
         "name": "CANCELLED_SIGTERM",
         "description": "Cancelled by SIGTERM; external state may be partially modified",
@@ -86,7 +87,7 @@ def test_etag_is_stable_and_changes_with_registrations(app: App) -> None:
 
     from treaty import Ctx, NoArgs
 
-    @app.command("ping", description="Reply")
+    @app.command("ping", description="Reply", danger_level="safe", exit_codes=())
     def ping(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         return {"pong": "yes"}
 

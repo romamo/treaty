@@ -18,7 +18,7 @@ def formats_app(*, plain: Renderer | None = None) -> App:
     if plain is not None:
         app.format(Format.PLAIN, render=plain)
 
-    @app.command("show", description="Show a release")
+    @app.command("show", description="Show a release", danger_level="safe", exit_codes=())
     def show(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"service": "api", "tag": "1.3.9"}
 
@@ -26,15 +26,17 @@ def formats_app(*, plain: Renderer | None = None) -> App:
         "tag",
         description="Show only the tag",
         renderers={Format.CSV: lambda d: f"tag\n{d['tag']}\n"},
+        danger_level="safe",
+        exit_codes=(),
     )
     def tag(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"service": "api", "tag": "1.3.9"}
 
-    @app.command("fail", description="Fail", exit_codes=["NOT_FOUND"])
+    @app.command("fail", description="Fail", exit_codes=["NOT_FOUND"], danger_level="safe")
     def fail(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         raise Exit.NOT_FOUND("no such release")
 
-    @app.command("tick", description="Events", streaming=True)
+    @app.command("tick", description="Events", streaming=True, danger_level="safe", exit_codes=())
     def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"n": 1}
         yield {"n": 2}
@@ -74,14 +76,14 @@ def test_json_ignores_the_renderers() -> None:
 def test_error_in_a_registered_format_is_prose_on_stderr() -> None:
     code, out, err = run(formats_app(), ["fail", "--format", "csv"])
     assert code == 5 and out == ""
-    assert err.startswith("showctl: NOT_FOUND: no such release\n")
+    assert err.startswith("showctl: NOT_FOUND: No such release.\n")
 
 
 def test_failing_renderer_names_its_format() -> None:
     app = App("showctl", version="1")
     app.format(Format.YAML, render=lambda d: d["missing"])
 
-    @app.command("show", description="Show")
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
     def show(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {}
 
@@ -115,24 +117,25 @@ def test_a_known_format_without_a_renderer_is_not_offered(
     code = formats_app().run(argv, stdout=out, stderr=io.StringIO(), env=env, isatty=False)
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and error["code"] == "ARG_ERROR"
-    assert error["message"] == "showctl does not offer --format 'yaml'"
-    assert error["context"]["allowed"] == ["plain", "json", "csv"]
+    assert error["message"] == "--format 'yaml' is not offered by showctl."
+    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "csv", "tsv"]
 
 
 def test_a_value_outside_format_is_unknown() -> None:
     out = io.StringIO()
     code = formats_app().run(["show", "--format", "xml"], stdout=out, stderr=io.StringIO(), env={})
     error = json.loads(out.getvalue())["error"]
-    assert code == 2 and error["message"] == "unknown --format 'xml'"
-    assert error["context"]["allowed"] == ["plain", "json", "csv"]
+    assert code == 2 and error["message"] == "Unknown --format 'xml'."
+    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "csv", "tsv"]
 
 
 def test_manifest_and_help_list_the_offered_formats() -> None:
     app = formats_app()
-    assert app.formats == (Format.PLAIN, Format.JSON, Format.CSV)
-    assert app.manifest()["flags"]["format"]["enum_values"] == ["plain", "json", "csv"]  # type: ignore[index]
+    assert app.formats == (Format.PLAIN, Format.JSON, Format.JSONL, Format.CSV, Format.TSV)
+    offered = app.manifest()["flags"]["format"]["enum_values"]  # type: ignore[index]
+    assert offered == ["plain", "json", "jsonl", "csv", "tsv"]
     _, out, _ = run(app, ["--help"])
-    assert "Output mode: plain, json, csv (default: json when piped)" in out
+    assert "Output mode: plain, json, jsonl, csv, tsv (default: json when piped)" in out
 
 
 # Registration
@@ -146,7 +149,13 @@ def test_a_string_is_not_a_format() -> None:
 def test_a_command_renderer_key_must_be_a_format() -> None:
     app = App("t", version="1")
     with pytest.raises(RegistrationError, match="not a Format member"):
-        app.command("show", description="Show", renderers={"plain": csv_rows})  # type: ignore[dict-item]
+        app.command(
+            "show",
+            description="Show",
+            renderers={"plain": csv_rows},
+            danger_level="safe",
+            exit_codes=(),
+        )  # type: ignore[dict-item]
 
 
 def test_json_takes_no_renderer() -> None:
@@ -154,13 +163,25 @@ def test_json_takes_no_renderer() -> None:
     with pytest.raises(RegistrationError, match="json is the response envelope"):
         app.format(Format.JSON, render=csv_rows)
     with pytest.raises(RegistrationError, match="json is the response envelope"):
-        app.command("show", description="Show", renderers={Format.JSON: csv_rows})
+        app.command(
+            "show",
+            description="Show",
+            renderers={Format.JSON: csv_rows},
+            danger_level="safe",
+            exit_codes=(),
+        )
 
 
 def test_a_command_renderer_needs_the_format_registered_first() -> None:
     app = App("t", version="1")
     with pytest.raises(RegistrationError, match=r"app\.format\(Format\.CSV"):
-        app.command("show", description="Show", renderers={Format.CSV: csv_rows})
+        app.command(
+            "show",
+            description="Show",
+            renderers={Format.CSV: csv_rows},
+            danger_level="safe",
+            exit_codes=(),
+        )
 
 
 def test_a_format_is_registered_once() -> None:

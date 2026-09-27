@@ -74,7 +74,7 @@ class NoArgs:
 def plain_app() -> App:
     app = App("showctl", version="1")
 
-    @app.command("show", description="Show a release")
+    @app.command("show", description="Show a release", danger_level="safe", exit_codes=())
     def show(args: NoArgs, ctx: Ctx) -> dict[str, object]:
         return {"service": "api", "release": {"tag": "1.3.9"}}
 
@@ -106,7 +106,7 @@ def test_human_is_an_unknown_format(argv: list[str], env: dict[str, str]) -> Non
     code = plain_app().run(argv, stdout=out, stderr=io.StringIO(), env=env, isatty=False)
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and error["code"] == "ARG_ERROR"
-    assert error["context"]["allowed"] == ["plain", "json"]
+    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "tsv"]
 
 
 def test_manifest_stays_json_in_plain_mode() -> None:

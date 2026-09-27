@@ -18,12 +18,20 @@ class SleepArgs:
 def make_app(default_timeout: float | None = 0.05) -> App:
     app = App("slowctl", version="1", default_timeout=default_timeout)
 
-    @app.command("fetch", description="Blocks then returns", has_network_io=True)
+    @app.command(
+        "fetch",
+        description="Blocks then returns",
+        has_network_io=True,
+        danger_level="safe",
+        exit_codes=(),
+    )
     def fetch(args: SleepArgs, ctx: Ctx) -> dict[str, object]:
         time.sleep(args.seconds)
         return {"slept": args.seconds, "timeout_s": ctx.timeout.seconds}
 
-    @app.command("quick", description="Own short limit", timeout=0.02)
+    @app.command(
+        "quick", description="Own short limit", timeout=0.02, danger_level="safe", exit_codes=()
+    )
     def quick(args: SleepArgs, ctx: Ctx) -> dict[str, object]:
         time.sleep(args.seconds)
         return {"timeout_s": ctx.timeout.seconds}
@@ -106,7 +114,7 @@ def test_call_with_timeout_reraises_handler_exception() -> None:
 def test_handler_exception_becomes_crash_envelope_with_traceback() -> None:
     app = App("x", version="1")
 
-    @app.command("crash", description="Raises")
+    @app.command("crash", description="Raises", danger_level="safe", exit_codes=())
     def crash(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise ValueError("handler bug")
 
@@ -114,5 +122,5 @@ def test_handler_exception_becomes_crash_envelope_with_traceback() -> None:
     code = app.run(["crash"], stdout=out, stderr=err, env={}, isatty=False)
     env = json.loads(out.getvalue())
     assert code == 1 and env["error"]["code"] == "HANDLER_CRASHED"
-    assert env["error"]["message"] == "crash raised ValueError: handler bug"
+    assert env["error"]["message"] == "Command crash raised ValueError: handler bug."
     assert "Traceback" in err.getvalue() and "handler bug" in err.getvalue()

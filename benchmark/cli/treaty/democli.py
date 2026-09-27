@@ -15,7 +15,7 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import _fixture as fx  # noqa: E402
 
-from treaty import App, Ctx, Exit, Flag  # noqa: E402
+from treaty import Affects, App, Ctx, Exit, Flag, ParseError  # noqa: E402
 
 # Idempotency records live beside the fixture state, which the harness isolates per trial
 app = App(
@@ -72,6 +72,8 @@ deployments = app.group("deployments", description="Manage deployments")
     description="List deployments, five per page by default",
     required_scopes=["deployments:read"],
     examples=[("Second page", "democli deployments list --page 2")],
+    danger_level="safe",
+    exit_codes=(),
 )
 def list_(args: ListArgs, ctx: Ctx) -> DeploymentPage:
     try:
@@ -102,6 +104,7 @@ class DeleteResult:
     effect: Literal["would_delete", "deleted"]
     deployments: list[Target]
     count: int
+    would_affect: Affects | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,21 +112,33 @@ class DeleteArgs:
     filter: str = Flag(description="Selection expression such as env=staging")
     dry_run: bool = Flag(default=False, description="Preview without deleting")
 
+    def __post_init__(self) -> None:
+        try:
+            fx.matching_stale(self.filter)  # a read; checked in phase 1 so a bad filter exits 2
+        except ValueError as exc:
+            raise ParseError(str(exc), context={"flag": "filter", "filter": self.filter}) from None
+
 
 @deployments.command(
     "delete",
     description="Delete deployments matching a filter",
     danger_level="destructive",
     required_scopes=["deployments:write"],
-    examples=[("Preview a staging cleanup", "democli deployments delete --filter env=staging --dry-run")],
+    examples=[
+        ("Preview a staging cleanup", "democli deployments delete --filter env=staging --dry-run")
+    ],
+    exit_codes=(),
 )
 def delete(args: DeleteArgs, ctx: Ctx) -> DeleteResult:
-    try:
-        targets = [Target(**t) for t in fx.matching_stale(args.filter)]  # type: ignore[arg-type]
-    except ValueError as exc:
-        raise Exit.ARG_ERROR(str(exc), context={"filter": args.filter}) from exc
-    effect: Literal["would_delete", "deleted"] = "would_delete" if args.dry_run else "deleted"
-    return DeleteResult(effect=effect, deployments=targets, count=len(targets))
+    targets = [Target(**t) for t in fx.matching_stale(args.filter)]  # type: ignore[arg-type]
+    if args.dry_run:
+        affects = Affects(
+            f"Deletes {len(targets)} deployments",
+            tuple(f"deployment/{t.id}" for t in targets),
+            len(targets),
+        )
+        return DeleteResult("would_delete", targets, len(targets), affects)
+    return DeleteResult(effect="deleted", deployments=targets, count=len(targets))
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +226,8 @@ health = app.group("health", description="Service health commands")
     has_network_io=True,
     timeout=5,
     examples=[("Check every service", "democli health check")],
+    danger_level="safe",
+    exit_codes=(),
 )
 def check(args: CheckArgs, ctx: Ctx) -> HealthReport:
     services = [
@@ -226,7 +243,11 @@ def check(args: CheckArgs, ctx: Ctx) -> HealthReport:
     raise Exit.AUTH_REQUIRED(
         "Registry credential expired",
         code="TOKEN_EXPIRED",
-        context={"service": "registry", "expired_at": fx.REGISTRY_EXPIRED_AT, "cache_age_hours": fx.CACHE_AGE_HOURS},
+        context={
+            "service": "registry",
+            "expired_at": fx.REGISTRY_EXPIRED_AT,
+            "cache_age_hours": fx.CACHE_AGE_HOURS,
+        },
         fix_required="Refresh the registry credential, then re-run the health check",
         data=report,
     )

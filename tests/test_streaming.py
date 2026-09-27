@@ -42,6 +42,7 @@ def stream_app(*, timeout: float | None | str = "inherit") -> App:
         "tail",
         description="Emit events",
         streaming=True,
+        danger_level="safe",
         exit_codes=["NO_SPACE"],
         renderers={Format.PLAIN: lambda e: f"[{e['n']}] {e['text']}\n"},
         **extra,  # type: ignore[arg-type]
@@ -118,7 +119,7 @@ def test_no_stream_buffers_events_into_one_envelope() -> None:
 def test_no_stream_takes_no_value() -> None:
     code, lines, _ = run(["tail", "2", "--no-stream=true"])
     assert code == 2
-    assert lines[0]["error"]["errors"][0]["message"] == "'no-stream' takes no value"
+    assert lines[0]["error"]["errors"][0]["message"] == "'no-stream' takes no value."
 
 
 def test_plain_mode_renders_each_event_and_nothing_for_the_end() -> None:
@@ -140,10 +141,10 @@ def test_cli_exit_mid_stream_keeps_delivered_events_and_marks_partial() -> None:
     assert CLOSED == ["tail"]
 
 
-def test_parse_error_mid_stream_is_an_argument_error() -> None:
+def test_parse_error_mid_stream_is_validation_after_start() -> None:
     code, lines, _ = run(["tail", "5", "--bad-at", "2"])
-    assert code == 2
-    assert lines[-1]["error"]["code"] == "ARG_ERROR"
+    assert code == 1
+    assert lines[-1]["error"]["code"] == "VALIDATION_AFTER_START"
     assert lines[-1]["meta"]["seq"] == 1
 
 
@@ -160,28 +161,37 @@ def test_plain_mode_failure_goes_to_stderr_after_rendered_events() -> None:
     code, _, text = run(["tail", "5", "--fail-at", "2"], plain=True)
     assert code == 80
     assert text.startswith("[1] line 1\n")
-    assert "logctl: NO_SPACE: disk full" in text
+    assert "logctl: NO_SPACE: Disk full." in text
 
 
 # Timeouts
 
 
-def test_streaming_commands_default_to_no_timeout() -> None:
+def test_f011_streams_inherit_the_default_as_an_idle_limit() -> None:
+    """0.3 s between events, four events: longer than the limit in all, never idle past it"""
     app = stream_app()
-    code, lines, _ = run(["tail", "2", "--sleep", "0.2"], app=app)
-    assert code == 0
-    assert lines[0]["meta"]["timeout_ms"] is None
+    code, lines, _ = run(["tail", "4", "--sleep", "0.2"], app=app)
+    assert code == 0 and len(lines) == 5
+    assert lines[0]["meta"]["timeout_ms"] == 300
     assert app.manifest()["commands"]["tail"]["streaming_default"] is True
 
 
-def test_explicit_timeout_is_a_deadline_for_the_whole_stream() -> None:
+def test_f011_a_stream_idle_past_its_timeout_ends_with_timeout() -> None:
     app = stream_app(timeout=0.25)
-    code, lines, _ = run(["tail", "10", "--sleep", "0.1"], app=app)
+    code, lines, _ = run(["tail", "3", "--sleep", "0.5"], app=app)
     assert code == 10
     assert lines[-1]["error"]["code"] == "TIMEOUT"
-    assert lines[-1]["meta"]["partial"] is True
-    assert 1 <= lines[-1]["meta"]["seq"] <= 3
+    assert "next event" in lines[-1]["error"]["message"]
+    assert lines[-1]["meta"]["seq"] == 0
     assert lines[-1]["meta"]["timeout_ms"] == 250
+
+
+def test_no_stream_timeout_is_a_deadline_for_the_whole_stream() -> None:
+    app = stream_app(timeout=0.25)
+    code, lines, _ = run(["tail", "10", "--sleep", "0.1", "--no-stream"], app=app)
+    (line,) = lines
+    assert code == 10 and line["error"]["code"] == "TIMEOUT"
+    assert 1 <= len(line["data"]) <= 3
 
 
 # Exec
@@ -271,7 +281,7 @@ def register(match: str, **meta: object) -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match=match):
 
-        @app.command("x", description="x", streaming=True, **meta)  # type: ignore[arg-type]
+        @app.command("x", description="x", streaming=True, exit_codes=(), **meta)  # type: ignore[arg-type]
         def handler(args: TailArgs, ctx: Ctx) -> Iterator[Event]:
             yield Event(1, "x")
 
@@ -280,7 +290,7 @@ def test_streaming_requires_an_iterator_annotation() -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match=r"annotated Iterator\[T\]"):
 
-        @app.command("x", description="x", streaming=True)
+        @app.command("x", description="x", streaming=True, danger_level="safe", exit_codes=())
         def handler(args: TailArgs, ctx: Ctx) -> Event:
             return Event(1, "x")
 
@@ -289,7 +299,7 @@ def test_streaming_events_must_be_payloads() -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match="each yielded event must serialize"):
 
-        @app.command("x", description="x", streaming=True)
+        @app.command("x", description="x", streaming=True, danger_level="safe", exit_codes=())
         def handler(args: TailArgs, ctx: Ctx) -> Iterator[int]:
             yield 1
 
@@ -302,6 +312,6 @@ def test_iterator_annotation_without_streaming_is_refused() -> None:
     app = App("logctl", version="1")
     with pytest.raises(RegistrationError, match="return type must serialize"):
 
-        @app.command("x", description="x")
+        @app.command("x", description="x", danger_level="safe", exit_codes=())
         def handler(args: TailArgs, ctx: Ctx) -> Iterator[Event]:
             yield Event(1, "x")

@@ -11,14 +11,20 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ._effect import can_carry_effect, with_replay_effect
+from ._auth import AuthKind, check_declaration
+from ._config import ConfigScope
+from ._effect import can_carry, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
+from ._jobs import Job, descriptor_schema
 from ._mode import Format
+from ._page import DEFAULT_LIMIT, Limit, Page
 from ._resources import ResourceSpec, dependency_params, resource_graph
 from ._scalars import ScalarRegistry
+from ._scan import ctx_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
+from ._subprocess import BROWSER_OPEN
 from ._timeout import Timeout
 from ._types import FlagType, is_dataclass_type, resolve_alias
 from ._values import CommandPath, ExitCodeName, Scope
@@ -82,6 +88,36 @@ class Command:
     """Resource classes the handler takes after ``ctx``, in parameter order"""
     resource_graph: Mapping[type, ResourceSpec]
     """Every resource reachable from ``resources``, validated at registration"""
+    safe_default: bool = False
+    """A destructive command that runs as a dry run unless ``--live`` (REQ-O-048)"""
+    gui_operations: tuple[str, ...] = ()
+    """Display operations the handler may start; only ``browser_open`` (REQ-C-024)"""
+    interactive: bool = False
+    """The handler may ask through ``ctx.prompt`` and ``ctx.confirm`` (REQ-C-005)"""
+    editor_alternatives: tuple[str, ...] = ()
+    """Flags that replace ``ctx.edit``; non-empty means the command may open an editor"""
+    paginated: bool = False
+    """A list command: ``--limit``, ``--cursor``, and ``meta.pagination`` (REQ-F-018)"""
+    default_limit: Limit = Limit(DEFAULT_LIMIT)
+    """Items per page without ``--limit`` (REQ-F-019)"""
+    cursor_check: Callable[[str], None] | None = None
+    """Validates the handler's own cursor from a ``--cursor`` token; raises ``ParseError``"""
+    heartbeat: bool = False
+    """JSON runs write heartbeat lines to stdout while the handler runs (REQ-F-053)"""
+    stdin_input: bool = False
+    """The handler reads a payload, ``ctx.stdin_text``, from stdin or ``--input-file``"""
+    output_file: bool = False
+    """``--output PATH`` writes the rendered ``data`` to a file (REQ-O-001)"""
+    requires_auth: bool = False
+    """The app's credentials must hold ``required_scopes`` before the handler runs"""
+    auth: AuthKind | None = None
+    """A login command (REQ-C-021): ``--headless``, ``--token-env-var``, ``ctx.token``"""
+    token_env_vars: tuple[str, ...] = ()
+    """Where a login command looks for a pre-acquired token, in order; ``<APP>_TOKEN`` first"""
+    async_job: bool = False
+    """Returns a ``treaty.Job`` for work that goes on after the process exits (REQ-C-022)"""
+    config_write_scope: ConfigScope | None = None
+    """The config file ``ctx.write_config`` may change (REQ-C-025)"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -100,6 +136,11 @@ class Command:
                 return f
         return None
 
+
+HEARTBEAT_FLAG = "heartbeat-ms"
+INPUT_FILE_FLAG = "input-file"
+OUTPUT_FLAG = "output"
+DEFAULT_HEARTBEAT_MS = 10_000
 
 # Consumed by split_globals before any command sees its tokens
 GLOBAL_FLAGS = frozenset({"format", "help", "max-output", "schema"})
@@ -123,11 +164,72 @@ def build_command(
     renderers: Mapping[Format, Renderer],
     scalars: ScalarRegistry,
     streaming: bool = False,
+    safe_default: bool = False,
+    gui_operations: Sequence[str] = (),
+    interactive: bool = False,
+    editor_alternatives: Sequence[str] = (),
+    paginated: bool | None = None,
+    default_limit: int = DEFAULT_LIMIT,
+    cursor_check: Callable[[str], None] | None = None,
+    heartbeat: bool = False,
+    stdin_input: bool = False,
+    output_file: bool = False,
+    requires_auth: bool = False,
+    auth: AuthKind | None = None,
+    token_env_vars: Sequence[str] = (),
+    async_job: bool = False,
+    config_write_scope: ConfigScope | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
-    args_type, output_type, resources = _inspect_handler(fn, path, streaming)
+    check_declaration(
+        str(path),
+        requires_auth=requires_auth,
+        required_scopes=required_scopes,
+        auth=auth,
+        token_env_vars=token_env_vars,
+        streaming=streaming,
+    )
+    if paginated and streaming:
+        raise RegistrationError(
+            f"{path}: a stream has no pages; drop paginated=True or streaming=True"
+        )
+    if output_file and streaming:
+        raise RegistrationError(
+            f"{path}: a stream writes events as they come; drop output_file=True or streaming=True"
+        )
+    if heartbeat and streaming:
+        raise RegistrationError(
+            f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
+        )
+    args_type, output_type, resources, paginated = _inspect_handler(fn, path, streaming, paginated)
+    if cursor_check is not None and not (paginated and callable(cursor_check)):
+        raise RegistrationError(
+            f"{path}: cursor_check is a function validating a list command's own cursor; "
+            "pass one to a command returning list[T] or treaty.Page[T]"
+        )
+    if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
+        raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
+    _check_gui(path, output_type, gui_operations)
+    _check_ctx_calls(fn, path, gui_operations, interactive, editor_alternatives, config_write_scope)
+    returns_job = isinstance(output_type, type) and issubclass(output_type, Job)
+    if async_job and not returns_job:
+        raise RegistrationError(
+            f"{path}: an async_job command returns treaty.Job, or a dataclass extending it, "
+            "as its job descriptor (REQ-C-022)"
+        )
+    if config_write_scope is not None and danger_level is DangerLevel.SAFE:
+        raise RegistrationError(
+            f'{path}: a command that writes config is mutating; set danger_level="mutating"'
+        )
     fields = inspect_fields(args_type, scalars)
+    flags = {f.flag for f in fields}
+    unknown = [name for name in editor_alternatives if name not in flags]
+    if unknown:
+        raise RegistrationError(
+            f"{path}: editor_alternatives {unknown} are not flags of the command; name the "
+            "flags that supply the text instead of the editor (REQ-C-023)"
+        )
     if streaming and danger_level is not DangerLevel.SAFE:
         raise RegistrationError(
             f"{path}: streaming commands must be safe; the effect and idempotency contracts "
@@ -148,28 +250,15 @@ def build_command(
             f"{path}: {'; '.join(shadowed)}: global options, which would never reach "
             "the handler (REQ-F-079)"
         )
+    if safe_default and danger_level is not DangerLevel.DESTRUCTIVE:
+        raise RegistrationError(
+            f"{path}: safe_default=True is for destructive commands, whose dry run it makes "
+            "the default (REQ-O-048)"
+        )
     for f in fields:
         f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
-    framework_flags = {
-        "timeout": has_network_io or streaming,
-        "raw-payload": supports_raw_payload,
-        "confirm-destructive": danger_level is DangerLevel.DESTRUCTIVE,
-        "no-stream": streaming,
-    }
-    taken = sorted(
-        f.flag
-        for f in fields
-        if framework_flags.get(f.flag, False)
-        # --no-<name> negates a boolean, so a boolean 'stream' would lose --no-stream
-        or (f.flag_type is FlagType.BOOLEAN and framework_flags.get(f"no-{f.flag}", False))
-    )
-    if taken:
-        raise RegistrationError(
-            f"{path}: flags {taken} are supplied by the framework for this command and "
-            "would never reach the handler; rename the fields"
-        )
     if danger_level is not DangerLevel.SAFE:
-        if not can_carry_effect(output_type):
+        if not can_carry(output_type, "effect"):
             raise RegistrationError(
                 f"{path}: {danger_level.value} commands must return an object with an "
                 "'effect' field (REQ-C-003)"
@@ -185,9 +274,17 @@ def build_command(
             raise RegistrationError(
                 f"{path}: destructive commands must declare a boolean 'dry_run' flag (REQ-C-004)"
             )
+        if not can_carry(output_type, "would_affect"):
+            raise RegistrationError(
+                f"{path}: destructive commands must return an object with a 'would_affect' "
+                "field for dry runs, such as would_affect: treaty.Affects | None = None "
+                "(REQ-C-004)"
+            )
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
     output_schema = schema_for(output_type, scalars)
+    if returns_job:
+        output_schema = descriptor_schema(output_schema)
     if danger_level is not DangerLevel.SAFE:
         output_schema = with_replay_effect(output_schema)
     return Command(
@@ -212,12 +309,108 @@ def build_command(
         streaming=streaming,
         resources=resources,
         resource_graph=resource_graph(resources, str(path), args_type),
+        safe_default=safe_default,
+        gui_operations=tuple(gui_operations),
+        interactive=interactive,
+        editor_alternatives=tuple(editor_alternatives),
+        paginated=paginated,
+        default_limit=Limit(default_limit or None),
+        cursor_check=cursor_check,
+        heartbeat=heartbeat,
+        stdin_input=stdin_input,
+        output_file=output_file,
+        requires_auth=requires_auth,
+        auth=auth,
+        token_env_vars=tuple(
+            dict.fromkeys((default_env_var(app_name, "token"), *token_env_vars)) if auth else ()
+        ),
+        async_job=async_job,
+        config_write_scope=config_write_scope,
     )
 
 
+def _page_output(
+    output_type: object, path: CommandPath, paginated: bool | None
+) -> tuple[object, bool]:
+    """A list command's output is ``list[T]`` or ``Page[T]``, served as ``list[T]``; with
+    ``paginated=None`` every such output is a list command (REQ-F-018)"""
+    annotation = resolve_alias(output_type)
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if annotation is Page or origin is Page:
+        if paginated is False:
+            raise RegistrationError(
+                f"{path}: returns treaty.Page but paginated=False; drop paginated=False"
+            )
+        return list[args[0] if args else object], True  # type: ignore[misc]
+    item: object = None
+    if origin in (list, collections.abc.Sequence) and len(args) == 1:
+        item = args[0]
+    elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
+        item = args[0]
+    if paginated is False or (paginated is None and item is None):
+        return output_type, False
+    if item is None:
+        raise RegistrationError(
+            f"{path}: a paginated command returns list[T] or treaty.Page[T], not {output_type!r}"
+        )
+    return list[item], True  # type: ignore[valid-type]
+
+
+def _check_gui(path: CommandPath, output_type: object, gui_operations: Sequence[str]) -> None:
+    unknown = sorted(set(gui_operations) - {BROWSER_OPEN})
+    if unknown:
+        raise RegistrationError(
+            f"{path}: gui_operations {unknown} are not supported; {BROWSER_OPEN!r} is"
+        )
+    if gui_operations and not can_carry(output_type, "open_url"):
+        raise RegistrationError(
+            f"{path}: a command that opens a browser must return an object with an "
+            "'open_url' field, where a headless run puts the URL (REQ-F-057), such as "
+            "open_url: str | None = None"
+        )
+
+
+def _check_ctx_calls(
+    fn: Handler,
+    path: CommandPath,
+    gui_operations: Sequence[str],
+    interactive: bool,
+    editor_alternatives: Sequence[str],
+    config_write_scope: ConfigScope | None,
+) -> None:
+    """Refuse at registration what the handler's source shows would fail at run time"""
+    for call in ctx_calls(fn):
+        where = f"{path}: ctx.{call.method}() on line {call.line} of the handler"
+        if call.shell:
+            raise RegistrationError(
+                f"{where} gets a shell string (SHELL_STRING_PROHIBITED); treaty never "
+                "runs a shell, so pass an argument list such as ['git', 'log', '-1'] (REQ-F-062)"
+            )
+        if call.method == "open_url" and BROWSER_OPEN not in gui_operations:
+            raise RegistrationError(
+                f"{where} opens a browser; declare gui_operations=[{BROWSER_OPEN!r}] (REQ-C-024)"
+            )
+        if call.method in ("prompt", "confirm") and not interactive:
+            raise RegistrationError(
+                f"{where} asks a person; declare interactive=True, which adds --yes and "
+                "--non-interactive (REQ-C-005)"
+            )
+        if call.method == "write_config" and config_write_scope is None:
+            raise RegistrationError(
+                f'{where} writes config; declare config_write_scope="local" (or "global") '
+                "(REQ-C-025)"
+            )
+        if call.method == "edit" and not editor_alternatives:
+            raise RegistrationError(
+                f"{where} opens an editor; declare editor_alternatives=[...] naming the flags "
+                "that supply the text instead (REQ-C-023)"
+            )
+
+
 def _inspect_handler(
-    fn: Handler, path: CommandPath, streaming: bool
-) -> tuple[type, object, tuple[type, ...]]:
+    fn: Handler, path: CommandPath, streaming: bool, paginated: bool | None
+) -> tuple[type, object, tuple[type, ...], bool]:
     resources = dependency_params(fn, f"{path}: handler")
     params = list(inspect.signature(fn).parameters.values())
     hints = typing.get_type_hints(fn)
@@ -229,11 +422,13 @@ def _inspect_handler(
     output_type = hints["return"]
     if streaming:
         output_type = _event_type(output_type, path)
+        paginated = False  # a stream has no pages; its events may be lists
+    output_type, paginated = _page_output(output_type, path, paginated)
     if not is_payload_type(output_type):
         what = "each yielded event" if streaming else "return type"
         raise RegistrationError(f"{path}: {what} must serialize to a JSON object, array, or null")
     assert isinstance(args_type, type)
-    return args_type, output_type, resources
+    return args_type, output_type, resources, paginated
 
 
 _STREAM_ORIGINS = (

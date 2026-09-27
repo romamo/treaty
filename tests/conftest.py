@@ -9,7 +9,7 @@ import pytest
 from jsonschema import Draft7Validator
 from referencing import Registry, Resource
 
-from treaty import App, Arg, Ctx, Exit, Flag
+from treaty import Affects, App, Arg, Ctx, Exit, Flag
 
 SPEC_DIR = Path(
     os.environ.get("TREATY_SPEC_DIR", Path(__file__).resolve().parents[2] / "cli-agent-ergonomics")
@@ -58,6 +58,7 @@ class Plan:
     replicas: int
     tags: tuple[str, ...]
     dry_run: bool
+    would_affect: Affects | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,9 +109,17 @@ def app() -> App:
             args.replicas,
             args.tags,
             args.dry_run,
+            Affects(f"Rolls {args.service} back", (f"service/{args.service}",), 1)
+            if args.dry_run
+            else None,
         )
 
-    @deploy.command("status", description="Show the active release of a service")
+    @deploy.command(
+        "status",
+        description="Show the active release of a service",
+        danger_level="safe",
+        exit_codes=(),
+    )
     def status(args: Status, ctx: Ctx) -> list[dict[str, str]]:
         return [{"service": args.service, "release": "1.4.0"}]
 

@@ -36,6 +36,7 @@ def test_success_envelope(app: App) -> None:
         "replicas": 1,
         "tags": ["a", "b"],
         "dry_run": True,
+        "would_affect": {"summary": "Rolls api back", "resources": ["service/api"], "count": 1},
     }
 
 
@@ -120,7 +121,7 @@ def test_flag_before_command_path_names_the_command(app: App, argv: list[str]) -
     code, env = run_json(app, argv)
     flag = argv[0] if argv[0].startswith("-") else argv[1]
     assert code == 2 and env["error"]["code"] == "ARG_ERROR"
-    assert env["error"]["message"] == f"flag {flag!r} must come after the command path"
+    assert env["error"]["message"] == f"Flag {flag!r} must come after the command path."
     assert env["error"]["context"]["command"] == "deployctl deploy rollback"
     assert env["error"]["suggestion"] == (
         f"flags go after the command: deployctl deploy rollback [arguments] {flag}"
@@ -236,7 +237,7 @@ def test_destructive_requires_dry_run() -> None:
 
     with pytest.raises(RegistrationError, match="dry_run"):
 
-        @app.command("nuke", description="Delete", danger_level="destructive")
+        @app.command("nuke", description="Delete", danger_level="destructive", exit_codes=())
         def nuke(args: Args, ctx: Ctx) -> dict[str, str]:
             return {}
 
@@ -245,7 +246,7 @@ def test_undeclared_exit_code_name_rejected_at_registration() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="not registered"):
 
-        @app.command("go", description="Go", exit_codes=["NOPE"])
+        @app.command("go", description="Go", exit_codes=["NOPE"], danger_level="safe")
         def go(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {}
 
@@ -254,13 +255,13 @@ def test_handler_signature_checked() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="return annotation"):
 
-        @app.command("go", description="Go")
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: NoArgs, ctx: Ctx):  # type: ignore[no-untyped-def]
             return {}
 
     with pytest.raises(RegistrationError, match="object, array, or null"):
 
-        @app.command("go2", description="Go")
+        @app.command("go2", description="Go", danger_level="safe", exit_codes=())
         def go2(args: NoArgs, ctx: Ctx) -> str:
             return ""
 
@@ -269,7 +270,7 @@ def test_duplicate_path_and_builtin_collision() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="already registered"):
 
-        @app.command("version", description="Mine")
+        @app.command("version", description="Mine", danger_level="safe", exit_codes=())
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {}
 
@@ -284,7 +285,7 @@ def test_field_without_marker_rejected() -> None:
 
     with pytest.raises(RegistrationError, match="Flag"):
 
-        @app.command("go", description="Go")
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: Args, ctx: Ctx) -> dict[str, str]:
             return {}
 
@@ -318,17 +319,18 @@ def test_manifest_advertises_confirm_flag(app: App) -> None:
     assert flags["confirm-destructive"]["type"] == "boolean"
 
 
-def test_handler_raised_parse_error_is_validation_failure() -> None:
+def test_handler_raised_parse_error_is_validation_after_start() -> None:
     from treaty import ParseError
 
     app = App("x", version="1")
 
-    @app.command("check", description="Validates its own input")
+    @app.command("check", description="Validates its own input", danger_level="safe", exit_codes=())
     def check(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         raise ParseError("bad input", context={"field": "x"})
 
     out = io.StringIO()
     code = app.run(["check"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
     env = json.loads(out.getvalue())
-    assert code == 2 and env["error"]["phase"] == "validation"
+    assert code == 1 and env["error"]["phase"] == "execution"
+    assert env["error"]["code"] == "VALIDATION_AFTER_START"
     assert env["error"]["context"] == {"field": "x"}

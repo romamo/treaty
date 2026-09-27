@@ -5,7 +5,7 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 
 ## Done since the skeleton
 
-- `treaty audit module:app` console script: ten ordered static rules over the registry,
+- `treaty audit module:app` console script: eleven ordered static rules over the registry,
   each with a generated fix, human and JSON output, `--all` and `--limit`; `treaty rules`
   lists the rule order
 - `human=` renderer hook on `@app.command` for commands whose human output should not be
@@ -18,7 +18,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   CI; the envelope keeps the full report as `data` and advice never fails the run
 - Human mode renders `data` on failed runs too, so `--strict` and a failing
   `conformance --run` print their report instead of raw JSON
-- Handler-raised `ParseError` becomes a validation-phase exit 2 envelope
+- Handler-raised `ParseError` and `Exit.ARG_ERROR` exit 1 with `VALIDATION_AFTER_START`
+  and `phase: execution` (REQ-F-002); cross-field checks in the args `__post_init__` run
+  in phase 1 and join `error.errors` (REQ-F-015)
+- Newlines, carriage returns, and null bytes in `str` arguments are refused in phase 1
+  on every route; `Flag(multiline=True)` opts out; `multiline-flag` audit rule (REQ-F-044)
 - `effect` on every mutating and destructive response (REQ-C-003, REQ-C-004) and a
   framework `--idempotency-key` with a per-app record store (REQ-C-007)
 - `exec` stdin cap (64 KiB, `STDIN_TOO_LARGE`) with an uncapped `--input-file`
@@ -44,10 +48,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - Typed resources (cloudfall gap 2): handler parameters after `ctx` name classes with a
   classmethod `acquire(cls, args, ctx, *deps)`; acquired once per run in dependency order
   under the command timeout; `CliExit` and `ParseError` from `acquire` take the normal
-  envelope path; cycles and missing `acquire` fail at registration
+  envelope path (a `ParseError` there is `VALIDATION_AFTER_START`); cycles and missing `acquire` fail at registration
 - Streaming handlers (cloudfall gap 3, REQ-O-004): `streaming=True` with an `Iterator[T]`
   handler; one envelope per yield with `meta.seq`, a terminal envelope with `end` and
-  `total`, failures mark `partial`; no timeout by default, else a whole-stream deadline;
+  `total`, failures mark `partial`; the timeout limits the wait for each event (it was a
+  whole-stream deadline, with none by default, until plan 07);
   `streaming_default` in the manifest and `--help`; `--no-stream` buffers; works in `exec`
 - MCP adapter (cloudfall gap 4, `treaty[mcp]`): `treaty-mcp module:app` serves one tool
   per command in-process over stdio; input schema from the args schema plus framework
@@ -57,6 +62,47 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - `--format plain` replaces `--format human` (REQ-O-001), with no alias; `plain=` replaces
   `human=`; commands without a renderer print flat `key: value` lines instead of indented
   JSON; `manifest` and `--schema` stay JSON
+- Output hygiene (REQ-F-005 to F-008, F-010, F-016, F-051, C-013): stray `print()` goes to
+  stderr with a `THIRD_PARTY_STDOUT` warning, `ctx.log` with redaction, escape and UTF-8
+  cleaning in JSON, `ctx.color`, `PAGER=cat` and `NO_COLOR=1` for children under
+  `App.main()`, ISO 8601 dates and `Decimal` text, sentence-form error messages, and
+  `suggestion=` on exit codes with the `exit-code-suggestion` audit rule
+- Required declarations (REQ-C-001, REQ-C-002, breaking): `exit_codes=` and
+  `danger_level=` have no default; `exit_codes=()` is the explicit empty declaration
+- `treaty.Affects` as `would_affect` on destructive dry runs, checked at registration and
+  per run, and quoted by `CONFIRMATION_REQUIRED` (REQ-C-004); `requires_confirmation: true`
+  in `--schema` (REQ-O-021)
+- `safe_default=True` destructive commands: dry run by default with exit 0, `--live` to
+  apply (it is the confirmation), `meta.dry_run` on every response (REQ-O-048)
+- `network-timeout` audit rule: network calls without `timeout=` in network commands
+  (REQ-C-012)
+- Subprocess API (REQ-F-044, F-046, F-055, F-057, F-062, F-065): `ctx.run` and
+  `ctx.pipeline` take argument lists only, give children a pager-, color-, and
+  editor-free environment and `/dev/null` stdin, raise `SUBPROCESS_FAILED` for any failing
+  stage, and stop tracked children on a signal or timeout; `ctx.open_url` with
+  `gui_operations=` and `meta.headless`; `no-shell` audit rule
+- Prompts (REQ-F-009, F-047, F-055, C-005, C-023): `interactive=True` adds `--yes` and
+  `--non-interactive`; `ctx.prompt`, `ctx.confirm`, and `ctx.edit` ask only on a terminal
+  and otherwise exit `4` naming the flag that answers; `editor_alternatives=`; a stray
+  `input()` off a terminal exits `4` with `INTERACTIVE_BLOCKED`
+- Pagination (REQ-F-018, F-019, O-003, F-052): `paginated=True`, `--limit` and
+  `--cursor`, `meta.pagination`, `treaty.Page` and `ctx.page`, `INVALID_CURSOR`; a cut
+  page's `truncation_hint` is the command for the next page; `<APP>_MAX_OUTPUT_BYTES`;
+  `paginated-list` audit rule
+- I/O and streams (REQ-F-011, F-014, F-053, F-054, O-001): idle timeouts for streams,
+  exit `0` when the reader leaves after a complete envelope, `PYTHONUNBUFFERED` and
+  `heartbeat=True`, `stdin_input=True` with `--input-file` and `hint`, `--format jsonl`,
+  built-in `tsv` and `treaty.table`, `output_file=True` with `--output PATH`
+- Auth and scopes (REQ-C-021, C-029, O-033, O-047): `App(credentials=)` with one
+  `active_scopes` method, `requires_auth=True` gated before the handler (exit `8` or `7`,
+  `CREDENTIAL_OVER_PRIVILEGED` warning), `check-permissions`, login commands with `auth=`,
+  `--headless`, `--token-env-var`, and `ctx.token`; `ctx.warn`; `broad-scope` and
+  `auth-declared` audit rules
+- Async jobs and config writes (REQ-C-022, C-025, F-070): `async_job=True` returning
+  `treaty.Job` with `App(jobs=)`, `job status` and `job cancel`; `config_write_scope=` with
+  `--global`, `ctx.config_path`, and `ctx.write_config`; atomic writes for config,
+  idempotency records, and `--output`; `async-job` and `config-write-scope` audit rules.
+  Level 2 is complete
 
 ## 0.1.0: first release
 
@@ -64,7 +110,6 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
 - GitHub Actions: pytest, mypy, ruff, and the conformance kit against a spec checkout
 - `meta.schema_version` on every response (REQ-F-022), derived from a per-command
   `schema_version=` declaration
-- Warnings API: `ctx.warn(code, message, context)` so `warnings` stops being always empty
 - `CHANGELOG.md`
 - `docs/guide.md`: the judgement calls the audit cannot make (naming paths, what belongs in
   `error.context`, when a failure deserves its own exit code); short, because every
@@ -82,8 +127,7 @@ landed the same day; what remains under each is follow-up work:
 - **Typed resources**: done, see above. Still open from it: a `release` counterpart to
   `acquire` for resources that hold a lock or a connection, run after the handler and on
   cancellation alongside `cleanup=`
-- **Streaming handlers**: done, see above. Still open from it: pagination metadata on
-  the terminal envelope for list commands (with REQ-F-018 in 0.2.0), and streaming for
+- **Streaming handlers**: done, see above. Still open from it: streaming for
   mutating commands once the effect contract can name the event that carries `effect`
 - **MCP adapter**: done, see above, as the `treaty-mcp` script rather than a `treaty`
   subcommand because a stdio server owns stdout. Still open from it: the manifest as an
@@ -94,14 +138,7 @@ landed the same day; what remains under each is follow-up work:
 Every remaining P0 requirement the kit cannot yet check. Each new declaration gets a
 matching audit rule so adoption never requires reading the spec.
 
-- `--yes` and `--non-interactive` for commands declaring `interactive=True` (REQ-C-005),
-  exit `4` when a prompt would block
-- Pagination metadata on list commands: `--limit`, `--cursor`, `meta.pagination`
-  (REQ-F-018)
-- `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028) and a
-  `would_affect` object on dry runs (REQ-C-004)
-- Pager suppression and locale-invariant serialization audit (REQ-F-010, REQ-F-005);
-  both likely already hold and need tests, not code
+- `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028)
 - `REDIRECTED` exit `13` with `error.redirect` for renamed commands and `aliases` in the
   manifest
 

@@ -10,13 +10,17 @@ import json
 import math
 import re
 from collections.abc import Collection, Mapping
-from dataclasses import MISSING, dataclass
+from dataclasses import MISSING, dataclass, replace
+from pathlib import Path
+from typing import Any, NoReturn
 
-from ._command import Command, DangerLevel
+from ._command import Command
 from ._dispatch import loads_strict
-from ._errors import ParseError
+from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
+from ._framework import RAW_PAYLOAD_FLAG, flag_named, framework_flags
 from ._idempotency import IdempotencyKey
+from ._page import Limit, Position
 from ._paths import check_path
 from ._secrets import (
     SecretRef,
@@ -27,13 +31,7 @@ from ._secrets import (
 )
 from ._timeout import Timeout
 from ._types import Classified, FlagType
-from ._values import CommandPath
-
-TIMEOUT_FLAG = "timeout"
-CONFIRM_FLAG = "confirm-destructive"
-RAW_PAYLOAD_FLAG = "raw-payload"
-IDEMPOTENCY_FLAG = "idempotency-key"
-NO_STREAM_FLAG = "no-stream"
+from ._values import CommandPath, InvalidValue
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,11 +39,37 @@ class Invocation:
     """Parsed arguments plus framework-level flags for one command run"""
 
     args: object
-    timeout: Timeout | None
+    timeout: Timeout | None = None
     confirmed: bool = False
     idempotency_key: IdempotencyKey | None = None
     no_stream: bool = False
     """A streaming command asked for one buffered envelope instead of JSONL"""
+    live: bool = False
+    """A ``safe_default`` command asked to apply instead of its default dry run"""
+    yes: bool = False
+    """``--yes``: every ``ctx.confirm`` of an interactive command answers yes"""
+    non_interactive: bool = False
+    """``--non-interactive``: an interactive command never prompts, even on a terminal"""
+    limit: Limit | None = None
+    """``--limit`` of a list command; None takes the command's default"""
+    cursor: Position | None = None
+    """``--cursor`` of a list command, decoded; None is the first page"""
+    heartbeat_ms: int | None = None
+    """``--heartbeat-ms`` of a ``heartbeat=True`` command; None is the default, 0 is off"""
+    input_file: Path | None = None
+    """``--input-file`` of a ``stdin_input`` command; None or ``-`` reads stdin"""
+    stdin_text: str | None = None
+    """The payload of a ``stdin_input`` command, read before the handler runs"""
+    output: Path | None = None
+    """``--output`` of an ``output_file`` command: where the rendered ``data`` goes"""
+    headless: bool = False
+    """``--headless`` of a login command: never wait for a person at a browser"""
+    token_env_var: str | None = None
+    """``--token-env-var`` of a login command: the one variable to read the token from"""
+    token: str | None = None
+    """The pre-acquired token of a login command, read before the handler runs"""
+    global_config: bool = False
+    """``--global`` of a config-writing command: write the user file, not the project's"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,9 +214,12 @@ class _Collector:
     def add(self, exc: ParseError) -> None:
         self.errors.append(exc)
 
+    def fail(self) -> NoReturn:
+        raise ParseError.combine(self.errors)
+
     def finish(self) -> None:
         if self.errors:
-            raise ParseError.combine(self.errors)
+            self.fail()
 
 
 def parse_command_args(
@@ -201,11 +228,8 @@ def parse_command_args(
     values: dict[str, object] = {}
     secrets: dict[str, SecretRef] = {}
     arrays: dict[str, list[object]] = {}
-    timeout: Timeout | None = None
-    confirmed = False
-    raw_payload: str | None = None
-    key: IdempotencyKey | None = None
-    no_stream = False
+    framework: dict[str, Any] = {}
+    """``Invocation`` fields set by framework flags, plus ``raw_payload``"""
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -279,41 +303,16 @@ def parse_command_args(
             if tok.startswith("--"):
                 name, eq, inline = tok[2:].partition("=")
                 has_eq = bool(eq)
-                if name == TIMEOUT_FLAG and command.accepts_timeout:
-                    parsed_timeout = Timeout.parse(value_after(tok, TIMEOUT_FLAG, has_eq, inline))
-                    if timeout is not None and timeout != parsed_timeout:
-                        raise _repeated(TIMEOUT_FLAG)
-                    timeout = parsed_timeout
-                    i += 1
-                    continue
-                if name == RAW_PAYLOAD_FLAG and command.supports_raw_payload:
-                    raw = value_after(tok, RAW_PAYLOAD_FLAG, has_eq, inline)
-                    if raw_payload is not None and raw_payload != raw:
-                        raise _repeated(RAW_PAYLOAD_FLAG)
-                    raw_payload = raw
-                    i += 1
-                    continue
-                if name == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-                    parsed_key = IdempotencyKey(value_after(tok, IDEMPOTENCY_FLAG, has_eq, inline))
-                    if key is not None and key != parsed_key:
-                        raise _repeated(IDEMPOTENCY_FLAG)
-                    key = parsed_key
-                    i += 1
-                    continue
-                if name == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
-                    if has_eq:
-                        raise ParseError(
-                            f"'{CONFIRM_FLAG}' takes no value", context={"flag": CONFIRM_FLAG}
-                        )
-                    confirmed = True
-                    i += 1
-                    continue
-                if name == NO_STREAM_FLAG and command.streaming:
-                    if has_eq:
-                        raise ParseError(
-                            f"'{NO_STREAM_FLAG}' takes no value", context={"flag": NO_STREAM_FLAG}
-                        )
-                    no_stream = True
+                spec = flag_named(command, name)
+                if spec is not None:
+                    if spec.parse is None:
+                        if has_eq:
+                            raise ParseError(f"'{name}' takes no value", context={"flag": name})
+                        value: object = True
+                    else:
+                        value = spec.parse(value_after(tok, name, has_eq, inline), command)
+                    if framework.setdefault(spec.attr, value) != value:
+                        raise _repeated(name)
                     i += 1
                     continue
                 found = command.field_by_flag(name)
@@ -374,6 +373,7 @@ def parse_command_args(
 
     for name, items in arrays.items():
         values[name] = tuple(items)
+    raw_payload = framework.pop("raw_payload", None)
     if raw_payload is not None:
         if values or secrets:
             raise ParseError(
@@ -383,30 +383,17 @@ def parse_command_args(
         errors.finish()
         mapping = _decode_raw_payload(raw_payload)
         built = build_from_mapping(command, mapping, env)
-        # Framework keys may come from argv or the payload; both only if they agree
-        if timeout is not None and built.timeout is not None and timeout != built.timeout:
-            raise _repeated(TIMEOUT_FLAG)
-        if key is not None and built.idempotency_key not in (None, key):
-            raise _repeated(IDEMPOTENCY_FLAG)
-        for flag, given in ((CONFIRM_FLAG, confirmed), (NO_STREAM_FLAG, no_stream)):
-            spellings = (flag, flag.replace("-", "_"))
-            if given and any(mapping.get(k) is False for k in spellings):
-                raise _repeated(flag)
-        return Invocation(
-            args=built.args,
-            timeout=timeout or built.timeout,
-            confirmed=confirmed or built.confirmed,
-            idempotency_key=key or built.idempotency_key,
-            no_stream=no_stream or built.no_stream,
-        )
+        # Framework keys may come from argv or the payload; both only if they agree, except
+        # --limit and --cursor, which win so a truncation hint appended to argv runs
+        in_payload = {k.replace("_", "-") for k in mapping}
+        for spec in framework_flags(command):
+            given = framework.get(spec.attr)
+            if spec.name in in_payload and not spec.argv_wins and given is not None:
+                if getattr(built, spec.attr) != given:
+                    raise _repeated(spec.name)
+        return replace(built, **framework)
     _apply_secrets(command, values, secrets, env, errors)
-    return Invocation(
-        args=_finish(command, values, errors),
-        timeout=timeout,
-        confirmed=confirmed,
-        idempotency_key=key,
-        no_stream=no_stream,
-    )
+    return Invocation(args=_finish(command, values, errors), **framework)
 
 
 def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
@@ -460,23 +447,20 @@ def _decode_raw_payload(raw: str) -> Mapping[str, object]:
     return decoded
 
 
-def known_flags(command: Command) -> list[str]:
+def known_flags(command: Command, *, argv: bool = True) -> list[str]:
+    """The flags a command accepts; ``argv=False`` leaves out those only argv takes, for
+    the unknown-field error of ``exec``, MCP, and ``--raw-payload``"""
     flags = [name for f in command.fields for name in f.exposed_flags()]
-    if command.supports_raw_payload:
-        flags.append(RAW_PAYLOAD_FLAG)
-    if command.accepts_timeout:
-        flags.append(TIMEOUT_FLAG)
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        flags.append(CONFIRM_FLAG)
-    if command.danger_level is not DangerLevel.SAFE:
-        flags.append(IDEMPOTENCY_FLAG)
-    if command.streaming:
-        flags.append(NO_STREAM_FLAG)
-    return flags
+    return flags + [f.name for f in framework_flags(command, json=not argv)]
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
-    """Report missing fields alongside everything collected, then build the dataclass"""
+    """Report missing fields alongside everything collected, then build the dataclass
+
+    The args ``__post_init__`` is the cross-field check of phase 1 (REQ-F-015): it runs
+    whenever every field has a value, so its ``ParseError`` (or several, through
+    ``ParseError.combine``) joins the errors of an unknown flag in the same run.
+    """
     failed = {e.field for e in errors.errors}
     missing = [
         f.env_flag if f.secret else f.flag
@@ -491,11 +475,24 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
                 context={"missing": missing, "command": command.path.value},
             )
         )
-    errors.finish()
+    named = {n for f in command.fields for n in (f.name, f.flag, *f.exposed_flags())}
+    if missing or not failed.isdisjoint(named):
+        errors.fail()  # a field without its value would give __post_init__ a false default
     for f in command.fields:
         if f.name not in values:
             values[f.name] = None if f.default is MISSING else f.default
-    return command.args_type(**values)
+    try:
+        args = command.args_type(**values)
+    except ParseError as exc:
+        errors.errors.extend(exc.errors or (exc,))
+        errors.fail()
+    except InvalidValue as exc:  # a value object built in __post_init__ refused its input
+        errors.add(ParseError(str(exc), context={"command": command.path.value}))
+        errors.fail()
+    except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
+        raise ArgsCrashed(exc, values) from exc
+    errors.finish()
+    return args
 
 
 def build_from_mapping(
@@ -504,35 +501,14 @@ def build_from_mapping(
     """Build an invocation from already-typed JSON values, as ``exec`` receives them"""
     values: dict[str, object] = {}
     secrets: dict[str, SecretRef] = {}
-    timeout: Timeout | None = None
-    confirmed = False
-    idempotency_key: IdempotencyKey | None = None
-    no_stream = False
+    framework: dict[str, Any] = {}
     errors = _Collector()
     for key, value in mapping.items():
         try:
             flag = key.replace("_", "-")
-            if flag == TIMEOUT_FLAG and command.accepts_timeout:
-                timeout = Timeout.parse(value)
-                continue
-            if flag == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-                if not isinstance(value, str):
-                    raise ParseError(f"{key!r} expects a string", context={"field": key})
-                idempotency_key = IdempotencyKey(value)
-                continue
-            if flag == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                confirmed = value
-                continue
-            if flag == NO_STREAM_FLAG and command.streaming:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                no_stream = value
+            spec = flag_named(command, flag, json=True)
+            if spec is not None and spec.from_json is not None:
+                framework[spec.attr] = spec.from_json(value, command)
                 continue
             found = command.field_by_flag(flag)
             if found is not None and found.secret:
@@ -551,7 +527,7 @@ def build_from_mapping(
                     context={
                         "field": key,
                         "command": command.path.value,
-                        "known": known_flags(command),
+                        "known": known_flags(command, argv=False),
                     },
                 )
             if found.name in values:
@@ -563,13 +539,7 @@ def build_from_mapping(
         except ParseError as exc:
             errors.add(exc)
     _apply_secrets(command, values, secrets, env, errors)
-    return Invocation(
-        args=_finish(command, values, errors),
-        timeout=timeout,
-        confirmed=confirmed,
-        idempotency_key=idempotency_key,
-        no_stream=no_stream,
-    )
+    return Invocation(args=_finish(command, values, errors), **framework)
 
 
 def _check_json_value(field: FieldInfo, value: object) -> object:
@@ -591,6 +561,8 @@ def _check_field_value(field: FieldInfo, value: object) -> object:
 
 def _check_patterned(field: FieldInfo, target: Classified, value: object) -> object:
     if isinstance(value, str):
+        if target.flag_type is FlagType.STRING:
+            field.check_text(value)
         field.check_pattern(value)
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
         try:

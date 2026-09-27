@@ -1,11 +1,23 @@
 """Example CLI built on treaty. Run: uv run examples/deployctl.py deploy rollback api --dry-run"""
 
+import json
 from dataclasses import dataclass
 from typing import Literal
 
-from treaty import App, Arg, Ctx, Exit, Flag
+from treaty import Affects, App, Arg, Ctx, Exit, Flag, Job
 
-app = App("deployctl", version="1.4.0", description="Manage deployments")
+
+class Deployments:
+    """Where jobs live; a real app asks its deploy API"""
+
+    def status(self, job_id: str, ctx: Ctx) -> Job | None:
+        return Job(job_id, "complete") if job_id.startswith("deploy-") else None
+
+    def cancel(self, job_id: str, ctx: Ctx) -> Job | None:
+        return Job(job_id, "complete", effect="noop") if job_id.startswith("deploy-") else None
+
+
+app = App("deployctl", version="1.4.0", description="Manage deployments", jobs=Deployments())
 app.exit_code(
     "DEPLOY_CONFLICT",
     79,
@@ -13,6 +25,14 @@ app.exit_code(
     retryable=False,
     side_effects="none",
 )
+app.exit_code(
+    "UNKNOWN_SETTING",
+    80,
+    description="The setting name is not one deployctl knows",
+    retryable=False,
+    side_effects="none",
+)
+SETTINGS = ("region", "strategy")
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +49,7 @@ class Plan:
     service: str
     release: str
     strategy: str
+    would_affect: Affects | None = None
 
 
 deploy = app.group("deploy", description="Manage deployments")
@@ -46,8 +67,69 @@ deploy = app.group("deploy", description="Manage deployments")
 def rollback(args: Rollback, ctx: Ctx) -> Plan:
     if args.service == "locked":
         raise Exit.DEPLOY_CONFLICT("deployment in progress", context={"service": args.service})
-    effect: Literal["would_update", "updated"] = "would_update" if args.dry_run else "updated"
-    return Plan(effect, args.service, args.to or "previous", args.strategy)
+    release = args.to or "previous"
+    if args.dry_run:
+        affects = Affects(
+            f"Rolls {args.service} back to {release}", (f"service/{args.service}",), 1
+        )
+        return Plan("would_update", args.service, release, args.strategy, affects)
+    return Plan("updated", args.service, release, args.strategy)
+
+
+@dataclass(frozen=True, slots=True)
+class Start:
+    service: str = Arg(description="Service name")
+
+
+@deploy.command(
+    "start",
+    description="Start deploying a service; poll the returned job for the outcome",
+    danger_level="mutating",
+    exit_codes=["DEPLOY_CONFLICT"],
+    async_job=True,
+    examples=[("Start a deployment", "deployctl deploy start api")],
+)
+def start(args: Start, ctx: Ctx) -> Job:
+    if args.service == "locked":
+        raise Exit.DEPLOY_CONFLICT("deployment in progress", context={"service": args.service})
+    return Job(f"deploy-{args.service}", "running", effect="created")
+
+
+@dataclass(frozen=True, slots=True)
+class Setting:
+    name: str = Arg(description="Setting name, such as region")
+    value: str = Arg(description="New value")
+
+
+@dataclass(frozen=True, slots=True)
+class Written:
+    effect: Literal["updated"]
+    name: str
+    value: str
+    path: str
+
+
+config = app.group("config", description="Change settings")
+
+
+@config.command(
+    "set",
+    description="Set a setting in the project config, or the user config with --global",
+    danger_level="mutating",
+    exit_codes=["UNKNOWN_SETTING"],
+    config_write_scope="local",
+    examples=[("Set the region", "deployctl config set region eu-west-1")],
+)
+def set_(args: Setting, ctx: Ctx) -> Written:
+    if args.name not in SETTINGS:
+        raise Exit.UNKNOWN_SETTING(
+            f"no setting named {args.name}", context={"name": args.name, "known": list(SETTINGS)}
+        )
+    assert ctx.config_path is not None
+    old = ctx.config_path.read_text().splitlines() if ctx.config_path.exists() else []
+    kept = [line for line in old if not line.startswith(f"{args.name} =")]
+    path = ctx.write_config("\n".join([*kept, f"{args.name} = {json.dumps(args.value)}"]) + "\n")
+    return Written("updated", args.name, args.value, str(path))
 
 
 if __name__ == "__main__":

@@ -19,14 +19,15 @@ import io
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TextIO, cast
 
 from ._app import EXEC_PATH, App, _Run
 from ._command import Command, DangerLevel
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
+from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._manifest import payload_schema
-from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG
+from ._prompt import NoPromptStdin
 from ._schema import JsonSchema
 from ._values import CommandPath
 
@@ -223,6 +224,11 @@ async def serve(app: App) -> None:
 
     server = build_server(app)
     async with stdio_server() as (read, write):
+        # The transport holds the real streams now. For the rest of the process a print()
+        # goes to stderr and an input() exits 4, instead of corrupting or stalling the
+        # protocol; App.call swaps no stream itself, since calls run on several threads
+        sys.stdout = sys.stderr
+        sys.stdin = cast(TextIO, NoPromptStdin(io.StringIO()))
         await server.run(read, write, server.create_initialization_options())
 
 

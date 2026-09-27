@@ -23,6 +23,8 @@ def test_audit_finds_each_planted_problem(monkeypatch, tmp_path) -> None:
     assert "destructive" in by_rule["danger-level"].findings[0].fix
     assert [f.command for f in by_rule["exit-codes"].findings] == []
     assert [f.command for f in by_rule["retryable"].findings] == ["create-item"]
+    assert [f.command for f in by_rule["exit-code-suggestion"].findings] == ["create-item"]
+    assert "suggestion=" in by_rule["exit-code-suggestion"].findings[0].fix
     assert {f.command for f in by_rule["typed-output"].findings} == {"delete-item", "create-item"}
     assert [f.command for f in by_rule["network-io"].findings] == ["create-item"]
     assert [f.message[:11] for f in by_rule["path-typed"].findings] == ["report_file"]
@@ -30,7 +32,7 @@ def test_audit_finds_each_planted_problem(monkeypatch, tmp_path) -> None:
     assert [f.command for f in by_rule["cleanup"].findings] == []
     assert not by_rule["profile"].passed
     assert len(report.next_steps) == 3 and report.next_steps[0].rule == "describe"
-    assert report.failed == 8
+    assert report.failed == 9
 
 
 def test_audit_passes_a_clean_app(monkeypatch, tmp_path) -> None:
@@ -41,7 +43,13 @@ def test_audit_passes_a_clean_app(monkeypatch, tmp_path) -> None:
 
     app = App("clean", version="1")
 
-    @app.command("ping", description="Ping", examples=[("Ping", "clean ping")])
+    @app.command(
+        "ping",
+        description="Ping",
+        examples=[("Ping", "clean ping")],
+        danger_level="safe",
+        exit_codes=(),
+    )
     def ping(args: NoArgs, ctx: Ctx) -> NoArgs:
         return args
 
@@ -60,12 +68,12 @@ def test_cli_audit_json_and_plain(monkeypatch, tmp_path) -> None:
     code, out = run_cli(["audit", "fixture_audit_app:app", "--limit", "2"], isatty=False)
     assert code == 0
     data = json.loads(out)["data"]
-    assert data["rules_total"] == len(RULES) and data["failed"] == 8
+    assert data["rules_total"] == len(RULES) and data["failed"] == 9
     assert len(data["next_steps"]) == 2
     code, out = run_cli(["audit", "fixture_audit_app:app", "--all"], isatty=True)
     assert code == 0
     assert "Next steps" in out and "1. (advice) describe [create-item]" in out
-    assert out.count("fix:") == 10
+    assert out.count("fix:") == 11
 
 
 def test_cli_audit_bad_targets() -> None:
@@ -129,7 +137,13 @@ def test_heuristics_skip_words_that_only_start_like_a_verb_or_end_like_a_path() 
 
     app = App("prefs", version="1")
 
-    @app.command("settings", description="Show settings", examples=[("x", "prefs settings")])
+    @app.command(
+        "settings",
+        description="Show settings",
+        examples=[("x", "prefs settings")],
+        danger_level="safe",
+        exit_codes=(),
+    )
     def settings(args: Prefs, ctx: Ctx) -> dict[str, str]:
         return {}
 

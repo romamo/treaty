@@ -8,14 +8,14 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
-from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from ._app import App, NoArgs
 from ._audit import RULES, AuditReport, Severity, audit
 from ._context import Ctx
-from ._errors import Exit
+from ._errors import Exit, ParseError
 from ._flags import Arg, Flag
 from ._mode import Format
 from ._profile import (
@@ -29,7 +29,7 @@ from ._profile import (
 )
 from ._scaffold import ProjectName, render
 
-cli = App("treaty", version=version("treaty"), description="Build and audit agent-ready CLIs")
+cli = App("treaty", version=__version__, description="Build and audit agent-ready CLIs")
 cli.exit_code(
     "CONFORMANCE_FAILED",
     80,
@@ -48,12 +48,36 @@ cli.exit_code(
 BLOCKING = frozenset({Severity.ERROR, Severity.WARNING})
 
 
+def check_target(target: str) -> None:
+    """``module:attribute``, checked in phase 1 so a malformed target exits 2"""
+    module_name, sep, attr = target.partition(":")
+    if not sep or not module_name or not attr:
+        raise ParseError(
+            "target must be module:attribute", context={"argument": "target", "target": target}
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class AuditArgs:
     target: str = Arg(description="Import path of the App object, as module:attribute")
     all: bool = Flag(default=False, description="List every finding instead of the next few")
     limit: int = Flag(default=3, description="How many next steps to show")
     strict: bool = Flag(default=False, description="Exit with AUDIT_FAILED on any warning or error")
+
+    def __post_init__(self) -> None:
+        errors = []
+        try:
+            check_target(self.target)
+        except ParseError as exc:
+            errors.append(exc)
+        if self.limit < 1:
+            errors.append(
+                ParseError(
+                    "limit must be at least 1", context={"flag": "limit", "limit": self.limit}
+                )
+            )
+        if errors:
+            raise ParseError.combine(errors)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +109,7 @@ class AuditOut:
 
 
 def load_app(target: str) -> App:
+    """The App at ``target``; the commands check its shape in phase 1, ``treaty-mcp`` here"""
     module_name, sep, attr = target.partition(":")
     if not sep or not module_name or not attr:
         raise Exit.ARG_ERROR("target must be module:attribute", context={"target": target})
@@ -101,10 +126,12 @@ def load_app(target: str) -> App:
         ) from None
     obj = getattr(module, attr, None)
     if obj is None:
-        raise Exit.NOT_FOUND(f"{module_name} has no attribute {attr}", context={"target": target})
+        raise Exit.NOT_FOUND(
+            f"Module {module_name} has no attribute {attr}", context={"target": target}
+        )
     if not isinstance(obj, App):
         raise Exit.PRECONDITION(
-            f"{target} is {type(obj).__name__}, not a treaty App", context={"target": target}
+            f"Target {target} is {type(obj).__name__}, not a treaty App", context={"target": target}
         )
     return obj
 
@@ -157,10 +184,9 @@ def render_audit(data: Any) -> str:
         ("Fail a CI step on warnings", "treaty audit myapp.cli:app --strict"),
     ],
     renderers={Format.PLAIN: render_audit},
+    danger_level="safe",
 )
 def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
-    if args.limit < 1:
-        raise Exit.ARG_ERROR("limit must be at least 1", context={"limit": args.limit})
     app = load_app(args.target)
     report = audit(app, args.target, limit=args.limit)
     out = _to_out(report, args.all)
@@ -176,7 +202,12 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     return out
 
 
-@cli.command("rules", description="List the audit rules in the order they are checked")
+@cli.command(
+    "rules",
+    description="List the audit rules in the order they are checked",
+    danger_level="safe",
+    exit_codes=(),
+)
 def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
     return [{"id": r.id, "title": r.title, "severity": r.severity.value} for r in RULES]
 
@@ -192,6 +223,25 @@ class InitArgs:
     treaty_source: str | None = Flag(
         default=None, description="Local treaty checkout to depend on instead of PyPI"
     )
+
+    def __post_init__(self) -> None:
+        errors = []
+        try:
+            ProjectName(self.name)
+        except ParseError as exc:
+            errors.append(exc)
+        source = self.treaty_source
+        if source is not None and not (Path(source) / "pyproject.toml").is_file():
+            # Caught now, not as a "Distribution not found" from uv sync in the new project
+            errors.append(
+                ParseError(
+                    f"--treaty-source {source} is not a treaty checkout",
+                    context={"flag": "treaty-source", "treaty_source": source},
+                    suggestion="pass the directory that holds treaty's pyproject.toml",
+                )
+            )
+        if errors:
+            raise ParseError.combine(errors)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,18 +276,11 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     target = args.directory if args.directory is not None else Path(name.value)
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise Exit.CONFLICT(
-            f"{target} exists and is not an empty directory",
+            f"Directory {target} exists and is not empty",
             context={"directory": str(target)},
             fix_required="choose an empty directory with --directory",
         )
     source = str(Path(args.treaty_source).resolve()) if args.treaty_source else None
-    if source is not None and not (Path(source) / "pyproject.toml").is_file():
-        # Caught now, not as a "Distribution not found" from uv sync in the new project
-        raise Exit.ARG_ERROR(
-            f"--treaty-source {args.treaty_source} is not a treaty checkout",
-            context={"treaty_source": source},
-            suggestion="pass the directory that holds treaty's pyproject.toml",
-        )
     files = render(name, source)
     if not args.dry_run:
         for rel, content in files.items():
@@ -280,6 +323,9 @@ class ConformanceArgs:
     spec_dir: Path | None = Flag(
         default=None, description="Spec checkout with conformance/run.py; also TREATY_SPEC_DIR"
     )
+
+    def __post_init__(self) -> None:
+        check_target(self.target)
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,7 +375,7 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
         )
     if not has_kit(named):
         raise Exit.PRECONDITION(
-            f"{source} has no conformance/run.py",
+            f"Spec checkout {source} has no conformance/run.py",
             context={"source": source, "spec_dir": str(named)},
             fix_required=f"point {source} at a spec checkout containing conformance/run.py",
         )

@@ -31,11 +31,13 @@ class PushArgs:
 def secret_app() -> App:
     app = App("vaultctl", version="1")
 
-    @app.command("login", description="Log in")
+    @app.command("login", description="Log in", danger_level="safe", exit_codes=())
     def login(args: LoginArgs, ctx: Ctx) -> dict[str, object]:
         return {"account": args.account, "pin": args.pin, "api_key": args.api_key}
 
-    @app.command("push", description="Push with a required token")
+    @app.command(
+        "push", description="Push with a required token", danger_level="safe", exit_codes=()
+    )
     def push(args: PushArgs, ctx: Ctx) -> dict[str, str]:
         return {"token_len": str(len(args.token))}
 
@@ -90,7 +92,7 @@ def test_direct_secret_flag_is_refused_with_the_two_sources() -> None:
 def test_unknown_inline_flag_keeps_only_the_name() -> None:
     _, out, _ = run(["login", "acme", f"--token={SECRET}"])
     error = error_of(out)
-    assert error["message"] == "unknown flag '--token'" and error["context"]["flag"] == "token"
+    assert error["message"] == "Unknown flag '--token'." and error["context"]["flag"] == "token"
 
 
 def test_non_secret_values_are_still_echoed() -> None:
@@ -210,7 +212,7 @@ def test_secret_positional_is_a_registration_error() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="cannot be positional"):
 
-        @app.command("go", description="Go")
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: Positional, ctx: Ctx) -> None:
             return None
 
@@ -231,7 +233,9 @@ def test_secret_bool_array_or_short_is_a_registration_error() -> None:
     for args_type, match in ((Flagged, "boolean"), (Many, "array"), (Short, "short flag")):
         app = App("x", version="1")
         with pytest.raises(RegistrationError, match=match):
-            app.command("go", description="Go")(_handler_for(args_type))
+            app.command("go", description="Go", danger_level="safe", exit_codes=())(
+                _handler_for(args_type)
+            )
 
 
 def _handler_for(args_type: type):  # type: ignore[no-untyped-def]

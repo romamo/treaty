@@ -15,7 +15,6 @@ after 24 hours; an expired lock file is removed only while nobody holds it.
 from __future__ import annotations
 
 import dataclasses
-import errno
 import hashlib
 import json
 import os
@@ -30,46 +29,13 @@ from enum import Enum
 from pathlib import Path
 from typing import IO
 
+from ._atomic import lock as _lock
+from ._atomic import try_lock as _try_lock
+from ._atomic import unlock as _unlock
+from ._atomic import write_atomic
 from ._errors import ParseError, SchemaError
 from ._scalars import ScalarRegistry
 from ._values import CommandPath
-
-if sys.platform == "win32":
-    import msvcrt
-
-    def _try_lock(handle: IO[str]) -> bool:
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as exc:
-            if exc.errno in (errno.EACCES, errno.EDEADLOCK):
-                return False
-            raise
-        return True
-
-    def _lock(handle: IO[str]) -> None:
-        # LK_LOCK gives up after ten one-second attempts; a retry must wait as long as it takes
-        while not _try_lock(handle):
-            time.sleep(0.05)
-
-    def _unlock(handle: IO[str]) -> None:
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-
-else:
-    import fcntl
-
-    def _try_lock(handle: IO[str]) -> bool:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return False
-        return True
-
-    def _lock(handle: IO[str]) -> None:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-
-    def _unlock(handle: IO[str]) -> None:
-        fcntl.flock(handle, fcntl.LOCK_UN)
-
 
 STATE_ENV = "TREATY_STATE_DIR"
 TTL_SECONDS = 24 * 60 * 60
@@ -161,7 +127,8 @@ def state_dir(app_name: str, explicit: Path | None, env: Mapping[str, str]) -> P
         return explicit
     if root := env.get(STATE_ENV):
         return Path(root) / app_name
-    if xdg := env.get("XDG_STATE_HOME"):
+    xdg = env.get("XDG_STATE_HOME")
+    if xdg and Path(xdg).is_absolute():  # a relative one is ignored, as the XDG spec says
         return Path(xdg) / "treaty" / app_name
     if home := env.get("HOME"):
         return Path(home) / ".local" / "state" / "treaty" / app_name
@@ -190,11 +157,7 @@ class Slot:
                 "created_at": record.created_at,
             }
         )
-        tmp = self.path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(body)
-        os.replace(tmp, self.path)
+        write_atomic(self.path, body)
 
     def prune(self, now: float) -> None:
         """Remove other keys' expired records and idle locks; separate from ``save`` so a
@@ -302,14 +265,16 @@ def _load(path: Path, now: float) -> Record | None:
 
 
 def _prune(directory: Path, now: float) -> None:
-    """Remove expired records and idle lock files; the saving key's own lock is held
-    by the caller, so its fresh record is never touched"""
+    """Remove expired records, idle lock files, and temporary files a crashed write left;
+    the saving key's own lock is held by the caller, so its fresh record is never touched"""
     failure: OSError | None = None
     for path in directory.iterdir():
-        if path.suffix not in (".json", ".lock") or not path.is_file():
+        if path.suffix not in (".json", ".lock", ".tmp") or not path.is_file():
             continue  # not treaty's: a directory or other entry someone left here
         try:
-            if path.suffix == ".json" and _expired(path, now):
+            if path.suffix == ".tmp" and _expired(path, now):
+                path.unlink(missing_ok=True)  # no write takes as long as a record lives
+            elif path.suffix == ".json" and _expired(path, now):
                 _prune_record(path, now)
             elif path.suffix == ".lock" and _expired(path, now):
                 _unlink_idle_lock(path)

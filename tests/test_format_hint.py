@@ -22,11 +22,11 @@ class ExportArgs:
 def hint_app() -> App:
     app = App("listctl", version="1")
 
-    @app.command("list", description="List items")
+    @app.command("list", description="List items", danger_level="safe", exit_codes=())
     def list_(args: ListArgs, ctx: Ctx) -> dict[str, int]:
         return {"limit": args.limit}
 
-    @app.command("export", description="Export items")
+    @app.command("export", description="Export items", danger_level="safe", exit_codes=())
     def export(args: ExportArgs, ctx: Ctx) -> dict[str, str]:
         return {"output": args.output}
 
@@ -58,7 +58,8 @@ def test_guessed_representation_flags_point_to_format(argv: list[str]) -> None:
 
 def test_other_unknown_flags_get_no_hint() -> None:
     _, env = run(["list", "--verbose"])
-    assert "suggestion" not in env["error"]
+    # Only the generic next step every validation error carries (REQ-C-013)
+    assert env["error"]["suggestion"] == env["error"]["fix_required"]
 
 
 def test_command_owned_output_flag_is_not_hijacked() -> None:

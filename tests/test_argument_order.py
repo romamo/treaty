@@ -64,7 +64,7 @@ def test_manifest_lists_global_options_at_the_root(app: App) -> None:
     _, env = run(app, ["manifest"])
     manifest = env["data"]
     assert set(manifest["flags"]) == {"format", "max-output", "schema", "help"}
-    assert manifest["flags"]["format"]["enum_values"] == ["plain", "json"]
+    assert manifest["flags"]["format"]["enum_values"] == ["plain", "json", "jsonl", "tsv"]
     for entry in manifest["commands"].values():
         assert not set(entry["flags"]) & set(manifest["flags"])
 
@@ -78,6 +78,6 @@ def test_short_alias_of_a_global_option_is_rejected() -> None:
 
     with pytest.raises(RegistrationError, match="global options"):
 
-        @app.command("connect", description="Connect")
+        @app.command("connect", description="Connect", danger_level="safe", exit_codes=())
         def connect(args: Host, ctx: Ctx) -> dict[str, str]:
             return {"host": args.host}

@@ -6,25 +6,35 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
-from ._command import Command, DangerLevel
+from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
+from ._framework import NO_STREAM_FLAG, framework_flags
 from ._mode import Format
-from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG, NO_STREAM_FLAG, TIMEOUT_FLAG
 from ._schema import JsonSchema
 from ._values import CommandPath, Etag
 
 SCHEMA_VERSION = "3.0"
-CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
-IDEMPOTENCY_KEY = IDEMPOTENCY_FLAG.replace("-", "_")
-NO_STREAM_KEY = NO_STREAM_FLAG.replace("-", "_")
-TIMEOUT_KEY = TIMEOUT_FLAG
-# TIMEOUT is shared: every handler runs under a deadline unless it is set to 0
+# TIMEOUT is shared: every handler runs under a deadline unless it is set to 0.
+# PRECONDITION too: a stray input() no one can answer exits 4 on any command (REQ-F-047)
 _ALWAYS = (
     FrameworkCode.SUCCESS,
     FrameworkCode.GENERAL_ERROR,
     FrameworkCode.ARG_ERROR,
     FrameworkCode.TIMEOUT,
+    FrameworkCode.PRECONDITION,
 )
+
+
+def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
+    """The codes a command may exit with undeclared: the shared ones, CONFLICT for a
+    reused idempotency key on a non-safe command, and 7 and 8 behind the credential gate"""
+    codes = list(_ALWAYS)
+    if command.danger_level is not DangerLevel.SAFE:
+        codes.append(FrameworkCode.CONFLICT)
+    if command.requires_auth:
+        # Not logged in, or the credential lacks a required scope (REQ-C-029)
+        codes += (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED)
+    return tuple(codes)
 
 
 def global_flag_entries(formats: Sequence[Format]) -> dict[str, object]:
@@ -91,49 +101,15 @@ def command_entry(
     for name in command.exit_codes:
         entry = exits.by_name(name)
         exit_codes[str(entry.code.value)] = entry.to_json()
+    for code in implicit_exit_codes(command):
+        entry = exits.framework(code)
+        exit_codes.setdefault(str(entry.code.value), entry.to_json())
     if shared is not None:
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
     flags: dict[str, object] = {}
     for f in command.fields:
         flags.update(f.to_flag_entries())
-    if command.accepts_timeout:
-        flags["timeout"] = {
-            "type": "number",
-            "required": False,
-            "description": "Seconds before the framework aborts with TIMEOUT; 0 disables the limit",
-        }
-    if command.supports_raw_payload:
-        flags["raw-payload"] = {
-            "type": "string",
-            "required": False,
-            "description": "JSON object of field values; cannot be combined with individual flags",
-        }
-    if command.danger_level is not DangerLevel.SAFE:
-        flags["idempotency-key"] = {
-            "type": "string",
-            "required": False,
-            "description": "Repeat calls with the same key return the original result "
-            "with effect noop instead of running again",
-        }
-        # A reused key is CONFLICT; an unusable state directory or record is PRECONDITION
-        for code in (FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION):
-            entry = exits.framework(code)
-            exit_codes.setdefault(str(entry.code.value), entry.to_json())
-    if command.streaming:
-        flags["no-stream"] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Return one envelope with every event in data instead of "
-            "one envelope line per event",
-        }
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        flags["confirm-destructive"] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Required to apply; without it the command previews and exits 2",
-        }
+    flags.update((f.name, f.to_entry(command)) for f in framework_flags(command))
     out: dict[str, object] = {
         "description": command.description,
         "danger_level": command.danger_level.value,
@@ -154,6 +130,25 @@ def command_entry(
         out["has_network_io"] = True
     if command.streaming:
         out["streaming_default"] = True
+    if command.safe_default:
+        out["safe_default"] = True
+    if command.interactive:
+        out["interactive"] = True
+    if command.editor_alternatives:
+        out["requires_editor"] = True
+        out["non_interactive_alternatives"] = list(command.editor_alternatives)
+    if command.gui_operations:
+        out["gui_operations"] = list(command.gui_operations)
+        # The only behavior treaty has: the URL goes to data.open_url (REQ-C-024)
+        out["headless_behavior"] = "emit_in_output"
+    if command.auth is not None:
+        out["headless_supported"] = command.auth.headless_supported  # REQ-C-021
+        out["token_env_vars"] = list(command.token_env_vars)
+    if command.async_job:
+        out["async"] = True  # REQ-C-022
+        out["job_descriptor_schema"] = command.output_schema
+    if command.config_write_scope is not None:
+        out["config_write_scope"] = command.config_write_scope.value  # REQ-C-025
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret
@@ -167,8 +162,21 @@ def command_schema(
     """``--schema`` output for one command (REQ-C-015, REQ-O-032)"""
     entry = command_entry(command, exits, all_paths)
     entry["parameters"] = entry["flags"]
+    if command.danger_level is DangerLevel.DESTRUCTIVE:
+        entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
     if command.supports_raw_payload:
         entry["raw_payload_schema"] = payload_schema(command)
+    if command.stdin_input:
+        entry["stdin_input"] = True  # REQ-F-054; not a ManifestResponse key
+    if command.heartbeat:
+        # REQ-F-053: lines an agent skips before the envelope; not a ManifestResponse key
+        entry["heartbeat_ms"] = DEFAULT_HEARTBEAT_MS
+    if command.streaming:
+        entry["timeout_kind"] = "idle"  # REQ-F-011: the limit restarts with every event
+    if command.paginated:
+        # REQ-F-019; not ManifestResponse keys, whose --limit flag shows the same default
+        entry["paginated"] = True
+        entry["default_limit"] = command.default_limit.count or 0
     return entry
 
 
@@ -179,46 +187,28 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
     required: list[str] = []
     base = command.args_schema
     for f in command.fields:
+        key = f.flag.replace("-", "_")  # the field name, less a keyword's trailing _
         if f.secret:
             what = f.spec.description
-            properties[f"{f.name}_from_env"] = {
+            properties[f"{key}_from_env"] = {
                 "type": "string",
                 "description": f"Name of the environment variable holding: {what}",
             }
-            properties[f"{f.name}_from_file"] = {
+            properties[f"{key}_from_file"] = {
                 "type": "string",
                 "description": f"Path of the file holding: {what}",
             }
             continue
         prop = dict(base["properties"][f.name])
         prop["description"] = f.spec.description
-        properties[f.name] = prop
+        properties[key] = prop
         if f.required:  # an X | None field without a default is optional, as the parser says
-            required.append(f.name)
-    if command.accepts_timeout:
-        properties[TIMEOUT_KEY] = {
-            "type": "number",
-            "description": "Seconds before the framework aborts with TIMEOUT; 0 disables it",
-        }
-    if command.danger_level is not DangerLevel.SAFE:
-        properties[IDEMPOTENCY_KEY] = {
-            "type": "string",
-            "description": "Repeat calls with the same key return the original result "
-            "with effect noop instead of running again",
-        }
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        properties[CONFIRM_KEY] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Required to apply; without it the command previews and fails "
-            "with CONFIRMATION_REQUIRED",
-        }
-    if command.streaming and stream_key:
-        properties[NO_STREAM_KEY] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Return one envelope with every event in data",
-        }
+            required.append(key)
+    properties.update(
+        (f.key, f.to_property(command))
+        for f in framework_flags(command, json=True)
+        if stream_key or f.name != NO_STREAM_FLAG
+    )
     schema: JsonSchema = {
         "type": "object",
         "properties": properties,

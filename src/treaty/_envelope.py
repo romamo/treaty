@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -38,6 +40,41 @@ def json_safe(value: object, depth: int = 0) -> object:
     return str(value)
 
 
+# REQ-F-007: CSI (colors, cursor movement), OSC (titles, links), other two-byte escapes,
+# and a stray ESC
+_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?")
+# REQ-F-016: a null byte or a lone surrogate is not valid UTF-8 text
+_INVALID = re.compile(r"[\x00\ud800-\udfff]")
+
+
+def clean(value: object) -> object:
+    """Every string value of a JSON value without terminal escapes, and valid UTF-8 once
+    encoded: whatever a handler or a library returned, the envelope stays plain text. Keys
+    are left alone, so two keys never collapse into one"""
+    if isinstance(value, str):
+        return _INVALID.sub("\ufffd", _ESCAPES.sub("", value))
+    if isinstance(value, dict):
+        return {k: clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [clean(v) for v in value]
+    return value
+
+
+def sentence(text: str) -> str:
+    """An error message as a complete sentence (REQ-C-013): a lowercase first letter is
+    capitalized and closing punctuation is added when missing. Escapes go first, so a
+    colored message is judged by its text."""
+    text = _ESCAPES.sub("", text).strip()
+    if text[:1].islower():
+        text = text[0].upper() + text[1:]
+    if text and text[-1] not in ".!?":
+        text += "."
+    return text
+
+
+_RETRY = "retry the same command; it had no side effects"
+
+
 @dataclass(frozen=True, slots=True)
 class ErrorDetail:
     code: str
@@ -53,6 +90,25 @@ class ErrorDetail:
     phase: str | None = None
     errors: Sequence[Mapping[str, object]] | None = None
     """Every validation failure of the run (REQ-F-015); present on validation errors only"""
+    alternatives: Sequence[Mapping[str, str]] | None = None
+    """Flags that replace an editor the run could not open (REQ-F-055)"""
+    hint: str | None = None
+    """The flag that avoids this failure, such as ``--input-file`` (REQ-F-054)"""
+    auth_methods: Sequence[Mapping[str, str]] | None = None
+    """Ways to log in without a browser, such as a token variable (REQ-O-033)"""
+
+    def __post_init__(self) -> None:
+        # One place, so framework and author messages alike read as sentences (REQ-C-013)
+        object.__setattr__(self, "message", sentence(self.message))
+        if self.errors is not None:
+            items = [
+                {**e, "message": sentence(str(e["message"]))} if "message" in e else e
+                for e in self.errors
+            ]
+            object.__setattr__(self, "errors", tuple(items))
+        if self.suggestion is None and (self.retryable or self.fix_required is not None):
+            # A recoverable error always names its next step
+            object.__setattr__(self, "suggestion", self.fix_required or _RETRY)
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -74,10 +130,16 @@ class ErrorDetail:
             out["retry_after_ms"] = self.retry_after_ms
         if self.fix_required is not None:
             out["fix_required"] = self.fix_required
+        if self.hint is not None:
+            out["hint"] = self.hint
         if self.phase is not None:
             out["phase"] = self.phase
         if self.errors is not None:
             out["errors"] = [json_safe(dict(e)) for e in self.errors]
+        if self.alternatives is not None:
+            out["alternatives"] = [dict(a) for a in self.alternatives]
+        if self.auth_methods is not None:
+            out["auth_methods"] = [dict(a) for a in self.auth_methods]
         return out
 
 
@@ -114,6 +176,10 @@ class Envelope:
     def ok(self) -> bool:
         return self.exit_code == 0
 
+    def cleaned(self) -> Envelope:
+        """``data`` as ``clean`` leaves it; the rest is cleaned by ``to_json``"""
+        return dataclasses.replace(self, data=clean(self.data))
+
     def to_json(self) -> dict[str, object]:
         meta: dict[str, object] = {
             "exit_code": self.exit_code,
@@ -123,10 +189,11 @@ class Envelope:
         meta.update(self.extra_meta)
         return {
             "ok": self.ok,
+            # Cleaned once in cleaned(), before the byte cap serializes it again and again
             "data": self.data,
-            "error": None if self.error is None else self.error.to_json(),
-            "warnings": [w.to_json() for w in self.warnings],
-            "meta": meta,
+            "error": None if self.error is None else clean(self.error.to_json()),
+            "warnings": clean([w.to_json() for w in self.warnings]),
+            "meta": clean(meta),
         }
 
 

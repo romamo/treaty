@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import keyword
 import math
 import re
 import typing
@@ -21,6 +22,8 @@ _META = "treaty"
 REDACTED = "[REDACTED]"
 # REQ-F-034: names containing these are treated as secrets unless declared otherwise
 _SECRET_NAME_PARTS = ("token", "secret", "password", "key", "credential", "auth")
+# REQ-F-044: characters refused in text values, by their rejected_pattern name
+_CONTROL_CHARS = {"\n": "newline", "\r": "carriage_return", "\x00": "null_byte"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +33,7 @@ class FlagSpec:
     short: str | None = None
     pattern: str | None = None
     secret: bool | None = None
+    multiline: bool = False
 
     def __post_init__(self) -> None:
         if not self.description:
@@ -47,12 +51,14 @@ def Flag(
     short: str | None = None,
     pattern: str | None = None,
     secret: bool | None = None,
+    multiline: bool = False,
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
     ``secret`` keeps the value out of every error; ``None`` infers it from the name.
+    ``multiline`` lets a text field such as a message body contain newlines.
     """
-    spec = FlagSpec(description, short=short, pattern=pattern, secret=secret)
+    spec = FlagSpec(description, short=short, pattern=pattern, secret=secret, multiline=multiline)
     if isinstance(default, (list, dict, set)):
         raise RegistrationError("mutable defaults are not allowed; use a tuple")
     if default is MISSING:
@@ -132,10 +138,27 @@ class FieldInfo:
         if target is None:
             raise RegistrationError(f"{self.name}: array without item type")
         try:
+            if target.flag_type is FlagType.STRING:
+                self.check_text(raw)
             self.check_pattern(raw)
             return _coerce(target, raw, self.flag, secret=self.secret)
         except ParseError as exc:
             raise self.scrub(exc) from None
+
+    def check_text(self, raw: str) -> None:
+        """REQ-F-044: a line break or null byte in a text value is refused in phase 1, since
+        it can end a command line or a log record wherever the value is passed on. A
+        ``multiline`` field accepts line breaks; a secret, never echoed or passed as an
+        argument, is exempt."""
+        if self.secret:
+            return
+        for char, name in _CONTROL_CHARS.items():
+            if char in raw and not (self.spec.multiline and char in "\n\r"):
+                raise ParseError(
+                    f"value for {self.flag!r} contains a {name.replace('_', ' ')}",
+                    context={"flag": self.flag, "value": raw, "rejected_pattern": name},
+                    suggestion=f"pass --{self.flag} as a single line",
+                )
 
     def check_pattern(self, raw: str) -> None:
         """``Flag(pattern=)`` for argv tokens and JSON strings alike (REQ-C-020)"""
@@ -165,10 +188,14 @@ class FieldInfo:
         }
 
     def to_flag_entry(self) -> dict[str, object]:
+        description = self.spec.description
+        if self.spec.multiline:
+            # FlagEntry allows no extra keys, so the opt-out is stated in the description
+            description = f"{description} (may contain newlines)"
         entry: dict[str, object] = {
             "type": self.flag_type.value,
             "required": self.required,
-            "description": self.spec.description,
+            "description": description,
         }
         if self.default is not MISSING and self.default is not None:
             entry["default"] = _jsonable_default(self.default, self.scalar)
@@ -408,6 +435,13 @@ def _check_positionals(cls: type, positionals: list[FieldInfo]) -> None:
         )
 
 
+def flag_name(field_name: str) -> str:
+    """``dry_run`` is ``--dry-run``; ``for_``, spelled so for Python, is ``--for``"""
+    if field_name.endswith("_") and keyword.iskeyword(field_name[:-1]):
+        field_name = field_name[:-1]
+    return field_name.replace("_", "-")
+
+
 def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
     """Read an arguments dataclass into ordered ``FieldInfo`` records"""
     if not dataclasses.is_dataclass(cls):
@@ -457,7 +491,7 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
         required = default is MISSING and not classified.optional
         info = FieldInfo(
             name=f.name,
-            flag=f.name.replace("_", "-"),
+            flag=flag_name(f.name),
             classified=classified,
             required=required,
             default=default,
@@ -465,6 +499,11 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
         )
         if info.secret:
             _check_secret_field(cls, info)
+        text = item if item is not None else classified
+        if spec.multiline and text.flag_type is not FlagType.STRING:
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: multiline=True is for str fields only"
+            )
         infos.append(info)
     _check_positionals(cls, [i for i in infos if i.positional])
     _check_flag_names(cls, infos)

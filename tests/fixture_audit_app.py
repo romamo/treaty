@@ -23,7 +23,7 @@ class Wide:
     report_file: str = Flag(default="", description="Where to write the report")
 
 
-@app.command("delete-item", description="Delete an item")
+@app.command("delete-item", description="Delete an item", danger_level="safe", exit_codes=())
 def delete_item(args: Name, ctx: Ctx) -> dict[str, object]:
     return {"deleted": args.name}
 
@@ -41,6 +41,8 @@ def create_item(args: Wide, ctx: Ctx) -> dict[str, object]:
     examples=[("Run it", "shopctl good x")],
     has_network_io=True,
     cleanup=lambda: None,
+    danger_level="safe",
+    exit_codes=(),
 )
 def good(args: Name, ctx: Ctx) -> Name:
     return args

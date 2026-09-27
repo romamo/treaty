@@ -76,7 +76,11 @@ def scalar_app() -> App:
     app.scalar(Release, parse=Release.parse, serialize=lambda r: r.tag)
 
     @app.command(
-        "deploy", description="Deploy a service", danger_level="mutating", supports_raw_payload=True
+        "deploy",
+        description="Deploy a service",
+        danger_level="mutating",
+        supports_raw_payload=True,
+        exit_codes=(),
     )
     def deploy(args: DeployArgs, ctx: Ctx) -> Receipt:
         assert isinstance(args.service, ResourceId)
@@ -128,7 +132,7 @@ def test_pattern_violation_is_a_field_error_with_the_pattern() -> None:
     code, env = run(["deploy", "Bad_Name"])
     assert code == 2
     error = errors_of(env)["service"]
-    assert error["message"] == "value for 'service' does not match pattern"
+    assert error["message"] == "Value for 'service' does not match pattern."
     assert error["context"]["pattern"] == _ID.pattern
     assert error["context"]["scalar"] == "ResourceId"
     assert error["context"]["value"] == "Bad_Name"
@@ -139,7 +143,7 @@ def test_parser_value_error_is_a_field_error_with_its_cause() -> None:
     assert code == 2
     error = errors_of(env)["port"]
     assert (
-        error["message"] == "value for 'port' is not a valid TcpPort: only even ports in this test"
+        error["message"] == "Value for 'port' is not a valid TcpPort: only even ports in this test."
     )
     assert error["context"]["cause"] == "only even ports in this test"
 
@@ -148,7 +152,7 @@ def test_bounds_are_checked_before_the_parser() -> None:
     code, env = run(["deploy", "api", "--port", "0"])
     assert code == 2
     error = errors_of(env)["port"]
-    assert error["message"] == "value for 'port' must be at least 1"
+    assert error["message"] == "Value for 'port' must be at least 1."
     assert error["context"]["minimum"] == 1
     code, env = run(["deploy", "api", "--port", "70000"])
     assert errors_of(env)["port"]["context"]["maximum"] == 65535
@@ -157,13 +161,13 @@ def test_bounds_are_checked_before_the_parser() -> None:
 def test_base_type_failure_is_reported_as_the_base_type() -> None:
     code, env = run(["deploy", "api", "--port", "http"])
     assert code == 2
-    assert errors_of(env)["port"]["message"] == "'port' expects an integer"
+    assert errors_of(env)["port"]["message"] == "'port' expects an integer."
 
 
 def test_all_scalar_errors_are_reported_in_one_run() -> None:
     code, env = run(["deploy", "Bad", "--port", "0", "--peers", "ok", "--peers", "NO"])
     assert code == 2
-    assert env["error"]["message"] == "Validation failed: 3 errors"
+    assert env["error"]["message"] == "Validation failed: 3 errors."
     assert set(errors_of(env)) == {"service", "port", "peers"}
 
 
@@ -181,7 +185,7 @@ def test_raw_payload_route_applies_the_same_checks() -> None:
 def test_raw_payload_base_type_mismatch_is_reported_as_the_base_type() -> None:
     code, env = run(["deploy", "--raw-payload", json.dumps({"service": 7})])
     assert code == 2
-    assert errors_of(env)["service"]["message"] == "'service' expects a string"
+    assert errors_of(env)["service"]["message"] == "'service' expects a string."
 
 
 def test_exec_route_parses_scalars() -> None:
@@ -267,7 +271,7 @@ def test_pattern_type_preset_reaches_manifest_and_schema() -> None:
     app = App("runs", version="1")
     app.scalar(RunId, parse=RunId, pattern_type="uuid")
 
-    @app.command("show", description="Show a run")
+    @app.command("show", description="Show a run", danger_level="safe", exit_codes=())
     def show(args: ShowArgs, ctx: Ctx) -> dict[str, RunId]:
         return {"run": args.run}
 
@@ -292,7 +296,7 @@ def test_unregistered_class_is_a_registration_time_schema_error() -> None:
     app = App("fleet", version="1")
     with pytest.raises(SchemaError, match="register a class with app.scalar"):
 
-        @app.command("deploy", description="Deploy")
+        @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
         def deploy(args: Args, ctx: Ctx) -> None:
             return None
 
@@ -308,7 +312,7 @@ def test_unregistered_dataclass_in_output_stays_a_nested_object() -> None:
 
     app = App("fleet", version="1")
 
-    @app.command("deploy", description="Deploy")
+    @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
     def deploy(args: Args, ctx: Ctx) -> Out:
         return Out(ResourceId(args.name))
 
@@ -328,7 +332,7 @@ def test_field_pattern_is_refused_on_a_scalar_field() -> None:
     app.scalar(ResourceId, parse=ResourceId.from_boundary)
     with pytest.raises(RegistrationError, match="pattern= is not allowed"):
 
-        @app.command("deploy", description="Deploy")
+        @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
         def deploy(args: Args, ctx: Ctx) -> None:
             return None
 

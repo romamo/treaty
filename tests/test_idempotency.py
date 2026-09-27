@@ -11,7 +11,7 @@ import pytest
 from conftest import needs_posix_permissions, spec_validator
 
 from treaty import App, Arg, Ctx, Exit, Flag, RegistrationError
-from treaty._idempotency import TTL_SECONDS, IdempotencyKey, Record, claim
+from treaty._idempotency import TTL_SECONDS, IdempotencyKey, Record, claim, state_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,11 +47,11 @@ def counting_app(state: Path) -> tuple[App, list[str]]:
         effect = "would_create" if args.dry_run else "created"
         return Created(effect, args.name, len(calls), ctx.idempotency_key)
 
-    @app.command("broken", description="Forgets its effect", danger_level="mutating")
+    @app.command("broken", description="Forgets its effect", danger_level="mutating", exit_codes=())
     def broken(args: CreateArgs, ctx: Ctx) -> dict[str, object]:
         return {"effect": "created" if args.dry_run else "made"}
 
-    @app.command("show", description="Read only")
+    @app.command("show", description="Read only", danger_level="safe", exit_codes=())
     def show(args: CreateArgs, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -152,7 +152,7 @@ def test_registration_requires_an_effect_field_and_reserves_the_key() -> None:
     app = App("x", version="1")
     with pytest.raises(RegistrationError, match="'effect' field"):
 
-        @app.command("make", description="Make", danger_level="mutating")
+        @app.command("make", description="Make", danger_level="mutating", exit_codes=())
         def make(args: CreateArgs, ctx: Ctx) -> list[str]:
             return []
 
@@ -162,7 +162,7 @@ def test_registration_requires_an_effect_field_and_reserves_the_key() -> None:
 
     with pytest.raises(RegistrationError, match="ctx.idempotency_key"):
 
-        @app.command("keyed", description="Keyed", danger_level="mutating")
+        @app.command("keyed", description="Keyed", danger_level="mutating", exit_codes=())
         def keyed(args: Keyed, ctx: Ctx) -> dict[str, object]:
             return {}
 
@@ -201,7 +201,7 @@ def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> No
     release = threading.Event()
     app = App("slowctl", version="1", state_dir=tmp_path, default_timeout=0.2)
 
-    @app.command("create", description="Slow create", danger_level="mutating")
+    @app.command("create", description="Slow create", danger_level="mutating", exit_codes=())
     def create(args: CreateArgs, ctx: Ctx) -> Created:
         started.append(time.monotonic())
         release.wait(10)  # held until the test has seen the retry refused
@@ -251,6 +251,22 @@ def test_prune_removes_an_idle_expired_lock(tmp_path: Path) -> None:
         slot.save(Record("fp", "create", {"effect": "created"}, time.time()))
         slot.prune(time.time())
     assert not lock.exists()
+
+
+def test_prune_removes_a_stale_temporary_file(tmp_path: Path) -> None:
+    stale_tmp, fresh_tmp = tmp_path / ".abc.json.x1.tmp", tmp_path / ".abc.json.x2.tmp"
+    stale_tmp.write_text("{")
+    fresh_tmp.write_text("{")
+    stale = time.time() - TTL_SECONDS - 3600
+    os.utime(stale_tmp, (stale, stale))
+    with claim(tmp_path, IdempotencyKey("other")) as slot:
+        slot.prune(time.time())
+    assert not stale_tmp.exists() and fresh_tmp.exists()
+
+
+def test_a_relative_xdg_state_home_is_ignored() -> None:
+    env = {"HOME": "/home/u", "XDG_STATE_HOME": "relative"}
+    assert state_dir("app", None, env) == Path("/home/u/.local/state/treaty/app")
 
 
 def test_signal_interrupts_a_retry_waiting_for_the_key(tmp_path: Path) -> None:

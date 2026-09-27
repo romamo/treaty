@@ -48,6 +48,8 @@ def render_greet(data: Mapping[str, str]) -> str:
         ("Greet the world", "hello greet world"),
         ("Greet Ada loudly", "hello greet Ada --shout"),
     ],
+    danger_level="safe",
+    exit_codes=(),
 )
 def greet_command(args: Greet, ctx: Ctx) -> Greeting:
     return greet(args.name, shout=args.shout)

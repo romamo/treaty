@@ -38,11 +38,19 @@ class TailArgs:
 def adapter_app() -> App:
     app = App("regctl", version="2", description="Registry control")
 
-    @app.command("push", description="Push an image", danger_level="mutating", has_network_io=True)
+    @app.command(
+        "push",
+        description="Push an image",
+        danger_level="mutating",
+        has_network_io=True,
+        exit_codes=(),
+    )
     def push(args: PushArgs, ctx: Ctx) -> Pushed:
         return Pushed("created", args.image, len(args.token))
 
-    @app.command("log.tail", description="Tail the log", streaming=True)
+    @app.command(
+        "log.tail", description="Tail the log", streaming=True, danger_level="safe", exit_codes=()
+    )
     def tail(args: TailArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         for n in range(args.count):
             yield {"n": n}
@@ -187,7 +195,15 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
 
     got = asyncio.run(scenario())
     assert got["server"] == ("deployctl", "1.4.0")
-    assert got["tools"] == ["deploy_rollback", "manifest", "version"]
+    assert got["tools"] == [
+        "config_set",
+        "deploy_rollback",
+        "deploy_start",
+        "job_cancel",
+        "job_status",
+        "manifest",
+        "version",
+    ]
     rollback = got["rollback"]
     assert rollback.annotations.destructive_hint is True  # type: ignore[attr-defined]
     assert rollback.input_schema["required"] == ["service"]  # type: ignore[attr-defined]
@@ -201,6 +217,49 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
     assert applied["ok"] is True and applied["data"]["effect"] == "updated"
     unknown = got["unknown"].structured_content  # type: ignore[attr-defined]
     assert unknown["error"]["code"] == "UNKNOWN_TOOL"
+
+
+def test_stdio_server_turns_a_stray_input_into_exit_4() -> None:
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object]]:
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "treaty._mcp", "fixture_prompt_app:app"],
+            cwd=str(Path(__file__).resolve().parent),
+        )
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            asked = await session.call_tool("ask", {})
+            after = await session.call_tool("version", {})
+            return asked.structured_content, after.structured_content  # type: ignore[return-value]
+
+    asked, after = asyncio.run(scenario())
+    assert asked["error"]["code"] == "INTERACTIVE_BLOCKED"  # type: ignore[index]
+    assert asked["meta"]["exit_code"] == 4  # type: ignore[index]
+    assert after["ok"] is True
+
+
+def test_unknown_field_lists_only_flags_a_mapping_accepts() -> None:
+    app = App("files", version="1")
+
+    @app.command(
+        "dump",
+        description="Dump",
+        danger_level="safe",
+        exit_codes=(),
+        heartbeat=True,
+        output_file=True,
+        has_network_io=True,
+    )
+    def dump(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": 1}
+
+    envelope = app.call("dump", {"nope": 1})
+    assert envelope.error is not None
+    known = envelope.error.context["known"]
+    assert known == ["timeout"]  # not heartbeat-ms or output, which only argv takes
 
 
 def test_console_script_usage_errors() -> None:
@@ -223,7 +282,7 @@ def test_capped_and_tuple_outputs_validate_like_an_mcp_client() -> None:
 
     app = App("wide", version="1", max_output_bytes=4096)
 
-    @app.command("wide", description="Big output")
+    @app.command("wide", description="Big output", danger_level="safe", exit_codes=())
     def wide(args: NoArgs, ctx: Ctx) -> Wide:
         return Wide((1, "a"), {f"k{i}": "x" * 300 for i in range(20)})
 
@@ -248,7 +307,7 @@ def test_replayed_noop_matches_a_closed_effect_enum() -> None:
 
     app = App("mk", version="1", state_dir=None)
 
-    @app.command("mk", description="Make", danger_level="mutating")
+    @app.command("mk", description="Make", danger_level="mutating", exit_codes=())
     def mk(args: NoArgs, ctx: Ctx) -> Made:
         return Made("created", "x")
 

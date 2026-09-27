@@ -12,16 +12,30 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 import traceback
+import types
 import uuid
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, NoReturn
+from typing import IO, Any, NoReturn, TextIO, cast
 
-from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, StdinCap, cap_envelope
+from ._atomic import write_atomic
+from ._auth import (
+    OVER_PRIVILEGED,
+    AuthKind,
+    Coverage,
+    Credentials,
+    insufficient,
+    names,
+    not_logged_in,
+    scope_set,
+)
+from ._cap import DEFAULT_CAP, DEFAULT_STDIN_CAP, OutputCap, Rerun, StdinCap, cap_envelope
 from ._command import (
+    DEFAULT_HEARTBEAT_MS,
     Cleanup,
     Command,
     DangerLevel,
@@ -30,17 +44,36 @@ from ._command import (
     Renderer,
     build_command,
 )
-from ._context import Ctx
+from ._config import ConfigFile, ConfigScope, local_config, user_config
+from ._context import Ctx, LogSink
 from ._dispatch import DispatchRequest, parse_dispatch_line
-from ._effect import effect_problem
-from ._envelope import Envelope, ErrorDetail, WarningDetail, write_envelope
-from ._errors import CliExit, ParseError, RegistrationError, SchemaError
+from ._effect import affects_summary, effect_problem
+from ._envelope import Envelope, ErrorDetail, WarningDetail, clean, json_safe, write_envelope
+from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
-from ._flags import REDACTED, Flag
+from ._flags import REDACTED, Arg, Flag
+from ._framework import framework_collisions
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
-from ._manifest import build_manifest, command_schema
-from ._mode import Format, resolve_mode
+from ._jobs import Job, JobStore, with_links
+from ._manifest import build_manifest, command_schema, implicit_exit_codes
+from ._mode import (
+    Format,
+    child_settings,
+    color_allowed,
+    is_headless,
+    quiet_children,
+    resolve_mode,
+)
+from ._page import (
+    CURSOR_FLAG,
+    DEFAULT_LIMIT,
+    PageRequest,
+    Position,
+    invalid_cursor,
+    request,
+    take,
+)
 from ._parse import (
     Invocation,
     Route,
@@ -53,14 +86,18 @@ from ._parse import (
     without_value,
 )
 from ._plain import render_event, render_plain
+from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._resources import Resolver
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
-from ._timeout import Pending, Timeout, TimeoutExpired, call_with_timeout
+from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, Processes
+from ._table import table
+from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, InvalidValue, Scope
 
 EXEC_PATH = CommandPath("exec")
+CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
 MANIFEST_PATH = CommandPath("manifest")
 VERSION_PATH = CommandPath("version")
 DEFAULT_TIMEOUT = Timeout(60.0)
@@ -73,9 +110,28 @@ class _Inherit:
 INHERIT = _Inherit()
 
 
+class _Unset:
+    """Sentinel: a required declaration was left out, reported as a ``RegistrationError``"""
+
+
+UNSET = _Unset()
+
+
 @dataclass(frozen=True, slots=True)
 class NoArgs:
     """Arguments dataclass for commands that take nothing"""
+
+
+@dataclass(frozen=True, slots=True)
+class CheckPermissionsArgs:
+    for_: str | None = Flag(
+        default=None, description="Command to check, such as 'deploy rollback'; omit for all"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class JobArgs:
+    job_id: str = Arg(description="The job_id of the job descriptor")
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +172,13 @@ class App:
         max_stdin_bytes: int = DEFAULT_STDIN_CAP.bytes,
         state_dir: str | Path | None = None,
         enable_exec: bool = True,
+        credentials: Credentials | None = None,
+        jobs: JobStore | None = None,
     ) -> None:
+        """``credentials`` tells treaty which scopes the active credential holds: it gates
+        ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
+        ``jobs`` looks up the jobs ``async_job=True`` commands start, for the ``job status``
+        and ``job cancel`` built-ins."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         self.name = name
@@ -132,6 +194,8 @@ class App:
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
         self._renderers: dict[Format, Renderer] = {}
+        self.credentials = credentials
+        self.jobs = jobs
         self._register_builtins(enable_exec)
 
     # Registration
@@ -144,7 +208,10 @@ class App:
         description: str,
         retryable: bool,
         side_effects: str,
+        suggestion: str | None = None,
     ) -> ExitCodeEntry:
+        """Declare a command-specific exit code; ``suggestion`` is the next step an agent
+        takes after it, used when the ``Exit`` raised gives none"""
         return self.exits.register(
             ExitCodeEntry(
                 name=ExitCodeName(name),
@@ -152,6 +219,7 @@ class App:
                 description=description,
                 retryable=retryable,
                 side_effects=SideEffects(side_effects),
+                suggestion=suggestion,
             )
         )
 
@@ -191,8 +259,9 @@ class App:
         """Offer ``--format <mode>``, written by ``render`` for every command without its own
         renderer for it; declare it before the commands overriding it
 
-        ``plain`` is always offered, and registering it replaces the built-in ``key: value``
-        lines. ``json`` is the response envelope agents read, so it takes no renderer.
+        ``plain`` and ``tsv`` are always offered, and registering one replaces its built-in
+        renderer. ``json`` and ``jsonl`` are the response envelope agents read, so they take
+        no renderer.
         """
         _check_renderer("app.format", mode, render)
         if mode in self._renderers:
@@ -202,7 +271,7 @@ class App:
     @property
     def formats(self) -> tuple[Format, ...]:
         """The ``--format`` values this app offers, in ``Format`` order"""
-        built_in = (Format.PLAIN, Format.JSON)
+        built_in = (Format.PLAIN, Format.JSON, Format.JSONL, Format.TSV)
         return tuple(m for m in Format if m in built_in or m in self._renderers)
 
     def renderer(self, command: Command, mode: Format) -> Renderer | None:
@@ -210,7 +279,7 @@ class App:
         if command.path == MANIFEST_PATH:
             # The manifest is for agents: every text mode keeps it JSON, indented for reading
             return _json_text
-        return command.renderers.get(mode, self._renderers.get(mode))
+        return command.renderers.get(mode, self._renderers.get(mode, _BUILT_IN.get(mode)))
 
     def group(self, path: str, *, description: str) -> Group:
         prefix = CommandPath(path)
@@ -227,9 +296,9 @@ class App:
         path: str,
         *,
         description: str,
-        danger_level: str = "safe",
+        danger_level: str | _Unset = UNSET,
         required_scopes: Sequence[str] = (),
-        exit_codes: Sequence[str] = (),
+        exit_codes: Sequence[str] | _Unset = UNSET,
         examples: Sequence[tuple[str, str]] = (),
         has_network_io: bool = False,
         timeout: float | None | _Inherit = INHERIT,
@@ -237,8 +306,83 @@ class App:
         cleanup: Cleanup | None = None,
         renderers: Mapping[Format, Renderer] | None = None,
         streaming: bool = False,
+        safe_default: bool = False,
+        gui_operations: Sequence[str] = (),
+        interactive: bool = False,
+        editor_alternatives: Sequence[str] = (),
+        paginated: bool | None = None,
+        default_limit: int = DEFAULT_LIMIT,
+        cursor_check: Callable[[str], None] | None = None,
+        heartbeat: bool = False,
+        stdin_input: bool = False,
+        output_file: bool = False,
+        requires_auth: bool = False,
+        auth: str | None = None,
+        token_env_vars: Sequence[str] = (),
+        async_job: bool = False,
+        config_write_scope: str | None = None,
     ) -> Callable[[Handler], Handler]:
+        """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
+        ``exit_codes=()`` declares that the command raises only the implicit codes
+
+        A command returning ``list[T]`` or ``Page[T]`` is a list command: it gets
+        ``--limit`` (``default_limit`` items, 0 for all), ``--cursor``, and
+        ``meta.pagination``; ``paginated=False`` opts a ``list[T]`` out.
+        ``cursor_check`` validates the handler's own ``Page.next_cursor`` when it comes
+        back, before the handler runs: a pure function raising ``ParseError`` to refuse it.
+        ``heartbeat=True`` writes a heartbeat line to stdout every ``--heartbeat-ms``
+        (10 s) while the handler runs, in JSON mode. ``stdin_input=True`` reads a payload
+        into ``ctx.stdin_text`` before the handler runs: stdin up to the stdin cap, or any
+        size from ``--input-file``. ``output_file=True`` adds ``--output PATH``, which
+        writes ``data`` there in the ``--format`` representation and the envelope to stdout.
+        ``requires_auth=True`` checks the app's ``credentials`` for ``required_scopes``
+        before the handler runs. ``auth="browser"`` or ``"device"`` marks a login command:
+        it gets ``--headless`` and ``--token-env-var``, and ``ctx.token`` from
+        ``<APP>_TOKEN`` or the ``token_env_vars`` after it. ``async_job=True`` returns a
+        ``treaty.Job`` polled with ``job status``. ``config_write_scope="local"`` or
+        ``"global"`` lets ``ctx.write_config`` change the project or user config file.
+        """
         cmd_path = CommandPath(path)
+        missing = [
+            fix
+            for value, fix in ((exit_codes, "exit_codes=()"), (danger_level, 'danger_level="safe"'))
+            if isinstance(value, _Unset)
+        ]
+        if missing:
+            raise RegistrationError(
+                f"{cmd_path}: every command declares its exit codes and danger level "
+                f"(REQ-C-001, REQ-C-002); add {' and '.join(missing)}, or the values it has"
+            )
+        assert not isinstance(danger_level, _Unset) and not isinstance(exit_codes, _Unset)
+        if exit_codes is None or isinstance(exit_codes, str):
+            fix = f"exit_codes=({exit_codes!r},)" if exit_codes else "exit_codes=()"
+            raise RegistrationError(
+                f"{cmd_path}: exit_codes is a sequence of exit code names, not "
+                f"{exit_codes!r}; write {fix}"
+            )
+        if danger_level not in DangerLevel:
+            levels = ", ".join(d.value for d in DangerLevel)
+            raise RegistrationError(
+                f"{cmd_path}: danger_level={danger_level!r} is not one of {levels}"
+            )
+        if requires_auth and self.credentials is None:
+            raise RegistrationError(
+                f"{cmd_path}: requires_auth=True needs App(credentials=...), which tells "
+                "treaty the scopes of the active credential"
+            )
+        if auth is not None and auth not in AuthKind:
+            kinds = ", ".join(k.value for k in AuthKind)
+            raise RegistrationError(f"{cmd_path}: auth={auth!r} is not one of {kinds}")
+        if async_job and self.jobs is None:
+            raise RegistrationError(
+                f"{cmd_path}: async_job=True needs App(jobs=...), which answers job status and "
+                "job cancel for the jobs it starts"
+            )
+        if config_write_scope is not None and config_write_scope not in ConfigScope:
+            scopes = ", ".join(c.value for c in ConfigScope)
+            raise RegistrationError(
+                f"{cmd_path}: config_write_scope={config_write_scope!r} is not one of {scopes}"
+            )
         overrides = dict(renderers or {})
         for mode, render in overrides.items():
             _check_renderer(f"{cmd_path}: renderers", mode, render)
@@ -247,11 +391,8 @@ class App:
                     f"{cmd_path}: --format {mode} is not offered; "
                     f"register it first with app.format(Format.{mode.name}, render=...)"
                 )
-        if isinstance(timeout, _Inherit):
-            # A stream serves until told to stop; the app default is for one-shot handlers
-            command_timeout = Timeout(None) if streaming else None
-        else:
-            command_timeout = Timeout(timeout)
+        # A stream's timeout is an idle limit: the wait for each event (REQ-F-011)
+        command_timeout = None if isinstance(timeout, _Inherit) else Timeout(timeout)
 
         def register(fn: Handler) -> Handler:
             self._register(
@@ -271,6 +412,23 @@ class App:
                     renderers=overrides,
                     scalars=self.scalars,
                     streaming=streaming,
+                    safe_default=safe_default,
+                    gui_operations=gui_operations,
+                    interactive=interactive,
+                    editor_alternatives=editor_alternatives,
+                    paginated=paginated,
+                    default_limit=default_limit,
+                    cursor_check=cursor_check,
+                    heartbeat=heartbeat,
+                    stdin_input=stdin_input,
+                    output_file=output_file,
+                    requires_auth=requires_auth,
+                    auth=None if auth is None else AuthKind(auth),
+                    token_env_vars=token_env_vars,
+                    async_job=async_job,
+                    config_write_scope=None
+                    if config_write_scope is None
+                    else ConfigScope(config_write_scope),
                 )
             )
             return fn
@@ -279,6 +437,12 @@ class App:
 
     def _register(self, command: Command) -> None:
         path = command.path
+        taken = framework_collisions(command)
+        if taken:
+            raise RegistrationError(
+                f"{path}: flags {taken} are supplied by the framework for this command and "
+                "would never reach the handler; rename the fields"
+            )
         if path in self._commands:
             raise RegistrationError(f"{path} is already registered")
         if path in self._groups:
@@ -301,23 +465,189 @@ class App:
                 )
 
     def _register_builtins(self, enable_exec: bool) -> None:
-        @self.command(MANIFEST_PATH.value, description="Print the command manifest for agents")
+        @self.command(
+            MANIFEST_PATH.value,
+            description="Print the command manifest for agents",
+            danger_level="safe",
+            exit_codes=(),
+        )
         def manifest(args: NoArgs, ctx: Ctx) -> dict[str, object]:
             return self.manifest()
 
-        @self.command(VERSION_PATH.value, description="Print the tool name and version")
+        @self.command(
+            VERSION_PATH.value,
+            description="Print the tool name and version",
+            danger_level="safe",
+            exit_codes=(),
+        )
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {"name": self.name, "version": self.version}
+
+        if self.credentials is not None:
+            self._register_check_permissions(self.credentials)
+        if self.jobs is not None:
+            self._register_jobs(self.jobs)
 
         if enable_exec:
 
             @self.command(
                 EXEC_PATH.value,
                 description="Dispatch JSONL DispatchRequest lines from stdin in-process",
+                danger_level="safe",
+                exit_codes=(),
                 examples=[("Run a plan", f"cat ops.jsonl | {self.name} exec --ignore-errors")],
             )
             def exec_(args: ExecArgs, ctx: Ctx) -> None:
                 raise RegistrationError("exec is dispatched by the framework, not called directly")
+
+    def _register_check_permissions(self, credentials: Credentials) -> None:
+        @self.command(
+            CHECK_PERMISSIONS_PATH.value,
+            description="Compare the active credential's scopes with what commands require",
+            danger_level="safe",
+            exit_codes=("AUTH_REQUIRED", "NOT_FOUND"),
+            examples=[("Check one command", f"{self.name} check-permissions --for manifest")],
+        )
+        def check_permissions(args: CheckPermissionsArgs, ctx: Ctx) -> dict[str, object]:
+            # REQ-O-047: exit 0 unless no one is logged in or --for lacks a scope
+            active = scope_set(credentials.active_scopes(ctx))
+            if active is None:
+                raise not_logged_in(CHECK_PERMISSIONS_PATH.value, self._logins())
+            if args.for_ is None:
+                gated = sorted(
+                    (
+                        (p.value, Coverage(c.required_scopes, active))
+                        for p, c in self._commands.items()
+                        if c.requires_auth
+                    ),
+                    key=lambda item: item[0],
+                )
+                over = [path for path, cover in gated if cover.over_privileged]
+                if over:
+                    ctx.warn(
+                        OVER_PRIVILEGED,
+                        f"Credential is over-privileged for {len(over)} of the commands",
+                        commands=over,
+                    )
+                return {
+                    "active_scopes": names(active),
+                    "commands": {
+                        path: {
+                            "required_scopes": [s.value for s in cover.required],
+                            "covered": not cover.missing,
+                            "over_privileged": cover.over_privileged,
+                        }
+                        for path, cover in gated
+                    },
+                }
+            target = self._command_named(args.for_)
+            coverage = Coverage(target.required_scopes if target.requires_auth else (), active)
+            if coverage.missing:
+                raise insufficient(target.path.value, coverage, "AUTH_REQUIRED")
+            flagged = target.requires_auth and coverage.over_privileged
+            if flagged:
+                self._warn_excess(ctx, target, coverage)
+            report = coverage.report(target.path.value)
+            report["over_privileged"] = flagged
+            return report
+
+    def _register_jobs(self, jobs: JobStore) -> None:
+        """``job status`` and ``job cancel`` (REQ-C-022); the store is app code"""
+        group = self.group("job", description="Check on or cancel async jobs")
+
+        def found(job: Job | None, job_id: str) -> Job:
+            if job is None:
+                raise CliExit(
+                    ExitCodeName("NOT_FOUND"),
+                    f"no job {job_id!r}",
+                    code="JOB_NOT_FOUND",
+                    context={"job_id": job_id},
+                )
+            if not isinstance(job, Job):
+                raise TypeError(f"the JobStore returned {type(job).__name__}, not treaty.Job")
+            return job
+
+        @group.command(
+            "status",
+            description="Show an async job: exit 0 complete, 3 running, 4 failed, 5 unknown",
+            danger_level="safe",
+            exit_codes=("PARTIAL_FAILURE", "PRECONDITION", "NOT_FOUND"),
+        )
+        def status(args: JobArgs, ctx: Ctx) -> Job:
+            job = found(jobs.status(args.job_id, ctx), args.job_id)
+            if job.status == "running":
+                raise CliExit(
+                    ExitCodeName("PARTIAL_FAILURE"),
+                    f"job {job.job_id} is still running",
+                    code="JOB_RUNNING",
+                    context={"job_id": job.job_id, "poll_interval_ms": job.poll_interval_ms},
+                    suggestion=f"poll again in {job.poll_interval_ms} ms",
+                    data=job,
+                )
+            if job.status != "complete":
+                raise CliExit(
+                    ExitCodeName("PRECONDITION"),
+                    f"job {job.job_id} is {job.status}",
+                    code="JOB_FAILED" if job.status == "failed" else "JOB_CANCELLED",
+                    context={"job_id": job.job_id, "status": job.status},
+                    data=job,
+                )
+            return job
+
+        @group.command(
+            "cancel",
+            description="Ask an async job to stop and show it",
+            danger_level="mutating",
+            exit_codes=("NOT_FOUND",),
+        )
+        def cancel(args: JobArgs, ctx: Ctx) -> Job:
+            job = found(jobs.cancel(args.job_id, ctx), args.job_id)
+            return job if job.effect is not None else dataclasses.replace(job, effect="updated")
+
+    def _command_named(self, name: str) -> Command:
+        """``deploy rollback`` as typed, or ``deploy.rollback`` as the manifest keys it"""
+        try:
+            path = CommandPath(".".join(name.split()))
+        except InvalidValue:
+            path = None
+        command = None if path is None else self._commands.get(path)
+        if command is None:
+            raise CliExit(
+                ExitCodeName("NOT_FOUND"),
+                f"no command {name!r} to check",
+                code="UNKNOWN_COMMAND",
+                context={"for": name, "available": sorted(p.value for p in self._commands)},
+                fix_required="pass --for one of the available commands",
+            )
+        return command
+
+    def _logins(self) -> list[str]:
+        """How to log in, for the fix of AUTH_REQUIRED"""
+        return sorted(
+            f"{self.name} {' '.join(p.parts)}" for p, c in self._commands.items() if c.auth
+        )
+
+    @staticmethod
+    def _warn_excess(ctx: Ctx, command: Command, coverage: Coverage) -> None:
+        ctx.warn(
+            OVER_PRIVILEGED,
+            f"Credential has scopes beyond what {command.path} requires",
+            command=command.path.value,
+            excess_scopes=coverage.excess,
+            required_scopes=[s.value for s in coverage.required],
+        )
+
+    def _gate(self, command: Command, ctx: Ctx) -> None:
+        """REQ-C-029: before a ``requires_auth`` handler, the credential holds its scopes"""
+        assert self.credentials is not None  # checked at registration
+        active = scope_set(self.credentials.active_scopes(ctx))
+        if active is None:
+            raise not_logged_in(command.path.value, self._logins())
+        coverage = Coverage(command.required_scopes, active)
+        if coverage.missing:
+            raise insufficient(command.path.value, coverage, "PERMISSION_DENIED")
+        if coverage.over_privileged:
+            self._warn_excess(ctx, command, coverage)  # REQ-O-047
 
     def _invocations(self, prefix: tuple[str, ...]) -> list[str]:
         """Commands as the agent must type them, scoped to the prefix it was already under
@@ -386,10 +716,11 @@ class App:
         # Tracebacks of crashed or late handlers go to the host process's stderr
         run = _Run(self, io.StringIO(), sys.stderr, environ)
         try:
-            cap = OutputCap.resolve(None, environ, self.max_output)
+            cap = OutputCap.resolve(None, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.arg_error(exc, meta={"_cmd": path})
-        return cap_envelope(self._call(run, path, arguments, environ), cap, argv=False)
+        envelope = self._call(run, path, arguments, environ)
+        return cap_envelope(envelope, cap, Rerun(argv=None, page=run.page))
 
     def _call(
         self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
@@ -413,7 +744,9 @@ class App:
         try:
             invocation = build_from_mapping(command, arguments, environ)
         except ParseError as exc:
-            return run.arg_error(exc, meta=meta)
+            return run.arg_error(exc, meta={**meta, **_mode_meta(command)})
+        except ArgsCrashed as exc:
+            return run.args_crashed(command, exc, meta=meta)
         if command.streaming:
             # Buffered in-process, a stream returns only when it ends, so it always gets a
             # deadline: the caller's, else the app default, even over a command's None
@@ -428,11 +761,42 @@ class App:
                 )
             if invocation.timeout is None and self.effective_timeout(command, None).seconds is None:
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
-            return buffer_stream(run.stream(command, invocation, Format.JSON, meta=meta))
+            return buffer_stream(
+                run.stream(command, invocation, Format.JSON, meta=meta, whole=True)
+            )
         return run.execute(command, invocation, Format.JSON, meta=meta)
 
     def main(self) -> NoReturn:
-        sys.exit(self.run(sys.argv[1:]))
+        # A standard stream whose descriptor was closed at startup is None
+        stdout, stdin = sys.stdout, sys.stdin
+        # Only the console entry point changes os.environ, which every child inherits;
+        # run() callers such as tests and embedders pass their own env
+        quiet_children(
+            os.environ,
+            stdout_isatty=stdout is not None and stdout.isatty(),
+            stdin_isatty=stdin is not None and stdin.isatty(),
+        )
+        # REQ-F-053: every line reaches a pipe reader as it is written, here and in children
+        os.environ["PYTHONUNBUFFERED"] = "1"
+        if stdout is None or sys.stderr is None:
+            sys.exit(self.run(sys.argv[1:]))
+        # REQ-F-006 below Python: for the run, descriptor 1 is stderr, so a child or C code
+        # writing to it cannot corrupt the envelope, which goes to a copy of the original
+        stdout.flush()
+        saved = os.dup(1)
+        os.dup2(sys.stderr.fileno(), 1)
+        envelopes = open(  # noqa: SIM115 - closed below, after descriptor 1 is restored
+            saved, "w", encoding=stdout.encoding, errors=stdout.errors, buffering=1
+        )
+        sys.stdout = envelopes
+        try:
+            code = self.run(sys.argv[1:])
+        finally:
+            sys.stdout = stdout
+            envelopes.flush()
+            os.dup2(saved, 1)
+            envelopes.close()
+        sys.exit(code)
 
     def run(
         self,
@@ -444,13 +808,20 @@ class App:
         env: Mapping[str, str] | None = None,
         isatty: bool | None = None,
     ) -> int:
-        out = stdout if stdout is not None else sys.stdout
-        err = stderr if stderr is not None else sys.stderr
+        # A closed descriptor leaves its sys stream None: then only the exit code answers,
+        # and stdin reads as empty
+        out = stdout if stdout is not None else sys.stdout or io.StringIO()
+        err = stderr if stderr is not None else sys.stderr or io.StringIO()
         inp = stdin if stdin is not None else sys.stdin
         environ = env if env is not None else os.environ
-        run = _Run(self, out, err, environ)
+        tty = out.isatty() if isatty is None else isatty
+        run = _Run(self, out, err, environ, tty=tty, stdin=inp)
+        run.argv = (self.name, *argv)
+        if inp is None:
+            run.no_payload = "stdin is closed, so there is no payload to read"
         try:
-            return self._route(run, list(argv), inp, environ, isatty)
+            with run.guard_streams():
+                return self._route(run, list(argv), environ)
         except OSError as exc:
             if not _closed_pipe(exc):
                 raise
@@ -461,21 +832,16 @@ class App:
         self,
         run: _Run,
         argv: list[str],
-        inp: IO[str],
         environ: Mapping[str, str],
-        isatty: bool | None,
     ) -> int:
         out = run.out
         try:
             globals_, rest = split_globals(argv)
-            mode = resolve_mode(
-                globals_.format,
-                environ,
-                out.isatty() if isatty is None else isatty,
-                self.formats,
-                self.name,
-            )
-            run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output)
+            mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
+            requested = mode
+            if mode is Format.JSONL:
+                mode = Format.JSON  # every JSON envelope is already one compact line
+            run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
         route = resolve_path(rest, self._commands)
@@ -511,24 +877,43 @@ class App:
         try:
             invocation = parse_command_args(command, route.tokens, environ)
         except ParseError as exc:
-            return run.emit(mode, run.arg_error(exc))
+            return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
+        except ArgsCrashed as exc:
+            return run.emit(mode, run.args_crashed(command, exc))
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
-                return run.exec(invocation.args, inp)
+                run.argv = None  # a line's hint cannot rerun the whole plan
+                return run.exec(invocation.args)
             render = self.renderer(command, mode)
             if command.streaming:
-                envelopes = run.stream(command, invocation, mode)
                 if invocation.no_stream:
+                    envelopes = run.stream(command, invocation, mode, whole=True)
                     return run.emit(mode, buffer_stream(envelopes), render=_each(render))
+                envelopes = run.stream(command, invocation, mode)
                 run.in_flight = command
                 return run.emit_stream(mode, envelopes, render=render)
-            return run.emit(mode, run.execute(command, invocation, mode), render=render)
+            envelope = run.execute(command, invocation, mode)
+            if invocation.output is not None:
+                # REQ-O-001: the file gets the representation; stdout gets the envelope
+                written = run.to_file(invocation.output, requested, envelope, render)
+                return run.emit(Format.JSON, written)
+            return run.emit(mode, envelope, render=render)
 
 
-def _invoke(command: Command, args: object, ctx: Ctx) -> object:
-    """Acquire the handler's resources, each once and in dependency order, then run it"""
+# Runs that swapped sys.stdout and sys.stdin now, and the streams from before the first:
+# with runs on several threads, or an abandoned handler's run, the last one out restores
+_guard_lock = threading.Lock()
+_guarded = 0
+_unguarded: tuple[TextIO, TextIO] = (sys.stdout, sys.stdin)
+
+
+def _invoke(app: App, command: Command, args: object, ctx: Ctx) -> object:
+    """Check the credential, acquire the handler's resources, each once and in dependency
+    order, then run it; ``active_scopes`` is app code, so it runs where the handler does"""
+    if command.requires_auth:
+        app._gate(command, ctx)
     resolver = Resolver(command.resource_graph, args, ctx)
     return command.handler(args, ctx, *resolver.all(command.resources))
 
@@ -538,6 +923,72 @@ _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 
 # Shorter values would redact every digit or letter they share with a traceback
 MIN_REDACTED = 4
+
+# REQ-F-051: ctx.log field names whose values are credentials: API_KEY, *_TOKEN, DB_PASS,
+# Authorization, Cookie, X-Api-Key, AUTH_URL, ...
+_SECRET_KEY = re.compile(
+    r"token|secret|password|key|credential|auth|cookie|(^|[_-])pass($|[_-])|^api([_-]|$)",
+    re.IGNORECASE,
+)
+
+
+def _redacted(value: object, redact: Callable[[str], str]) -> object:
+    """Every string of a JSON value with the run's secrets replaced"""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: _redacted(v, redact) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redacted(v, redact) for v in value]
+    return value
+
+
+def _scrub(key: str, value: object, redact: Callable[[str], str]) -> object:
+    """A ``ctx.log`` field as JSON values, with credentials replaced at any depth"""
+    if _SECRET_KEY.search(key):
+        return REDACTED
+    if isinstance(value, dict):
+        return {k: _scrub(k, v, redact) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub("", v, redact) for v in value]
+    if isinstance(value, str):
+        return redact(value)
+    return value
+
+
+class _StrayStdout(io.TextIOBase):
+    """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
+    to stderr, and the next envelope reports how much (REQ-F-006)"""
+
+    def __init__(self, err: _Stderr) -> None:
+        super().__init__()
+        self._err = err
+        self._bytes = 0
+
+    def writable(self) -> bool:
+        return True
+
+    @property
+    def buffer(self) -> Any:
+        """Bytes written here reach stderr too, uncounted"""
+        return getattr(self._err.stream, "buffer")  # noqa: B009 - IO[str] does not declare it
+
+    @property
+    def encoding(self) -> Any:  # type: ignore[override]  # read-only, like a real stream's
+        return getattr(self._err.stream, "encoding", None) or "utf-8"
+
+    def write(self, text: str, /) -> int:
+        self._err.write(text)
+        self._bytes += len(text.encode("utf-8", "surrogatepass"))
+        return len(text)
+
+    def flush(self) -> None:
+        self._err.flush()
+
+    def take(self) -> int:
+        """Bytes written since the last call"""
+        written, self._bytes = self._bytes, 0
+        return written
 
 
 def _text(exc: BaseException) -> str:
@@ -565,6 +1016,10 @@ class _Stderr:
 
     def __init__(self, stream: IO[str]) -> None:
         self._stream = stream
+
+    @property
+    def stream(self) -> IO[str]:
+        return self._stream
 
     def write(self, text: str) -> None:
         try:
@@ -595,6 +1050,9 @@ def _warned(envelope: Envelope, code: str, message: str, command: Command) -> En
     return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
 
 
+_BUILT_IN: Mapping[Format, Renderer] = {Format.TSV: table("\t")}
+
+
 def _json_text(data: Any) -> str:
     """Machine output in a text mode: the data alone, indented, without the envelope"""
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
@@ -603,8 +1061,8 @@ def _json_text(data: Any) -> str:
 def _check_renderer(where: str, mode: object, render: object) -> None:
     if not isinstance(mode, Format):
         raise RegistrationError(f"{where}: {mode!r} is not a Format member")
-    if mode is Format.JSON:
-        raise RegistrationError(f"{where}: json is the response envelope and takes no renderer")
+    if mode in (Format.JSON, Format.JSONL):
+        raise RegistrationError(f"{where}: {mode} is the response envelope and takes no renderer")
     if not callable(render):
         raise RegistrationError(f"{where}: the {mode} renderer is not callable")
 
@@ -619,6 +1077,11 @@ def _each(render: Renderer | None) -> Renderer | None:
 def _still_running(running: Sequence[Pending]) -> Pending | None:
     """The handler's worker when an interrupted wait left it running"""
     return next((p for p in running if p.worker.is_alive()), None)
+
+
+def _mode_meta(command: Command) -> dict[str, object]:
+    """``meta.dry_run`` on a safe_default command's argument error: nothing was applied"""
+    return {"dry_run": True} if command.safe_default else {}
 
 
 def _previewing(command: Command, invocation: Invocation) -> bool:
@@ -664,11 +1127,30 @@ def buffer_stream(envelopes: Generator[Envelope]) -> Envelope:
 class _Run:
     """One process invocation: builds envelopes, writes them, tracks timing"""
 
-    def __init__(self, app: App, out: IO[str], err: IO[str], env: Mapping[str, str]) -> None:
+    def __init__(
+        self,
+        app: App,
+        out: IO[str],
+        err: IO[str],
+        env: Mapping[str, str],
+        *,
+        tty: bool = False,
+        stdin: IO[str] | None = None,
+    ) -> None:
         self.app = app
         self.out = out
         self.err = _Stderr(err)
         self.env = env
+        self.tty = tty
+        """Whether stdout is a terminal"""
+        self.stdin = stdin if stdin is not None else io.StringIO()
+        """What ``ctx.prompt`` reads; ``App.call`` has none"""
+        self.interactive = tty and stdin is not None and stdin.isatty()
+        """Whether a person can answer: stdin and stdout are both terminals"""
+        self.headless = is_headless(env, interactive=self.interactive, platform=sys.platform)
+        self.processes: Processes | None = None
+        """The children of the handler that runs now, stopped on a signal or timeout"""
+        self.stray: _StrayStdout | None = None
         self.started = time.perf_counter()
         self.request_id = uuid.uuid4().hex[:12]
         self.cap = app.max_output
@@ -677,6 +1159,147 @@ class _Run:
         """A streaming command whose events are still being written"""
         self.abandoned: Pending | None = None
         """Set by ``_execute`` when the handler outlived its timeout and still runs"""
+        self.page: tuple[CommandPath, Position] | None = None
+        """Where the list page ``_execute`` last answered started, to resume after a cut"""
+        self.argv: tuple[str, ...] | None = None
+        """The invocation as typed, app name first; None where it cannot be rerun (exec)"""
+        self.delivered = False
+        """Whether a complete envelope, event, or rendered result was written and flushed"""
+        self.payload_stdin: IO[str] | None = stdin
+        """Where a ``stdin_input`` command reads its payload; None in ``App.call``"""
+        self.no_payload = "stdin carries the plan or the call here, not a payload"
+        """Why ``payload_stdin`` is None"""
+        self.warnings: list[WarningDetail] = []
+        """``ctx.warn`` entries of the command that runs now, added to its envelopes"""
+        self.token: str | None = None
+        """A login command's token, redacted wherever a secret argument is"""
+        self.config: ConfigFile | None = None
+        """The config file the command that runs now may write"""
+
+    @contextlib.contextmanager
+    def guard_streams(self) -> Iterator[None]:
+        """Point ``sys.stdout`` at stderr for the run, and, off a terminal, ``sys.stdin`` at
+        a reader that refuses ``input()`` (REQ-F-047). Process-wide, not a context-local
+        redirect, because handlers run on worker threads; one run owns the process."""
+        global _guarded, _unguarded
+        self.stray = _StrayStdout(self.err)
+        with _guard_lock:
+            if not _guarded:
+                _unguarded = (sys.stdout, sys.stdin)
+            _guarded += 1
+            saved = (sys.stdout, sys.stdin)
+            ours = (
+                cast(TextIO, self.stray),
+                sys.stdin if self.interactive else cast(TextIO, NoPromptStdin(self.stdin)),
+            )
+            sys.stdout, sys.stdin = ours
+        try:
+            yield
+        finally:
+            with _guard_lock:
+                _guarded -= 1
+                if not _guarded:
+                    sys.stdout, sys.stdin = _unguarded
+                elif sys.stdout is ours[0]:
+                    # A run nested in another's handler: give back what it found. A run
+                    # that another swapped over leaves the streams to the last one out.
+                    sys.stdout, sys.stdin = saved
+
+    def _write(self, envelope: Envelope) -> None:
+        """One JSON envelope on stdout, warning when text was printed there since the last"""
+        written = 0 if self.stray is None else self.stray.take()
+        if written:
+            warning = WarningDetail(
+                "THIRD_PARTY_STDOUT",
+                "Third-party code wrote to stdout; the text went to stderr",
+                context={"bytes": written},
+            )
+            envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        write_envelope(cap_envelope(envelope, self.cap, Rerun(self.argv, self.page)), self.out)
+        self.delivered = True
+
+    def _ctx(
+        self,
+        command: Command,
+        args: object,
+        mode: Format,
+        timeout: Timeout,
+        idempotency_key: str | None = None,
+        *,
+        invocation: Invocation,
+        page: PageRequest | None = None,
+    ) -> Ctx:
+        deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
+        # Output is captured, so a child never colors; editors only for a person
+        settings = child_settings(color=False, interactive=self.interactive)
+        # REQ-O-033: --headless opens no browser even where one could be shown
+        headless = self.headless or invocation.headless
+        self.processes = Processes(
+            {**self.env, **settings},
+            deadline=deadline,
+            headless=headless,
+            browser_open=BROWSER_OPEN in command.gui_operations,
+        )
+        return Ctx(
+            app_name=self.app.name,
+            version=self.app.version,
+            mode=mode,
+            request_id=self.request_id,
+            env=self.env,
+            state=self.app._state,
+            timeout=timeout,
+            color=mode is not Format.JSON and color_allowed(self.env, self.tty),
+            headless=headless,
+            log_sink=self._log_sink(command, args, mode),
+            processes=self.processes,
+            prompter=Prompter(
+                command=command.path.value,
+                declared=command.interactive,
+                editor_alternatives=command.editor_alternatives,
+                interactive=self.interactive and not invocation.non_interactive,
+                assume_yes=invocation.yes,
+                stdin=self.stdin,
+                stderr=self.err.stream,
+                env=self.env,
+            ),
+            warn_sink=self._warn,
+            idempotency_key=idempotency_key,
+            stdin_text=invocation.stdin_text,
+            page=page,
+            token=invocation.token,
+            config=self.config if command.config_write_scope is not None else None,
+        )
+
+    def _warn(self, code: str, message: str, context: Mapping[str, object]) -> None:
+        if not _ERROR_CODE.fullmatch(code):
+            raise ValueError(f"warning code {code!r} is not UPPER_SNAKE_CASE")
+        safe = json_safe(dict(context))
+        assert isinstance(safe, dict)
+        self.warnings.append(WarningDetail(code, message, context=safe))
+
+    def _log_sink(self, command: Command, args: object, mode: Format) -> LogSink:
+        """``ctx.log``: one line on stderr, secrets redacted, escapes stripped unless the
+        run may color (REQ-F-006, REQ-F-051)"""
+        keep_escapes = mode is not Format.JSON and color_allowed(self.env, self.tty)
+
+        def write(message: str, fields: Mapping[str, object]) -> None:
+            # Built per call, inside the handler: a secret scalar's serialize= is user code
+            redact = self._redactor(command, args)
+            safe = {k: _scrub(k, json_safe(v), redact) for k, v in fields.items()}
+            if mode is Format.JSON:
+                record = {"level": "info", "message": redact(message), "fields": safe}
+                line = json.dumps(clean(record), separators=(",", ":"), sort_keys=True)
+            else:
+                pairs = (
+                    f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in safe.items()
+                )
+                line = " ".join((redact(message), *pairs))
+                if not keep_escapes:
+                    line = str(clean(line))
+            self.err.write(line + "\n")
+            self.err.flush()
+
+        return write
 
     # Envelope construction
 
@@ -690,21 +1313,24 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         origin = self.started if started is None else started
+        # REQ-F-057: every response says when no window could have been opened
+        extra = {"headless": True} if self.headless else {}
         return Envelope(
             exit_code=code,
             data=data,
             error=error,
             duration_ms=int((time.perf_counter() - origin) * 1000),
             request_id=self.request_id,
-            extra_meta=dict(meta or {}),
+            warnings=tuple(self.warnings),
+            extra_meta={**extra, **(meta or {})},
         )
 
-    def arg_error(self, exc: ParseError, *, code: str = "ARG_ERROR", **kw: Any) -> Envelope:
+    def arg_error(self, exc: ParseError, *, code: str | None = None, **kw: Any) -> Envelope:
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
-                code=code,
+                code=code or exc.code or "ARG_ERROR",
                 message=exc.message,
                 retryable=False,
                 context=exc.context,
@@ -712,6 +1338,38 @@ class _Run:
                 phase="validation",
                 fix_required="correct the arguments and reissue",
                 errors=exc.items(),
+            ),
+            **kw,
+        )
+
+    def args_crashed(
+        self,
+        command: Command,
+        exc: ArgsCrashed,
+        *,
+        started: float | None = None,
+        meta: Mapping[str, object] | None = None,
+    ) -> Envelope:
+        """A bug in the args ``__post_init__``: reported like a handler crash"""
+        values = types.SimpleNamespace(**exc.values)  # what the redactor reads secrets from
+        return self._crashed(command, values, exc.cause, started or self.started, meta or {})
+
+    def after_start(self, exc: ParseError, **kw: Any) -> Envelope:
+        """A ``ParseError`` from a handler or a resource's ``acquire``: user code already
+        ran, so exit 2 would promise an agent a side-effect-free failure it cannot have
+        (REQ-F-002). Phase 1 checks belong in the args ``__post_init__``."""
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="VALIDATION_AFTER_START",
+                message=exc.message,
+                retryable=False,
+                context=exc.context,
+                suggestion=exc.suggestion,
+                phase="execution",
+                fix_required="correct the arguments; the command author should move this "
+                "check into the args dataclass's __post_init__ so it runs before any side effect",
             ),
             **kw,
         )
@@ -725,6 +1383,154 @@ class _Run:
         meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen"""
+        if command.paginated:
+            position = self._position(command, invocation, meta)
+            if isinstance(position, Envelope):
+                return position
+            invocation = dataclasses.replace(invocation, cursor=position)
+        if command.auth is not None:
+            token = self._login_token(command, invocation, meta)
+            if isinstance(token, Envelope):
+                return token
+            self.token = token
+            invocation = dataclasses.replace(invocation, token=token)
+        if command.config_write_scope is not None:
+            config = self._config_file(command, invocation, meta)
+            if isinstance(config, Envelope):
+                return config
+            self.config = config
+        if command.stdin_input:
+            try:
+                payload = self._read_input(invocation.input_file, meta=meta)
+            except Cancelled as exc:
+                return self._cancelled(
+                    command, exc.signal, self.started, meta or {}, handler_started=False
+                )
+            if isinstance(payload, Envelope):
+                return payload
+            invocation = dataclasses.replace(invocation, stdin_text=payload)
+        if not command.safe_default:
+            return self._keyed(command, invocation, mode, meta=meta)
+        # REQ-O-048: a dry run unless --live; --dry-run still wins, as a preview is safe
+        dry_run = not invocation.live or _dry_run_requested(invocation.args)
+        args = invocation.args
+        assert dataclasses.is_dataclass(args) and not isinstance(args, type)
+        # --live is the explicit confirmation; --confirm-destructive is not also needed
+        invocation = dataclasses.replace(
+            invocation,
+            args=dataclasses.replace(args, dry_run=True) if dry_run else args,
+            confirmed=not dry_run,
+        )
+        envelope = self._keyed(command, invocation, mode, meta=meta)
+        extra: dict[str, object] = {"dry_run": dry_run}
+        if not dry_run:
+            extra["confirmed"] = True
+        return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+
+    def _position(
+        self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
+    ) -> Position | Envelope:
+        """Where the page starts, bound to the command's other arguments (REQ-O-003): a
+        cursor from another listing, or one the command's ``cursor_check`` refuses, is
+        ``INVALID_CURSOR`` before the handler runs"""
+        args = invocation.args
+        # Secrets stay out: the digest is written to stdout inside every cursor
+        listed = {f.name: getattr(args, f.name) for f in command.fields if not f.secret}
+        try:
+            digest = fingerprint(command.path, listed, self.app.scalars)[:16]
+        except SchemaError as exc:
+            message = f"Command {command.path} has arguments a cursor cannot bind to: {exc}"
+            return self._broken(command, "INVALID_ARGS", message, self.started, meta or {})
+        except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
+            return self._crashed(command, args, exc, self.started, meta or {})
+        given = invocation.cursor
+        if given is None:
+            return Position(args=digest)
+        try:
+            if given.args != digest:
+                raise invalid_cursor("it was issued for different arguments")
+            if given.cursor is not None and command.cursor_check is not None:
+                command.cursor_check(given.cursor)
+        except ParseError as exc:
+            exc.context.setdefault("flag", CURSOR_FLAG)
+            return self.arg_error(exc, code="INVALID_CURSOR", meta=meta)
+        except Exception as exc:  # noqa: BLE001 - cursor_check= is user code
+            return self._crashed(command, args, exc, self.started, meta or {})
+        return given
+
+    def _config_file(
+        self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
+    ) -> ConfigFile | Envelope:
+        """The file ``ctx.write_config`` writes; a global-only command needs ``--global``"""
+        if command.config_write_scope is ConfigScope.GLOBAL and not invocation.global_config:
+            return self.arg_error(
+                ParseError(
+                    f"Command {command.path} writes the global config and needs --global",
+                    context={"flag": "global", "command": command.path.value},
+                    suggestion="rerun with --global to confirm the user-wide change",
+                ),
+                meta=meta,
+            )
+        if not invocation.global_config:
+            return ConfigFile(local_config(self.app.name), False, self._warn)
+        path = user_config(self.app.name, self.env)
+        if path is None:
+            return self._state_error(
+                "CONFIG_DIR_UNKNOWN",
+                "no directory for the global config",
+                "set XDG_CONFIG_HOME or HOME",
+                time.perf_counter(),
+                meta or {},
+            )
+        return ConfigFile(path, True, self._warn)
+
+    def _login_token(
+        self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
+    ) -> str | None | Envelope:
+        """A login command's token: ``--token-env-var``, else the first set variable of
+        ``token_env_vars``. A browser login no person can finish, or a named variable
+        that is empty, exits 4 listing where the token goes (REQ-C-021, REQ-O-033)."""
+        named = invocation.token_env_var
+        candidates = (named,) if named is not None else command.token_env_vars
+        token = next((self.env[v] for v in candidates if self.env.get(v)), None)
+        headless = self.headless or invocation.headless
+        if token is not None or (
+            named is None and not (headless and command.auth is AuthKind.BROWSER)
+        ):
+            return token
+        first = candidates[0]
+        entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
+        why = (
+            f"{named} is not set"
+            if named is not None
+            else f"Command {command.path} logs in through a browser, and this run is headless"
+        )
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="TOKEN_REQUIRED",
+                message=f"{why}; set {first} to a token to log in without one",
+                retryable=False,
+                context={"command": command.path.value, "token_env_vars": list(candidates)},
+                fix_required=f"export {first}=<token>, or pass --token-env-var NAME naming "
+                "a variable that holds it",
+                phase="validation",
+                auth_methods=[
+                    {"type": "env_var", "name": v, "hint": f"Set {v} to your API token"}
+                    for v in candidates
+                ],
+            ),
+            meta=meta,
+        )
+
+    def _keyed(
+        self,
+        command: Command,
+        invocation: Invocation,
+        mode: Format,
+        *,
+        meta: Mapping[str, object] | None = None,
+    ) -> Envelope:
         key = invocation.idempotency_key
         if key is None or _previewing(command, invocation) or _dry_run_requested(invocation.args):
             return self._execute(command, invocation, mode, meta=meta)
@@ -749,7 +1555,7 @@ class _Run:
         try:
             call = fingerprint(command.path, invocation.args, self.app.scalars)
         except SchemaError as exc:
-            message = f"{command.path}: its arguments cannot be fingerprinted for the key: {exc}"
+            message = f"Command {command.path} has arguments the key cannot fingerprint: {exc}"
             return self._broken(command, "INVALID_ARGS", message, started, full_meta)
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
             return self._crashed(command, invocation.args, exc, started, full_meta)
@@ -858,13 +1664,21 @@ class _Run:
                 meta=full_meta,
             )
         if slot.record is not None:
-            assert isinstance(slot.record.data, dict)
-            return self._envelope(
-                0,
-                data={**slot.record.data, "effect": "noop"},
-                started=started,
-                meta={**full_meta, "idempotency_hit": True},
-            )
+            data = slot.record.data
+            assert isinstance(data, dict)
+
+            def replay() -> Envelope:
+                return self._envelope(
+                    0,
+                    data={**data, "effect": "noop"},
+                    started=started,
+                    meta={**full_meta, "idempotency_hit": True},
+                )
+
+            if not command.requires_auth:
+                return replay()
+            # A stored result is still the command's output: the credential must cover it
+            return self._execute(command, invocation, mode, meta=meta, replay=replay)
         envelope = self._execute(command, invocation, mode, meta=meta)
         pending = self.abandoned
         if pending is not None:
@@ -903,23 +1717,26 @@ class _Run:
         mode: Format,
         *,
         meta: Mapping[str, object] | None = None,
+        replay: Callable[[], Envelope] | None = None,
     ) -> Envelope:
-        """Run one handler under its timeout and turn the outcome into an envelope"""
+        """Run one handler under its timeout and turn the outcome into an envelope;
+        with ``replay``, run only the credential gate there and answer with ``replay()``"""
         self.abandoned = None
+        self.page = None
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
-        ctx = Ctx(
-            app_name=self.app.name,
-            version=self.app.version,
-            mode=mode,
-            request_id=self.request_id,
-            env=self.env,
-            state=self.app._state,
-            timeout=timeout,
-            idempotency_key=None
-            if invocation.idempotency_key is None
-            else invocation.idempotency_key.value,
+        key = invocation.idempotency_key
+        position = invocation.cursor if invocation.cursor is not None else Position()
+        limit = invocation.limit if invocation.limit is not None else command.default_limit
+        ctx = self._ctx(
+            command,
+            invocation.args,
+            mode,
+            timeout,
+            None if key is None else key.value,
+            invocation=invocation,
+            page=request(position, limit) if command.paginated else None,
         )
         args = invocation.args
         preview_only = _previewing(command, invocation)
@@ -930,24 +1747,27 @@ class _Run:
         try:
             self.cancellation.check()
             result = call_with_timeout(
-                lambda: _invoke(command, args, ctx),
+                (lambda: self.app._gate(command, ctx))
+                if replay is not None
+                else (lambda: _invoke(self.app, command, args, ctx)),
                 timeout,
                 running.append,
                 self.cancellation.armed,
+                heartbeat=self._heartbeat(command, invocation, mode, started),
             )
         except CliExit as exc:
             return self._exit_envelope(command, args, exc, started, full_meta)
         except ParseError as exc:
-            # A handler validating its own input before any side effect
-            return self.arg_error(exc, started=started, meta=full_meta)
+            return self.after_start(exc, started=started, meta=full_meta)
         except TimeoutExpired as exc:
             self.abandoned = exc.pending
+            self._stop_children()
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
             return self._envelope(
                 entry.code.value,
                 error=ErrorDetail(
                     code="TIMEOUT",
-                    message=f"{command.path} exceeded {timeout.seconds}s",
+                    message=f"Command {command.path} exceeded its {timeout.seconds}s timeout",
                     retryable=entry.retryable,
                     context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
                     phase="execution",
@@ -959,32 +1779,53 @@ class _Run:
             self.abandoned = _still_running(running)
             # A held signal raised before fn() or before the worker started: nothing ran
             ran = not exc.held or bool(running)
-            return self._cancelled(command, exc.signal, started, full_meta, handler_started=ran)
+            return self._cancelled(
+                command, exc.signal, started, full_meta, handler_started=ran, running=running
+            )
         except KeyboardInterrupt:
             self.abandoned = _still_running(running)
-            return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
+            sig = CancelSignal("SIGINT", 130)
+            return self._cancelled(command, sig, started, full_meta, running=running)
+        except InputRequired as exc:
+            return self._input_required(exc, started, full_meta)
         except GeneratorExit:
             raise
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
             # asyncio.CancelledError, SystemExit, trio.Cancelled: user code, not a signal
             return self._crashed(command, args, exc, started, full_meta)
+        if replay is not None:
+            return replay()
+        page_meta: dict[str, object] = {}
         try:
+            if command.paginated:
+                result, pagination = take(result, position, limit, command.path)
+                page_meta["pagination"] = pagination.to_json()
+                self.page = (command.path, position)
             data = self._payload(result)
         except SchemaError as exc:
             return self._broken(
-                command, "INVALID_OUTPUT", f"{command.path} returned {exc}", started, full_meta
+                command,
+                "INVALID_OUTPUT",
+                f"Command {command.path} returned {exc}",
+                started,
+                full_meta,
             )
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, exc, started, full_meta)
+        data = self._with_open_url(data)
         if command.danger_level is not DangerLevel.SAFE:
-            problem = effect_problem(data, preview=_dry_run_requested(args))
+            problem = effect_problem(
+                data,
+                preview=_dry_run_requested(args),
+                destructive=command.danger_level is DangerLevel.DESTRUCTIVE,
+            )
             if problem is not None:
                 entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
                 return self._envelope(
                     entry.code.value,
                     error=ErrorDetail(
                         code="INVALID_EFFECT",
-                        message=f"{command.path} broke the effect contract: {problem}",
+                        message=f"Command {command.path} broke the effect contract: {problem}",
                         retryable=False,
                         context={"command": command.path.value},
                         phase="execution",
@@ -999,7 +1840,8 @@ class _Run:
                 data=data,
                 error=ErrorDetail(
                     code="CONFIRMATION_REQUIRED",
-                    message=f"{command.path} is destructive; nothing was applied",
+                    message=f"Command {command.path} is destructive and was not applied; "
+                    f"it would: {affects_summary(data)}",
                     retryable=False,
                     context={"command": command.path.value, "flag": "confirm-destructive"},
                     phase="validation",
@@ -1009,7 +1851,7 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
-        return self._envelope(0, data=data, started=started, meta=full_meta)
+        return self._envelope(0, data=data, started=started, meta={**full_meta, **page_meta})
 
     def stream(
         self,
@@ -1018,24 +1860,20 @@ class _Run:
         mode: Format,
         *,
         meta: Mapping[str, object] | None = None,
+        whole: bool = False,
     ) -> Generator[Envelope]:
         """Run a generator handler: one envelope per event, then a terminal one (REQ-O-004)
 
-        A timeout is a deadline for the whole stream. A failure after some events keeps
+        The timeout limits the wait for each event, so a stream runs as long as it keeps
+        producing (REQ-F-011); ``whole`` makes it a deadline for the whole stream, for a
+        caller that sees nothing until the stream ends. A failure after some events keeps
         their count in ``meta.seq`` and marks the response ``partial``.
         """
         started = time.perf_counter()
+        waiting_since = started
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
-        ctx = Ctx(
-            app_name=self.app.name,
-            version=self.app.version,
-            mode=mode,
-            request_id=self.request_id,
-            env=self.env,
-            state=self.app._state,
-            timeout=timeout,
-        )
+        ctx = self._ctx(command, invocation.args, mode, timeout, invocation=invocation)
         args = invocation.args
         seq = 0
         events: Iterator[object] | None = None
@@ -1043,7 +1881,7 @@ class _Run:
         def remaining() -> Timeout:
             if timeout.seconds is None:
                 return timeout
-            left = timeout.seconds - (time.perf_counter() - started)
+            left = timeout.seconds - (time.perf_counter() - (started if whole else waiting_since))
             if left <= 0:
                 raise TimeoutExpired(timeout)
             return Timeout(left)
@@ -1062,7 +1900,7 @@ class _Run:
         try:
             self.cancellation.check()
             produced = call_with_timeout(
-                lambda: _invoke(command, args, ctx),
+                lambda: _invoke(self.app, command, args, ctx),
                 remaining(),
                 running.append,
                 self.cancellation.armed,
@@ -1079,6 +1917,7 @@ class _Run:
             events = produced
             while True:
                 self.cancellation.check()
+                waiting_since = time.perf_counter()
                 event = call_with_timeout(
                     lambda: next(produced, _END),
                     remaining(),
@@ -1087,6 +1926,7 @@ class _Run:
                     stream_context,
                 )
                 if event is _END:
+                    self.in_flight = None  # the handler finished; nothing is left to clean up
                     break
                 seq += 1
                 data = self._payload(event)
@@ -1095,15 +1935,17 @@ class _Run:
             yield self._exit_envelope(command, args, exc, started, partial())
             return
         except ParseError as exc:
-            yield self.arg_error(exc, started=started, meta=partial())
+            yield self.after_start(exc, started=started, meta=partial())
             return
         except TimeoutExpired:
+            self._stop_children()
             entry = self.app.exits.framework(FrameworkCode.TIMEOUT)
+            what = "timeout" if whole else "timeout waiting for its next event"
             yield self._envelope(
                 entry.code.value,
                 error=ErrorDetail(
                     code="TIMEOUT",
-                    message=f"{command.path} exceeded {timeout.seconds}s",
+                    message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
                     retryable=entry.retryable,
                     context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
                     phase="execution",
@@ -1115,14 +1957,20 @@ class _Run:
         except Cancelled as exc:
             ran = events is not None or not exc.held or bool(running)
             meta_now = {**full_meta, "seq": seq}
-            yield self._cancelled(command, exc.signal, started, meta_now, handler_started=ran)
+            yield self._cancelled(
+                command, exc.signal, started, meta_now, handler_started=ran, running=running
+            )
             return
         except KeyboardInterrupt:
             sig = CancelSignal("SIGINT", 130)
-            yield self._cancelled(command, sig, started, {**full_meta, "seq": seq})
+            meta_now = {**full_meta, "seq": seq}
+            yield self._cancelled(command, sig, started, meta_now, running=running)
+            return
+        except InputRequired as exc:
+            yield self._input_required(exc, started, partial())
             return
         except SchemaError as exc:
-            message = f"{command.path} yielded {exc}"
+            message = f"Command {command.path} yielded {exc}"
             yield self._broken(command, "INVALID_OUTPUT", message, started, partial())
             return
         except GeneratorExit:
@@ -1143,6 +1991,68 @@ class _Run:
             0, started=started, meta={**full_meta, "seq": seq, "end": True, "total": seq}
         )
 
+    def _heartbeat(
+        self, command: Command, invocation: Invocation, mode: Format, started: float
+    ) -> Heartbeat | None:
+        """Heartbeat lines for a JSON run from argv (REQ-F-053); an exec plan and an MCP
+        call have one reader for many results, and plain output is for a person"""
+        ms = invocation.heartbeat_ms
+        if ms is None:
+            ms = DEFAULT_HEARTBEAT_MS
+        if not command.heartbeat or not ms or mode is not Format.JSON or self.argv is None:
+            return None
+        beating = [True]
+
+        def tick() -> None:
+            if not beating[0]:
+                return
+            elapsed = int((time.perf_counter() - started) * 1000)
+            line = {"status": "running", "heartbeat": True, "elapsed_ms": elapsed}
+            try:
+                self.out.write(json.dumps(line, separators=(",", ":")) + "\n")
+                self.out.flush()
+            except OSError as exc:
+                if not _closed_pipe(exc):
+                    raise
+                beating[0] = False  # the envelope write reports the closed pipe
+
+        return Heartbeat(ms / 1000, tick)
+
+    def _input_required(
+        self, exc: InputRequired, started: float, meta: Mapping[str, object]
+    ) -> Envelope:
+        """Exit 4: the run needs an answer only a person at a terminal could give
+        (REQ-F-009, REQ-F-047, REQ-F-055); the suggestion names the flag that gives it"""
+        entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code=exc.code,
+                message=exc.message,
+                retryable=False,
+                context=exc.context,
+                suggestion=exc.suggestion,
+                fix_required=exc.suggestion,
+                phase="execution",
+                alternatives=exc.alternatives or None,
+            ),
+            started=started,
+            meta=meta,
+        )
+
+    def _stop_children(self, cancelled: CancelSignal | None = None) -> None:
+        """Terminate what the interrupted or abandoned handler still runs (REQ-F-030);
+        ``cancelled`` is the signal, None for a timeout"""
+        if self.processes is not None:
+            self.processes.terminate(cancelled)
+
+    def _with_open_url(self, data: object) -> object:
+        """A headless ``ctx.open_url`` leaves its URL in ``data.open_url`` (REQ-F-057)"""
+        url = None if self.processes is None else self.processes.suppressed_url
+        if url is None or not isinstance(data, dict) or data.get("open_url") is not None:
+            return data
+        return {**data, "open_url": url}
+
     def _cancelled(
         self,
         command: Command,
@@ -1151,12 +2061,22 @@ class _Run:
         meta: Mapping[str, object],
         *,
         handler_started: bool = True,
+        running: Sequence[Pending] = (),
     ) -> Envelope:
         """Run the cleanup hook, then build the CANCELLED envelope (REQ-F-013, REQ-F-069)
 
         Before the handler started there is nothing to clean up and nothing partial.
+        ``running`` holds the handler's worker, which gets the children's grace to finish
+        before the cleanup hook runs beside it.
         """
         context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
+        # Children first, so the envelope is written after they were signaled (REQ-F-031)
+        self._stop_children(sig)
+        for pending in running:
+            # Waiting on a child or its next event, not stuck: a stream's generator is
+            # handed back so it can be closed, and cleanup never races the handler
+            pending.worker.join(GRACE_SECONDS)
+        self.in_flight = None  # cleaned up here; a closed stdout must not clean up again
         if handler_started and command.cleanup is not None:
             try:
                 command.cleanup()
@@ -1168,7 +2088,7 @@ class _Run:
             sig.exit_code,
             error=ErrorDetail(
                 code="CANCELLED",
-                message=f"{command.path} cancelled by {sig.name}",
+                message=f"Command {command.path} was cancelled by {sig.name}",
                 retryable=entry.retryable,
                 context=context,
                 phase="execution",
@@ -1185,25 +2105,34 @@ class _Run:
         started: float,
         meta: Mapping[str, object],
     ) -> Envelope:
+        # A failed child's argv and stderr, or ctx.token, may carry a secret: stdout never
+        # gets one, as the traceback on stderr does not
+        redact = self._redactor(command, args)
+        # Checked below: a handler may pass anything as the message
+        message = redact(exc.message) if isinstance(exc.message, str) else exc.message
+        if exc.name.value == FrameworkCode.ARG_ERROR.name:
+            # Exit 2 promises nothing ran; from a handler, something did (REQ-F-002)
+            rejected = ParseError(
+                message,
+                context=cast(dict[str, object], _redacted(json_safe(exc.context), redact)),
+                suggestion=exc.suggestion,
+            )
+            return self.after_start(rejected, started=started, meta=meta)
         # The codes the manifest lists for this command without a declaration; any other
         # framework code (NOT_FOUND, RATE_LIMITED, ...) must be declared like a custom one
-        implicit = {FrameworkCode.SUCCESS, FrameworkCode.GENERAL_ERROR, FrameworkCode.ARG_ERROR}
-        implicit.add(FrameworkCode.TIMEOUT)
-        if command.danger_level is not DangerLevel.SAFE:
-            implicit |= {FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION}
-        allowed = {ExitCodeName(c.name) for c in implicit}
+        allowed = {ExitCodeName(c.name) for c in implicit_exit_codes(command)}
         if exc.name not in command.exit_codes and exc.name not in allowed:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
             return self._envelope(
                 entry.code.value,
                 error=ErrorDetail(
                     code="UNDECLARED_EXIT_CODE",
-                    message=f"{command.path} raised {exc.name}, which it does not declare",
+                    message=f"Command {command.path} raised {exc.name}, which it does not declare",
                     retryable=False,
                     context={
                         "declared": [n.value for n in command.exit_codes],
                         "raised": exc.name.value,
-                        "original_message": exc.message,
+                        "original_message": message,
                     },
                     phase="execution",
                 ),
@@ -1212,26 +2141,30 @@ class _Run:
             )
         entry = self.app.exits.by_name(exc.name)
         if entry.code.value == 0:
-            message = f"{command.path} raised {exc.name}; return the result instead of raising"
+            message = (
+                f"Command {command.path} raised {exc.name}; return the result instead of raising"
+            )
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         if not _ERROR_CODE.fullmatch(exc.code) or not isinstance(exc.message, str):
             message = (
-                f"{command.path} raised {exc.name} with code {exc.code!r}; error codes are "
+                f"Command {command.path} raised {exc.name} with code {exc.code!r}; error codes are "
                 "UPPER_SNAKE_CASE and messages are text"
             )
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         retry_after = exc.retry_after_ms
         if retry_after is not None:
             if isinstance(retry_after, bool) or not isinstance(retry_after, (int, float)):
-                message = f"{command.path} raised {exc.name} with a non-numeric retry_after_ms"
+                message = (
+                    f"Command {command.path} raised {exc.name} with a non-numeric retry_after_ms"
+                )
                 return self._broken(command, "INVALID_EXIT", message, started, meta)
             # A reset time already past (negative) means retry now; fractions round up
             retry_after = max(0, math.ceil(retry_after))
         try:
             data = self._payload(exc.data)
-            context = to_jsonable(exc.context, self.app.scalars)
+            context = _redacted(to_jsonable(exc.context, self.app.scalars), redact)
         except SchemaError as err:
-            message = f"{command.path} raised {exc.name} with {err}"
+            message = f"Command {command.path} raised {exc.name} with {err}"
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         except Exception as err:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, err, started, meta)
@@ -1241,11 +2174,11 @@ class _Run:
             data=data,
             error=ErrorDetail(
                 code=exc.code,
-                message=exc.message,
+                message=message,
                 retryable=entry.retryable,
                 detail=exc.detail,
                 context=context,
-                suggestion=exc.suggestion,
+                suggestion=exc.suggestion if exc.suggestion is not None else entry.suggestion,
                 fix_command=exc.fix_command,
                 fix_required=exc.fix_required,
                 retry_after_ms=retry_after if entry.retryable else None,
@@ -1295,6 +2228,8 @@ class _Run:
         """Replace every spelling of the run's secret values: the value, its serialized
         form for a registered scalar, and the escaped form ``repr`` puts in messages"""
         spellings: set[str] = set()
+        if self.token is not None and len(self.token) >= MIN_REDACTED:
+            spellings.update({self.token, repr(self.token)[1:-1]})
         for f in command.fields:
             value = getattr(args, f.name, None) if f.secret else None
             # A default is in the source anyway; redacting it (max_tokens=1) garbles text
@@ -1318,6 +2253,8 @@ class _Run:
     def _payload(self, value: object) -> object:
         """A result or exit ``data`` as envelope data: an object, an array, or null"""
         data = to_jsonable(value, self.app.scalars)
+        if isinstance(value, Job) and isinstance(data, dict):
+            data = with_links(data, self.app.name)  # REQ-C-022
         if data is not None and not isinstance(data, (dict, list)):
             raise SchemaError(f"{type(value).__name__}, not an object, array, or null")
         return data
@@ -1358,7 +2295,7 @@ class _Run:
             entry.code.value,
             error=ErrorDetail(
                 code="HANDLER_CRASHED",
-                message=redact(f"{command.path} raised {type(exc).__name__}: {_text(exc)}"),
+                message=redact(f"Command {command.path} raised {type(exc).__name__}: {_text(exc)}"),
                 retryable=False,
                 context={"command": command.path.value, "exception": type(exc).__qualname__},
                 phase="execution",
@@ -1372,14 +2309,16 @@ class _Run:
 
     def emit(self, mode: Format, envelope: Envelope, *, render: Renderer | None = None) -> int:
         if mode is Format.JSON:
-            write_envelope(cap_envelope(envelope, self.cap), self.out)
+            self._write(envelope)
             return envelope.exit_code
         return self._emit_text(mode, envelope, render)
 
     def output_closed(self) -> int:
-        """The reader went away (``tool logs | head``): nothing more can be written, so exit
-        141, the SIGPIPE convention. A stream cut off mid-way runs its cleanup hook like a
-        cancellation; a finished handler has nothing left to clean up."""
+        """The reader went away: nothing more can be written, and nothing goes to stderr.
+        After a complete envelope or event (``tool logs | head -1``) the reader got what it
+        wanted, so exit 0 (REQ-F-014); before any, it got no answer, so exit 141, the SIGPIPE
+        convention (``OUTPUT_CLOSED``). A stream cut off mid-way runs its cleanup hook like
+        a cancellation; a finished handler has nothing left to clean up."""
         command, self.in_flight = self.in_flight, None
         if command is not None and command.cleanup is not None:
             try:
@@ -1391,7 +2330,54 @@ class _Run:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stdout.fileno())
             os.close(devnull)
-        return 141
+        return 0 if self.delivered else 141
+
+    def to_file(
+        self, path: Path, mode: Format, envelope: Envelope, render: Renderer | None
+    ) -> Envelope:
+        """Write a successful result's ``data`` to ``path``; the envelope then describes
+        the write. A failed run writes no file."""
+        if not envelope.ok or envelope.data is None:
+            return envelope
+        data = envelope.data
+        if mode is Format.JSONL:
+            items = data if isinstance(data, list) else [data]
+            text = "".join(
+                json.dumps(i, separators=(",", ":"), sort_keys=True) + "\n" for i in items
+            )
+        elif mode is Format.JSON:
+            text = _json_text(data)
+        else:
+            try:
+                text = render(data) if render is not None else render_plain(data)
+            except Exception as exc:  # noqa: BLE001 - a renderer is user code
+                self.err.write(_traceback(exc))
+                return self._file_error(
+                    envelope, "RENDER_FAILED", f"the {mode} renderer failed", path
+                )
+        try:
+            write_atomic(path, text, new_mode=0o644)  # REQ-F-070
+        except OSError as exc:
+            return self._file_error(
+                envelope, "OUTPUT_UNWRITABLE", f"cannot write --output: {exc.strerror}", path
+            )
+        written = {"path": str(path), "bytes": len(text.encode("utf-8"))}
+        return dataclasses.replace(envelope, data=written)
+
+    def _file_error(self, envelope: Envelope, code: str, message: str, path: Path) -> Envelope:
+        """The result stays in ``data``, so a run that could not write its file loses nothing"""
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        return dataclasses.replace(
+            envelope,
+            exit_code=entry.code.value,
+            error=ErrorDetail(
+                code=code,
+                message=message,
+                retryable=False,
+                context={"output": str(path)},
+                phase="execution",
+            ),
+        )
 
     def emit_stream(
         self,
@@ -1417,7 +2403,7 @@ class _Run:
         render_failed = False
         for envelope in drain(envelopes):
             if mode is Format.JSON:
-                write_envelope(cap_envelope(envelope, self.cap), self.out)
+                self._write(envelope)
                 code = envelope.exit_code
                 continue
             code = self._emit_text(mode, envelope, render, fallback=render_event)
@@ -1463,6 +2449,7 @@ class _Run:
             if envelope.error.suggestion is not None:
                 self.err.write(f"hint: {envelope.error.suggestion}\n")
         self.out.flush()
+        self.delivered = True
         self.err.flush()
         return code
 
@@ -1505,9 +2492,10 @@ class _Run:
 
     # exec (REQ-O-050)
 
-    def exec(self, args: ExecArgs, stdin: IO[str]) -> int:
+    def exec(self, args: ExecArgs) -> int:
         """Dispatch each plan line in-process; JSONL envelopes out; 0, 1, or 2"""
-        text = self._read_plan(args, stdin)
+        text = self._read_plan(args)
+        self.payload_stdin = None  # the plan is stdin; a line's payload needs input_file
         if isinstance(text, Envelope):
             return self.emit(Format.JSON, text)
         # Only \n ends a JSONL line: splitlines() would also break on U+2028, U+2029,
@@ -1521,7 +2509,7 @@ class _Run:
         with contextlib.closing(self._exec_lines(args, plan)) as lines:
             for line_no, envelope in lines:
                 lines_seen, last = line_no, envelope
-                write_envelope(cap_envelope(envelope, self.cap), self.out)
+                self._write(envelope)
                 if envelope.error is None or envelope.error.code != "DISPATCH_PARSE_ERROR":
                     parsed_any = True
                 if not envelope.ok:
@@ -1532,7 +2520,7 @@ class _Run:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
             # between lines left no CANCELLED line, so the plan says where it stopped.
             if last is None or last.error is None or last.error.code != "CANCELLED":
-                write_envelope(self._plan_cancelled(received, lines_seen), self.out)
+                self._write(self._plan_cancelled(received, lines_seen))
             return received.exit_code
         if not lines_seen:
             return self.emit(
@@ -1559,49 +2547,74 @@ class _Run:
             meta={"partial": lines_run > 0},
         )
 
-    def _read_plan(self, args: ExecArgs, stdin: IO[str]) -> str | Envelope:
+    def _read_plan(self, args: ExecArgs) -> str | Envelope:
         """The whole plan, read before dispatch so a write-then-read caller cannot deadlock"""
-        if args.input_file is not None and args.input_file != Path("-"):
+        try:
+            return self._read_input(args.input_file)
+        except Cancelled as exc:
+            return self._plan_cancelled(exc.signal, 0)
+
+    def _read_input(
+        self, input_file: Path | None, *, meta: Mapping[str, object] | None = None
+    ) -> str | Envelope:
+        """A payload from ``--input-file``, of any size, or from stdin up to the stdin cap
+        (REQ-F-054); ``Cancelled`` when a signal ends the wait for a slow writer"""
+        if input_file is not None and input_file != Path("-"):
             try:
-                return args.input_file.read_text(encoding="utf-8-sig")  # tolerate a BOM
+                return input_file.read_text(encoding="utf-8-sig")  # tolerate a BOM
             except (OSError, UnicodeDecodeError) as exc:
                 return self._stream_error(
                     "INPUT_FILE_UNREADABLE",
                     f"cannot read --input-file: {exc}",
-                    context={"input_file": str(args.input_file)},
+                    context={"input_file": str(input_file)},
                     fix_required="pass a readable UTF-8 file, or - to read stdin",
+                    meta=meta,
                 )
+        stdin = self.payload_stdin
+        if stdin is None:
+            return self._stream_error(
+                "STDIN_UNAVAILABLE",
+                self.no_payload,
+                context={},
+                fix_required="pass input_file with the path of the payload",
+                meta=meta,
+            )
         if stdin.isatty():
             # Reading a terminal would block until the user types EOF
             return self._stream_error(
-                "STDIN_IS_TTY", "exec reads JSONL from stdin, not a terminal", context={"lines": 0}
+                "STDIN_IS_TTY",
+                "the input is read from stdin, not a terminal",
+                context={"lines": 0},
+                fix_required="pipe the input into stdin, or pass --input-file",
+                meta=meta,
             )
         try:
-            cap = StdinCap.resolve(self.env, self.app.max_stdin)
+            cap = StdinCap.resolve(self.env, self.app.max_stdin, self.app.name)
         except ParseError as exc:
-            return self.arg_error(exc)
+            return self.arg_error(exc, meta=meta)
         # One more character than the cap is always more bytes than the cap
         try:
             # A writer that keeps the pipe open must still be able to cancel the read
             with self.cancellation.armed():
                 text = stdin.read(cap.bytes + 1)
             size = len(text.encode("utf-8"))
-        except Cancelled as exc:
-            return self._plan_cancelled(exc.signal, 0)
         except (UnicodeDecodeError, UnicodeEncodeError) as exc:
             # A strict stdin fails to decode; a surrogateescape one fails to re-encode
             return self._stream_error(
                 "STDIN_NOT_UTF8",
-                f"stdin plan is not valid UTF-8: {exc.reason}",
+                f"stdin is not valid UTF-8: {exc.reason}",
                 context={"lines": 0},
-                fix_required="pipe UTF-8 JSONL into exec, or pass --input-file",
+                fix_required="pipe UTF-8 into stdin, or pass --input-file",
+                meta=meta,
             )
         if size > cap.bytes:
             return self._stream_error(
                 "STDIN_TOO_LARGE",
-                f"stdin plan exceeds the {cap.bytes}-byte limit",
+                f"stdin exceeds the {cap.bytes}-byte limit",
                 context={"limit_bytes": cap.bytes},
-                fix_required="write the plan to a file and pass --input-file <path>",
+                fix_required="write the input to a file and pass --input-file <path>",
+                hint="--input-file <path> reads the input from a file, with no size limit",
+                meta=meta,
             )
         return text
 
@@ -1613,6 +2626,8 @@ class _Run:
         context: Mapping[str, object],
         fix_required: str = "pipe one DispatchRequest JSON object per line into exec, "
         "or pass --input-file",
+        hint: str | None = None,
+        meta: Mapping[str, object] | None = None,
     ) -> Envelope:
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
         return self._envelope(
@@ -1624,7 +2639,9 @@ class _Run:
                 context=context,
                 phase="validation",
                 fix_required=fix_required,
+                hint=hint,
             ),
+            meta=meta,
         )
 
     def _exec_lines(self, args: ExecArgs, plan: list[str]) -> Generator[tuple[int, Envelope]]:
@@ -1634,6 +2651,7 @@ class _Run:
             line = raw.strip()
             if not line:
                 continue
+            self.warnings, self.token, self.config = [], None, None  # one command per line
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:
@@ -1663,13 +2681,18 @@ class _Run:
             try:
                 invocation = self._exec_invocation(command, request, args.dry_run, line_no)
             except ParseError as exc:
-                yield line_no, self.arg_error(exc, started=started, meta=meta)
+                failed = {**meta, **_mode_meta(command)}
+                yield line_no, self.arg_error(exc, started=started, meta=failed)
+                continue
+            except ArgsCrashed as exc:
+                yield line_no, self.args_crashed(command, exc, started=started, meta=meta)
                 continue
             if command.streaming:
-                envelopes = self.stream(command, invocation, Format.JSON, meta=meta)
                 if invocation.no_stream:
+                    envelopes = self.stream(command, invocation, Format.JSON, meta=meta, whole=True)
                     yield line_no, buffer_stream(envelopes)
                     continue
+                envelopes = self.stream(command, invocation, Format.JSON, meta=meta)
                 self.in_flight = command
                 with contextlib.closing(envelopes):
                     for envelope in envelopes:

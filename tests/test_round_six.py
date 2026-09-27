@@ -34,7 +34,7 @@ def test_asyncio_cancelled_error_in_a_handler_still_writes_an_envelope() -> None
         task.cancel()
         await asyncio.sleep(0)
 
-    @app.command("one", description="Awaits a cancelled task")
+    @app.command("one", description="Awaits a cancelled task", danger_level="safe", exit_codes=())
     def one(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         asyncio.run(cancelled())
         return {}
@@ -43,7 +43,8 @@ def test_asyncio_cancelled_error_in_a_handler_still_writes_an_envelope() -> None
     assert code == 1 and env["error"]["context"]["exception"] == "CancelledError"
 
 
-def test_closed_stdout_exits_141_without_a_traceback() -> None:
+def test_closed_stdout_after_an_event_exits_0_without_a_traceback() -> None:
+    """``| head -n 1``: the reader got a complete event, so this is success (REQ-F-014)"""
     proc = subprocess.Popen(
         [sys.executable, str(SLOWCTL), "serve", "--interval", "0.01"],
         stdout=subprocess.PIPE,
@@ -54,17 +55,25 @@ def test_closed_stdout_exits_141_without_a_traceback() -> None:
     proc.stdout.close()  # the reader goes away, as `| head -n 1` does
     code = proc.wait(timeout=10)
     err = proc.stderr.read().decode()
-    assert code == 141 and "Traceback" not in err, err
+    assert code == 0 and "Traceback" not in err and "BrokenPipe" not in err, err
 
 
 def test_handler_and_stream_see_the_callers_contextvars() -> None:
     app = App("ctx", version="1", default_timeout=5)
 
-    @app.command("who", description="Reads a contextvar on the worker")
+    @app.command(
+        "who", description="Reads a contextvar on the worker", danger_level="safe", exit_codes=()
+    )
     def who(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         return {"tenant": TENANT.get()}
 
-    @app.command("events", description="Sets a contextvar between events", streaming=True)
+    @app.command(
+        "events",
+        description="Sets a contextvar between events",
+        streaming=True,
+        danger_level="safe",
+        exit_codes=(),
+    )
     def events(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, str]]:
         TENANT.set("acme")
         yield {"tenant": TENANT.get()}
@@ -84,7 +93,9 @@ def test_failure_before_any_event_is_not_partial() -> None:
     app = App("early", version="1")
     app.exit_code("NOPE", 80, description="No", retryable=False, side_effects="none")
 
-    @app.command("s", description="Fails first", streaming=True, exit_codes=["NOPE"])
+    @app.command(
+        "s", description="Fails first", streaming=True, exit_codes=["NOPE"], danger_level="safe"
+    )
     def s(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         from treaty import Exit
 
@@ -98,7 +109,9 @@ def test_failure_before_any_event_is_not_partial() -> None:
 def test_in_process_streams_are_bounded_by_the_default_timeout() -> None:
     app = App("inf", version="1", default_timeout=0.3)
 
-    @app.command("forever", description="Never ends", streaming=True)
+    @app.command(
+        "forever", description="Never ends", streaming=True, danger_level="safe", exit_codes=()
+    )
     def forever(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         n = 0
         while True:
@@ -118,7 +131,7 @@ def test_integer_fields_accept_integral_floats_from_json() -> None:
     class N:
         n: int = Flag(default=1, description="N")
 
-    @app.command("n", description="N")
+    @app.command("n", description="N", danger_level="safe", exit_codes=())
     def n(args: N, ctx: Ctx) -> dict[str, int]:
         return {"n": args.n}
 
@@ -132,7 +145,7 @@ def test_cap_leaves_an_envelope_whose_error_alone_is_too_big() -> None:
     app = App("cap", version="1", max_output_bytes=4096)
     app.exit_code("BIG", 80, description="Big", retryable=False, side_effects="none")
 
-    @app.command("big", description="Big error", exit_codes=["BIG"])
+    @app.command("big", description="Big error", exit_codes=["BIG"], danger_level="safe")
     def big(args: NoArgs, ctx: Ctx) -> dict[str, list[int]]:
         raise Exit.BIG("big", detail="x" * 6000, data={"items": [1, 2, 3]})
 
@@ -143,7 +156,9 @@ def test_cap_leaves_an_envelope_whose_error_alone_is_too_big() -> None:
 def test_plain_help_lists_groups_implied_by_dotted_paths() -> None:
     app = App("a1", version="1", description="A1")
 
-    @app.command("db.migrate.up", description="Apply migrations")
+    @app.command(
+        "db.migrate.up", description="Apply migrations", danger_level="safe", exit_codes=()
+    )
     def up(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -160,7 +175,9 @@ def test_framework_flag_errors_are_collected_with_the_rest() -> None:
         src: str = Arg(description="Source")
         count: int = Flag(default=1, description="Count")
 
-    @app.command("copy", description="Copy", has_network_io=True)
+    @app.command(
+        "copy", description="Copy", has_network_io=True, danger_level="safe", exit_codes=()
+    )
     def copy(args: Copy, ctx: Ctx) -> dict[str, str]:
         return {}
 
@@ -186,7 +203,7 @@ def test_resource_reading_foreign_args_is_rejected_at_registration() -> None:
     app = App("res", version="1")
     with pytest.raises(RegistrationError, match=r"reads .*ProjectArgs, but .*OtherArgs"):
 
-        @app.command("x", description="X")
+        @app.command("x", description="X", danger_level="safe", exit_codes=())
         def x(args: OtherArgs, ctx: Ctx, project: Project) -> dict[str, str]:
             return {}
 
@@ -203,7 +220,7 @@ def test_pep_695_aliases_are_accepted() -> None:
         port: Port = Flag(default=80, description="Port")
         names: Names = Flag(default=(), description="Names")
 
-    @app.command("serve", description="Serve")
+    @app.command("serve", description="Serve", danger_level="safe", exit_codes=())
     def serve(args: Serve, ctx: Ctx) -> dict[str, int]:
         return {"port": args.port, "names": len(args.names)}
 
@@ -229,11 +246,11 @@ def test_defaults_must_match_the_field_type() -> None:
     app = App("def", version="1")
     with pytest.raises(RegistrationError, match="does not match"):
 
-        @app.command("bad", description="Bad")
+        @app.command("bad", description="Bad", danger_level="safe", exit_codes=())
         def bad(args: Bad, ctx: Ctx) -> dict[str, str]:
             return {}
 
-    @app.command("paint", description="Paint")
+    @app.command("paint", description="Paint", danger_level="safe", exit_codes=())
     def paint(args: Paint, ctx: Ctx) -> dict[str, bool]:
         return {"member": isinstance(args.color, Color)}
 
