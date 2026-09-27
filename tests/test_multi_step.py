@@ -11,8 +11,20 @@ from typing import Any, Literal
 
 import pytest
 from conftest import needs_posix_signals, spec_validator
+from jsonschema import Draft7Validator
 
-from treaty import App, CommandPath, Ctx, Exit, Flag, NoArgs, RegistrationError
+from treaty import (
+    App,
+    Batch,
+    CommandPath,
+    Ctx,
+    Exit,
+    Flag,
+    Item,
+    ItemError,
+    NoArgs,
+    RegistrationError,
+)
 from treaty._audit import audit
 from treaty._manifest import payload_schema
 from treaty._profile import probes_for
@@ -372,3 +384,124 @@ def test_the_conformance_profile_probes_resume_from_with_an_unknown_step() -> No
     assert probe.kind == "invalid"
     code, _, _ = run(app, list(probe.argv))
     assert code == 2
+
+
+# REQ-C-009
+
+
+@dataclass(frozen=True, slots=True)
+class Users:
+    users: tuple[int, ...] = Flag(default=(1, 2, 3, 4, 5), description="User ids")
+
+
+@dataclass(frozen=True, slots=True)
+class Sent:
+    effect: str
+    channel: str
+
+
+def notify_app() -> App:
+    app = App("notify", version="1.0.0")
+    app.exit_code(
+        "INVALID_EMAIL", 81, description="Bad address", retryable=False, side_effects="none"
+    )
+
+    @app.command(
+        "send",
+        description="Send notifications",
+        danger_level="mutating",
+        exit_codes=("INVALID_EMAIL", "RATE_LIMITED"),
+    )
+    def send(args: Users, ctx: Ctx) -> Batch[Sent]:
+        items: list[Item[Sent]] = []
+        for user in args.users:
+            if user == 3:
+                items.append(Item(user, error=Exit.INVALID_EMAIL("Invalid email address")))
+            elif user == 5:
+                error = ItemError("RATE_LIMITED", "Rate limit exceeded", retryable=True)
+                items.append(Item(user, error=error))
+            else:
+                items.append(Item(user, Sent(effect="created", channel="email")))
+        return Batch(items)
+
+    return app
+
+
+def test_a_batch_command_response_includes_summary_total_summary_succeeded_summary_failed() -> None:
+    code, envelope, _ = run(notify_app(), ["send"])
+    assert envelope["data"]["summary"] == {"total": 5, "succeeded": 3, "failed": 2}
+    assert envelope["data"]["partial"] is True and envelope["data"]["effect"] == "created"
+    assert envelope["error"]["code"] == "PARTIAL_FAILURE"
+    assert envelope["error"]["message"] == "2 of 5 items failed."
+
+
+def test_each_item_in_results_includes_ok_true_false_and_when_false_an_error_object() -> None:
+    _, envelope, _ = run(notify_app(), ["send"])
+    results = envelope["data"]["results"]
+    assert [r["id"] for r in results] == [1, 2, 3, 4, 5]
+    assert results[0] == {"id": 1, "ok": True, "effect": "created", "channel": "email"}
+    assert [r["ok"] for r in results] == [True, True, False, True, False]
+    assert all("error" in r for r in results if not r["ok"])
+
+
+def test_the_item_level_error_object_follows_the_standard_error_structure_code_message_retryable() -> (  # noqa: E501
+    None
+):
+    _, envelope, _ = run(notify_app(), ["send"])
+    errors = [r["error"] for r in envelope["data"]["results"] if not r["ok"]]
+    assert errors == [
+        {"code": "INVALID_EMAIL", "message": "Invalid email address", "retryable": False},
+        {"code": "RATE_LIMITED", "message": "Rate limit exceeded", "retryable": True},
+    ]
+
+
+def test_the_exit_code_for_a_partial_batch_success_is_non_zero() -> None:
+    code, envelope, _ = run(notify_app(), ["send"])
+    assert code == 3 and envelope["ok"] is False
+    code, envelope, _ = run(notify_app(), ["send", "--users", "1", "--users", "2"])
+    assert code == 0 and envelope["data"]["summary"]["failed"] == 0
+    code, envelope, _ = run(notify_app(), ["send", "--users", "3"])
+    assert code == 3 and envelope["data"]["partial"] is False  # 06-D4
+    assert envelope["data"]["effect"] == "noop"
+
+
+def test_a_batch_output_schema_describes_summary_and_results() -> None:
+    app = notify_app()
+    command = app.commands[CommandPath("send")]
+    schema = command.output_schema
+    assert schema["required"] == ["summary", "results"]
+    _, envelope, _ = run(app, ["send"])
+    Draft7Validator(schema).validate(envelope["data"])
+    assert "PARTIAL_FAILURE" in {
+        e["name"] for e in app.manifest()["commands"]["send"]["exit_codes"].values()
+    } | {e["name"] for e in app.manifest()["exit_codes"].values()}
+
+
+def test_an_item_with_both_or_neither_value_and_error_is_refused() -> None:
+    with pytest.raises(TypeError, match="exactly one"):
+        Item(1)
+    with pytest.raises(TypeError, match="exactly one"):
+        Item(1, Sent("created", "sms"), error=ItemError("X_Y", "no"))
+
+
+def test_batch_declarations_are_checked_at_registration() -> None:
+    @dataclass(frozen=True, slots=True)
+    class WithOk:
+        ok: bool
+
+    app = App("bad", version="1.0.0")
+    with pytest.raises(RegistrationError, match="'ok'"):
+
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
+        def go(args: NoArgs, ctx: Ctx) -> Batch[WithOk]:
+            return Batch([])
+
+    @dataclass(frozen=True, slots=True)
+    class Named:
+        name: str
+
+    with pytest.raises(RegistrationError, match="each Batch item's value"):
+
+        @app.command("mut", description="Mut", danger_level="mutating", exit_codes=())
+        def mut(args: NoArgs, ctx: Ctx) -> Batch[Named]:
+            return Batch([])

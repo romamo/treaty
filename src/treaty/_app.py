@@ -40,6 +40,7 @@ from ._auth import (
     not_logged_in,
     scope_set,
 )
+from ._batch import Batch, ItemError
 from ._cap import (
     DEFAULT_CAP,
     DEFAULT_STDIN_CAP,
@@ -2576,6 +2577,8 @@ class _Run:
         if replay is not None:
             return replay()
         page_meta: dict[str, object] = {}
+        batch_problem: str | None = None
+        data: object
         try:
             if command.paginated:
                 if isinstance(result, (list, tuple)):
@@ -2583,7 +2586,12 @@ class _Run:
                 result, pagination = take(result, position, limit, command.path)
                 page_meta["pagination"] = pagination.to_json()
                 self.page = (command.path, position)
-            data = self._payload(self._shimmed(command, result), *self._output(command))
+            if command.batch:
+                data, batch_problem = self._batch_data(
+                    command, args, result, _dry_run_requested(args)
+                )
+            else:
+                data = self._payload(self._shimmed(command, result), *self._output(command))
         except SchemaError as exc:
             return self._broken(
                 command,
@@ -2596,7 +2604,7 @@ class _Run:
             return self._crashed(command, args, exc, started, full_meta)
         data = self._with_open_url(data)
         if command.danger_level is not DangerLevel.SAFE:
-            problem = effect_problem(
+            problem = batch_problem or effect_problem(
                 data,
                 preview=_dry_run_requested(args),
                 destructive=command.danger_level is DangerLevel.DESTRUCTIVE,
@@ -2633,7 +2641,92 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
+        if command.batch:
+            return self._batch_envelope(command, data, started, full_meta)
         return self._envelope(0, data=data, started=started, meta={**full_meta, **page_meta})
+
+    def _batch_data(
+        self, command: Command, args: object, result: object, preview: bool
+    ) -> tuple[dict[str, object], str | None]:
+        """``data`` of a ``Batch``: the summary and one result per item, in the handler's
+        order, and why an item's value breaks the effect contract, if one does"""
+        if not isinstance(result, Batch):
+            raise SchemaError(f"{type(result).__name__}, not a treaty.Batch")
+        results: list[dict[str, object]] = []
+        effects: set[str] = set()
+        problem: str | None = None
+        for item in result.items:
+            if item.error is not None:
+                error = self._item_error(command, args, item.error)
+                results.append({"id": item.id, "ok": False, "error": error})
+                continue
+            value = self._payload(item.value, command.output_type)
+            if not isinstance(value, dict):
+                raise SchemaError(f"item {item.id!r} with a value that is not an object")
+            if command.danger_level is not DangerLevel.SAFE:
+                why = effect_problem(value, preview=preview)
+                problem = problem or (None if why is None else f"item {item.id!r}: {why}")
+                effects.add(str(value.get("effect")))
+            results.append({"id": item.id, "ok": True, **value})
+        failed = sum(1 for r in results if not r["ok"])
+        data: dict[str, object] = {
+            "summary": {
+                "total": len(results),
+                "succeeded": len(results) - failed,
+                "failed": failed,
+            },
+            "results": results,
+        }
+        if command.danger_level is not DangerLevel.SAFE:
+            # One effect for the whole batch: the items' own, when they agree
+            if len(effects) > 1:
+                data["effect"] = "would_update" if preview else "updated"
+            else:
+                data["effect"] = effects.pop() if effects else "noop"
+        return data, problem
+
+    def _item_error(
+        self, command: Command, args: object, error: ItemError | CliExit
+    ) -> dict[str, object]:
+        """``results[].error``: the standard code, message, and retryable (REQ-C-013); a
+        raised ``Exit`` takes ``retryable`` from its exit code"""
+        if isinstance(error, ItemError):
+            return error.to_json()
+        if error.name not in self.app.exits:
+            raise SchemaError(
+                f"an Item error raising exit code {error.name}, which is not registered"
+            )
+        if not _ERROR_CODE.fullmatch(error.code) or not isinstance(error.message, str):
+            raise SchemaError(f"an Item error with code {error.code!r}; codes are UPPER_SNAKE_CASE")
+        entry = self.app.exits.by_name(error.name)
+        message = self._redactor(command, args)(error.message)
+        return ItemError(error.code, message or error.code, entry.retryable).to_json()
+
+    def _batch_envelope(
+        self, command: Command, data: object, started: float, meta: Mapping[str, object]
+    ) -> Envelope:
+        """Exit 0 when every item succeeded; else 3, ``PARTIAL_FAILURE``, with ``data`` kept
+        and ``partial`` true when some succeeded (06-D4)"""
+        assert isinstance(data, dict)
+        summary = data["summary"]
+        assert isinstance(summary, dict)
+        if not summary["failed"]:
+            return self._envelope(0, data=data, started=started, meta=meta)
+        entry = self.app.exits.framework(FrameworkCode.PARTIAL_FAILURE)
+        return self._envelope(
+            entry.code.value,
+            data={**data, "partial": summary["succeeded"] > 0},
+            error=ErrorDetail(
+                code="PARTIAL_FAILURE",
+                message=f"{summary['failed']} of {summary['total']} items failed",
+                retryable=False,
+                context={"command": command.path.value, "failed": summary["failed"]},
+                phase="execution",
+                suggestion="retry only the results with ok false; the rest are done",
+            ),
+            started=started,
+            meta=meta,
+        )
 
     def stream(
         self,

@@ -35,8 +35,9 @@ def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
     if command.requires_auth:
         # Not logged in, or the credential lacks a required scope (REQ-C-029)
         codes += (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED)
-    if command.steps:
-        codes.append(FrameworkCode.PARTIAL_FAILURE)  # a step failed after one completed
+    if command.steps or command.batch:
+        # A step failed after one completed, or some items of a batch failed
+        codes.append(FrameworkCode.PARTIAL_FAILURE)
     return tuple(codes)
 
 

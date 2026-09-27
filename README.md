@@ -813,6 +813,28 @@ it, which the handler skips, and they are listed in `skipped_steps`. A failure's
 teardown, and `data.rollback_status` is `completed`, `failed` (with `rollback_error`), or
 `not_attempted` (REQ-O-011). `--schema` says `resumable` and `rollback_available`.
 
+A command that works through a batch of items returns `treaty.Batch[T]`, one `Item` per
+item with its value or its error:
+
+```python
+def send(args: SendArgs, ctx: Ctx) -> Batch[Sent]:
+    items = []
+    for user in args.users:
+        try:
+            items.append(Item(user, deliver(user)))
+        except Undeliverable as exc:
+            items.append(Item(user, error=Exit.INVALID_EMAIL(str(exc))))
+    return Batch(items)
+```
+
+`data` is `summary` (`total`, `succeeded`, `failed`) and `results`, one per item in the
+handler's order: `{"id": 1, "ok": true, ...value}` or `{"id": 3, "ok": false, "error":
+{"code", "message", "retryable"}}`, so a caller retries only the failed items (REQ-C-009).
+An item's error is a `treaty.ItemError(code, message, retryable)` or a `treaty.Exit`,
+whose `retryable` comes from its exit code. Any failed item exits `3` with
+`PARTIAL_FAILURE`, "2 of 5 items failed", `data` kept and `data.partial` true when some
+succeeded. A mutating batch checks each item's `effect` and reports one for the batch.
+
 ## Locks
 
 `ctx.lock(name)` holds a lock shared by every run of the app for a `with` block:

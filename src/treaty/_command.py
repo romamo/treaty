@@ -13,6 +13,7 @@ from enum import StrEnum
 from typing import Any
 
 from ._auth import AuthKind, check_declaration
+from ._batch import ITEM_KEYS, batch_item, batch_schema
 from ._config import ConfigScope
 from ._deprecation import Deprecated
 from ._effect import can_carry, with_replay_effect
@@ -177,6 +178,9 @@ class Command:
     """``--resume-from STEP`` starts at a step (REQ-O-010)"""
     rollback: Rollback | None = None
     """Undoes completed steps under ``--rollback-on-failure`` (REQ-O-011)"""
+    batch: bool = False
+    """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
+    and ``results``, and a failed item exits 3 (REQ-C-009)"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -322,7 +326,17 @@ def build_command(
         raise RegistrationError(
             f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
         )
+    paginated_asked = bool(paginated)
     args_type, output_type, resources, paginated = _inspect_handler(fn, path, streaming, paginated)
+    item_type = batch_item(resolve_alias(output_type))
+    batch = item_type is not None
+    if item_type is not None:
+        _check_batch(path, item_type, streaming, danger_level, compat)
+        if steps or paginated_asked:
+            raise RegistrationError(
+                f"{path}: a treaty.Batch reports per-item results; drop steps= and paginated="
+            )
+        output_type = item_type
     refuse_async(cleanup, f"{path}: cleanup")
     refuse_async(cursor_check, f"{path}: cursor_check")
     if cursor_check is not None and not (paginated and callable(cursor_check)):
@@ -405,8 +419,9 @@ def build_command(
         f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
     if danger_level is not DangerLevel.SAFE:
         if not can_carry(output_type, "effect"):
+            what = "each Batch item's value" if batch else "an object"
             raise RegistrationError(
-                f"{path}: {danger_level.value} commands must return an object with an "
+                f"{path}: {danger_level.value} commands must return {what} with an "
                 "'effect' field (REQ-C-003)"
             )
         if any(f.name == "idempotency_key" for f in fields):
@@ -440,6 +455,11 @@ def build_command(
     shims = _compat(path, compat or {}, schema_version, output_type, scalars)
     if returns_job:
         output_schema = descriptor_schema(output_schema)
+    if batch:
+        output_schema = batch_schema(output_schema)
+        if danger_level is not DangerLevel.SAFE:
+            effect: JsonSchema = {"type": "string", "description": "What the batch did overall"}
+            output_schema["properties"]["effect"] = effect
     if danger_level is not DangerLevel.SAFE:
         output_schema = with_replay_effect(output_schema)
     if step_names:
@@ -497,7 +517,42 @@ def build_command(
         steps=step_names,
         resumable=resumable,
         rollback=rollback,
+        batch=batch,
     )
+
+
+def _check_batch(
+    path: CommandPath,
+    item: object,
+    streaming: bool,
+    danger_level: DangerLevel,
+    compat: Mapping[str, Shim] | None,
+) -> None:
+    """``Batch[T]``: ``T`` is an object whose fields sit beside ``id`` and ``ok``"""
+    if streaming:
+        raise RegistrationError(f"{path}: a stream yields events, not a treaty.Batch")
+    if danger_level is DangerLevel.DESTRUCTIVE:
+        raise RegistrationError(
+            f"{path}: a destructive command previews one would_affect for its dry run; "
+            "return one result, or make each item its own call, instead of treaty.Batch"
+        )
+    if compat:
+        raise RegistrationError(f"{path}: compat= shims one result, not a treaty.Batch")
+    base, optional = strip_optional(item)
+    is_object = is_dataclass_type(base) or base is dict or typing.get_origin(base) is dict
+    if optional or not is_object:
+        raise RegistrationError(
+            f"{path}: Batch[T] needs T to be a dataclass or dict, whose fields go beside "
+            f"id and ok in each result; not {item!r}"
+        )
+    if is_dataclass_type(base):
+        assert isinstance(base, type)
+        taken = sorted(ITEM_KEYS & {f.name for f in dataclasses.fields(base)})
+        if taken:
+            raise RegistrationError(
+                f"{path}: fields {taken} of {base.__qualname__} are keys every result "
+                "already has; rename them, and pass the item's id as Item(id=...)"
+            )
 
 
 def _check_steps(
@@ -750,6 +805,9 @@ def _inspect_handler(
     if streaming:
         output_type = _event_type(output_type, path)
         paginated = False  # a stream has no pages; its events may be lists
+    if batch_item(resolve_alias(output_type)) is not None:
+        assert isinstance(args_type, type)
+        return args_type, output_type, resources, False  # checked by _check_batch
     output_type, paginated = _page_output(output_type, path, paginated)
     if not is_payload_type(output_type):
         what = "each yielded event" if streaming else "return type"

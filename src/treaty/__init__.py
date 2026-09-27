@@ -4,6 +4,7 @@ from importlib.metadata import version
 
 from ._app import App, ExecArgs, Group, NoArgs
 from ._auth import Credentials, Expired
+from ._batch import Batch, Item, ItemError
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
 from ._deprecation import Deprecated
@@ -40,6 +41,7 @@ __all__ = [
     "Affects",
     "App",
     "Arg",
+    "Batch",
     "Binary",
     "CliExit",
     "CommandPath",
@@ -63,6 +65,8 @@ __all__ = [
     "FrameworkCode",
     "Group",
     "Init",
+    "Item",
+    "ItemError",
     "Job",
     "JobStore",
     "Meta",
