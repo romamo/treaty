@@ -99,7 +99,7 @@ class ScalarSpec:
                 return "does not match pattern", {"pattern": self.pattern}
         if self.pattern_type is not None:
             assert isinstance(base_value, str)
-            if not _matches_preset(self.pattern_type, base_value):
+            if not matches_preset(self.pattern_type, base_value):
                 return f"is not a valid {self.pattern_type}", {"pattern_type": self.pattern_type}
         if self.minimum is not None:
             assert isinstance(base_value, (int, float))
@@ -130,7 +130,7 @@ def anchored(pattern: str) -> str:
     return f"^(?:{pattern})$"
 
 
-def _matches_preset(preset: str, value: str) -> bool:
+def matches_preset(preset: str, value: str) -> bool:
     if preset == "url":
         try:
             parts = urlsplit(value)

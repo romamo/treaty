@@ -14,7 +14,15 @@ from typing import Any
 
 from ._errors import ParseError, RegistrationError
 from ._paths import PATTERN_TYPE, check_path
-from ._scalars import ScalarRegistry, ScalarSpec, anchored, check_pattern_publishable
+from ._scalars import (
+    PATTERN_TYPES,
+    PRESET_PATTERNS,
+    ScalarRegistry,
+    ScalarSpec,
+    anchored,
+    check_pattern_publishable,
+    matches_preset,
+)
 from ._secrets import source_flags
 from ._types import Classified, FlagType, classify
 
@@ -35,10 +43,19 @@ class FlagSpec:
     secret: bool | None = None
     multiline: bool = False
     max_bytes: int | None = None
+    pattern_type: str | None = None
+    """A REQ-C-020 preset such as ``alphanumeric_id``, without registering a scalar"""
 
     def __post_init__(self) -> None:
         if not self.description:
             raise RegistrationError("every flag needs a description")
+        if self.pattern_type is not None and self.pattern_type not in PATTERN_TYPES:
+            raise RegistrationError(
+                f"pattern_type={self.pattern_type!r} is not one of "
+                f"{', '.join(sorted(PATTERN_TYPES))}; Path fields get filepath on their own"
+            )
+        if self.pattern is not None and self.pattern_type is not None:
+            raise RegistrationError("pattern and pattern_type are mutually exclusive")
         if self.max_bytes is not None and (
             isinstance(self.max_bytes, bool)
             or not isinstance(self.max_bytes, int)
@@ -60,9 +77,12 @@ def Flag(
     secret: bool | None = None,
     multiline: bool = False,
     max_bytes: int | None = None,
+    pattern_type: str | None = None,
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
+    ``pattern`` is a regex the whole value must match; ``pattern_type`` is a preset
+    instead: ``alphanumeric_id``, ``uuid``, ``semver``, or ``url`` (REQ-C-020).
     ``secret`` keeps the value out of every error; ``None`` infers it from the name.
     ``multiline`` lets a text field such as a message body contain newlines.
     ``max_bytes`` is the most UTF-8 bytes a text value may have, such as a backend
@@ -75,6 +95,7 @@ def Flag(
         secret=secret,
         multiline=multiline,
         max_bytes=max_bytes,
+        pattern_type=pattern_type,
     )
     if isinstance(default, (list, dict, set)):
         raise RegistrationError("mutable defaults are not allowed; use a tuple")
@@ -83,9 +104,17 @@ def Flag(
     return field(default=default, metadata={_META: spec})
 
 
-def Arg(*, description: str, pattern: str | None = None, secret: bool | None = None) -> Any:
+def Arg(
+    *,
+    description: str,
+    pattern: str | None = None,
+    secret: bool | None = None,
+    pattern_type: str | None = None,
+) -> Any:
     """Declare a positional argument on an arguments dataclass"""
-    spec = FlagSpec(description, positional=True, pattern=pattern, secret=secret)
+    spec = FlagSpec(
+        description, positional=True, pattern=pattern, secret=secret, pattern_type=pattern_type
+    )
     return field(metadata={_META: spec})
 
 
@@ -193,11 +222,22 @@ class FieldInfo:
             )
 
     def check_pattern(self, raw: str) -> None:
-        """``Flag(pattern=)`` for argv tokens and JSON strings alike (REQ-C-020)"""
+        """``Flag(pattern=)`` and ``Flag(pattern_type=)`` for argv tokens and JSON strings
+        alike; the error names the flag and what it expects (REQ-C-020)"""
         if self.spec.pattern is not None and not re.fullmatch(self.spec.pattern, raw):
             raise ParseError(
                 f"value for {self.flag!r} does not match pattern",
                 context={"flag": self.flag, "value": raw, "pattern": self.spec.pattern},
+            )
+        preset = self.spec.pattern_type
+        if preset is not None and not matches_preset(preset, raw):
+            context: dict[str, object] = {"flag": self.flag, "value": raw, "pattern_type": preset}
+            if preset in PRESET_PATTERNS:
+                context["pattern"] = anchored(PRESET_PATTERNS[preset])
+            raise ParseError(
+                f"value for {self.flag!r} does not match the {preset} pattern",
+                context=context,
+                suggestion=_PRESET_HINTS[preset],
             )
 
     def to_flag_entries(self) -> dict[str, dict[str, object]]:
@@ -239,6 +279,8 @@ class FieldInfo:
             entry["short"] = self.spec.short
         if self.spec.pattern is not None:
             entry["pattern"] = anchored(self.spec.pattern)
+        if self.spec.pattern_type is not None:
+            entry["pattern_type"] = self.spec.pattern_type
         if self.path:
             entry["pattern_type"] = PATTERN_TYPE
         if (scalar := self.scalar) is not None:
@@ -264,6 +306,15 @@ class FieldInfo:
         if variadic:
             entry["variadic"] = True
         return entry
+
+
+_PRESET_HINTS = {
+    "alphanumeric_id": "use letters, digits, - and _ only, starting with a letter or digit; "
+    "no /, ., ?, #, or %",
+    "uuid": "pass a UUID such as 123e4567-e89b-12d3-a456-426614174000",
+    "semver": "pass a version such as 1.2.3",
+    "url": "pass an http or https URL with a host",
+}
 
 
 def _jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
@@ -497,6 +548,14 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
                 "pattern= is not allowed on them (REQ-C-020)"
             )
         scalar = classified.scalar if item is None else item.scalar
+        text_type = item if item is not None else classified
+        if spec.pattern_type is not None and (
+            text_type.flag_type is not FlagType.STRING or text_type.path or scalar is not None
+        ):
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: pattern_type is for str fields; a Path gets "
+                "filepath on its own, and a scalar declares it in app.scalar(...) (REQ-C-020)"
+            )
         if spec.pattern is not None and scalar is not None:
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: {scalar.cls.__qualname__} declares its own "

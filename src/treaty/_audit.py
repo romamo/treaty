@@ -363,6 +363,36 @@ def _path_typed(app: App) -> Iterator[Finding]:
                 )
 
 
+_ID_NAMES = re.compile(r"(^|_)(id|slug|ref)$")
+
+
+def _id_pattern(app: App) -> Iterator[Finding]:
+    """REQ-C-020's registration warning (04-D1): an identifier field with nothing that
+    rejects a hallucinated value such as ``prod/../evil``"""
+    for c in user_commands(app):
+        for f in c.fields:
+            text = f.classified.item or f.classified
+            if (
+                text.flag_type is FlagType.STRING
+                and not text.path
+                and text.scalar is None
+                and not f.secret
+                and f.spec.pattern is None
+                and f.spec.pattern_type is None
+                and _ID_NAMES.search(f.name)
+            ):
+                marker = "Arg" if f.positional else "Flag"
+                yield Finding(
+                    "id-pattern",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"{f.name} looks like a resource identifier but declares no pattern, so "
+                    "a value with / . ? # or % reaches the handler (heuristic, REQ-C-020)",
+                    f'{f.name}: str = {marker}(..., pattern_type="alphanumeric_id"), or '
+                    'pattern="^...$" for another shape',
+                )
+
+
 _MULTILINE_NAMES = re.compile(r"(^|_)(message|body|description|text)($|_)")
 
 
@@ -1198,6 +1228,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule("no-shell", "Handlers never run a shell", Severity.WARNING, _no_shell),
     Rule("path-typed", "Path-like fields are typed Path", Severity.WARNING, _path_typed),
+    Rule("id-pattern", "Identifier fields declare a pattern", Severity.WARNING, _id_pattern),
     Rule(
         "multiline-flag",
         "Free-text fields that may span lines declare multiline",
