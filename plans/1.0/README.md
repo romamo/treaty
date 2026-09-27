@@ -61,7 +61,7 @@ with Phase A:
 | Reserve global names (see below) | 01, 02, 04, 05, 07, 09, 11, 12 | A reserved name collides with app fields (REQ-F-079); adding one after 1.0 breaks apps |
 | `os.system`, `os.popen`, `shell=True` in a handler is a `RegistrationError` (landed) | 08 (C-019) | Refuses registration of apps that pass today |
 | `gui_operations` requires `headless_behavior=` (landed) | 08 (C-024) | New required keyword |
-| `ctx.log` and stray `print()` silent off a TTY or under `CI` | 11 (F-038) | Default behavior change |
+| `ctx.log` and stray `print()` silent off a TTY or under `CI` (landed with 11) | 11 (F-038) | Default behavior change |
 | Built-in name rule: new built-ins yield to a same-named app command (landed with 08's `doctor` and `cleanup`) | 13 (13-D1) | Decides which names apps may use |
 | `LC_ALL=C` for children unless `preserve_locale=True` (landed with 09) | 09 (F-066) | Changes child output that apps may parse |
 
@@ -143,6 +143,9 @@ Workstream-local questions are in each file's Decisions table. These span files:
 
 X1 landed with 05: `treaty.Out` (`_out.OutSpec`: `sort_key`, `ordered`, `volatile`); 07
 adds its keywords to the same spec.
+
+X3 and X4 landed with 11: the audit log calls `_redact.scrub` on every entry, so F-034 is
+Done; it is on by default, off with `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`.
 
 X2 and X5 landed with 10: `ctx.http` fills `error.network_context`, and its retries go
 through the command's `retry=` budget into `meta.retries` and `error.retries_exhausted`.

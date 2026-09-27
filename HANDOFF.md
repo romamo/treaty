@@ -338,8 +338,8 @@ The two do not share code.
   REQ-F-034's list plus `cookie` and a `pass` segment) for inputs, settings, logs, and
   stderr, where over-redaction is harmless; `secret_field` (the last word) for masking
   output, where it is not (`author`, `token_count`)
-- **Yielding built-ins** (13-D1): `doctor` and `cleanup` (`_builtins.py`) are registered
-  on every app and listed in `App._yielding`; `_yield_to` drops one when an app command,
+- **Yielding built-ins** (13-D1): `doctor`, `cleanup`, and `audit-log` (unless
+  `App(audit_log=None)`, as the treaty CLI passes) (`_builtins.py`) are registered on every app and listed in `App._yielding`; `_yield_to` drops one when an app command,
   group, or redirect takes its path, and `shadowed_builtins` feeds the `builtin-shadowed`
   audit rule. `manifest`, `version`, and `exec` stay reserved. Workstream 13 adds its
   built-ins the same way
@@ -358,6 +358,22 @@ The two do not share code.
 - **`App.main()` runs with `CI` as it was started**: it sets `CI=1` in `os.environ` off a
   terminal for libraries and children, but passes the run an env with the original, so
   a terminal's plain output never turns into JSON
+- **Every stderr line has a level** (`_verbosity.py`): `_Stderr.write(text, level)` drops
+  what the run's `Verbosity` hides; tracebacks and error prose default to ERROR, the
+  deprecation and `--no-injection-protection` lines are WARN (so AUTO keeps F-075's line),
+  `ctx.log` and stray `print()` are INFO, `ctx.progress` and step events PROGRESS. The
+  verbosity is resolved in `_route` right after `split_globals`; `App.call` stays AUTO
+- **`--debug` is the `logging` module**: `_verbosity.trace(event, **fields)` logs to the
+  `treaty` logger, and `_Run.attach_trace` adds a `_TraceHandler` to the root logger (level
+  DEBUG) until `App.run` returns, so framework events and any library's records go through
+  `_log_line`'s redaction. `_http.py`, `_subprocess.py`, and `_locks.py` call `trace`
+- **`_Run.settle` is the one place an answer is finished**: `--warnings-as-errors`, then
+  the audit entry, called by `_write` and `_emit_text` (not for stream events or help,
+  `settle=False`) and by `App.call`. `_write` returns the exit code it wrote, since settling
+  can change it. `self.args` holds the parsed args for the entry; `exec` resets it per line
+- **The audit log is `_journal.py`** (`_audit.py` is the linter): the run resolves the path
+  once (`env_error` holds a bad `<APP>_AUDIT_LOG`, like a bad `TOOL_TRACE_ID`); the test
+  suite points `XDG_DATA_HOME` at a temp dir in `conftest.pytest_configure`
 - **`ctx.http` never uses urllib's proxy logic**: `ProxyHandler` and `proxy_bypass*`
   read `os.environ` and, on macOS, the system settings, so the opener gets
   `ProxyHandler({})` and `_Proxied`, a pre-processor that routes each request (redirects
@@ -392,8 +408,10 @@ src/treaty/
   _http.py       ProxyConfig, Http, HttpResponse, NetworkFailure: ctx.http (10)
   _walk.py       Walk, WalkEntry, Traversal: ctx.walk, loop and depth limits (10)
   _deps.py       Version, Dependency, doctor's dependency and required-tool checks
-  _builtins.py   doctor and cleanup: built-ins that yield to an app command (13-D1)
+  _builtins.py   doctor, cleanup, audit-log: built-ins that yield to an app command (13-D1)
   _redact.py     SECRET_NAME, secret_field(), scrub(): what a secret name is (REQ-F-034)
+  _verbosity.py  Verbosity, Level, resolve_verbosity(), trace(): stderr levels (11)
+  _journal.py    AuditLog, Journal, log_path(), read_entries(): the audit log (11)
   _protect.py    protect(), tagged(): masking and trust tags of data (REQ-F-058, F-035)
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
@@ -466,20 +484,20 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
 F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-022, F-023, F-024,
-F-025 (not the audit log), F-027, F-028, F-029, F-030, F-031, F-032, F-034 (not the audit log), F-035, F-036, F-037, F-040, F-041, F-043, F-044, F-045 (paths),
-F-046, F-047, F-048, F-050, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-060 (not `--debug`), F-061, F-062, F-063, F-064, F-065, F-066, F-069,
+F-025, F-026, F-027, F-028, F-029, F-030, F-031, F-032, F-034, F-035, F-036, F-037, F-038, F-040, F-041, F-042, F-043, F-044, F-045 (paths),
+F-046, F-047, F-048, F-050, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-069,
 F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
 C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-010, C-011 (not `status`), C-012,
 C-013, C-015, C-016, C-017, C-018, C-019,
-C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-003, O-007, O-010, O-011, O-013, O-014, O-015, O-016, O-017, O-018, O-019, O-020, O-021, O-022,
-O-023 (not the audit log), O-024, O-031, O-032, O-033, O-036, O-037, O-039, O-040, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
+C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-003, O-007, O-008, O-010, O-011, O-013, O-014, O-015, O-016, O-017, O-018, O-019, O-020, O-021, O-022,
+O-023, O-024, O-025, O-030, O-031, O-032, O-033, O-036, O-037, O-039, O-040, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),
 `--output-schema`, `--schema-version`, `--stable-output`, `--unmask`,
 `--no-injection-protection`, `--max-output`, `--config`,
 `--context`, `--no-config`, `--show-config`, `--instance-id`, `--cwd`, `--no-update-check`,
-and per
+`--quiet`, `--verbose`, `--debug`, `--warnings-as-errors`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and

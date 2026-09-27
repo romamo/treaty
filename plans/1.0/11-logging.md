@@ -145,12 +145,32 @@ applies `_scrub` again for lines written before a secret field was declared.
 
 ## Tasks
 
-- [ ] `Verbosity`, `resolve_verbosity`, global flags in `split_globals` and `global_flag_entries`; collision check
-- [ ] Levels on `_Stderr` and every framework write; `ctx.debug`, `ctx.log_error`, `ctx.progress`
-- [ ] `_Run.trace` at the framework's decision points; run-scoped `logging` handler
-- [ ] `_Run.finish`; `--warnings-as-errors` and `WARNINGS_AS_ERRORS`
-- [ ] `AuditLog`, path resolution, redacted append, `meta.audit_log_path`, `AUDIT_LOG_UNAVAILABLE`
-- [ ] Size rotation under the lock; age pruning on first append
-- [ ] `audit-log` built-in; `audit_log=None` for the treaty CLI; test fixture for `XDG_DATA_HOME`
-- [ ] Audit rule `log-not-print`: handlers calling `print()` or `sys.stderr.write`, fix `ctx.log(...)`
-- [ ] Update COMPLIANCE rows F-026, F-038, F-042, O-008, O-025, O-030; README, HANDOFF, ROADMAP
+- [x] `Verbosity`, `resolve_verbosity`, global flags in `split_globals` and `global_flag_entries`; collision check.
+  AUTO writes warnings as well as errors, so F-075's deprecation line and O-023's
+  structured line still reach stderr off a terminal; help asked for in JSON mode is
+  written like an error (all but `--quiet`)
+- [x] Levels on `_Stderr` and every framework write; `ctx.debug`, `ctx.log_error`, `ctx.progress`
+- [x] `_Run.trace` at the framework's decision points; run-scoped `logging` handler. The
+  trace is the `treaty` logger itself (`_verbosity.trace`), so `_http.py`,
+  `_subprocess.py`, and `_locks.py` log without a reference to the run; points traced:
+  format and verbosity, config resolution, command start with its timeout, each
+  `ctx.http` request, each child's argv and exit, lock acquisition, the audit entry, and
+  stray stdout with its source (F-060). Idempotency claims and resource acquire/release
+  are not traced
+- [x] `_Run.finish`; `--warnings-as-errors` and `WARNINGS_AS_ERRORS`. Named `_Run.settle`,
+  called from `_write` and `_emit_text` (stream events and help pass `settle=False`) and
+  `App.call`, so no call site in `_route` changed; `context` also lists the `codes`
+- [x] `AuditLog`, path resolution, redacted append, `meta.audit_log_path`, `AUDIT_LOG_UNAVAILABLE`.
+  `<APP>_AUDIT_LOG=off` wins over `AuditLog.path`. Entries also carry `error_code`,
+  `warnings` (codes: O-023's audit record), and `data` when under 4 KiB, scrubbed, for
+  F-034's response-field criterion (else `data_bytes`)
+- [x] Size rotation under the lock; age pruning on first append. Pruning also deletes a
+  live file untouched for `max_age_days`
+- [x] `audit-log` built-in; `audit_log=None` for the treaty CLI; test fixture for `XDG_DATA_HOME`.
+  `--limit` keeps the newest N, oldest first; `--command` accepts `deploy rollback` or
+  `deploy.rollback`; with the log off it exits 4 `AUDIT_LOG_OFF`; unreadable lines are
+  skipped with an `AUDIT_LINES_UNREADABLE` warning
+- [x] Audit rule `log-not-print`: handlers calling `print()` or `sys.stderr.write`, fix `ctx.log(...)`
+- [x] Update COMPLIANCE rows F-026, F-038, F-042, O-008, O-025, O-030; README, HANDOFF, ROADMAP.
+  Also closed: F-025, F-034, F-060, O-023, whose remaining criteria waited on this
+  workstream

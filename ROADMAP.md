@@ -183,6 +183,14 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   rules `http-client` and `recursive-traversal`. Behavior change: network commands list
   exit 12 among their implicit codes, and a field named `proxy`, `no-proxy`, `max-depth`,
   or `no-follow-symlinks` on an opting-in command was already refused
+- 1.0 plan, logging, verbosity, and audit log (`plans/1.0/11-logging.md`): `--quiet`,
+  `--verbose`, `--debug` (the framework's trace and every `logging` record, redacted),
+  `ctx.progress`, `ctx.debug`, `ctx.log_error`, `--warnings-as-errors` with
+  `WARNINGS_AS_ERRORS`, a rotated and redacted `audit.jsonl` (`treaty.AuditLog`,
+  `<APP>_AUDIT_LOG`, `meta.audit_log_path`), the `audit-log` built-in, and the audit rule
+  `log-not-print`. Behavior changes: off a terminal or under `CI`, `ctx.log` and stray
+  `print()` text no longer reach stderr; every app writes an audit log under
+  `XDG_DATA_HOME` unless `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`
 
 ## 0.1.x: after the first minor release
 
