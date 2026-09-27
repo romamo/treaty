@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from ._audit import user_commands
 from ._command import Command, DangerLevel
 from ._parse import VALUED_GLOBALS
+from ._values import CommandPath
 
 if TYPE_CHECKING:
     from ._app import App
@@ -78,6 +79,10 @@ def probes_for(app: App) -> list[Probe]:
         elif command.danger_level is DangerLevel.SAFE:
             probes.append(Probe(label, argv, "read"))
     probes.append(Probe("version", ("version",), "read"))
+    if CommandPath("status") in app.builtins:
+        probes.append(Probe("status built-in", ("status",), "read"))  # REQ-O-028: always 0
+    # REQ-O-041: an etag that is not sha256:<32 hex> exits 2 before anything runs
+    probes.append(Probe("manifest malformed etag", ("manifest", "--etag", "x"), "invalid"))
     first = next(p for p in probes if p.kind != "invalid")
     probes.append(Probe("unknown flag", (*first.argv, "--no-such-flag"), "invalid"))
     return probes

@@ -8,6 +8,8 @@
   "probes": [
     { "name": "version", "argv": ["version"], "kind": "read" },
     { "name": "manifest", "argv": ["manifest"], "kind": "read" },
+    { "name": "status built-in", "argv": ["status"], "kind": "read" },
+    { "name": "manifest malformed etag", "argv": ["manifest", "--etag", "x"], "kind": "invalid" },
     { "name": "rollback preview", "argv": ["deploy", "rollback", "api", "--dry-run"], "kind": "read" },
     { "name": "unknown flag", "argv": ["deploy", "rollback", "api", "--no-such-flag"], "kind": "invalid" },
     { "name": "unknown command", "argv": ["deploy", "explode"], "kind": "invalid" },
