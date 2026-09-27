@@ -847,6 +847,16 @@ def test_a_redirect_needs_a_registered_target_and_a_free_path() -> None:
             return {}
 
 
+def test_a_redirect_under_or_over_another_is_refused() -> None:
+    app = moved_app()
+    app.redirect("retired", to="deploy.rollback")
+    with pytest.raises(RegistrationError, match="still in use"):
+        app.redirect("retired.sub", to="deploy.rollback")
+    app.redirect("gone.sub", to="deploy.rollback")
+    with pytest.raises(RegistrationError, match="still in use"):
+        app.redirect("gone", to="deploy.rollback")
+
+
 def test_a_declared_fix_command_is_left_off_a_retryable_error() -> None:
     app = App("st", version="1.0.0")
 

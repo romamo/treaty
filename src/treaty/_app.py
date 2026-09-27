@@ -713,9 +713,15 @@ class App:
             or source.is_ancestor_of(p)
             or (p in self._commands and p.is_ancestor_of(source))
         ]
-        if live or source in self._redirects:
+        # A redirect above another would answer for it, and one below never be reached
+        live += [
+            f"redirect {r}"
+            for r in self._redirects
+            if r == source or r.is_ancestor_of(source) or source.is_ancestor_of(r)
+        ]
+        if live:
             raise RegistrationError(
-                f"redirect {source}: the path is still in use ({', '.join(live) or 'redirect'})"
+                f"redirect {source}: the path is still in use ({', '.join(live)})"
             )
         self._redirects[source] = Moved(target, RedirectReason(reason), permanent)
         self._commands[target] = dataclasses.replace(command, aliases=(*command.aliases, source))
