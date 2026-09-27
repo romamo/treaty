@@ -6,36 +6,14 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
-from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG
-from ._command import (
-    DEFAULT_HEARTBEAT_MS,
-    HEARTBEAT_FLAG,
-    INPUT_FILE_FLAG,
-    OUTPUT_FLAG,
-    Command,
-    DangerLevel,
-)
-from ._config import GLOBAL_FLAG, ConfigScope
+from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
+from ._framework import NO_STREAM_FLAG, framework_flags
 from ._mode import Format
-from ._page import CURSOR_FLAG, LIMIT_FLAG
-from ._parse import (
-    CONFIRM_FLAG,
-    IDEMPOTENCY_FLAG,
-    LIVE_FLAG,
-    NO_STREAM_FLAG,
-    NON_INTERACTIVE_FLAG,
-    TIMEOUT_FLAG,
-    YES_FLAG,
-)
 from ._schema import JsonSchema
 from ._values import CommandPath, Etag
 
 SCHEMA_VERSION = "3.0"
-CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
-IDEMPOTENCY_KEY = IDEMPOTENCY_FLAG.replace("-", "_")
-NO_STREAM_KEY = NO_STREAM_FLAG.replace("-", "_")
-TIMEOUT_KEY = TIMEOUT_FLAG
 # TIMEOUT is shared: every handler runs under a deadline unless it is set to 0.
 # PRECONDITION too: a stray input() no one can answer exits 4 on any command (REQ-F-047)
 _ALWAYS = (
@@ -131,126 +109,7 @@ def command_entry(
     flags: dict[str, object] = {}
     for f in command.fields:
         flags.update(f.to_flag_entries())
-    if command.accepts_timeout:
-        flags["timeout"] = {
-            "type": "number",
-            "required": False,
-            "description": "Seconds to wait for each event before TIMEOUT; 0 disables the limit"
-            if command.streaming
-            else "Seconds before the framework aborts with TIMEOUT; 0 disables the limit",
-        }
-    if command.supports_raw_payload:
-        flags["raw-payload"] = {
-            "type": "string",
-            "required": False,
-            "description": "JSON object of field values; cannot be combined with individual flags",
-        }
-    if command.danger_level is not DangerLevel.SAFE:
-        flags["idempotency-key"] = {
-            "type": "string",
-            "required": False,
-            "description": "Repeat calls with the same key return the original result "
-            "with effect noop instead of running again",
-        }
-    if command.streaming:
-        flags["no-stream"] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Return one envelope with every event in data instead of "
-            "one envelope line per event",
-        }
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        flags["confirm-destructive"] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Not needed: --live applies and is the confirmation"
-            if command.safe_default
-            else "Required to apply; without it the command previews and exits 2",
-        }
-    if command.interactive:
-        flags[YES_FLAG] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Answer yes to every confirmation instead of asking",
-        }
-        flags[NON_INTERACTIVE_FLAG] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Never prompt, even on a terminal; a needed answer exits 4",
-        }
-    if command.config_write_scope is not None:
-        only_global = command.config_write_scope is ConfigScope.GLOBAL
-        entry_global: dict[str, object] = {
-            "type": "boolean",
-            "required": only_global,
-            "description": "Required: the command writes the user config file"
-            if only_global
-            else "Write the user config file instead of the project's",
-        }
-        if not only_global:
-            entry_global["default"] = False
-        flags[GLOBAL_FLAG] = entry_global
-    if command.auth is not None:
-        flags[HEADLESS_FLAG] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Never open a browser; read the token from --token-env-var or "
-            "the default variables. Implied without a terminal",
-        }
-        flags[TOKEN_ENV_FLAG] = {
-            "type": "string",
-            "required": False,
-            "description": "Name of the environment variable holding a pre-acquired token",
-        }
-    if command.paginated:
-        flags[LIMIT_FLAG] = {
-            "type": "integer",
-            "required": False,
-            "default": command.default_limit.count or 0,
-            "description": "Most items to return; 0 returns every item",
-        }
-        flags[CURSOR_FLAG] = {
-            "type": "string",
-            "required": False,
-            "description": "meta.pagination.next_cursor of the previous page, to get the next",
-        }
-    if command.stdin_input:
-        flags[INPUT_FILE_FLAG] = {
-            "type": "string",
-            "required": False,
-            "pattern_type": "filepath",
-            "description": "Read the input from this file, of any size, instead of stdin; "
-            "- is stdin, capped",
-        }
-    if command.output_file:
-        flags[OUTPUT_FLAG] = {
-            "type": "string",
-            "required": False,
-            "pattern_type": "filepath",
-            "description": "Write the result to this file in the --format representation; "
-            "stdout gets the envelope",
-        }
-    if command.heartbeat:
-        flags[HEARTBEAT_FLAG] = {
-            "type": "integer",
-            "required": False,
-            "default": DEFAULT_HEARTBEAT_MS,
-            "description": "Milliseconds between heartbeat lines on stdout while the command "
-            "runs; 0 turns them off",
-        }
-    if command.safe_default:
-        flags[LIVE_FLAG] = {
-            "type": "boolean",
-            "required": False,
-            "default": False,
-            "description": "Apply; this is the confirmation. Without it the command runs "
-            "as a dry run and exits 0",
-        }
+    flags.update((f.name, f.to_entry(command)) for f in framework_flags(command))
     out: dict[str, object] = {
         "description": command.description,
         "danger_level": command.danger_level.value,
@@ -345,82 +204,11 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         properties[key] = prop
         if f.required:  # an X | None field without a default is optional, as the parser says
             required.append(key)
-    if command.accepts_timeout:
-        properties[TIMEOUT_KEY] = {
-            "type": "number",
-            "description": "Seconds before the framework aborts with TIMEOUT; 0 disables it",
-        }
-    if command.danger_level is not DangerLevel.SAFE:
-        properties[IDEMPOTENCY_KEY] = {
-            "type": "string",
-            "description": "Repeat calls with the same key return the original result "
-            "with effect noop instead of running again",
-        }
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        properties[CONFIRM_KEY] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Not needed: live applies and is the confirmation"
-            if command.safe_default
-            else "Required to apply; without it the command previews and fails "
-            "with CONFIRMATION_REQUIRED",
-        }
-    if command.safe_default:
-        properties[LIVE_FLAG] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Apply; this is the confirmation. Without it the command runs "
-            "as a dry run",
-        }
-    if command.interactive:
-        properties[YES_FLAG] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Answer yes to every confirmation",
-        }
-        properties[NON_INTERACTIVE_FLAG.replace("-", "_")] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Never prompt; a needed answer exits 4",
-        }
-    if command.paginated:
-        properties[LIMIT_FLAG] = {
-            "type": "integer",
-            "minimum": 0,
-            "default": command.default_limit.count or 0,
-            "description": "Most items to return; 0 returns every item",
-        }
-        properties[CURSOR_FLAG] = {
-            "type": ["string", "null"],
-            "description": "meta.pagination.next_cursor of the previous page, to get the next",
-        }
-    if command.stdin_input:
-        properties[INPUT_FILE_FLAG.replace("-", "_")] = {
-            "type": "string",
-            "description": "Path of the file holding the input",
-        }
-    if command.config_write_scope is not None:
-        properties[GLOBAL_FLAG] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Write the user config file instead of the project's",
-        }
-    if command.auth is not None:
-        properties[HEADLESS_FLAG] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Never open a browser; read the token from a variable",
-        }
-        properties[TOKEN_ENV_FLAG.replace("-", "_")] = {
-            "type": "string",
-            "description": "Name of the environment variable holding a pre-acquired token",
-        }
-    if command.streaming and stream_key:
-        properties[NO_STREAM_KEY] = {
-            "type": "boolean",
-            "default": False,
-            "description": "Return one envelope with every event in data",
-        }
+    properties.update(
+        (f.key, f.to_property(command))
+        for f in framework_flags(command, json=True)
+        if stream_key or f.name != NO_STREAM_FLAG
+    )
     schema: JsonSchema = {
         "type": "object",
         "properties": properties,

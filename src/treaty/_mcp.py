@@ -25,8 +25,8 @@ from ._app import EXEC_PATH, App, _Run
 from ._command import Command, DangerLevel
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
+from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._manifest import payload_schema
-from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._prompt import NoPromptStdin
 from ._schema import JsonSchema
 from ._values import CommandPath

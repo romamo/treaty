@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 756 passed |
+| `uv run pytest` | 757 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -255,6 +255,7 @@ src/treaty/
   _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
   _table.py      table(): delimited rows under a header, the built-in tsv renderer
   _command.py    Command record, build_command(), handler signature inspection
+  _framework.py  FLAGS: one row per per-command framework flag (parse, JSON, manifest, help)
   _context.py    Ctx handed to handlers (mode, env, timeout, color, headless, log, run, ...)
   _dispatch.py   DispatchRequest line parser for exec
   _effect.py     effect contract: registration check and per-run validation
@@ -322,7 +323,12 @@ command `--timeout` (network and streaming), `--confirm-destructive` (destructiv
 `--cursor` (list outputs), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
 (`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
 (`auth=`), `--global` (`config_write_scope=`), and
-`--<name>-from-env` / `--<name>-from-file` for each secret field.
+`--<name>-from-env` / `--<name>-from-file` for each secret field. The per-command ones are
+rows of `_framework.FLAGS`: argv parsing, the JSON routes, the `--raw-payload` merge (one
+"given twice with different values" check; `--limit` and `--cursor` from argv win),
+`known_flags`, the field collision check in `App._register`, the manifest entry, the
+payload schema, and the help all iterate it. A new framework flag is one row plus an
+`Invocation` field.
 
 ## Gotchas
 

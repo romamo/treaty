@@ -11,14 +11,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, AuthKind, check_declaration
-from ._config import GLOBAL_FLAG, ConfigScope
+from ._auth import AuthKind, check_declaration
+from ._config import ConfigScope
 from ._effect import can_carry, with_replay_effect
 from ._errors import RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._mode import Format
-from ._page import CURSOR_FLAG, DEFAULT_LIMIT, LIMIT_FLAG, Limit, Page
+from ._page import DEFAULT_LIMIT, Limit, Page
 from ._resources import ResourceSpec, dependency_params, resource_graph
 from ._scalars import ScalarRegistry
 from ._scan import ctx_calls
@@ -257,35 +257,6 @@ def build_command(
         )
     for f in fields:
         f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
-    framework_flags = {
-        "timeout": has_network_io or streaming,
-        "raw-payload": supports_raw_payload,
-        "confirm-destructive": danger_level is DangerLevel.DESTRUCTIVE,
-        "no-stream": streaming,
-        "live": safe_default,
-        "yes": interactive,
-        "non-interactive": interactive,
-        LIMIT_FLAG: paginated,
-        CURSOR_FLAG: paginated,
-        HEARTBEAT_FLAG: heartbeat,
-        INPUT_FILE_FLAG: stdin_input,
-        OUTPUT_FLAG: output_file,
-        HEADLESS_FLAG: auth is not None,
-        TOKEN_ENV_FLAG: auth is not None,
-        GLOBAL_FLAG: config_write_scope is not None,
-    }
-    taken = sorted(
-        f.flag
-        for f in fields
-        if framework_flags.get(f.flag, False)
-        # --no-<name> negates a boolean, so a boolean 'stream' would lose --no-stream
-        or (f.flag_type is FlagType.BOOLEAN and framework_flags.get(f"no-{f.flag}", False))
-    )
-    if taken:
-        raise RegistrationError(
-            f"{path}: flags {taken} are supplied by the framework for this command and "
-            "would never reach the handler; rename the fields"
-        )
     if danger_level is not DangerLevel.SAFE:
         if not can_carry(output_type, "effect"):
             raise RegistrationError(

@@ -10,18 +10,17 @@ import json
 import math
 import re
 from collections.abc import Collection, Mapping
-from dataclasses import MISSING, dataclass
+from dataclasses import MISSING, dataclass, replace
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
-from ._auth import HEADLESS_FLAG, TOKEN_ENV_FLAG, is_env_var_name
-from ._command import HEARTBEAT_FLAG, INPUT_FILE_FLAG, OUTPUT_FLAG, Command, DangerLevel
-from ._config import GLOBAL_FLAG
+from ._command import Command
 from ._dispatch import loads_strict
 from ._errors import ArgsCrashed, ParseError
 from ._flags import FieldInfo, apply_scalar
+from ._framework import RAW_PAYLOAD_FLAG, flag_named, framework_flags
 from ._idempotency import IdempotencyKey
-from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
+from ._page import Limit, Position
 from ._paths import check_path
 from ._secrets import (
     SecretRef,
@@ -34,22 +33,13 @@ from ._timeout import Timeout
 from ._types import Classified, FlagType
 from ._values import CommandPath, InvalidValue
 
-TIMEOUT_FLAG = "timeout"
-CONFIRM_FLAG = "confirm-destructive"
-RAW_PAYLOAD_FLAG = "raw-payload"
-IDEMPOTENCY_FLAG = "idempotency-key"
-NO_STREAM_FLAG = "no-stream"
-LIVE_FLAG = "live"
-YES_FLAG = "yes"
-NON_INTERACTIVE_FLAG = "non-interactive"
-
 
 @dataclass(frozen=True, slots=True)
 class Invocation:
     """Parsed arguments plus framework-level flags for one command run"""
 
     args: object
-    timeout: Timeout | None
+    timeout: Timeout | None = None
     confirmed: bool = False
     idempotency_key: IdempotencyKey | None = None
     no_stream: bool = False
@@ -238,21 +228,8 @@ def parse_command_args(
     values: dict[str, object] = {}
     secrets: dict[str, SecretRef] = {}
     arrays: dict[str, list[object]] = {}
-    timeout: Timeout | None = None
-    confirmed = False
-    raw_payload: str | None = None
-    key: IdempotencyKey | None = None
-    no_stream = False
-    live = False
-    switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
-    limit: Limit | None = None
-    cursor: Position | None = None
-    heartbeat_ms: int | None = None
-    input_file: Path | None = None
-    output: Path | None = None
-    headless = False
-    token_var: str | None = None
-    global_config = False
+    framework: dict[str, Any] = {}
+    """``Invocation`` fields set by framework flags, plus ``raw_payload``"""
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -326,113 +303,16 @@ def parse_command_args(
             if tok.startswith("--"):
                 name, eq, inline = tok[2:].partition("=")
                 has_eq = bool(eq)
-                if name == TIMEOUT_FLAG and command.accepts_timeout:
-                    parsed_timeout = Timeout.parse(value_after(tok, TIMEOUT_FLAG, has_eq, inline))
-                    if timeout is not None and timeout != parsed_timeout:
-                        raise _repeated(TIMEOUT_FLAG)
-                    timeout = parsed_timeout
-                    i += 1
-                    continue
-                if name == LIMIT_FLAG and command.paginated:
-                    parsed_limit = Limit.parse(value_after(tok, LIMIT_FLAG, has_eq, inline))
-                    if limit is not None and limit != parsed_limit:
-                        raise _repeated(LIMIT_FLAG)
-                    limit = parsed_limit
-                    i += 1
-                    continue
-                if name == OUTPUT_FLAG and command.output_file:
-                    parsed_output = output_path(value_after(tok, OUTPUT_FLAG, has_eq, inline))
-                    if output is not None and output != parsed_output:
-                        raise _repeated(OUTPUT_FLAG)
-                    output = parsed_output
-                    i += 1
-                    continue
-                if name == INPUT_FILE_FLAG and command.stdin_input:
-                    parsed_path = check_path(
-                        value_after(tok, INPUT_FILE_FLAG, has_eq, inline), INPUT_FILE_FLAG
-                    )
-                    if input_file is not None and input_file != parsed_path:
-                        raise _repeated(INPUT_FILE_FLAG)
-                    input_file = parsed_path
-                    i += 1
-                    continue
-                if name == HEARTBEAT_FLAG and command.heartbeat:
-                    parsed_ms = parse_heartbeat(value_after(tok, HEARTBEAT_FLAG, has_eq, inline))
-                    if heartbeat_ms is not None and heartbeat_ms != parsed_ms:
-                        raise _repeated(HEARTBEAT_FLAG)
-                    heartbeat_ms = parsed_ms
-                    i += 1
-                    continue
-                if name == CURSOR_FLAG and command.paginated:
-                    parsed_cursor = Position.decode(
-                        value_after(tok, CURSOR_FLAG, has_eq, inline), command.path
-                    )
-                    if cursor is not None and cursor != parsed_cursor:
-                        raise _repeated(CURSOR_FLAG)
-                    cursor = parsed_cursor
-                    i += 1
-                    continue
-                if name == RAW_PAYLOAD_FLAG and command.supports_raw_payload:
-                    raw = value_after(tok, RAW_PAYLOAD_FLAG, has_eq, inline)
-                    if raw_payload is not None and raw_payload != raw:
-                        raise _repeated(RAW_PAYLOAD_FLAG)
-                    raw_payload = raw
-                    i += 1
-                    continue
-                if name == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-                    parsed_key = IdempotencyKey(value_after(tok, IDEMPOTENCY_FLAG, has_eq, inline))
-                    if key is not None and key != parsed_key:
-                        raise _repeated(IDEMPOTENCY_FLAG)
-                    key = parsed_key
-                    i += 1
-                    continue
-                if name == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
-                    if has_eq:
-                        raise ParseError(
-                            f"'{CONFIRM_FLAG}' takes no value", context={"flag": CONFIRM_FLAG}
-                        )
-                    confirmed = True
-                    i += 1
-                    continue
-                if name == NO_STREAM_FLAG and command.streaming:
-                    if has_eq:
-                        raise ParseError(
-                            f"'{NO_STREAM_FLAG}' takes no value", context={"flag": NO_STREAM_FLAG}
-                        )
-                    no_stream = True
-                    i += 1
-                    continue
-                if name == LIVE_FLAG and command.safe_default:
-                    if has_eq:
-                        raise ParseError(
-                            f"'{LIVE_FLAG}' takes no value", context={"flag": LIVE_FLAG}
-                        )
-                    live = True
-                    i += 1
-                    continue
-                if name in switches and command.interactive:
-                    if has_eq:
-                        raise ParseError(f"'{name}' takes no value", context={"flag": name})
-                    switches[name] = True
-                    i += 1
-                    continue
-                if name == HEADLESS_FLAG and command.auth is not None:
-                    if has_eq:
-                        raise ParseError(f"'{name}' takes no value", context={"flag": name})
-                    headless = True
-                    i += 1
-                    continue
-                if name == GLOBAL_FLAG and command.config_write_scope is not None:
-                    if has_eq:
-                        raise ParseError(f"'{name}' takes no value", context={"flag": name})
-                    global_config = True
-                    i += 1
-                    continue
-                if name == TOKEN_ENV_FLAG and command.auth is not None:
-                    parsed_var = env_var(value_after(tok, TOKEN_ENV_FLAG, has_eq, inline))
-                    if token_var is not None and token_var != parsed_var:
-                        raise _repeated(TOKEN_ENV_FLAG)
-                    token_var = parsed_var
+                spec = flag_named(command, name)
+                if spec is not None:
+                    if spec.parse is None:
+                        if has_eq:
+                            raise ParseError(f"'{name}' takes no value", context={"flag": name})
+                        value: object = True
+                    else:
+                        value = spec.parse(value_after(tok, name, has_eq, inline), command)
+                    if framework.setdefault(spec.attr, value) != value:
+                        raise _repeated(name)
                     i += 1
                     continue
                 found = command.field_by_flag(name)
@@ -493,6 +373,7 @@ def parse_command_args(
 
     for name, items in arrays.items():
         values[name] = tuple(items)
+    raw_payload = framework.pop("raw_payload", None)
     if raw_payload is not None:
         if values or secrets:
             raise ParseError(
@@ -504,95 +385,15 @@ def parse_command_args(
         built = build_from_mapping(command, mapping, env)
         # Framework keys may come from argv or the payload; both only if they agree, except
         # --limit and --cursor, which win so a truncation hint appended to argv runs
-        if timeout is not None and built.timeout is not None and timeout != built.timeout:
-            raise _repeated(TIMEOUT_FLAG)
-        if key is not None and built.idempotency_key not in (None, key):
-            raise _repeated(IDEMPOTENCY_FLAG)
-        if token_var is not None and built.token_env_var not in (None, token_var):
-            raise _repeated(TOKEN_ENV_FLAG)
-        for flag, given in (
-            (CONFIRM_FLAG, confirmed),
-            (NO_STREAM_FLAG, no_stream),
-            (LIVE_FLAG, live),
-            (HEADLESS_FLAG, headless),
-            (GLOBAL_FLAG, global_config),
-            *switches.items(),
-        ):
-            spellings = (flag, flag.replace("-", "_"))
-            if given and any(mapping.get(k) is False for k in spellings):
-                raise _repeated(flag)
-        return Invocation(
-            args=built.args,
-            timeout=timeout or built.timeout,
-            confirmed=confirmed or built.confirmed,
-            idempotency_key=key or built.idempotency_key,
-            no_stream=no_stream or built.no_stream,
-            live=live or built.live,
-            yes=switches[YES_FLAG] or built.yes,
-            non_interactive=switches[NON_INTERACTIVE_FLAG] or built.non_interactive,
-            limit=limit if limit is not None else built.limit,
-            cursor=cursor if cursor is not None else built.cursor,
-            heartbeat_ms=heartbeat_ms,
-            input_file=input_file if input_file is not None else built.input_file,
-            output=output,
-            headless=headless or built.headless,
-            token_env_var=token_var if token_var is not None else built.token_env_var,
-            global_config=global_config or built.global_config,
-        )
+        in_payload = {k.replace("_", "-") for k in mapping}
+        for spec in framework_flags(command):
+            given = framework.get(spec.attr)
+            if spec.name in in_payload and not spec.argv_wins and given is not None:
+                if getattr(built, spec.attr) != given:
+                    raise _repeated(spec.name)
+        return replace(built, **framework)
     _apply_secrets(command, values, secrets, env, errors)
-    return Invocation(
-        args=_finish(command, values, errors),
-        timeout=timeout,
-        confirmed=confirmed,
-        idempotency_key=key,
-        no_stream=no_stream,
-        live=live,
-        yes=switches[YES_FLAG],
-        non_interactive=switches[NON_INTERACTIVE_FLAG],
-        limit=limit,
-        cursor=cursor,
-        heartbeat_ms=heartbeat_ms,
-        input_file=input_file,
-        output=output,
-        headless=headless,
-        token_env_var=token_var,
-        global_config=global_config,
-    )
-
-
-# REQ-O-001: names an agent may pass to --output meaning a representation, not a file
-_FORMAT_NAMES = frozenset({"json", "jsonl", "tsv", "csv", "plain", "table", "id", "yaml"})
-
-
-def env_var(raw: str) -> str:
-    """``--token-env-var``: the name of a variable, never the token itself"""
-    if not is_env_var_name(raw):
-        raise ParseError(
-            f"'{TOKEN_ENV_FLAG}' takes the name of an environment variable, such as MY_TOKEN",
-            context={"flag": TOKEN_ENV_FLAG},
-            suggestion="export the token in a variable and pass its name, not its value",
-        )
-    return raw
-
-
-def output_path(raw: str) -> Path:
-    """``--output``: a file path, never a format name such as ``json``"""
-    if raw in _FORMAT_NAMES:
-        raise ParseError(
-            f"--output takes a file path, not the format {raw!r}",
-            context={"flag": OUTPUT_FLAG, "value": raw},
-            suggestion=f"use --format {raw} to choose the representation",
-        )
-    return check_path(raw, OUTPUT_FLAG)
-
-
-def parse_heartbeat(raw: str) -> int:
-    """``--heartbeat-ms``: whole milliseconds; 0 turns heartbeats off"""
-    expects = "whole milliseconds, at most a day; 0 turns heartbeats off"
-    value = whole_number(raw, HEARTBEAT_FLAG, expects)
-    if value > 86_400_000:
-        raise ParseError(f"'heartbeat-ms' expects {expects}", context={"flag": HEARTBEAT_FLAG})
-    return value
+    return Invocation(args=_finish(command, values, errors), **framework)
 
 
 def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
@@ -650,33 +451,7 @@ def known_flags(command: Command, *, argv: bool = True) -> list[str]:
     """The flags a command accepts; ``argv=False`` leaves out those only argv takes, for
     the unknown-field error of ``exec``, MCP, and ``--raw-payload``"""
     flags = [name for f in command.fields for name in f.exposed_flags()]
-    if command.supports_raw_payload:
-        flags.append(RAW_PAYLOAD_FLAG)
-    if command.accepts_timeout:
-        flags.append(TIMEOUT_FLAG)
-    if command.danger_level is DangerLevel.DESTRUCTIVE:
-        flags.append(CONFIRM_FLAG)
-    if command.danger_level is not DangerLevel.SAFE:
-        flags.append(IDEMPOTENCY_FLAG)
-    if command.streaming:
-        flags.append(NO_STREAM_FLAG)
-    if command.safe_default:
-        flags.append(LIVE_FLAG)
-    if command.interactive:
-        flags.extend((YES_FLAG, NON_INTERACTIVE_FLAG))
-    if command.paginated:
-        flags.extend((LIMIT_FLAG, CURSOR_FLAG))
-    if command.heartbeat and argv:
-        flags.append(HEARTBEAT_FLAG)
-    if command.stdin_input:
-        flags.append(INPUT_FILE_FLAG)
-    if command.output_file and argv:
-        flags.append(OUTPUT_FLAG)
-    if command.auth is not None:
-        flags.extend((HEADLESS_FLAG, TOKEN_ENV_FLAG))
-    if command.config_write_scope is not None:
-        flags.append(GLOBAL_FLAG)
-    return flags
+    return flags + [f.name for f in framework_flags(command, json=not argv)]
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
@@ -726,88 +501,14 @@ def build_from_mapping(
     """Build an invocation from already-typed JSON values, as ``exec`` receives them"""
     values: dict[str, object] = {}
     secrets: dict[str, SecretRef] = {}
-    timeout: Timeout | None = None
-    confirmed = False
-    idempotency_key: IdempotencyKey | None = None
-    no_stream = False
-    live = False
-    switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
-    limit: Limit | None = None
-    cursor: Position | None = None
-    input_file: Path | None = None
-    headless = False
-    token_var: str | None = None
-    global_config = False
+    framework: dict[str, Any] = {}
     errors = _Collector()
     for key, value in mapping.items():
         try:
             flag = key.replace("_", "-")
-            if flag == TIMEOUT_FLAG and command.accepts_timeout:
-                timeout = Timeout.parse(value)
-                continue
-            if flag == LIMIT_FLAG and command.paginated:
-                limit = Limit.from_json(value)
-                continue
-            if flag == INPUT_FILE_FLAG and command.stdin_input:
-                if not isinstance(value, str):
-                    raise ParseError(f"{key!r} expects a path", context={"field": key})
-                input_file = check_path(value, INPUT_FILE_FLAG)
-                continue
-            if flag == CURSOR_FLAG and command.paginated:
-                # null is the first page, as a JSON caller spells an absent cursor
-                cursor = None if value is None else Position.decode(value, command.path)
-                continue
-            if flag == IDEMPOTENCY_FLAG and command.danger_level is not DangerLevel.SAFE:
-                if not isinstance(value, str):
-                    raise ParseError(f"{key!r} expects a string", context={"field": key})
-                idempotency_key = IdempotencyKey(value)
-                continue
-            if flag == CONFIRM_FLAG and command.danger_level is DangerLevel.DESTRUCTIVE:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                confirmed = value
-                continue
-            if flag == NO_STREAM_FLAG and command.streaming:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                no_stream = value
-                continue
-            if flag == LIVE_FLAG and command.safe_default:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                live = value
-                continue
-            if flag in switches and command.interactive:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                switches[flag] = value
-                continue
-            if flag == HEADLESS_FLAG and command.auth is not None:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                headless = value
-                continue
-            if flag == GLOBAL_FLAG and command.config_write_scope is not None:
-                if not isinstance(value, bool):
-                    raise ParseError(
-                        f"{key!r} expects a boolean", context={"field": key, "value": value}
-                    )
-                global_config = value
-                continue
-            if flag == TOKEN_ENV_FLAG and command.auth is not None:
-                if not isinstance(value, str):
-                    raise ParseError(f"{key!r} expects a string", context={"field": key})
-                token_var = env_var(value)
+            spec = flag_named(command, flag, json=True)
+            if spec is not None and spec.from_json is not None:
+                framework[spec.attr] = spec.from_json(value, command)
                 continue
             found = command.field_by_flag(flag)
             if found is not None and found.secret:
@@ -838,22 +539,7 @@ def build_from_mapping(
         except ParseError as exc:
             errors.add(exc)
     _apply_secrets(command, values, secrets, env, errors)
-    return Invocation(
-        args=_finish(command, values, errors),
-        timeout=timeout,
-        confirmed=confirmed,
-        idempotency_key=idempotency_key,
-        no_stream=no_stream,
-        live=live,
-        yes=switches[YES_FLAG],
-        non_interactive=switches[NON_INTERACTIVE_FLAG],
-        limit=limit,
-        cursor=cursor,
-        input_file=input_file,
-        headless=headless,
-        token_env_var=token_var,
-        global_config=global_config,
-    )
+    return Invocation(args=_finish(command, values, errors), **framework)
 
 
 def _check_json_value(field: FieldInfo, value: object) -> object:

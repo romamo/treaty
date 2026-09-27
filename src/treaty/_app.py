@@ -52,6 +52,7 @@ from ._envelope import Envelope, ErrorDetail, WarningDetail, clean, json_safe, w
 from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, SideEffects
 from ._flags import REDACTED, Arg, Flag
+from ._framework import framework_collisions
 from ._help import render_command, render_root
 from ._idempotency import KeyBusy, Record, RecordCorrupt, Slot, claim, fingerprint, state_dir
 from ._jobs import Job, JobStore, with_links
@@ -436,6 +437,12 @@ class App:
 
     def _register(self, command: Command) -> None:
         path = command.path
+        taken = framework_collisions(command)
+        if taken:
+            raise RegistrationError(
+                f"{path}: flags {taken} are supplied by the framework for this command and "
+                "would never reach the handler; rename the fields"
+            )
         if path in self._commands:
             raise RegistrationError(f"{path} is already registered")
         if path in self._groups:

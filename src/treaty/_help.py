@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from ._command import Command, DangerLevel
+from ._command import Command
+from ._framework import framework_flags
 from ._mode import Format
 from ._values import CommandPath
 
@@ -80,40 +81,10 @@ def _under(commands: Mapping[CommandPath, Command], parts: tuple[str, ...]) -> l
 
 def _framework_rows(command: Command) -> list[tuple[str, str]]:
     """The flags treaty adds to this command, so a person can find how to apply it"""
-    rows: list[tuple[str, str]] = []
-    if command.safe_default:
-        rows.append(("--live", "Apply; without it the command runs as a dry run"))
-    elif command.danger_level is DangerLevel.DESTRUCTIVE:
-        rows.append(("--confirm-destructive", "Apply; without it the command only previews"))
-    if command.danger_level is not DangerLevel.SAFE:
-        rows.append(("--idempotency-key KEY", "Repeat calls with KEY replay the first result"))
-    if command.accepts_timeout:
-        rows.append(("--timeout SECONDS", "Abort with TIMEOUT after SECONDS; 0 disables it"))
-    if command.supports_raw_payload:
-        rows.append(("--raw-payload JSON", "All field values as one JSON object"))
-    if command.streaming:
-        rows.append(("--no-stream", "One envelope with every event instead of JSONL"))
-    if command.paginated:
-        default = command.default_limit.count or 0
-        rows.append(("--limit N", f"Most items to return (default: {default}); 0 returns all"))
-        rows.append(("--cursor TOKEN", "Next page: meta.pagination.next_cursor of the last one"))
-    if command.output_file:
-        rows.append(("--output PATH", "Write the result to PATH; stdout gets the envelope"))
-    if command.stdin_input:
-        rows.append(("--input-file PATH", "Read the input from PATH instead of stdin"))
-    if command.heartbeat:
-        rows.append(("--heartbeat-ms MS", "Heartbeat lines while running (default: 10000)"))
-    if command.interactive:
-        rows.append(("--yes", "Answer yes to every confirmation"))
-        rows.append(("--non-interactive", "Never prompt; a needed answer exits 4"))
-    if command.config_write_scope is not None:
-        rows.append(("--global", "Write the user config file instead of the project's"))
-    if command.auth is not None:
-        rows.append(("--headless", "Never open a browser; log in with a token variable"))
-        rows.append(("--token-env-var NAME", "Read the token from $NAME"))
-        rows.extend(
-            (f"${v}", "Token read when no --token-env-var is given") for v in command.token_env_vars
-        )
+    rows = [f.help_row(command) for f in framework_flags(command)]
+    rows.extend(
+        (f"${v}", "Token read when no --token-env-var is given") for v in command.token_env_vars
+    )
     return rows
 
 

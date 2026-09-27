@@ -198,3 +198,26 @@ def test_malformed_declarations_are_registration_errors(kw: dict[str, object], f
             return {}
 
     assert fix in str(info.value)
+
+
+# 15: one table of framework flags feeds the parser, manifest, payload schema, and help
+
+
+def test_every_framework_flag_surface_agrees() -> None:
+    from treaty._framework import framework_flags
+    from treaty._help import render_command
+    from treaty._manifest import command_entry, payload_schema
+    from treaty._parse import known_flags
+    from treaty._values import CommandPath
+
+    app = make_app()
+    command = app.commands[CommandPath("items")]
+    names = [f.name for f in framework_flags(command)]
+    assert names == ["raw-payload", "limit", "cursor", "heartbeat-ms"]
+    entry = command_entry(command, app.exits, app.commands)
+    assert set(names) <= set(entry["flags"])  # type: ignore[arg-type]
+    assert known_flags(command)[-4:] == names
+    json_keys = {n.replace("-", "_") for n in known_flags(command, argv=False)}
+    assert json_keys == set(payload_schema(command)["properties"])  # type: ignore[arg-type]
+    help_text = render_command("r8", command)
+    assert all(f"--{n}" in help_text for n in names)
