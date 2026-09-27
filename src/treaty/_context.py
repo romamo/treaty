@@ -18,7 +18,7 @@ from ._page import PageRequest
 from ._prompt import Prompter
 from ._retry import Retrier
 from ._steps import StepTracker
-from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Processes
+from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Processes, Spawned
 from ._timeout import Timeout
 
 LogSink = Callable[[str, Mapping[str, object]], None]
@@ -165,6 +165,18 @@ class Ctx:
         return self.processes.pipeline(
             stages, input=input, cwd=cwd, env=env, timeout=timeout, check=check
         )
+
+    def spawn(
+        self, argv: Argv, *, cwd: Path | None = None, env: Mapping[str, str] | None = None
+    ) -> Spawned:
+        """Start a process that outlives the run, from an argument list, never a shell
+
+        It gets its own session, reads ``/dev/null``, writes to ``log_path``, and is not
+        stopped when the run ends; a later ``ctx.spawn`` of the command stops it once its
+        ``max_lifetime_seconds`` are up. Needs ``background=treaty.Background(...)``,
+        whose output carries ``background_pid`` and ``cleanup_command`` (REQ-C-010).
+        """
+        return self.processes.spawn(argv, cwd=cwd, env=env)
 
     def open_url(self, url: str) -> bool:
         """Open ``url`` in a browser and return True; when headless, open nothing and return

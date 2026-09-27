@@ -371,6 +371,42 @@ def _declared_commands(app: App) -> Iterator[Finding]:
             )
 
 
+def detaches(handler: Callable[..., object]) -> str | None:
+    """A call in the handler's source that starts a process outliving it (REQ-C-010)"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted(node.func) or ""
+        if name in ("os.fork", "fork", "os.setsid", "os.daemon"):
+            return name
+        detached = any(
+            k.arg in ("start_new_session", "process_group")
+            and not (isinstance(k.value, ast.Constant) and not k.value.value)
+            for k in node.keywords
+        )
+        if name.rpartition(".")[2] == "Popen" and detached:
+            return name
+    return None
+
+
+def _background_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        name = None if c.background is not None else detaches(c.handler)
+        if name is not None:
+            yield Finding(
+                "background-declared",
+                Severity.WARNING,
+                c.path.value,
+                f"{name}(...) starts a process that outlives the run, undeclared, so agents "
+                "cannot find or stop it (REQ-C-010)",
+                'ctx.spawn([...]) with background=treaty.Background("<tool> <stop command>", '
+                "max_lifetime_seconds=3600)",
+            )
+
+
 def _builtin_shadowed(app: App) -> Iterator[Finding]:
     for path in app.shadowed_builtins:
         yield Finding(
@@ -1493,6 +1529,12 @@ RULES: tuple[Rule, ...] = (
         "Commands that run a child declare its arguments",
         Severity.WARNING,
         _subprocess_declared,
+    ),
+    Rule(
+        "background-declared",
+        "Background processes are declared and started with ctx.spawn",
+        Severity.WARNING,
+        _background_declared,
     ),
     Rule(
         "fs-side-effects",

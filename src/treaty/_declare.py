@@ -225,3 +225,33 @@ def check_side_effects(where: str, effects: Sequence[SideEffect]) -> tuple[SideE
             f"{where}: filesystem_side_effects is a list of treaty.SideEffect(path, type)"
         )
     return tuple(effects)
+
+
+@dataclass(frozen=True, slots=True)
+class Background:
+    """A command that starts a process outliving the run, through ``ctx.spawn`` (REQ-C-010)
+
+    ``cleanup_command`` is the invocation that stops it, such as ``"tool stop-watcher"``,
+    checked to name a command when the manifest is built; ``max_lifetime_seconds`` is how
+    long it may run before a later ``ctx.spawn`` of the command stops it.
+    """
+
+    cleanup_command: str
+    max_lifetime_seconds: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cleanup_command, str) or not self.cleanup_command.strip():
+            raise RegistrationError(
+                "Background(cleanup_command=) is the invocation that stops the process, "
+                "such as 'tool stop-watcher'"
+            )
+        seconds = self.max_lifetime_seconds
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds < 1:
+            raise RegistrationError("Background(max_lifetime_seconds=) is a whole number >= 1")
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "spawns_background_process": True,
+            "cleanup_command": self.cleanup_command,
+            "max_lifetime_seconds": self.max_lifetime_seconds,
+        }

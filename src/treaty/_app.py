@@ -15,6 +15,7 @@ import os
 import re
 import shlex
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -65,7 +66,7 @@ from ._command import (
 )
 from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
-from ._declare import UNSUPPORTED_PLATFORM, SideEffect, Subprocess, supports
+from ._declare import UNSUPPORTED_PLATFORM, Background, SideEffect, Subprocess, supports
 from ._deprecation import Deprecated
 from ._deps import Dependency, check_dependencies
 from ._dispatch import DispatchRequest, parse_dispatch_line
@@ -163,7 +164,13 @@ from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
 from ._steps import Rollback, RollbackStatus, StepError, StepTracker
-from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, HeadlessBehavior, Processes
+from ._subprocess import (
+    BROWSER_OPEN,
+    GRACE_SECONDS,
+    BackgroundSlot,
+    HeadlessBehavior,
+    Processes,
+)
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._values import (
@@ -473,6 +480,7 @@ class App:
         platform: Sequence[str] = (),
         required_tools: Mapping[str, str] | None = None,
         filesystem_side_effects: Sequence[SideEffect] = (),
+        background: Background | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -540,6 +548,9 @@ class App:
         ``filesystem_side_effects=[SideEffect("~/.cache/tool/", "cache")]`` declares where
         the command writes on disk, in the manifest; the ``cleanup`` built-in removes the
         ``temp`` and ``cache`` paths (REQ-C-011).
+        ``background=Background("tool stop-watcher", max_lifetime_seconds=3600)`` lets
+        ``ctx.spawn`` start a process that outlives the run; the output carries
+        ``background_pid`` and ``cleanup_command`` (REQ-C-010).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
@@ -687,6 +698,7 @@ class App:
                     platform=platform,
                     required_tools=required_tools,
                     filesystem_side_effects=filesystem_side_effects,
+                    background=background,
                 )
             )
             return fn
@@ -821,8 +833,15 @@ class App:
         self._fixes_checked = True
 
     def named_commands(self, command: Command) -> list[str]:
-        """Each ``clearable_with`` that does not run a command of this app (08-D2)"""
+        """Each ``clearable_with`` and ``cleanup_command`` that does not run a command of
+        this app (08-D2)"""
         found: list[str] = []
+        if command.background is not None:
+            problem = command_problem(
+                command.background.cleanup_command, app_name=self.name, commands=self._commands
+            )
+            if problem is not None:
+                found.append(f"Background(cleanup_command=...): {problem}")
         for effect in command.filesystem_side_effects:
             if effect.clearable_with is not None:
                 problem = command_problem(
@@ -1836,6 +1855,7 @@ class _Run:
             headless=headless,
             browser_open=BROWSER_OPEN in command.gui_operations,
             headless_behavior=command.headless_behavior or HeadlessBehavior.EMIT_IN_OUTPUT,
+            background=self.background_slot(command),
         )
         if not supports(command.platform, sys.platform):
             self._warn(
@@ -1902,6 +1922,19 @@ class _Run:
             locks=Locks(self.locks_dir(), deadline),
             teardown=self.teardown,
             steps=self.steps,
+        )
+
+    def background_slot(self, command: Command) -> BackgroundSlot | None:
+        """``background/`` of the state directory, or of the temp directory without one"""
+        if command.background is None:
+            return None
+        base = state_dir(
+            self.app.name, self.app.state_dir, self.env, self.settings.options.instance_id
+        )
+        if base is None:
+            base = Path(tempfile.gettempdir()) / f"treaty-{self.app.name}"
+        return BackgroundSlot(
+            base / "background", command.path.value, command.background.max_lifetime_seconds
         )
 
     def locks_dir(self) -> Path | None:

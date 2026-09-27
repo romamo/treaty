@@ -26,8 +26,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
+from ._atomic import write_atomic
 from ._errors import CliExit, RegistrationError
 from ._signals import Cancelled, CancelSignal
 from ._timeout import Timeout
@@ -72,6 +73,34 @@ class Completed:
     stage: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class Spawned:
+    """A background process ``ctx.spawn`` started (REQ-C-010)"""
+
+    pid: int
+    log_path: Path
+    """Its stdout and stderr"""
+    pid_file: Path
+    """Where treaty tracks it until its max lifetime is up"""
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundSlot:
+    """Where one command's background processes are tracked, and for how long"""
+
+    directory: Path
+    command: str
+    lifetime_seconds: int
+
+    @property
+    def pid_file(self) -> Path:
+        return self.directory / f"{self.command}.pids"
+
+
+_DETACHED: list[subprocess.Popen[bytes]] = []
+"""Background children, kept so the interpreter never reports them as leaked"""
+
+
 def shell_string_prohibited(value: object) -> CliExit:
     return CliExit(
         ExitCodeName("GENERAL_ERROR"),
@@ -111,12 +140,14 @@ class Processes:
         headless: bool,
         browser_open: bool,
         headless_behavior: HeadlessBehavior = HeadlessBehavior.EMIT_IN_OUTPUT,
+        background: BackgroundSlot | None = None,
     ) -> None:
         self.env = dict(env)
         self.deadline = deadline
         self.headless = headless
         self.browser_open = browser_open
         self.headless_behavior = headless_behavior
+        self.background = background
         self.suppressed_url: str | None = None
         """The URL ``open_url`` did not open because the run is headless (REQ-F-057)"""
         self._live: set[subprocess.Popen[bytes]] = set()
@@ -252,6 +283,52 @@ class Processes:
             return False
         return webbrowser.open(url)
 
+    def spawn(
+        self, argv: Argv, *, cwd: Path | None = None, env: Mapping[str, str] | None = None
+    ) -> Spawned:
+        """Start a child that outlives the run: its own session, stdin from /dev/null,
+        output to a log file, and no stop when the run ends; its pid and deadline go to
+        the command's pid file, and expired entries there are stopped first"""
+        if self.background is None:
+            raise RegistrationError("ctx.spawn needs background=treaty.Background(...)")
+        parts = _argv(argv)
+        slot = self.background
+        with self._lock:
+            if self._closed:
+                raise self._refusal(parts)
+        slot.directory.mkdir(parents=True, exist_ok=True)
+        kept = reap(slot.pid_file)
+        log_path = slot.directory / f"{slot.command}.{time.time_ns()}.log"
+        detach: dict[str, Any]
+        if sys.platform == "win32":
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            detach = {"creationflags": flags}
+        else:
+            detach = {"start_new_session": True}
+        with open(log_path, "wb") as log:
+            try:
+                proc = subprocess.Popen(
+                    parts,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=cwd,
+                    env={**self.env, **(env or {})},
+                    **detach,
+                )
+            except OSError as exc:
+                raise CliExit(
+                    ExitCodeName("GENERAL_ERROR"),
+                    f"Cannot start `{parts[0]}`: {exc.strerror}",
+                    code="SUBPROCESS_FAILED",
+                    context={"argv": list(parts), "cause": exc.strerror},
+                ) from None
+        _DETACHED.append(proc)
+        deadline = time.time() + slot.lifetime_seconds
+        entries = [*kept, f"{proc.pid} {deadline:.0f}"]
+        write_atomic(slot.pid_file, "".join(f"{e}\n" for e in entries))
+        return Spawned(proc.pid, log_path, slot.pid_file)
+
     def terminate(self, cancelled: CancelSignal | None = None) -> None:
         """SIGTERM every tracked child's process group, SIGKILL what outlives the grace;
         from now on no child starts. ``cancelled`` is the signal that ended the run, None
@@ -341,6 +418,50 @@ class Processes:
             if _alive(proc):
                 _signal(proc, kill=True)
             proc.wait()
+
+
+def reap(pid_file: Path) -> list[str]:
+    """Stop every background process in ``pid_file`` past its deadline; the entries of
+    those still running, which the caller writes back"""
+    try:
+        lines = pid_file.read_text().splitlines()
+    except FileNotFoundError:
+        return []
+    kept: list[str] = []
+    now = time.time()
+    for line in lines:
+        pid_text, _, deadline_text = line.partition(" ")
+        if not (pid_text.isdigit() and deadline_text.isdigit()):
+            continue  # not an entry treaty wrote
+        pid = int(pid_text)
+        if int(deadline_text) <= now:
+            _stop_background(pid)
+        elif _running(pid):
+            kept.append(line)
+    return kept
+
+
+def _stop_background(pid: int) -> None:
+    """SIGTERM the process group ``spawn`` started, if that pid still leads it"""
+    try:
+        if sys.platform == "win32":
+            os.kill(pid, signal.SIGTERM)
+        elif os.getpgid(pid) == pid:
+            os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError, PermissionError:
+        pass  # gone already, or the pid now belongs to someone else
+
+
+def _running(pid: int) -> bool:
+    if sys.platform == "win32":
+        return True  # kept until its deadline; os.kill(pid, 0) would terminate it there
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _signal(proc: subprocess.Popen[bytes], *, kill: bool) -> None:

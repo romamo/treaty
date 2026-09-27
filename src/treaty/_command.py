@@ -16,6 +16,7 @@ from ._auth import AuthKind, check_declaration
 from ._batch import ITEM_KEYS, batch_item, batch_schema
 from ._config import ConfigScope
 from ._declare import (
+    Background,
     SideEffect,
     Subprocess,
     check_platform,
@@ -204,6 +205,8 @@ class Command:
     """Programs the command runs, to their minimum versions; checked by ``doctor``"""
     filesystem_side_effects: tuple[SideEffect, ...] = ()
     """Where the command writes on disk; ``cleanup`` removes the temp and cache ones"""
+    background: Background | None = None
+    """Starts a process that outlives the run with ``ctx.spawn`` (REQ-C-010)"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -325,6 +328,7 @@ def build_command(
     platform: Sequence[str] = (),
     required_tools: Mapping[str, str] | None = None,
     filesystem_side_effects: Sequence[SideEffect] = (),
+    background: Background | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -379,6 +383,7 @@ def build_command(
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
     _check_gui(path, output_type, gui_operations, headless_behavior)
+    _check_background(path, output_type, background, streaming)
     step_names = _check_steps(path, steps, resumable, rollback, streaming, output_type)
     _check_ctx_calls(
         fn,
@@ -389,6 +394,7 @@ def build_command(
         config_write_scope,
         retry,
         step_names,
+        background,
     )
     if isinstance(project_root, str) or not all(isinstance(m, str) and m for m in project_root):
         raise RegistrationError(
@@ -574,6 +580,7 @@ def build_command(
         platform=check_platform(str(path), platform),
         required_tools=check_required_tools(str(path), required_tools or {}),
         filesystem_side_effects=check_side_effects(str(path), filesystem_side_effects),
+        background=background,
         batch=batch,
     )
 
@@ -815,6 +822,24 @@ def _check_gui(
         )
 
 
+def _check_background(
+    path: CommandPath, output_type: object, background: Background | None, streaming: bool
+) -> None:
+    if background is None:
+        return
+    if not isinstance(background, Background):
+        raise RegistrationError(f"{path}: background takes treaty.Background(...)")
+    if streaming:
+        raise RegistrationError(f"{path}: a stream cannot start a background process")
+    missing = [f for f in ("background_pid", "cleanup_command") if not can_carry(output_type, f)]
+    if missing:
+        raise RegistrationError(
+            f"{path}: a command that starts a background process returns an object with "
+            f"{' and '.join(repr(m) for m in missing)} fields, such as background_pid: int "
+            "and cleanup_command: str (REQ-C-010)"
+        )
+
+
 def _check_ctx_calls(
     fn: Handler,
     path: CommandPath,
@@ -824,6 +849,7 @@ def _check_ctx_calls(
     config_write_scope: ConfigScope | None,
     retry: Retry | None,
     steps: Sequence[StepName] = (),
+    background: Background | None = None,
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
     for shell in shell_calls(fn):
@@ -852,6 +878,11 @@ def _check_ctx_calls(
             raise RegistrationError(
                 f'{where} writes config; declare config_write_scope="local" (or "global") '
                 "(REQ-C-025)"
+            )
+        if call.method == "spawn" and background is None:
+            raise RegistrationError(
+                f"{where} starts a background process; declare background=treaty.Background("
+                'cleanup_command="<tool> <stop command>", max_lifetime_seconds=3600) (REQ-C-010)'
             )
         if call.method == "retry" and retry is None:
             raise RegistrationError(

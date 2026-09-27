@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from conftest import WINDOWS, spec_validator
 from treaty import (
     App,
     Arg,
+    Background,
     Ctx,
     Dependency,
     Flag,
@@ -27,6 +29,7 @@ from treaty import (
 )
 from treaty._audit import audit
 from treaty._deps import Version
+from treaty._subprocess import _DETACHED
 from treaty._values import CommandPath
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -695,3 +698,143 @@ def test_audit_flags_an_undeclared_disk_write(tmp_path: Path) -> None:
     assert "write_text" in finding.message and "treaty.SideEffect" in finding.fix
     clean = {r.id: r for r in audit(side_effects_app(tmp_path), "fetcher", limit=3).rules}
     assert clean["fs-side-effects"].passed
+
+
+# REQ-C-010
+
+SLEEPER = [sys.executable, "-c", "import time; print('watching', flush=True); time.sleep(60)"]
+
+
+@dataclass(frozen=True, slots=True)
+class Watching:
+    background_pid: int
+    cleanup_command: str
+    pid_file: str
+
+
+def watcher_app(state: Path, lifetime: int = 3600, cleanup: str = "watch stop-watcher") -> App:
+    app = App("watch", version="1.0.0", state_dir=state)
+
+    @app.command(
+        "start-watcher",
+        description="Start a watcher",
+        danger_level="safe",
+        exit_codes=(),
+        background=Background(cleanup, max_lifetime_seconds=lifetime),
+    )
+    def start(args: NoArgs, ctx: Ctx) -> Watching:
+        spawned = ctx.spawn(SLEEPER)
+        return Watching(
+            spawned.pid, f"watch stop-watcher --pid {spawned.pid}", str(spawned.pid_file)
+        )
+
+    @app.command("stop-watcher", description="Stop the watcher", danger_level="safe", exit_codes=())
+    def stop(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    return app
+
+
+def detached(pid: int) -> subprocess.Popen[bytes]:
+    return next(p for p in _DETACHED if p.pid == pid)
+
+
+def stop(pid: int) -> None:
+    proc = detached(pid)
+    proc.kill()
+    proc.wait(timeout=10)
+
+
+def test_the_schema_output_for_background_commands_includes_spawns_background_process_true(
+    tmp_path: Path,
+) -> None:
+    app = watcher_app(tmp_path)
+    out = io.StringIO()
+    app.run(
+        ["start-watcher", "--schema", "--format", "json"], stdout=out, stderr=io.StringIO(), env={}
+    )
+    schema = json.loads(out.getvalue())["data"]
+    assert schema["spawns_background_process"] is True
+    assert schema["cleanup_command"] == "watch stop-watcher"
+    assert schema["max_lifetime_seconds"] == 3600
+    spec_validator("manifest-response").validate(app.manifest())
+
+
+def test_the_response_data_includes_background_pid_and_cleanup_command(tmp_path: Path) -> None:
+    code, env = run(watcher_app(tmp_path), ["start-watcher"])
+    assert code == 0
+    data = env["data"]
+    assert isinstance(data, dict)
+    pid = data["background_pid"]
+    assert isinstance(pid, int) and data["cleanup_command"] == f"watch stop-watcher --pid {pid}"
+    try:
+        assert detached(pid).poll() is None  # it outlived the run
+        pid_file = Path(data["pid_file"])
+        assert pid_file == tmp_path / "background" / "start-watcher.pids"
+        assert pid_file.read_text().split()[0] == str(pid)
+        logs = list((tmp_path / "background").glob("start-watcher.*.log"))
+        deadline = time.monotonic() + 10
+        while "watching" not in logs[0].read_text() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert logs[0].read_text() == "watching\n"
+    finally:
+        stop(pid)
+
+
+def test_the_framework_refuses_to_register_a_background_command_without_its_metadata() -> None:
+    app = App("watch", version="1.0.0")
+    with pytest.raises(RegistrationError, match="background=treaty.Background"):
+
+        @app.command("start", description="x", danger_level="safe", exit_codes=())
+        def start(args: NoArgs, ctx: Ctx) -> Watching:
+            spawned = ctx.spawn(SLEEPER)
+            return Watching(spawned.pid, "watch stop", "")
+
+    with pytest.raises(RegistrationError, match="'background_pid' and 'cleanup_command'"):
+
+        @app.command(
+            "begin",
+            description="x",
+            danger_level="safe",
+            exit_codes=(),
+            background=Background("watch stop", max_lifetime_seconds=60),
+        )
+        def begin(args: NoArgs, ctx: Ctx) -> Login:
+            return Login("x")
+
+    with pytest.raises(RegistrationError, match="max_lifetime_seconds"):
+        Background("watch stop", max_lifetime_seconds=0)
+
+
+def test_cleanup_command_must_name_a_command_when_the_manifest_is_built(tmp_path: Path) -> None:
+    app = watcher_app(tmp_path, cleanup="watch halt")
+    with pytest.raises(RegistrationError, match="cleanup_command"):
+        app.manifest()
+
+
+def test_a_later_spawn_stops_processes_past_their_max_lifetime(tmp_path: Path) -> None:
+    app = watcher_app(tmp_path, lifetime=1)
+    _, first = run(app, ["start-watcher"])
+    old = first["data"]["background_pid"]  # type: ignore[index]
+    time.sleep(1.2)
+    _, second = run(app, ["start-watcher"])
+    new = second["data"]["background_pid"]  # type: ignore[index]
+    try:
+        assert detached(old).wait(timeout=10) != 0
+        pids = (tmp_path / "background" / "start-watcher.pids").read_text().split()
+        assert pids[0] == str(new) and len(pids) == 2
+    finally:
+        stop(new)
+
+
+def test_audit_flags_an_undeclared_background_process() -> None:
+    app = App("watch", version="1.0.0")
+
+    @app.command("start", description="x", danger_level="safe", exit_codes=())
+    def start(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        subprocess.Popen(["sleep", "60"], start_new_session=True)
+        return {}
+
+    rules = {r.id: r for r in audit(app, "watch", limit=3).rules}
+    [finding] = rules["background-declared"].findings
+    assert "subprocess.Popen" in finding.message and "ctx.spawn" in finding.fix

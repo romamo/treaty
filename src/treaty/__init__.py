@@ -7,7 +7,7 @@ from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
-from ._declare import SideEffect, Subprocess
+from ._declare import Background, SideEffect, Subprocess
 from ._deprecation import Deprecated
 from ._deps import Dependency
 from ._effect import Affects
@@ -32,7 +32,7 @@ from ._retry import Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarSpec
 from ._steps import Rollback, StepName
-from ._subprocess import Completed
+from ._subprocess import Completed, Spawned
 from ._table import table
 from ._timeout import Timeout
 from ._values import CommandPath, ExitCode, ExitCodeName, SchemaVersion, Scope
@@ -43,6 +43,7 @@ __all__ = [
     "Affects",
     "App",
     "Arg",
+    "Background",
     "Batch",
     "Binary",
     "CliExit",
@@ -93,6 +94,7 @@ __all__ = [
     "Scope",
     "SideEffect",
     "SideEffects",
+    "Spawned",
     "StepName",
     "Subprocess",
     "Timeout",
