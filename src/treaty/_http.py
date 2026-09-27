@@ -50,7 +50,7 @@ def _proxy_problem(raw: str) -> str | None:
     """Why ``raw`` is no proxy URL ``ctx.http`` can use; None when it is one"""
     parts = urlsplit(raw)
     try:
-        parts.port
+        parts.port  # noqa: B018 - reading the port is what checks it
     except ValueError:
         return "has a port that is not a number from 0 to 65535"
     if parts.scheme not in ("http", "https") or not parts.hostname:
