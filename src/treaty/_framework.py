@@ -28,6 +28,7 @@ from ._idempotency import IdempotencyKey
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path
 from ._retry import RETRIES_FLAG, RETRY_DELAY_FLAG, parse_delay, parse_retries
+from ._steps import StepName
 from ._timeout import Timeout
 from ._types import FlagType
 
@@ -45,6 +46,8 @@ LIVE_FLAG = "live"
 YES_FLAG = "yes"
 NON_INTERACTIVE_FLAG = "non-interactive"
 VALIDATE_ONLY_FLAG = "validate-only"
+RESUME_FROM_FLAG = "resume-from"
+ROLLBACK_FLAG = "rollback-on-failure"
 
 Parse = Callable[[object, Command], object]
 
@@ -90,6 +93,9 @@ class FrameworkFlag:
         """The JSON Schema property of ``exec``, MCP, and ``--raw-payload`` payloads"""
         prop = {k: v for k, v in self.to_entry(command).items() if k != "required"}
         prop.pop("pattern_type", None)
+        if prop["type"] == "enum":
+            prop["type"] = "string"
+            prop["enum"] = prop.pop("enum_values")
         return prop | self.json_extra
 
     def describe(self, command: Command) -> str:
@@ -151,8 +157,8 @@ RESERVED_GLOBAL: frozenset[str] = frozenset(
 RESERVED_OPT_IN: Mapping[str, Callable[[Command], bool]] = {
     "retries": lambda c: c.retry is not None,
     "retry-delay": lambda c: c.retry is not None,
-    "resume-from": _never,  # resumable= (06)
-    "rollback-on-failure": _never,  # rollback= (06)
+    "resume-from": lambda c: c.resumable,
+    "rollback-on-failure": lambda c: c.rollback is not None,
     "proxy": lambda c: c.has_network_io,
     "no-proxy": lambda c: c.has_network_io,
     "no-follow-symlinks": _never,  # recursive_traversal= (10)
@@ -174,6 +180,8 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "retries",
         "retry-delay",
         "validate-only",
+        "resume-from",
+        "rollback-on-failure",
     }
 )
 UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED
@@ -231,6 +239,19 @@ def output_path(raw: str) -> Path:
             suggestion=f"use --format {raw} to choose the representation",
         )
     return check_path(raw, OUTPUT_FLAG)
+
+
+def resume_step(raw: object, command: Command) -> StepName:
+    """``--resume-from``: one of the command's declared steps (REQ-O-010)"""
+    available = [s.value for s in command.steps]
+    if not isinstance(raw, str) or raw not in available:
+        shown = raw[:64] if isinstance(raw, str) else raw
+        raise ParseError(
+            f"--resume-from {shown!r} is not a step of {command.path}",
+            context={"flag": RESUME_FROM_FLAG, "value": shown, "available": available},
+            suggestion=f"pass one of: {', '.join(available)}",
+        )
+    return StepName(raw)
 
 
 def parse_heartbeat(raw: str) -> int:
@@ -465,6 +486,25 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         metavar="DURATION",
         entry=lambda c: {"default": f"{c.retry.delay_ms}ms" if c.retry else None},
         json_extra={"type": ["string", "integer"]},
+    ),
+    FrameworkFlag(
+        RESUME_FROM_FLAG,
+        "resume_from",
+        lambda c: c.resumable,
+        "enum",
+        "Start at this step, skipping the ones before it; a failure's data.resume_from "
+        "names the step to pass",
+        parse=resume_step,
+        from_json=resume_step,
+        metavar="STEP",
+        entry=lambda c: {"enum_values": [s.value for s in c.steps]},
+    ),
+    _switch(
+        ROLLBACK_FLAG,
+        "rollback_on_failure",
+        lambda c: c.rollback is not None,
+        "When a step fails, undo the completed steps before exiting; data.rollback_status "
+        "says how it went",
     ),
     _switch(
         VALIDATE_ONLY_FLAG,

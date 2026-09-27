@@ -776,6 +776,43 @@ Without a key, repeats run again, unless `$<APP>_SESSION` names an agent session
 the key is derived from the session, the command, and its arguments, reported in
 `meta.idempotency_key`, and a repeat in the same session is a `noop` (REQ-C-007).
 
+## Multi-step commands
+
+A command whose work is ordered steps declares them, and its handler calls `ctx.step`
+before each one:
+
+```python
+@app.command("migrate", description="Migrate the database", danger_level="mutating",
+             exit_codes=["DISK_FULL"], steps=["backup", "apply_schema", "migrate_data"],
+             resumable=True, rollback=restore_backup)
+def migrate(args: MigrateArgs, ctx: Ctx) -> Migrated:
+    if ctx.step("backup"):
+        backup_database()
+    if ctx.step("apply_schema"):
+        apply_schema_changes()
+    if ctx.step("migrate_data"):
+        migrate_data()
+    return Migrated(effect="updated")
+```
+
+`ctx.step(name)` completes the step in progress and starts `name`; the last step completes
+when the handler returns, and a step that is undeclared, repeated, or out of order exits
+`1` with `INVALID_STEP`. The manifest lists `steps`, and every response's `data` carries
+`completed_steps`, `failed_step`, and `skipped_steps`, on success, failure, timeout, and
+signal alike (REQ-C-008). A failure after a completed step exits `3`, `PARTIAL_FAILURE`,
+keeping the handler's `error.code`, with `data.partial: true`; a timeout or signal keeps
+its own exit. Each step logs `step started` and `step completed` to stderr, and heartbeat
+lines name the step in progress.
+
+`resumable=True` adds `--resume-from STEP`: `ctx.step` returns False for the steps before
+it, which the handler skips, and they are listed in `skipped_steps`. A failure's
+`data.resume_from` is the value to pass; an undeclared step exits `2` (REQ-O-010). The
+`resume-guard` audit rule flags a resumable handler that ignores what `ctx.step` returns.
+`rollback=restore_backup` adds `--rollback-on-failure`: when a step fails, treaty calls
+`restore_backup(args, ctx, completed)` with the completed steps, newest first, before the
+teardown, and `data.rollback_status` is `completed`, `failed` (with `rollback_error`), or
+`not_attempted` (REQ-O-011). `--schema` says `resumable` and `rollback_available`.
+
 ## Locks
 
 `ctx.lock(name)` holds a lock shared by every run of the app for a `with` block:

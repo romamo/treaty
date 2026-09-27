@@ -42,6 +42,7 @@ from ._secrets import (
     resolve_secret,
     split_source_flag,
 )
+from ._steps import StepName
 from ._timeout import Timeout
 from ._types import Classified, FlagType
 from ._values import CommandPath, InvalidValue, SchemaVersion
@@ -93,6 +94,10 @@ class Invocation:
     """``stable_output`` of an exec line or MCP call: the ``--stable-output`` global"""
     validate_only: bool = False
     """``--validate-only``: answer once phase 1 passes, without running (REQ-O-009)"""
+    resume_from: StepName | None = None
+    """``--resume-from`` of a ``resumable`` command: the step to start at (REQ-O-010)"""
+    rollback_on_failure: bool = False
+    """``--rollback-on-failure`` of a ``rollback=`` command (REQ-O-011)"""
     given: frozenset[str] = frozenset()
     """The fields the caller supplied, as opposed to defaulted"""
 

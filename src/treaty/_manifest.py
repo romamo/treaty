@@ -35,6 +35,8 @@ def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
     if command.requires_auth:
         # Not logged in, or the credential lacks a required scope (REQ-C-029)
         codes += (FrameworkCode.PERMISSION_DENIED, FrameworkCode.AUTH_REQUIRED)
+    if command.steps:
+        codes.append(FrameworkCode.PARTIAL_FAILURE)  # a step failed after one completed
     return tuple(codes)
 
 
@@ -223,6 +225,8 @@ def command_entry(
         out["config_write_scope"] = command.config_write_scope.value  # REQ-C-025
     if command.requires:
         out["requires"] = [r.to_json() for r in command.requires]  # REQ-C-026
+    if command.steps:
+        out["steps"] = [s.value for s in command.steps]  # REQ-C-008
     if command.secret_env_vars:
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret
@@ -246,6 +250,11 @@ def command_schema(
         entry.update(command.deprecated.to_json())
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         entry["requires_confirmation"] = True  # REQ-O-021; not a ManifestResponse key
+    # REQ-O-010, REQ-O-011; not ManifestResponse keys
+    if command.resumable:
+        entry["resumable"] = True
+    if command.rollback is not None:
+        entry["rollback_available"] = True
     if command.supports_raw_payload:
         entry["raw_payload_schema"] = payload_schema(command)
     if command.stdin_input:

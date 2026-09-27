@@ -17,6 +17,7 @@ from ._mode import Format
 from ._page import PageRequest
 from ._prompt import Prompter
 from ._retry import Retrier
+from ._steps import StepTracker
 from ._subprocess import Argv, Completed, Processes
 from ._timeout import Timeout
 
@@ -62,6 +63,16 @@ class Ctx:
     locks: Locks | None = field(default=None, repr=False, compare=False)
     teardown: Teardown | None = field(default=None, repr=False, compare=False)
     """What the run releases when it ends: resources' ``release``, then ``cleanup=``"""
+    steps: StepTracker | None = field(default=None, repr=False, compare=False)
+
+    def step(self, name: str) -> bool:
+        """Complete the step in progress and start ``name``, the next of the command's
+        ``steps=`` to run; the last completes when the handler returns. Returns False for a
+        step before ``--resume-from``, so ``if ctx.step("backup"):`` skips it. The response
+        lists ``completed_steps``, ``failed_step``, and ``skipped_steps`` (REQ-C-008)."""
+        if self.steps is None:
+            raise RegistrationError("ctx.step needs steps=[...] on the command")
+        return self.steps.step(name)
 
     def retry(self, fn: Callable[[], T]) -> T:
         """Call ``fn``, and again after ``--retry-delay`` while it raises one of the

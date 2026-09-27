@@ -59,6 +59,10 @@ def probes_for(app: App) -> list[Probe]:
                 continue
             argv = command.path.parts
         label = " ".join(command.path.parts)
+        if command.resumable:
+            # REQ-O-010: a step the command does not declare exits 2 before anything runs
+            bad = (*argv, "--resume-from", "no-such-step")
+            probes.append(Probe(f"{label} --resume-from unknown step", bad, "invalid"))
         if command.danger_level is DangerLevel.DESTRUCTIVE:
             # A safe_default command previews and exits 0 on its own; --live is what the
             # confirmation gate refuses
@@ -67,7 +71,7 @@ def probes_for(app: App) -> list[Probe]:
         elif command.danger_level is DangerLevel.SAFE:
             probes.append(Probe(label, argv, "read"))
     probes.append(Probe("version", ("version",), "read"))
-    first = probes[0]
+    first = next(p for p in probes if p.kind != "invalid")
     probes.append(Probe("unknown flag", (*first.argv, "--no-such-flag"), "invalid"))
     return probes
 

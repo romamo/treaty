@@ -149,6 +149,7 @@ from ._settings import ConfigOptions, Resolved, SettingsSpec
 from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
+from ._steps import Rollback, RollbackStatus, StepError, StepTracker
 from ._subprocess import BROWSER_OPEN, GRACE_SECONDS, Processes
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
@@ -438,6 +439,9 @@ class App:
         option_placement: str = "any",
         introduced_in: str | None = None,
         deprecated: Deprecated | None = None,
+        steps: Sequence[str] = (),
+        resumable: bool = False,
+        rollback: Rollback | None = None,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -482,6 +486,13 @@ class App:
         ``deprecated=Deprecated("2.0.0", replacement="deploy.rollback", removed_in="3.0.0")``
         keeps a retiring command working with a warning on every run; both are in
         ``--schema`` (REQ-F-075). Once it is removed, ``redirect`` keeps its path answering.
+        ``steps=["backup", "apply_schema"]`` declares a multi-step command: the handler
+        calls ``ctx.step(name)`` before each step, and every response's ``data`` lists
+        ``completed_steps``, ``failed_step``, and ``skipped_steps``; a failure after a
+        completed step exits 3 (REQ-C-008). ``resumable=True`` adds ``--resume-from STEP``
+        (REQ-O-010). ``rollback=undo`` adds ``--rollback-on-failure``, which calls
+        ``undo(args, ctx, completed)`` with the completed steps, newest first, when a step
+        fails (REQ-O-011).
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -610,6 +621,9 @@ class App:
                     option_placement=OptionPlacement(option_placement),
                     introduced_in=added,
                     deprecated=deprecated,
+                    steps=steps,
+                    resumable=resumable,
+                    rollback=rollback,
                 )
             )
             return fn
@@ -1310,16 +1324,26 @@ def _invoke(
     ``provided`` holds what the run already has, such as the settings. The run's teardown
     follows here, on the handler's thread, however it ended; a stream's follows its
     generator instead (REQ-C-017)."""
-    teardown = ctx.teardown
+    teardown, steps = ctx.teardown, ctx.steps
     if teardown is None:
         return _call(app, command, args, ctx, provided)
     teardown.begin()
     if command.streaming:
         return _call(app, command, args, ctx, provided)
     try:
-        return _call(app, command, args, ctx, provided)
+        result = _call(app, command, args, ctx, provided)
+    except Cancelled, KeyboardInterrupt:
+        raise  # the run is ending now: no rollback (REQ-O-011)
+    except BaseException:  # noqa: BLE001 - re-raised once the completed steps are undone
+        if steps is not None:
+            steps.roll_back(args, ctx)
+        raise
+    else:
+        if steps is not None:
+            steps.finish()
     finally:
         teardown.run()
+    return result
 
 
 def _call(
@@ -1628,6 +1652,8 @@ class _Run:
         """``ctx.retry`` of the current command, whose count is ``meta.retries``"""
         self.teardown: Teardown | None = None
         """What the current command's run releases when it ends (REQ-C-017)"""
+        self.steps: StepTracker | None = None
+        """The current command's progress through its ``steps=`` (REQ-C-008)"""
         self.stable_all = False
         """``--stable-output`` on argv: every envelope of the run is stable (REQ-O-007)"""
         self.stable = False
@@ -1700,6 +1726,16 @@ class _Run:
             browser_open=BROWSER_OPEN in command.gui_operations,
         )
         self.teardown = Teardown(command.cleanup, self._teardown_failed(command, args))
+        self.steps = (
+            StepTracker(
+                command.steps,
+                self._log_sink(command, args, mode),
+                resume_from=invocation.resume_from,
+                rollback=command.rollback if invocation.rollback_on_failure else None,
+            )
+            if command.steps
+            else None
+        )
         policy = command.retry
         self.retrier = (
             None
@@ -1746,6 +1782,7 @@ class _Run:
             retrier=self.retrier,
             locks=Locks(self.locks_dir(), deadline),
             teardown=self.teardown,
+            steps=self.steps,
         )
 
     def locks_dir(self) -> Path | None:
@@ -2383,6 +2420,82 @@ class _Run:
     ) -> Envelope:
         """Run one handler under its timeout and turn the outcome into an envelope;
         with ``replay``, run only the credential gate there and answer with ``replay()``"""
+        self.steps = None
+        envelope = self._run_handler(command, invocation, mode, meta=meta, replay=replay)
+        if replay is not None or self.steps is None:
+            return envelope
+        return self._stepped(command, invocation.args, envelope, self.steps)
+
+    def _stepped(
+        self, command: Command, args: object, envelope: Envelope, steps: StepTracker
+    ) -> Envelope:
+        """The step fields in ``data`` of a ``steps=`` command (REQ-C-008): a failure after
+        a completed step exits 3, ``PARTIAL_FAILURE``, keeping ``error.code`` (06-D2); a
+        timeout or signal keeps its exit and names the step it stopped in"""
+        error = envelope.error
+        if error is not None and error.phase != "execution":
+            return envelope  # refused, or previewed, before any step could change anything
+        data = {} if envelope.data is None else envelope.data
+        if not isinstance(data, dict):
+            assert error is not None  # registration makes a result an object
+            broken = ErrorDetail(
+                code="INVALID_EXIT",
+                message=f"Command {command.path} raised {error.code} with data that is not "
+                "an object; the data of a steps= command carries its step fields",
+                retryable=False,
+                context={"command": command.path.value},
+                phase="execution",
+            )
+            code = self.app.exits.framework(FrameworkCode.GENERAL_ERROR).code.value
+            return dataclasses.replace(envelope, exit_code=code, error=broken, data=None)
+        snap = steps.snapshot()
+        fields: dict[str, object] = {
+            "completed_steps": [s.value for s in snap.completed],
+            "failed_step": None,
+            "skipped_steps": [s.value for s in snap.skipped],
+        }
+        if error is None:
+            return dataclasses.replace(envelope, data={**data, **fields})
+        failed = snap.current
+        fields["failed_step"] = None if failed is None else failed.value
+        fields["partial"] = bool(snap.completed)
+        if command.resumable and failed is not None:
+            fields["resume_from"] = failed.value  # REQ-O-010: pass it to --resume-from
+        if command.rollback is not None:
+            fields["rollback_status"] = steps.rollback_status.value  # REQ-O-011
+            if steps.rollback_status is RollbackStatus.FAILED:
+                assert steps.rollback_failure is not None
+                fields["rollback_error"] = self._rollback_error(
+                    command, args, steps.rollback_failure
+                )
+        stepped = dataclasses.replace(envelope, data={**data, **fields})
+        if not snap.completed or error.code in ("TIMEOUT", "CANCELLED"):
+            return stepped
+        entry = self.app.exits.framework(FrameworkCode.PARTIAL_FAILURE)
+        # Some steps changed things: retrying the whole command would repeat them
+        partial = dataclasses.replace(
+            error, retryable=entry.retryable, retry_after_ms=None, retry_strategy=None
+        )
+        return dataclasses.replace(stepped, exit_code=entry.code.value, error=partial)
+
+    def _rollback_error(self, command: Command, args: object, exc: Exception) -> dict[str, str]:
+        """``data.rollback_error``: the code and message; the traceback goes to stderr"""
+        redact = self._redactor(command, args)
+        self.err.write(redact(_traceback(exc)))
+        code = exc.code if isinstance(exc, CliExit) else "ROLLBACK_FAILED"
+        if not isinstance(code, str) or not _ERROR_CODE.fullmatch(code):
+            code = "ROLLBACK_FAILED"
+        return {"code": code, "message": redact(_text(exc))}
+
+    def _run_handler(
+        self,
+        command: Command,
+        invocation: Invocation,
+        mode: Format,
+        *,
+        meta: Mapping[str, object] | None,
+        replay: Callable[[], Envelope] | None,
+    ) -> Envelope:
         self.abandoned = None
         self.page = None
         started = time.perf_counter()
@@ -2452,6 +2565,9 @@ class _Run:
             return self._cancelled(command, sig, started, full_meta, running=running)
         except InputRequired as exc:
             return self._input_required(exc, started, full_meta)
+        except StepError as exc:
+            message = f"Command {command.path} broke its step manifest: {exc}"
+            return self._broken(command, "INVALID_STEP", message, started, full_meta)
         except GeneratorExit:
             raise
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
@@ -2688,7 +2804,11 @@ class _Run:
             if not beating[0]:
                 return
             elapsed = int((time.perf_counter() - started) * 1000)
-            line = {"status": "running", "heartbeat": True, "elapsed_ms": elapsed}
+            line: dict[str, object] = {"status": "running", "heartbeat": True}
+            line["elapsed_ms"] = elapsed
+            step = None if self.steps is None else self.steps.current
+            if step is not None:
+                line["step"] = step.value  # REQ-C-008: the step in progress
             try:
                 self.out.write(json.dumps(line, separators=(",", ":")) + "\n")
                 self.out.flush()

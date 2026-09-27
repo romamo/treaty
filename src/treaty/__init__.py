@@ -28,6 +28,7 @@ from ._page import Page, PageRequest
 from ._retry import Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
 from ._scalars import ScalarSpec
+from ._steps import Rollback, StepName
 from ._subprocess import Completed
 from ._table import table
 from ._timeout import Timeout
@@ -78,11 +79,13 @@ __all__ = [
     "RequiredWhen",
     "Retry",
     "RetryStrategy",
+    "Rollback",
     "ScalarSpec",
     "SchemaError",
     "SchemaVersion",
     "Scope",
     "SideEffects",
+    "StepName",
     "Timeout",
     "TreatyError",
     "WarningDetail",

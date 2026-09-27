@@ -1134,6 +1134,41 @@ def _retry_declared(app: App) -> Iterator[Finding]:
             )
 
 
+def unguarded_steps(handler: Callable[..., object]) -> list[str]:
+    """``ctx.step(...)`` calls whose result no ``if`` tests, so a resumed run would still
+    do the skipped steps' work"""
+    tree = _handler_tree(handler)
+    params = list(inspect.signature(handler).parameters)
+    if tree is None or len(params) < 2:
+        return []
+    tested: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.If, ast.IfExp, ast.While)):
+            tested.update(id(n) for n in ast.walk(node.test))
+    return [
+        ast.unparse(node)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _dotted(node.func) == f"{params[1]}.step"
+        and id(node) not in tested
+    ]
+
+
+def _resume_guard(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if not c.resumable:
+            continue
+        for call in unguarded_steps(c.handler):
+            yield Finding(
+                "resume-guard",
+                Severity.WARNING,
+                c.path.value,
+                f"{call} is not an if test: under --resume-from it returns False for a step "
+                "to skip, and the step's work still runs (REQ-O-010)",
+                f"if {call}:\n    <the step's work>",
+            )
+
+
 def raises_without(handler: Callable[..., object], exit_name: str, keyword: str) -> bool:
     """A call of ``Exit.<exit_name>(...)`` in the handler without ``keyword=``"""
     tree = _handler_tree(handler)
@@ -1420,6 +1455,12 @@ RULES: tuple[Rule, ...] = (
         "Commands that find a project root declare project_root",
         Severity.WARNING,
         _project_root,
+    ),
+    Rule(
+        "resume-guard",
+        "Resumable handlers skip the steps ctx.step says to",
+        Severity.WARNING,
+        _resume_guard,
     ),
     Rule(
         "retry-declared",

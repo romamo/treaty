@@ -24,6 +24,8 @@ class CtxCall:
     """A shell string where ``ctx.run`` or ``ctx.pipeline`` takes an argument list"""
     fields: tuple[str, ...] = ()
     """The ``args.<field>`` reads among the call's arguments"""
+    literal: str | None = None
+    """The first argument, when it is a string literal"""
 
 
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
@@ -60,7 +62,13 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
                 and n.value.id == params[0]
             )
         )
-        calls.append(CtxCall(method, node.lineno, shell, fields))
+        first_arg = node.args[0] if node.args else None
+        literal = (
+            first_arg.value
+            if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str)
+            else None
+        )
+        calls.append(CtxCall(method, node.lineno, shell, fields, literal))
     return calls
 
 

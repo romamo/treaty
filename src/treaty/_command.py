@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections.abc
+import dataclasses
 import inspect
 import shlex
 import typing
@@ -28,9 +29,10 @@ from ._scalars import ScalarRegistry
 from ._scan import ctx_calls
 from ._schema import JsonSchema, is_payload_type, schema_for
 from ._secrets import default_env_var
+from ._steps import STEP_KEYS, Rollback, StepName
 from ._subprocess import BROWSER_OPEN
 from ._timeout import Timeout
-from ._types import FlagType, is_dataclass_type, resolve_alias
+from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope, ToolVersion
 
 Handler = Callable[..., Any]
@@ -169,6 +171,12 @@ class Command:
     """The tool version that added the command, in ``--schema`` (REQ-F-075)"""
     deprecated: Deprecated | None = None
     """Retiring: runs warn and name ``replacement``, a command path (REQ-F-075)"""
+    steps: tuple[StepName, ...] = ()
+    """The ordered steps ``ctx.step`` walks through, in the manifest (REQ-C-008)"""
+    resumable: bool = False
+    """``--resume-from STEP`` starts at a step (REQ-O-010)"""
+    rollback: Rollback | None = None
+    """Undoes completed steps under ``--rollback-on-failure`` (REQ-O-011)"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -278,6 +286,9 @@ def build_command(
     option_placement: OptionPlacement = OptionPlacement.ANY,
     introduced_in: ToolVersion | None = None,
     deprecated: Deprecated | None = None,
+    steps: Sequence[str] = (),
+    resumable: bool = False,
+    rollback: Rollback | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -322,8 +333,16 @@ def build_command(
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
     _check_gui(path, output_type, gui_operations)
+    step_names = _check_steps(path, steps, resumable, rollback, streaming, output_type)
     _check_ctx_calls(
-        fn, path, gui_operations, interactive, editor_alternatives, config_write_scope, retry
+        fn,
+        path,
+        gui_operations,
+        interactive,
+        editor_alternatives,
+        config_write_scope,
+        retry,
+        step_names,
     )
     if isinstance(project_root, str) or not all(isinstance(m, str) and m for m in project_root):
         raise RegistrationError(
@@ -423,6 +442,8 @@ def build_command(
         output_schema = descriptor_schema(output_schema)
     if danger_level is not DangerLevel.SAFE:
         output_schema = with_replay_effect(output_schema)
+    if step_names:
+        output_schema = _with_step_fields(output_schema, step_names)
     return Command(
         path=path,
         handler=fn,
@@ -473,7 +494,80 @@ def build_command(
         option_placement=option_placement,
         introduced_in=introduced_in,
         deprecated=deprecated,
+        steps=step_names,
+        resumable=resumable,
+        rollback=rollback,
     )
+
+
+def _check_steps(
+    path: CommandPath,
+    steps: Sequence[str],
+    resumable: bool,
+    rollback: Rollback | None,
+    streaming: bool,
+    output_type: object,
+) -> tuple[StepName, ...]:
+    """``steps=`` names each step once, in order, and the output can carry the step fields"""
+    if isinstance(steps, str):
+        raise RegistrationError(f"{path}: steps is a list of step names, such as steps=[{steps!r}]")
+    try:
+        names = tuple(StepName(s) for s in steps)
+    except InvalidValue as exc:
+        raise RegistrationError(f"{path}: steps: {exc}") from None
+    if len(set(names)) != len(names):
+        raise RegistrationError(f"{path}: steps names a step twice")
+    if not names:
+        if resumable:
+            raise RegistrationError(
+                f"{path}: resumable=True resumes at one of the command's steps; declare "
+                "steps=[...] (REQ-O-010)"
+            )
+        if rollback is not None:
+            raise RegistrationError(
+                f"{path}: rollback= undoes the command's completed steps; declare steps=[...] "
+                "(REQ-O-011)"
+            )
+        return names
+    if rollback is not None:
+        refuse_async(rollback, f"{path}: rollback")
+        if not callable(rollback):
+            raise RegistrationError(f"{path}: rollback is a function (args, ctx, completed)")
+    if streaming:
+        raise RegistrationError(
+            f"{path}: a stream's events show its progress; drop steps= or streaming=True"
+        )
+    base, optional = strip_optional(output_type)
+    is_object = is_dataclass_type(base) or base is dict or typing.get_origin(base) is dict
+    if optional or not is_object:
+        raise RegistrationError(
+            f"{path}: a steps= command returns an object, a dataclass or dict, whose data "
+            f"carries completed_steps, failed_step, and skipped_steps; not {output_type!r}"
+        )
+    if is_dataclass_type(base):
+        assert isinstance(base, type)
+        taken = sorted(STEP_KEYS & {f.name for f in dataclasses.fields(base)})
+        if taken:
+            raise RegistrationError(
+                f"{path}: output fields {taken} are the step fields treaty adds to data; "
+                "rename them"
+            )
+    return names
+
+
+def _with_step_fields(schema: JsonSchema, steps: Sequence[StepName]) -> JsonSchema:
+    """The step fields a successful run adds to ``data`` (REQ-C-008)"""
+    names: JsonSchema = {"type": "array", "items": {"enum": [s.value for s in steps]}}
+    properties = {
+        **schema.get("properties", {}),
+        "completed_steps": {**names, "description": "Steps that completed, in order"},
+        "failed_step": {
+            "type": ["string", "null"],
+            "description": "The step that failed; null when the command completed",
+        },
+        "skipped_steps": {**names, "description": "Steps that did not run"},
+    }
+    return {**schema, "properties": properties}
 
 
 def _check_strict(path: CommandPath, fields: Sequence[FieldInfo]) -> None:
@@ -594,6 +688,7 @@ def _check_ctx_calls(
     editor_alternatives: Sequence[str],
     config_write_scope: ConfigScope | None,
     retry: Retry | None,
+    steps: Sequence[StepName] = (),
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
     for call in ctx_calls(fn):
@@ -622,6 +717,17 @@ def _check_ctx_calls(
                 f"{where} retries; declare retry=treaty.Retry(...), which adds --retries and "
                 "--retry-delay (REQ-F-078)"
             )
+        if call.method == "step" and not steps:
+            raise RegistrationError(
+                f'{where} starts a step; declare steps=["...", ...] naming them in order '
+                "(REQ-C-008)"
+            )
+        if call.method == "step" and call.literal is not None:
+            if call.literal not in {s.value for s in steps}:
+                raise RegistrationError(
+                    f"{where} starts {call.literal!r}, which is not one of steps="
+                    f"{[s.value for s in steps]}"
+                )
         if call.method == "edit" and not editor_alternatives:
             raise RegistrationError(
                 f"{where} opens an editor; declare editor_alternatives=[...] naming the flags "
