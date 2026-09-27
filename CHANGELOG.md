@@ -1,0 +1,203 @@
+# Changelog
+
+All notable changes to treaty. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and treaty follows
+[Semantic Versioning](https://semver.org/) from 1.0 (see "Stability" in the README).
+Before 1.0 any release could break an app; the "Breaking" sections say where.
+
+Apps built on treaty keep their own, structured schema changelog with
+`App(schema_changelog=)` and `treaty changelog-add`; this file is treaty's.
+
+## [Unreleased]
+
+The 1.0 branch: every Level 3 requirement that changes the public API, the additive
+Level 3 work, and the API review. See `plans/1.0/` and `docs/api.md`.
+
+### Breaking
+
+- `TREATY_FORMAT`, `TREATY_MAX_OUTPUT_BYTES`, `TREATY_MAX_STDIN_BYTES`, and
+  `TREATY_STATE_DIR` are now `<APP>_FORMAT` and friends; every variable treaty reads for
+  an app carries its prefix, and `<APP>_STATE_DIR` names the directory itself
+- `Envelope` takes a `treaty.Meta` instead of `duration_ms` and `request_id`;
+  `Meta.request_id` and `timestamp` are optional
+- `App(version=)` must be semver
+- `Ctx.config` is private; config writes go through `ctx.write_config` and are locked
+- `RATE_LIMITED` without `retry_after_ms` and an invalid `fix_command` end the run as
+  `INVALID_EXIT`; a missing login is `UNAUTHENTICATED` and a missing scope at run time
+  `PERMISSION_DENIED` (was `AUTH_REQUIRED` and `INSUFFICIENT_SCOPES`); a read-only
+  command's `TIMEOUT` is retryable
+- `async def` handlers, hooks, and resource acquires fail registration
+- Unparseable JSON input is `INVALID_JSON` (was `ARG_ERROR`, or `DISPATCH_PARSE_ERROR`
+  for an `exec` line); `validate_only` is a framework key; every manifest entry has
+  `option_placement`
+- Arrays in `data` are sorted unless the field is `Out(ordered=True)`; `Path` output is
+  absolute; `list[T] | None` output fields are refused; every output key is required
+- `cleanup=` runs after every handler run, not only on signals
+- High-entropy strings and credential-named fields in `data` are masked unless
+  `--unmask`; `unmask` and `no-injection-protection` are global names; output fields
+  named `_source` or `_trusted` are refused; more names are inferred secret (`cookie`, a
+  `pass` segment); truncation warnings name `data.x` instead of `$.x`
+- `os.system`, `os.popen`, and `shell=True` in a handler fail registration (the `no-shell`
+  audit rule is gone); `gui_operations` requires `headless_behavior=`
+- Every app has the `doctor`, `cleanup`, `status`, `generate-skills`, `mcp-validate`, and
+  `audit-log` built-ins, each yielding to an app command of the same name, so every etag
+  changes once; `cleanup` output has `cleaned` instead of `removed`
+- Children of `ctx.run` get `LC_ALL=C` unless `preserve_locale=True`, and `CI=1` off a
+  terminal
+- Off a terminal or under `CI`, `ctx.log` and stray `print()` text no longer reach stderr
+- Every app writes a rotated, redacted audit log under `XDG_DATA_HOME` unless
+  `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`
+- A field named after a reserved framework flag (`--config`, `--quiet`, `--fields`,
+  `--token-limit`, and the rest of the table in `_framework.py`) fails registration
+- The manifest's `framework_version` is treaty's version; the app's is `meta.tool_version`
+- API review: `treaty.ExecArgs` is no longer exported; `Ctx`'s run plumbing (`log_sink`,
+  `warn_sink`, `processes`, `prompter`, `retrier`, `locks`, `teardown`, `steps`,
+  `session`) and `App`'s run-path helpers (`renderer`, `moved`, `check_fixes`,
+  `fix_problem`, `named_commands`, `effective_timeout`, `silence_notifiers`) are private
+- `--version --format plain` prints the bare version
+
+### Added
+
+- Response meta: `command`, `timestamp`, `schema_version`, `tool_version`, `cwd`,
+  `trace_id`, `project_root`, and `retries`; `schema_version=` and `compat=` with
+  `--schema-version`, `--output-schema`, `--print-schema`; `project_root=`; `treaty.Retry`
+  with `ctx.retry`; `treaty schema-lock`
+- Settings: `App(settings=)` from `<APP>_<FIELD>`, `--config`, project and user TOML
+  files, and defaults; `--context`, `--no-config`, `--show-config`, `--instance-id`;
+  `App(init=)` with the `init` built-in and `INIT_REQUIRED`
+- Error contract: `retry_strategy`, `treaty.already_exists` with `conflict_id`,
+  `fix_commands=` and `App(companions=)`, `treaty.Expired` with `refreshes_auth=`,
+  `treaty.NetworkContext`, `ctx.lock` with `LOCK_HELD`, `<APP>_SESSION` idempotency keys,
+  and `App.redirect` (exit 13 `REDIRECTED`, manifest `aliases`)
+- Argument grammar: `pattern_type=`, `requires=` with `RequiredWhen`, `Excludes`, and
+  `DefaultWhenAbsent`, `option_placement="strict"`, `from_stdin=`, `--validate-only`, JSON5
+  in `--raw-payload` and `exec` with `corrected_input`, `introduced_in=`,
+  `deprecated=treaty.Deprecated(...)`, and `treaty audit --baseline`
+- Output data: `treaty.Out` (`sort_key`, `ordered`, `volatile`, `high_entropy`,
+  `external`), `treaty.Binary`, `Flag(max_bytes=)` with `FIELD_TOO_LARGE`,
+  `ctx.truncated`, `--stable-output`
+- Multi-step commands: `steps=`, `ctx.step`, `--resume-from`, `--rollback-on-failure`,
+  `treaty.Batch`; resources' `release` on every exit
+- Output security: masking, `external=True` with `_source` and `_trusted` tags,
+  `--no-injection-protection`, `scrub()` for logs and stderr
+- Declarations: `subprocess=treaty.Subprocess(...)`, `platform=`, `required_tools=`,
+  `filesystem_side_effects=`, `background=` with `ctx.spawn`,
+  `App(dependencies=[treaty.Dependency(...)])`, and the `doctor` and `cleanup` built-ins
+- Session hygiene: `app.suppress_update_notifier`, `App(update_check=)` with
+  `--no-update-check`, `--cwd` and `CWD_CHANGED`, `ctx.tmp_dir`, `ctx.temp_file()`,
+  `ctx.output_file()`, `treaty.intercept_stdout()`, `cache=treaty.CachePolicy(...)` with
+  `ctx.cache`, `--no-cache`, `--cache-ttl`
+- Network and filesystem: `ctx.http` (proxies, CA bundles, `error.network_context`,
+  retries), `--proxy`, `--no-proxy`, `recursive_traversal=True` with `ctx.walk`,
+  `--no-follow-symlinks`, `--max-depth`
+- Logging: `--quiet`, `--verbose`, `--debug`, `ctx.progress`, `ctx.debug`,
+  `ctx.log_error`, `--warnings-as-errors`, `treaty.AuditLog`, the `audit-log` built-in
+- Output selection: `--fields`, `--stream`, `--format id` with `id_field=`,
+  `--heartbeat-interval`, `--token-limit`, `--token-offset`, `--token-count`,
+  `--tokenizer`, `app.tokenizer()`, the `treaty[tiktoken]` extra
+- Built-ins: `manifest --etag` with `meta.not_modified`, `App(checks=)` with `treaty.Check`
+  and `treaty.endpoint`, `status`, `cleanup --scope` and `--min-age`,
+  `App(schema_changelog=)` with `changelog` and `treaty changelog-add`, `generate-skills`,
+  `mcp-validate`, `treaty-mcp --list-tools`
+- Agent docs: `treaty agents-md`, `treaty check-docs`, AGENTS.md from `treaty init`
+- 37 new audit rules (56 in all, listed by `treaty rules`), each with a generated fix
+- `docs/api.md` (the frozen surface), `docs/guide.md`, this changelog, a stability policy,
+  and per-platform notes in the README
+
+## [0.1.0] - 2026-09-27
+
+CLI Agent Spec Level 1 and Level 2.
+
+### Breaking
+
+- `@app.command` requires `danger_level=` and `exit_codes=` (the Level 2 plan's D3; no
+  deprecation window)
+- Argument errors exit 2 only in the validation phase, before user code runs; a
+  handler-raised `ParseError` exits 1 with `VALIDATION_AFTER_START`
+- Newlines, carriage returns, and null bytes in `str` arguments are refused unless
+  `Flag(multiline=True)`
+
+### Added
+
+- Output hygiene: the stdout guard, `ctx.log`, JSON cleaning, color and pager
+  environment, ISO dates, sentence-case errors
+- `would_affect` and `safe_default=`; paginated lists with `--limit` and `--cursor`, and
+  `--live` for safe-default commands
+- `ctx.run` and `ctx.pipeline` with a hardened child environment and headless runs
+- Prompts with `--yes` and `--non-interactive`, editors, stray `input()` detection
+- Idle stream timeouts, exit 0 on a closed reader, heartbeats, stdin payloads, `jsonl`
+  and `tsv`, `--output PATH` for `output_file=True` commands
+- Credentials and scopes: the credentials gate, `check-permissions`, login commands
+- Async jobs with job descriptors and `job status`; config writes with a scope
+- The tutorial in `docs/tutorial/`
+
+### Fixed
+
+- Byte-exact atomic writes and steadier timing on Windows and macOS
+
+## [0.0.6] - 2026-09-27
+
+### Added
+
+- CSV in the hello example; the error for an unoffered `--format` names the offered ones
+
+## [0.0.5] - 2026-09-27
+
+### Added
+
+- Per-format renderers keyed by the `Format` enum
+
+## [0.0.4] - 2026-09-26
+
+### Breaking
+
+- `--format human` is `--format plain`
+
+### Added
+
+- The plain fallback renderer
+- Exit codes hoisted in the root `--schema`; piped `--help` points to `--schema`
+
+## [0.0.3] - 2026-09-26
+
+### Fixed
+
+- Conformance runs on Windows through the app's console script
+
+## [0.0.2] - 2026-09-26
+
+### Added
+
+- CI on Linux, macOS, and Windows for pushes and pull requests; publishing reuses it
+
+### Fixed
+
+- `EINVAL` on a closed pipe is a broken pipe on Windows
+- The timed-out idempotency test is event-driven
+
+## [0.0.1] - 2026-09-26
+
+First release.
+
+### Added
+
+- Typed commands from dataclasses, the JSON envelope, the manifest, and `--schema`
+- `exec` with a 64 KiB stdin cap, `--input-file`, and an `EMPTY_STREAM` envelope
+- `effect` on mutating and destructive commands and `--idempotency-key`
+- Secret flags from an env var or file only, redacted in errors
+- `Path` fields hardened against traversal and encoded bytes
+- Output size cap with truncation metadata
+- Every validation error in one run
+- Custom scalars, typed resources on the handler signature, streaming handlers, and the
+  MCP adapter (`treaty[mcp]`)
+- `treaty audit`, `treaty init`, and `treaty conformance`
+- The benchmark against argparse and click on the spec harness
+
+[Unreleased]: https://github.com/romamo/treaty/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/romamo/treaty/compare/v0.0.6...v0.1.0
+[0.0.6]: https://github.com/romamo/treaty/compare/v0.0.5...v0.0.6
+[0.0.5]: https://github.com/romamo/treaty/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/romamo/treaty/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/romamo/treaty/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/romamo/treaty/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/romamo/treaty/releases/tag/v0.0.1

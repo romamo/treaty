@@ -1109,6 +1109,30 @@ written, and the exit is `0` once a complete envelope or event reached the reade
 got what it wanted (REQ-F-014), or `141` (`OUTPUT_CLOSED`) when it left before any. All three
 signal codes appear in every command's `exit_codes` map.
 
+## Platforms
+
+treaty runs on Linux, macOS, and Windows; CI runs the suite and a scaffolded project on
+all three. Where the operating system lacks a mechanism, the behavior differs:
+
+| Behavior | Linux and macOS | Windows |
+|----------|-----------------|---------|
+| Ctrl+C in a console | `SIGINT`: teardown, `CANCELLED`, exit `130` | The same |
+| Termination by another process | `SIGTERM`: teardown, `CANCELLED`, exit `143` | `TerminateProcess` (`taskkill /F`, `os.kill`) ends the process at once: no teardown, no envelope |
+| Reader closes stdout early | Exit `0` or `141` (`OUTPUT_CLOSED`) | The same, detected from the broken pipe since there is no `SIGPIPE` |
+| Stopping `ctx.run` children | `SIGTERM` to the process group, then `SIGKILL` | Only the child is stopped, not its grandchildren |
+| `ctx.spawn` background processes | New session; `cleanup` stops a live process group | Detached process; a pid is kept until its deadline, since probing it would kill it |
+| `ctx.pipeline` stage ended by `SIGPIPE` | Not a failure when a later stage succeeded | No such signal; every non-zero stage fails |
+| Locks (`ctx.lock`, config writes, idempotency) | `flock` | `msvcrt.locking`; an idle lock file is removed only when no process holds it open |
+| Private temp dirs and files | Mode `0700` and `0600` | No permission bits; the user profile's ACLs apply |
+| Headless detection | No `DISPLAY` or `WAYLAND_DISPLAY` on Linux and the BSDs, or over SSH | A console session is never headless for lack of a display |
+| Output line endings | LF | LF: `App.main` never writes CRLF |
+| `cleanup_command` in `data.cleanup` | `rm -f ...` | `del /f /q ...` |
+| `platform=` | `sys.platform` values | `win32` |
+
+The signal tests skip on Windows because the test harness cannot deliver `SIGINT` or
+`SIGTERM` to a running child there; the permission-bit and `/bin/sh` tests skip for the
+same kind of reason.
+
 ## Response meta
 
 `data` is safe to cache and diff: two runs of the same call with the same state return
@@ -1325,6 +1349,34 @@ profile. `--all` lists
 everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and
 piping the output gives an envelope an agent can act on. Rules see declarations only; the
 conformance kit covers runtime behaviour.
+
+## Stability
+
+treaty follows semantic versioning from 1.0. The frozen surface is listed in
+[`docs/api.md`](docs/api.md) and snapshotted by `tests/test_public_api.py`: every name
+exported from `treaty`, every keyword of `App`, `App.command`, `Group.command`, `Flag`,
+`Arg`, and `Out`, the public fields and methods of `Ctx`, every envelope and manifest key,
+every framework exit code and error code, and every environment variable name. Modules
+named `treaty._*` are private and may change in any release.
+
+- **Patch** releases fix bugs. A fix may make treaty refuse something it wrongly accepted,
+  such as a malformed declaration, when accepting it broke the contract
+- **Minor** releases add: new keywords, built-ins, audit rules, error codes, and optional
+  envelope or manifest keys. An agent that ignores unknown keys keeps working. A new
+  built-in yields to an app command of the same name, so no app breaks
+- **Major** releases remove or change meaning. Nothing is removed without first being
+  deprecated for at least one minor release
+
+A deprecated treaty keyword or name keeps working through its deprecation window and says
+so when the app registers, with a `DEPRECATED_USAGE` warning naming the replacement, and
+`treaty audit` lists each use with the fix. Nothing is deprecated yet, so that check lands
+with the first deprecation after 1.0, built on the same `treaty.Deprecated` metadata. Apps retire their own commands and flags the same way, with
+`deprecated=treaty.Deprecated("1.4.0", replacement=...)`, `App.redirect`, and
+`treaty audit --baseline` (see [Renamed commands](#renamed-commands)).
+
+treaty 1.0 claims CLI Agent Spec Level 2 conformance; the Level 3 score is in
+[`COMPLIANCE.md`](COMPLIANCE.md). Changes are listed in [`CHANGELOG.md`](CHANGELOG.md),
+and [`docs/guide.md`](docs/guide.md) covers the design calls the audit cannot make.
 
 ## Development
 
