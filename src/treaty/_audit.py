@@ -312,6 +312,65 @@ def _subprocess_declared(app: App) -> Iterator[Finding]:
             )
 
 
+_WRITES = frozenset({"write_text", "write_bytes", "mkdir", "makedirs", "mkdtemp", "mkstemp"})
+
+
+def disk_writes(handler: Callable[..., object]) -> list[str]:
+    """Calls in the handler's source that write to disk (REQ-C-011, heuristic)"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return []
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted(node.func) or (
+            node.func.attr if isinstance(node.func, ast.Attribute) else None
+        )
+        if name is None:
+            continue
+        last = name.rpartition(".")[2]
+        if last in _WRITES:
+            found.append(name)
+        elif last == "open":
+            mode = node.args[1] if len(node.args) > 1 else None
+            mode = next((k.value for k in node.keywords if k.arg == "mode"), mode)
+            if isinstance(mode, ast.Constant) and set(str(mode.value)) & set("wax+"):
+                found.append(name)
+    return found
+
+
+def _fs_side_effects(app: App) -> Iterator[Finding]:
+    # A safe command changes nothing, so what it writes is a cache, log, or temp file; a
+    # mutating command's writes may be its effect, such as the project init creates
+    for c in user_commands(app):
+        if c.danger_level is not DangerLevel.SAFE or c.filesystem_side_effects or c.output_file:
+            continue
+        writes = disk_writes(c.handler)
+        if writes:
+            yield Finding(
+                "fs-side-effects",
+                Severity.ADVICE,
+                c.path.value,
+                f"{writes[0]}(...) writes to disk, and the safe command declares no "
+                "filesystem_side_effects, so agents cannot find or clean up what it leaves "
+                "(REQ-C-011, heuristic)",
+                'filesystem_side_effects=[treaty.SideEffect("~/.cache/<tool>/", "cache")]',
+            )
+
+
+def _declared_commands(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        for problem in app.named_commands(c):
+            yield Finding(
+                "declared-commands",
+                Severity.ERROR,
+                c.path.value,
+                f"{problem}; the manifest and every run fail until it does (08-D2)",
+                "name a registered command, such as " + f"{app.name} cleanup",
+            )
+
+
 def _builtin_shadowed(app: App) -> Iterator[Finding]:
     for path in app.shadowed_builtins:
         yield Finding(
@@ -1434,6 +1493,18 @@ RULES: tuple[Rule, ...] = (
         "Commands that run a child declare its arguments",
         Severity.WARNING,
         _subprocess_declared,
+    ),
+    Rule(
+        "fs-side-effects",
+        "Commands that write to disk declare it",
+        Severity.ADVICE,
+        _fs_side_effects,
+    ),
+    Rule(
+        "declared-commands",
+        "Declared cleanup commands exist",
+        Severity.ERROR,
+        _declared_commands,
     ),
     Rule(
         "required-tools",

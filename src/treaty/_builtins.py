@@ -1,14 +1,20 @@
 """Built-ins every app gets that yield to an app command of the same name (13-D1):
-``doctor`` (REQ-O-031, REQ-C-018)."""
+``doctor`` (REQ-O-031, REQ-C-018) and ``cleanup`` (REQ-C-011)."""
 
 from __future__ import annotations
 
+import glob
+import shutil
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ._context import Ctx
+from ._declare import CLEARED
 from ._deps import Found, Version, dependency_result, find, tool_check
+from ._effect import Affects
 from ._errors import CliExit
+from ._flags import Flag
 from ._values import CommandPath, ExitCodeName
 
 if TYPE_CHECKING:
@@ -66,3 +72,57 @@ def register_doctor(app: App) -> CommandPath:
         return report
 
     return DOCTOR_PATH
+
+
+CLEANUP_PATH = CommandPath("cleanup")
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupArgs:
+    dry_run: bool = Flag(default=False, description="List what would be removed; remove nothing")
+
+
+@dataclass(frozen=True, slots=True)
+class Cleaned:
+    effect: str
+    removed: list[str]
+    """Every path removed; empty in a dry run"""
+    would_affect: Affects | None = None
+
+
+def register_cleanup(app: App) -> CommandPath:
+    @app.command(
+        CLEANUP_PATH.value,
+        description="Remove the temp and cache paths the tool's commands declare in "
+        "filesystem_side_effects",
+        danger_level="destructive",
+        exit_codes=(),
+        examples=[("See what would be removed", f"{app.name} cleanup --dry-run")],
+    )
+    def cleanup(args: CleanupArgs, ctx: Ctx) -> Cleaned:
+        paths = sorted(_cleared(app, ctx.env.get("HOME")))
+        if args.dry_run:
+            summary = f"Removes {len(paths)} temp and cache paths"
+            return Cleaned("would_delete", [], Affects(summary, tuple(paths), len(paths)))
+        for path in paths:
+            target = Path(path)
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            elif target.exists() or target.is_symlink():
+                target.unlink()
+        return Cleaned("deleted" if paths else "noop", paths)
+
+    return CLEANUP_PATH
+
+
+def _cleared(app: App, home: str | None) -> set[str]:
+    """Every existing path a temp or cache side effect of a command covers (REQ-C-011)"""
+    found: set[str] = set()
+    for command in app.commands.values():
+        for effect in command.filesystem_side_effects:
+            pattern = effect.pattern(home) if effect.kind in CLEARED else None
+            if pattern is not None:
+                found.update(
+                    glob.glob(glob.escape(pattern).replace("[*]", "*"), include_hidden=True)
+                )
+    return found

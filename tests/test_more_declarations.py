@@ -14,7 +14,17 @@ from pathlib import Path
 import pytest
 from conftest import WINDOWS, spec_validator
 
-from treaty import App, Arg, Ctx, Dependency, Flag, NoArgs, RegistrationError, Subprocess
+from treaty import (
+    App,
+    Arg,
+    Ctx,
+    Dependency,
+    Flag,
+    NoArgs,
+    RegistrationError,
+    SideEffect,
+    Subprocess,
+)
 from treaty._audit import audit
 from treaty._deps import Version
 from treaty._values import CommandPath
@@ -558,3 +568,130 @@ def test_manifest_version_and_exec_stay_reserved() -> None:
     for name in ("manifest", "version", "exec"):
         with pytest.raises(RegistrationError, match="already registered"):
             app.command(name, description="x", danger_level="safe", exit_codes=())(handler)
+
+
+# REQ-C-011
+
+
+def side_effects_app(root: Path, clearable_with: str | None = None) -> App:
+    app = App("fetcher", version="1.0.0")
+
+    @app.command(
+        "fetch-schema",
+        description="Fetch and cache a schema",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[
+            SideEffect(
+                f"{root}/cache/schemas/", "cache", ttl_seconds=3600, clearable_with=clearable_with
+            ),
+            SideEffect(f"{root}/tmp/fetch-{{session_id}}/", "temp"),
+            SideEffect(f"{root}/logs/{{date}}.log", "log"),
+            SideEffect(f"{root}/credentials.json", "credential"),
+        ],
+    )
+    def fetch_schema(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        cache = root / "cache" / "schemas"
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "a.json").write_text("{}")
+        for session in ("1", "2"):
+            (root / "tmp" / f"fetch-{session}").mkdir(parents=True, exist_ok=True)
+        (root / "logs").mkdir(exist_ok=True)
+        (root / "logs" / "2026-09-27.log").write_text("log")
+        (root / "credentials.json").write_text("{}")
+        return {}
+
+    return app
+
+
+def test_a_command_that_writes_to_a_cache_directory_declares_that_path_in_filesystem_side_effects(
+    tmp_path: Path,
+) -> None:
+    app = side_effects_app(tmp_path, clearable_with="fetcher cleanup")
+    manifest = app.manifest()
+    effects = manifest["commands"]["fetch-schema"]["filesystem_side_effects"]  # type: ignore[index]
+    assert effects[0] == {
+        "path": f"{tmp_path}/cache/schemas/",
+        "type": "cache",
+        "ttl_seconds": 3600,
+        "clearable_with": "fetcher cleanup",
+    }
+    assert [e["type"] for e in effects] == ["cache", "temp", "log", "credential"]
+    spec_validator("manifest-response").validate(manifest)
+    out = io.StringIO()
+    app.run(
+        ["fetch-schema", "--schema", "--format", "json"], stdout=out, stderr=io.StringIO(), env={}
+    )
+    assert json.loads(out.getvalue())["data"]["filesystem_side_effects"] == effects
+
+
+@pytest.mark.skipif(WINDOWS, reason="expected paths use / separators")
+def test_tool_cleanup_removes_all_paths_declared_as_temp_or_cache(tmp_path: Path) -> None:
+    app = side_effects_app(tmp_path)
+    assert run(app, ["fetch-schema"])[0] == 0
+    code, env = run(app, ["cleanup", "--dry-run"])
+    assert code == 0
+    data = env["data"]
+    assert isinstance(data, dict) and data["effect"] == "would_delete"
+    expected = [f"{tmp_path}/cache/schemas", f"{tmp_path}/tmp/fetch-1", f"{tmp_path}/tmp/fetch-2"]
+    assert data["would_affect"]["resources"] == expected
+    assert (tmp_path / "cache" / "schemas").exists()
+    code, env = run(app, ["cleanup", "--confirm-destructive"])
+    assert code == 0
+    assert env["data"] == {"effect": "deleted", "removed": expected, "would_affect": None}
+    assert not (tmp_path / "cache" / "schemas").exists()
+    assert not (tmp_path / "tmp" / "fetch-1").exists()
+    assert (tmp_path / "logs" / "2026-09-27.log").exists()
+    assert (tmp_path / "credentials.json").exists()
+    _, env = run(app, ["cleanup", "--confirm-destructive"])
+    assert env["data"] == {"effect": "noop", "removed": [], "would_affect": None}
+
+
+@pytest.mark.skipif(WINDOWS, reason="expected paths use / separators")
+def test_cleanup_expands_a_home_path_from_the_run_environment(tmp_path: Path) -> None:
+    app = App("homey", version="1.0.0")
+
+    @app.command(
+        "x",
+        description="x",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[SideEffect("~/.cache/homey/", "cache")],
+    )
+    def x(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    (tmp_path / ".cache" / "homey").mkdir(parents=True)
+    _, env = run(app, ["cleanup", "--confirm-destructive"], env={"HOME": str(tmp_path)})
+    assert env["data"]["removed"] == [f"{tmp_path}/.cache/homey"]  # type: ignore[index]
+
+
+def test_clearable_with_must_name_a_command_when_the_manifest_is_built(tmp_path: Path) -> None:
+    app = side_effects_app(tmp_path, clearable_with="fetcher cache clear")
+    rules = {r.id: r for r in audit(app, "fetcher", limit=3).rules}
+    [finding] = rules["declared-commands"].findings
+    assert "names no command" in finding.message
+    with pytest.raises(RegistrationError, match="clearable_with"):
+        app.manifest()
+
+
+def test_a_side_effect_is_an_absolute_path_of_a_known_type() -> None:
+    with pytest.raises(RegistrationError, match="absolute"):
+        SideEffect("cache/", "cache")
+    with pytest.raises(RegistrationError, match="cache, log, temp, credential, config"):
+        SideEffect("/tmp/x", "scratch")
+
+
+def test_audit_flags_an_undeclared_disk_write(tmp_path: Path) -> None:
+    app = App("writer", version="1.0.0")
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        (tmp_path / "cache.json").write_text("{}")
+        return {}
+
+    rules = {r.id: r for r in audit(app, "writer", limit=3).rules}
+    [finding] = rules["fs-side-effects"].findings
+    assert "write_text" in finding.message and "treaty.SideEffect" in finding.fix
+    clean = {r.id: r for r in audit(side_effects_app(tmp_path), "fetcher", limit=3).rules}
+    assert clean["fs-side-effects"].passed

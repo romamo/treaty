@@ -259,6 +259,8 @@ def command_entry(
         out["platform"] = list(command.platform)  # REQ-C-018
     if command.required_tools:
         out["required_tools"] = {t: v.value for t, v in sorted(command.required_tools.items())}
+    if command.filesystem_side_effects:
+        out["filesystem_side_effects"] = [e.to_json() for e in command.filesystem_side_effects]
     if command.subprocess is not None:
         out["subprocess"] = command.subprocess.to_json(command.fields)  # REQ-C-019
     if command.secret_env_vars:

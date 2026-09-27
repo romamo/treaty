@@ -15,7 +15,14 @@ from typing import Any
 from ._auth import AuthKind, check_declaration
 from ._batch import ITEM_KEYS, batch_item, batch_schema
 from ._config import ConfigScope
-from ._declare import Subprocess, check_platform, check_subprocess, derive_subprocess
+from ._declare import (
+    SideEffect,
+    Subprocess,
+    check_platform,
+    check_side_effects,
+    check_subprocess,
+    derive_subprocess,
+)
 from ._deprecation import Deprecated
 from ._deps import Version, check_required_tools
 from ._effect import can_carry, with_replay_effect
@@ -195,6 +202,8 @@ class Command:
     """``sys.platform`` values the command supports; empty is all (REQ-C-018)"""
     required_tools: Mapping[str, Version] = field(default_factory=dict)
     """Programs the command runs, to their minimum versions; checked by ``doctor``"""
+    filesystem_side_effects: tuple[SideEffect, ...] = ()
+    """Where the command writes on disk; ``cleanup`` removes the temp and cache ones"""
     batch: bool = False
     """Returns ``treaty.Batch[T]``, ``output_type`` being ``T``: ``data`` is ``summary``
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
@@ -315,6 +324,7 @@ def build_command(
     subprocess: Subprocess | None = None,
     platform: Sequence[str] = (),
     required_tools: Mapping[str, str] | None = None,
+    filesystem_side_effects: Sequence[SideEffect] = (),
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -563,6 +573,7 @@ def build_command(
         shell_checked=() if declared_child is None else declared_child.user_controlled_args,
         platform=check_platform(str(path), platform),
         required_tools=check_required_tools(str(path), required_tools or {}),
+        filesystem_side_effects=check_side_effects(str(path), filesystem_side_effects),
         batch=batch,
     )
 

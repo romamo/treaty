@@ -41,7 +41,7 @@ from ._auth import (
     scope_set,
 )
 from ._batch import Batch, ItemError
-from ._builtins import register_doctor
+from ._builtins import register_cleanup, register_doctor
 from ._cap import (
     DEFAULT_CAP,
     DEFAULT_STDIN_CAP,
@@ -65,7 +65,7 @@ from ._command import (
 )
 from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
-from ._declare import UNSUPPORTED_PLATFORM, Subprocess, supports
+from ._declare import UNSUPPORTED_PLATFORM, SideEffect, Subprocess, supports
 from ._deprecation import Deprecated
 from ._deps import Dependency, check_dependencies
 from ._dispatch import DispatchRequest, parse_dispatch_line
@@ -85,7 +85,7 @@ from ._envelope import (
 )
 from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy, SideEffects
-from ._fix import fix_problem
+from ._fix import command_problem, fix_problem
 from ._flags import Arg, Flag
 from ._framework import framework_collisions
 from ._help import global_rows, render_command, render_root
@@ -273,8 +273,8 @@ class App:
         lists the external tools the app needs, each a ``treaty.Dependency`` that the
         ``doctor`` built-in checks and the manifest lists (REQ-O-031).
 
-        ``doctor`` is a built-in that yields: an app command or group of the same name
-        replaces it (13-D1). ``manifest``, ``version``, and ``exec`` are reserved."""
+        ``doctor`` and ``cleanup`` are built-ins that yield: an app command or group of the
+        same name replaces it (13-D1). ``manifest``, ``version``, and ``exec`` are reserved."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -472,6 +472,7 @@ class App:
         subprocess: Subprocess | None = None,
         platform: Sequence[str] = (),
         required_tools: Mapping[str, str] | None = None,
+        filesystem_side_effects: Sequence[SideEffect] = (),
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -536,6 +537,9 @@ class App:
         elsewhere it still runs, with an ``UNSUPPORTED_PLATFORM`` warning.
         ``required_tools={"dpkg-deb": "1.19.0"}`` names the programs it runs and their
         minimum versions, each a ``doctor`` check (REQ-C-018).
+        ``filesystem_side_effects=[SideEffect("~/.cache/tool/", "cache")]`` declares where
+        the command writes on disk, in the manifest; the ``cleanup`` built-in removes the
+        ``temp`` and ``cache`` paths (REQ-C-011).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
         ``headless_behavior=``: ``"emit_in_output"`` (the URL in ``data.open_url``),
         ``"skip"`` (a ``GUI_SKIPPED`` warning), or ``"error"`` (exit 4) (REQ-C-024).
@@ -682,6 +686,7 @@ class App:
                     subprocess=subprocess,
                     platform=platform,
                     required_tools=required_tools,
+                    filesystem_side_effects=filesystem_side_effects,
                 )
             )
             return fn
@@ -810,7 +815,22 @@ class App:
                 problem = self.fix_problem(fix)
                 if problem is not None:
                     raise RegistrationError(f"{path}: fix_commands[{error_code!r}]: {problem}")
+            problems = self.named_commands(command)
+            if problems:
+                raise RegistrationError(f"{path}: {problems[0]}")
         self._fixes_checked = True
+
+    def named_commands(self, command: Command) -> list[str]:
+        """Each ``clearable_with`` that does not run a command of this app (08-D2)"""
+        found: list[str] = []
+        for effect in command.filesystem_side_effects:
+            if effect.clearable_with is not None:
+                problem = command_problem(
+                    effect.clearable_with, app_name=self.name, commands=self._commands
+                )
+                if problem is not None:
+                    found.append(f"SideEffect(clearable_with=...): {problem}")
+        return found
 
     def fix_problem(self, fix: object) -> str | None:
         """Why ``fix`` cannot be an ``error.fix_command`` of this app, or None"""
@@ -850,6 +870,7 @@ class App:
             return {"name": self.name, "version": self.version}
 
         self._yielding.add(register_doctor(self))
+        self._yielding.add(register_cleanup(self))
 
         if self.init is not None:
             setup = self.init

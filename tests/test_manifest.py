@@ -19,6 +19,7 @@ def test_manifest_validates_against_spec(app: App) -> None:
     manifest = envelope["data"]
     spec_validator("manifest-response").validate(manifest)
     assert set(manifest["commands"]) == {
+        "cleanup",
         "doctor",
         "manifest",
         "version",

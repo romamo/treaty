@@ -55,3 +55,20 @@ def fix_problem(
     if commands[route.path].danger_level is DangerLevel.DESTRUCTIVE:
         return f"{text!r} runs {route.path}, which is destructive; a fix is safe to run twice"
     return None
+
+
+def command_problem(
+    text: str, *, app_name: str, commands: Mapping[CommandPath, Command]
+) -> str | None:
+    """Why ``text``, such as ``tool cache clear --scope schemas``, does not run a command
+    of this app, or None; for ``clearable_with`` and ``cleanup_command``, which may be
+    destructive (08-D2)"""
+    try:
+        words = shlex.split(text)
+    except ValueError:
+        return f"{text!r} has unbalanced quotes"
+    if not words or words[0] != app_name:
+        return f"{text!r} does not start with {app_name!r}"
+    if resolve_path(words[1:], commands).path is None:
+        return f"{text!r} names no command of {app_name}"
+    return None

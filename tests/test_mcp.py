@@ -63,7 +63,7 @@ def adapter_app() -> App:
 
 def test_one_tool_per_command_except_exec_with_dots_as_underscores() -> None:
     names = [e.name for e in tool_entries(adapter_app())]
-    assert names == ["doctor", "log_tail", "manifest", "push", "version"]
+    assert names == ["cleanup", "doctor", "log_tail", "manifest", "push", "version"]
     assert tool_name(next(e.path for e in tool_entries(adapter_app()) if e.name == "log_tail")) == (
         "log_tail"
     )
@@ -139,6 +139,7 @@ def test_call_reports_validation_errors_and_unknown_commands() -> None:
     unknown = app.call("nope", {})
     assert unknown.error is not None and unknown.error.code == "UNKNOWN_COMMAND"
     assert unknown.error.context["available"] == [
+        "cleanup",
         "doctor",
         "log.tail",
         "manifest",
@@ -163,6 +164,7 @@ def test_call_tool_maps_names_and_passes_unknown_through() -> None:
     unknown = call_tool(app, entries, "log.tail", {"count": 1})
     assert unknown.error is not None and unknown.error.code == "UNKNOWN_TOOL"
     assert unknown.error.context["available"] == [
+        "cleanup",
         "doctor",
         "log_tail",
         "manifest",
@@ -210,6 +212,7 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
     got = asyncio.run(scenario())
     assert got["server"] == ("deployctl", "1.4.0")
     assert got["tools"] == [
+        "cleanup",
         "config_set",
         "deploy_rollback",
         "deploy_start",

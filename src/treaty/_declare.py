@@ -7,6 +7,7 @@ import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo
@@ -147,3 +148,80 @@ def check_platform(where: str, platform: Sequence[str]) -> tuple[str, ...]:
 
 def supports(platform: Sequence[str], current: str) -> bool:
     return not platform or any(current.startswith(p) for p in platform)
+
+
+class SideEffectType(StrEnum):
+    CACHE = "cache"
+    LOG = "log"
+    TEMP = "temp"
+    CREDENTIAL = "credential"
+    CONFIG = "config"
+
+
+CLEARED = frozenset({SideEffectType.TEMP, SideEffectType.CACHE})
+"""What the ``cleanup`` built-in removes (REQ-C-011)"""
+
+
+@dataclass(frozen=True, slots=True)
+class SideEffect:
+    """A filesystem location a command writes (REQ-C-011)
+
+    ``path`` is absolute or starts with ``~/``; ``{name}`` placeholders and ``*`` match any
+    one path segment, so ``"/tmp/tool-{session}/"`` covers every session. ``type`` is
+    ``cache``, ``log``, ``temp``, ``credential``, or ``config``; ``cleanup`` removes the
+    ``temp`` and ``cache`` ones. ``clearable_with`` is the invocation that removes it,
+    such as ``"tool cache clear"``, checked to name a command when the manifest is built.
+    """
+
+    path: str
+    type: str
+    ttl_seconds: int | None = None
+    clearable_with: str | None = None
+
+    def __post_init__(self) -> None:
+        where = f"SideEffect({self.path!r})"
+        if not isinstance(self.path, str) or not (
+            self.path.startswith(("/", "~/")) or re.match(r"[A-Za-z]:[\\/]", self.path)
+        ):
+            raise RegistrationError(f"{where}: path is absolute or starts with ~/")
+        if self.type not in SideEffectType:
+            kinds = ", ".join(t.value for t in SideEffectType)
+            raise RegistrationError(f"{where}: type={self.type!r} is not one of {kinds}")
+        ttl = self.ttl_seconds
+        if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 0):
+            raise RegistrationError(f"{where}: ttl_seconds is a whole number of seconds")
+        if self.clearable_with is not None and not (
+            isinstance(self.clearable_with, str) and self.clearable_with.strip()
+        ):
+            raise RegistrationError(f"{where}: clearable_with is an invocation of this tool")
+
+    @property
+    def kind(self) -> SideEffectType:
+        return SideEffectType(self.type)
+
+    def to_json(self) -> dict[str, object]:
+        out: dict[str, object] = {"path": self.path, "type": self.type}
+        if self.ttl_seconds is not None:
+            out["ttl_seconds"] = self.ttl_seconds
+        if self.clearable_with is not None:
+            out["clearable_with"] = self.clearable_with
+        return out
+
+    def pattern(self, home: str | None) -> str | None:
+        """The glob of every path it covers; None for ``~/`` without a home"""
+        path = self.path
+        if path.startswith("~/"):
+            if not home:
+                return None
+            path = home.rstrip("/") + path[1:]
+        return re.sub(r"\{[^{}/]*\}", "*", path).rstrip("/") or "/"
+
+
+def check_side_effects(where: str, effects: Sequence[SideEffect]) -> tuple[SideEffect, ...]:
+    if isinstance(effects, (str, SideEffect)) or not all(
+        isinstance(e, SideEffect) for e in effects
+    ):
+        raise RegistrationError(
+            f"{where}: filesystem_side_effects is a list of treaty.SideEffect(path, type)"
+        )
+    return tuple(effects)

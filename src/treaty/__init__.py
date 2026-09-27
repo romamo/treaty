@@ -7,7 +7,7 @@ from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
 from ._command import DangerLevel, Example, Renderer
 from ._context import Ctx
-from ._declare import Subprocess
+from ._declare import SideEffect, Subprocess
 from ._deprecation import Deprecated
 from ._deps import Dependency
 from ._effect import Affects
@@ -91,6 +91,7 @@ __all__ = [
     "SchemaError",
     "SchemaVersion",
     "Scope",
+    "SideEffect",
     "SideEffects",
     "StepName",
     "Subprocess",
