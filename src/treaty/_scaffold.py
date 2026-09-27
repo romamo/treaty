@@ -5,9 +5,11 @@ from __future__ import annotations
 import keyword
 import re
 import sys
+import types
 from dataclasses import dataclass
 
 from . import __version__
+from ._agents_md import render_file
 from ._errors import ParseError
 
 # PEP 508 names end in a letter or digit; no doubled hyphens
@@ -59,8 +61,31 @@ def _toml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+def agents_md(name: ProjectName, cli_source: str) -> str:
+    """The new project's AGENTS.md, rendered from its app: the template's ``cli.py`` is
+    run in a fresh namespace, since the project is not importable before ``uv sync``"""
+    from ._app import App
+
+    # Registered while it runs: dataclasses look their module up in sys.modules
+    module = types.ModuleType(f"_treaty_scaffold_{name.package}")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(cli_source, f"src/{name.package}/cli.py", "exec"), module.__dict__)
+    finally:
+        del sys.modules[module.__name__]
+    app = module.__dict__["app"]
+    assert isinstance(app, App)
+    return render_file(app, None, f"{name.package}.cli:app", name.value, "uv tool install .")
+
+
 def render(name: ProjectName, treaty_source: str | None = None) -> dict[str, str]:
     """Relative path to file contents for a new project"""
+    files = _templates(name, treaty_source)
+    files["AGENTS.md"] = agents_md(name, files[f"src/{name.package}/cli.py"])
+    return files
+
+
+def _templates(name: ProjectName, treaty_source: str | None) -> dict[str, str]:
     n, pkg = name.value, name.package
     sources = (
         "\n[tool.uv.sources]\n"
@@ -241,6 +266,23 @@ def test_delete_needs_confirmation() -> None:
     code, envelope = run(["delete", "widget", "--confirm-destructive"])
     assert code == 0 and envelope["data"]["effect"] == "deleted"
 """,
+        "tests/test_agents_md.py": f"""import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_agents_md_matches_the_cli() -> None:
+    # The first uv run pytest fails when AGENTS.md drifts from the app (REQ-O-046);
+    # uv run treaty agents-md {pkg}.cli:app rewrites its generated sections
+    treaty = shutil.which("treaty", path=str(Path(sys.executable).parent))
+    assert treaty is not None, "treaty is not installed in this environment"
+    argv = [treaty, "check-docs", "{pkg}.cli:app", "AGENTS.md", "--format", "plain"]
+    done = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+""",
         f"conformance/{n}.json": f'''{{
   "schema_version": "1.0",
   "tool": "{n}",
@@ -282,6 +324,7 @@ uv run {n} show widget
 uv run pytest
 uv run treaty audit {pkg}.cli:app
 uv run treaty conformance {pkg}.cli:app --run
+uv run treaty agents-md {pkg}.cli:app   # refresh AGENTS.md after changing commands
 ```
 """,
         ".gitignore": ".venv/\n__pycache__/\ndist/\n.pytest_cache/\n",

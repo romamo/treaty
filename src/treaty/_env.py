@@ -53,11 +53,13 @@ class EnvVar:
 
     key: str
     description: str
+    type: str = "string"
+    """How AGENTS.md types it: string or integer"""
 
 
 FORMAT = EnvVar("format", "Default --format when the flag is not passed")
-MAX_OUTPUT_BYTES = EnvVar("max_output_bytes", "Default --max-output, in bytes")
-MAX_STDIN_BYTES = EnvVar("max_stdin_bytes", "Most bytes read from a piped stdin")
+MAX_OUTPUT_BYTES = EnvVar("max_output_bytes", "Default --max-output, in bytes", "integer")
+MAX_STDIN_BYTES = EnvVar("max_stdin_bytes", "Most bytes read from a piped stdin", "integer")
 STATE_DIR = EnvVar("state_dir", "Directory for idempotency records")
 CONFIG = EnvVar("config", "Config file to read instead of the project and user files")
 CONTEXT = EnvVar("context", "Named context of the config files to apply")

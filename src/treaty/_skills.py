@@ -158,7 +158,8 @@ def render_context(app: App, manifest: Mapping[str, object], paths: list[Command
         f"| {spec['description']} |"
         for code, spec in sorted(shared.items(), key=lambda kv: int(kv[0]))
     )
-    return f"""# {app.name} {app.version}
+    return f"""<!-- cli-version: {app.version} -->
+# {app.name} {app.version}
 
 {app.description or app.name}
 

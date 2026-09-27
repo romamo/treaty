@@ -195,7 +195,7 @@ def test_root_version_flag_aliases_version_command(app: App) -> None:
     code, env = run_json(app, ["--version"])
     assert code == 0 and env["data"] == {"name": "deployctl", "version": "1.4.0"}
     code, out, _ = run(app, ["--version"], isatty=True)
-    assert code == 0 and out == "name: deployctl\nversion: 1.4.0\n"
+    assert code == 0 and out == "1.4.0\n"  # bare, as AGENTS.md declares it (14-D1)
 
 
 def test_version_flag_not_aliased_below_root(app: App) -> None:

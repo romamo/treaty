@@ -40,6 +40,15 @@ jobs:
       - run: uv run ruff format --check src tests examples
       - run: uv run mypy src examples
 
+      - name: Check AGENTS.md against the CLI (REQ-O-046)
+        run: uv run treaty check-docs treaty._cli:cli AGENTS.md --format plain
+
+      - name: Install as AGENTS.md documents it, twice and with no stdin (REQ-O-044)
+        run: |
+          uv tool install treaty < /dev/null
+          uv tool install treaty < /dev/null
+          "$(uv tool dir --bin)/treaty" --version
+
   test:
     strategy:
       fail-fast: false
@@ -105,3 +114,10 @@ jobs:
           uv sync
           uv run pytest -q
           uv run treaty conformance shop_tool.cli:app --run
+
+      - name: Install the project as its AGENTS.md documents it, twice and with no stdin
+        working-directory: ${{ runner.temp }}/shop-tool
+        run: |
+          uv tool install . < /dev/null
+          uv tool install . < /dev/null
+          "$(uv tool dir --bin)/shop-tool" --version

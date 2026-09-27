@@ -1045,6 +1045,8 @@ class App:
             description="Print the tool name and version",
             danger_level="safe",
             exit_codes=(),
+            # The bare version, so it equals an agent doc's cli-version (REQ-O-043)
+            renderers={Format.PLAIN: lambda data: f"{data['version']}\n"},
         )
         def version(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {"name": self.name, "version": self.version}

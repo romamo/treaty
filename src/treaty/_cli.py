@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from ._agents_md import AGENTS_FILE, Mismatch, check, check_tools, render_file
 from ._app import App, NoArgs
 from ._atomic import write_atomic
 from ._audit import ADDITIVE, LOCK_FILE, RULES, AuditReport, Severity, audit, schema_lock
@@ -53,6 +54,14 @@ cli.exit_code(
     "AUDIT_FAILED",
     79,
     description="Strict audit found warnings or errors; data holds the full report",
+    retryable=False,
+    side_effects="none",
+)
+
+cli.exit_code(
+    "DOCS_OUT_OF_DATE",
+    81,
+    description="An agent doc disagrees with the app; data.mismatches lists each difference",
     retryable=False,
     side_effects="none",
 )
@@ -352,6 +361,131 @@ def changelog_add_command(args: ChangelogAddArgs, ctx: Ctx) -> ChangelogAddOut:
     write_atomic(path, dump_changelog(entries), new_mode=0o644)
     write_atomic(snapshot, json.dumps(live, indent=2, sort_keys=True) + "\n", new_mode=0o644)
     return ChangelogAddOut(effect, str(path), str(snapshot), entry)
+
+
+# agents-md
+
+
+@dataclass(frozen=True, slots=True)
+class AgentsMdArgs:
+    target: str = Arg(description="Import path of the App object, as module:attribute")
+    path: Path = Flag(default=Path(AGENTS_FILE), description="The file to write")
+    invocation: str | None = Flag(
+        default=None, description="Command prefix agents use, default the app name"
+    )
+
+    def __post_init__(self) -> None:
+        check_target(self.target)
+
+
+@dataclass(frozen=True, slots=True)
+class AgentsMdOut:
+    effect: str
+    path: Path
+    cli_version: str
+
+
+@cli.command(
+    "agents-md",
+    description="Write AGENTS.md from the registry: the cli-version comment and the generated "
+    "sections between the treaty markers; text outside the markers is kept",
+    danger_level="mutating",
+    exit_codes=["NOT_FOUND", "PRECONDITION"],
+    examples=[("Write or refresh ./AGENTS.md", "treaty agents-md myapp.cli:app")],
+)
+def agents_md_command(args: AgentsMdArgs, ctx: Ctx) -> AgentsMdOut:
+    """REQ-O-043, REQ-O-044: ``treaty check-docs`` keeps the result current"""
+    app = load_app(args.target)
+    path = ctx.cwd / args.path
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    text = render_file(app, old, args.target, args.invocation or app.name)
+    effect = "noop" if old == text else "created" if old is None else "updated"
+    if effect != "noop":
+        write_atomic(path, text, new_mode=0o644)
+    return AgentsMdOut(effect, path, app.version)
+
+
+# check-docs
+
+
+@dataclass(frozen=True, slots=True)
+class CheckDocsArgs:
+    target: str = Arg(description="Import path of the App object, as module:attribute")
+    paths: tuple[Path, ...] = Arg(
+        description="AGENTS.md, a generate-skills directory, or a treaty-mcp --list-tools file"
+    )
+
+    def __post_init__(self) -> None:
+        check_target(self.target)
+
+
+@dataclass(frozen=True, slots=True)
+class CheckDocsOut:
+    cli_version: str
+    files: tuple[Path, ...] = Out(ordered=True)
+    mismatches: tuple[Mismatch, ...] = Out(ordered=True)
+
+
+def render_check_docs(data: Any) -> str:
+    lines = [
+        f"- {m['file']}:{m['line']} {m['kind']} {m['name']}: {m['problem']}"
+        for m in data["mismatches"]
+    ]
+    if not lines:
+        count = len(data["files"])
+        lines.append(
+            f"{count} {'file matches' if count == 1 else 'files match'} {data['cli_version']}"
+        )
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _doc_files(path: Path) -> list[Path]:
+    if path.is_dir():
+        return sorted(path.glob("*.md"))
+    if not path.is_file():
+        raise Exit.NOT_FOUND(f"no file or directory {path}", context={"path": str(path)})
+    return [path]
+
+
+@cli.command(
+    "check-docs",
+    description="Check agent docs against the app: the declared version, AGENTS.md's "
+    "sections, and every command, flag, and variable they name against --help",
+    danger_level="safe",
+    exit_codes=["NOT_FOUND", "PRECONDITION", "DOCS_OUT_OF_DATE"],
+    examples=[
+        ("Check AGENTS.md in CI", "treaty check-docs myapp.cli:app AGENTS.md"),
+        ("Check the skill files too", "treaty check-docs myapp.cli:app AGENTS.md skills"),
+    ],
+    renderers={Format.PLAIN: render_check_docs},
+)
+def check_docs_command(args: CheckDocsArgs, ctx: Ctx) -> CheckDocsOut:
+    """REQ-O-045, REQ-O-046: drift exits 81 with one mismatch per item"""
+    app = load_app(args.target)
+    files: list[Path] = []
+    mismatches: list[Mismatch] = []
+    for given in args.paths:
+        for path in _doc_files(ctx.cwd / given):
+            files.append(path)
+            text = path.read_text(encoding="utf-8")
+            if path.suffix == ".json":
+                try:
+                    mismatches += check_tools(app, path, text)
+                except json.JSONDecodeError as exc:
+                    raise Exit.PRECONDITION(
+                        f"{path} is not JSON: {exc.msg}", context={"path": str(path)}
+                    ) from None
+            else:
+                mismatches += check(app, path, text, agents_md=path.name == AGENTS_FILE)
+    out = CheckDocsOut(app.version, tuple(files), tuple(mismatches))
+    if mismatches:
+        raise Exit.DOCS_OUT_OF_DATE(
+            f"{len(mismatches)} items in the docs disagree with {app.name} {app.version}",
+            context={"files": [str(f) for f in files]},
+            fix_required=f"run treaty agents-md {args.target}, then fix what it does not write",
+            data=out,
+        )
+    return out
 
 
 # init

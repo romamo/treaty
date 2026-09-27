@@ -102,7 +102,7 @@ def test_env_i_prefixed_variable_applies_and_the_unprefixed_one_does_not() -> No
         return done.stdout
 
     assert json.loads(version({"FORMAT": "plain"}))["data"]["name"] == "configctl"
-    assert version({"CONFIGCTL_FORMAT": "plain"}).startswith("name: configctl")
+    assert version({"CONFIGCTL_FORMAT": "plain"}) == "1.0.0\n"
 
 
 # REQ-O-042

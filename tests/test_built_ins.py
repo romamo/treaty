@@ -728,7 +728,9 @@ def test_the_generated_files_pass_validation_by_an_openclaw_compatible_skill_loa
 ) -> None:
     for name, text in generated(tmp_path, deployctl).items():
         if name == "CONTEXT.md":
-            assert text.startswith("# ") and "## Exit codes" in text
+            version, _, rest = text.partition("\n")
+            assert version == f"<!-- cli-version: {deployctl.version} -->"
+            assert rest.startswith("# ") and "## Exit codes" in rest
             continue
         front = frontmatter(text)
         assert isinstance(front["name"], str) and len(front["name"]) <= 64
