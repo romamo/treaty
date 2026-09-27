@@ -51,7 +51,7 @@ from ._auth import (
     scope_set,
 )
 from ._batch import Batch, ItemError
-from ._builtins import register_audit_log, register_cleanup, register_doctor
+from ._builtins import register_audit_log, register_cleanup, register_doctor, register_status
 from ._cache import Cache, CachePolicy, cache_dir
 from ._cap import (
     DEFAULT_CAP,
@@ -344,8 +344,8 @@ class App:
         ``treaty.AuditLog``; None keeps no log and drops the ``audit-log`` built-in
         (REQ-F-026, REQ-O-030).
 
-        ``doctor``, ``cleanup``, and ``audit-log`` are built-ins that yield: an app command
-        or group of the same name replaces it (13-D1). ``manifest``, ``version``, and
+        ``doctor``, ``cleanup``, ``status``, and ``audit-log`` are built-ins that yield: an
+        app command or group of the same name replaces it (13-D1). ``manifest``, ``version``, and
         ``exec`` are reserved."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
@@ -1034,6 +1034,7 @@ class App:
 
         self._yielding.add(register_doctor(self))
         self._yielding.add(register_cleanup(self))
+        self._yielding.add(register_status(self))
         if self.audit_log is not None:
             self._yielding.add(register_audit_log(self, self.audit_log))
 

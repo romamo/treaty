@@ -636,18 +636,31 @@ def test_tool_cleanup_removes_all_paths_declared_as_temp_or_cache(tmp_path: Path
     assert code == 0
     data = env["data"]
     assert isinstance(data, dict) and data["effect"] == "would_delete"
-    expected = [f"{tmp_path}/cache/schemas", f"{tmp_path}/tmp/fetch-1", f"{tmp_path}/tmp/fetch-2"]
+    expected = [
+        f"{tmp_path}/cache/schemas",
+        f"{tmp_path}/logs/2026-09-27.log",
+        f"{tmp_path}/tmp/fetch-1",
+        f"{tmp_path}/tmp/fetch-2",
+    ]
     assert data["would_affect"]["resources"] == expected
     assert (tmp_path / "cache" / "schemas").exists()
     code, env = run(app, ["cleanup", "--confirm-destructive"])
     assert code == 0
-    assert env["data"] == {"effect": "deleted", "removed": expected, "would_affect": None}
+    data = env["data"]
+    assert isinstance(data, dict) and data["effect"] == "deleted"
+    assert [c["path"] for c in data["cleaned"]] == expected
+    assert [c["type"] for c in data["cleaned"]] == ["cache", "log", "temp", "temp"]
     assert not (tmp_path / "cache" / "schemas").exists()
     assert not (tmp_path / "tmp" / "fetch-1").exists()
-    assert (tmp_path / "logs" / "2026-09-27.log").exists()
     assert (tmp_path / "credentials.json").exists()
     _, env = run(app, ["cleanup", "--confirm-destructive"])
-    assert env["data"] == {"effect": "noop", "removed": [], "would_affect": None}
+    assert env["data"] == {
+        "effect": "noop",
+        "cleaned": [],
+        "total_bytes_freed": 0,
+        "skipped": [],
+        "would_affect": None,
+    }
 
 
 @pytest.mark.skipif(WINDOWS, reason="expected paths use / separators")
@@ -666,7 +679,8 @@ def test_cleanup_expands_a_home_path_from_the_run_environment(tmp_path: Path) ->
 
     (tmp_path / ".cache" / "homey").mkdir(parents=True)
     _, env = run(app, ["cleanup", "--confirm-destructive"], env={"HOME": str(tmp_path)})
-    assert env["data"]["removed"] == [f"{tmp_path}/.cache/homey"]  # type: ignore[index]
+    cleaned = env["data"]["cleaned"]  # type: ignore[index]
+    assert [c["path"] for c in cleaned] == [f"{tmp_path}/.cache/homey"]
 
 
 def test_clearable_with_must_name_a_command_when_the_manifest_is_built(tmp_path: Path) -> None:

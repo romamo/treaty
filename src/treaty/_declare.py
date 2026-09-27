@@ -158,10 +158,6 @@ class SideEffectType(StrEnum):
     CONFIG = "config"
 
 
-CLEARED = frozenset({SideEffectType.TEMP, SideEffectType.CACHE})
-"""What the ``cleanup`` built-in removes (REQ-C-011)"""
-
-
 @dataclass(frozen=True, slots=True)
 class SideEffect:
     """A filesystem location a command writes (REQ-C-011)
@@ -169,8 +165,9 @@ class SideEffect:
     ``path`` is absolute or starts with ``~/``; ``{name}`` placeholders and ``*`` match any
     one path segment, so ``"/tmp/tool-{session}/"`` covers every session. ``type`` is
     ``cache``, ``log``, ``temp``, ``credential``, or ``config``; ``cleanup`` removes the
-    ``temp`` and ``cache`` ones. ``clearable_with`` is the invocation that removes it,
-    such as ``"tool cache clear"``, checked to name a command when the manifest is built.
+    ``temp``, ``cache``, and ``log`` ones, and ``status`` lists them all.
+    ``clearable_with`` is the invocation that removes it, such as ``"tool cache clear"``,
+    checked to name a command when the manifest is built.
     """
 
     path: str

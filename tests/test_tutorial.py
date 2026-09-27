@@ -297,6 +297,7 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
         "list",
         "manifest",
         "purge",
+        "status",
         "version",
     ]
     assert tools["list"].annotations.read_only_hint is True

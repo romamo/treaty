@@ -6,12 +6,13 @@ import json
 import os
 import socket
 import subprocess
+import time
 from pathlib import Path
 
 from conftest import needs_posix_permissions, spec_validator
 from test_network_and_fs import Origin, Proxy, serving
 
-from treaty import App, Check, Ctx, NoArgs, endpoint
+from treaty import App, Check, Ctx, NoArgs, SideEffect, endpoint
 from treaty._audit import audit
 from treaty._deps import CheckFn
 
@@ -228,3 +229,222 @@ def test_doctor_fix_rule_flags_a_check_that_can_fail_without_a_fix() -> None:
     rule = {r.id: r for r in audit(doctor_app(unfixed, api_key_set), "m:app", limit=9).rules}
     (finding,) = rule["doctor-fix"].findings
     assert "unfixed" in finding.message and "fix=" in finding.fix
+
+
+# REQ-O-027, REQ-O-028, REQ-C-011
+
+
+def effects_app(root: Path) -> App:
+    app = App("fx", version="1.0.0")
+
+    @app.command(
+        "fetch",
+        description="Fetch",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[
+            SideEffect(f"{root}/cache/", "cache", clearable_with="fx cleanup --scope cache"),
+            SideEffect(f"{root}/tmp/fetch-{{session}}/", "temp"),
+            SideEffect(f"{root}/logs/{{date}}.log", "log"),
+            SideEffect(f"{root}/token.json", "credential"),
+        ],
+    )
+    def fetch(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    return app
+
+
+def populate(root: Path) -> None:
+    (root / "cache").mkdir(parents=True)
+    (root / "cache" / "a.json").write_text("x" * 100)
+    for session in ("1", "2"):
+        (root / "tmp" / f"fetch-{session}").mkdir(parents=True)
+        (root / "tmp" / f"fetch-{session}" / "part").write_text("y" * 10)
+    (root / "logs").mkdir()
+    (root / "logs" / "today.log").write_text("z" * 7)
+    (root / "token.json").write_text("{}")
+
+
+def age(path: Path, seconds: float) -> None:
+    """Set the mtime of ``path`` and everything under it ``seconds`` in the past"""
+    when = time.time() - seconds
+    for item in [path, *path.rglob("*")]:
+        os.utime(item, (when, when))
+
+
+def cleaned_paths(envelope: dict[str, object]) -> list[str]:
+    cleaned = data_of(envelope)["cleaned"]
+    assert isinstance(cleaned, list)
+    return [c["path"] for c in cleaned]
+
+
+def test_tool_cleanup_scope_temp_removes_all_paths_declared_as_type_temp(tmp_path: Path) -> None:
+    populate(tmp_path)
+    code, envelope = run(
+        effects_app(tmp_path), ["cleanup", "--scope", "temp", "--confirm-destructive"]
+    )
+    assert code == 0
+    assert cleaned_paths(envelope) == [
+        str(tmp_path / "tmp" / "fetch-1"),
+        str(tmp_path / "tmp" / "fetch-2"),
+    ]
+    assert not (tmp_path / "tmp" / "fetch-1").exists()
+    assert (tmp_path / "cache").exists() and (tmp_path / "logs" / "today.log").exists()
+
+
+def test_tool_cleanup_format_json_returns_a_list_of_removed_paths_and_total_bytes_freed(
+    tmp_path: Path,
+) -> None:
+    populate(tmp_path)
+    code, envelope = run(effects_app(tmp_path), ["cleanup", "--confirm-destructive"])
+    assert code == 0
+    data = data_of(envelope)
+    assert data["cleaned"] == [
+        {"path": str(tmp_path / "cache"), "type": "cache", "bytes_freed": 100},
+        {"path": str(tmp_path / "logs" / "today.log"), "type": "log", "bytes_freed": 7},
+        {"path": str(tmp_path / "tmp" / "fetch-1"), "type": "temp", "bytes_freed": 10},
+        {"path": str(tmp_path / "tmp" / "fetch-2"), "type": "temp", "bytes_freed": 10},
+    ]
+    assert data["total_bytes_freed"] == 127
+    assert (tmp_path / "token.json").exists()  # a credential is never cleaned
+
+
+def test_tool_cleanup_min_age_3600_does_not_remove_any_file_or_directory_created_in_the_last_hour(
+    tmp_path: Path,
+) -> None:
+    populate(tmp_path)
+    for path in (tmp_path / "cache", tmp_path / "logs", tmp_path / "tmp"):
+        age(path, 7200)
+    (tmp_path / "tmp" / "fetch-2" / "fresh").write_text("new")  # a new file in an old directory
+    code, envelope = run(
+        effects_app(tmp_path), ["cleanup", "--min-age", "3600", "--confirm-destructive"]
+    )
+    assert code == 0
+    assert str(tmp_path / "tmp" / "fetch-2") not in cleaned_paths(envelope)
+    assert data_of(envelope)["skipped"] == [str(tmp_path / "tmp" / "fetch-2")]
+    assert (tmp_path / "tmp" / "fetch-2" / "fresh").exists()
+    assert not (tmp_path / "tmp" / "fetch-1").exists()
+
+
+def test_tool_cleanup_scope_cache_does_not_affect_logs_or_temp_files(tmp_path: Path) -> None:
+    populate(tmp_path)
+    code, envelope = run(
+        effects_app(tmp_path), ["cleanup", "--scope", "cache", "--confirm-destructive"]
+    )
+    assert code == 0 and cleaned_paths(envelope) == [str(tmp_path / "cache")]
+    assert (tmp_path / "logs" / "today.log").exists()
+    assert (tmp_path / "tmp" / "fetch-1" / "part").exists()
+
+
+def test_cleanup_refuses_a_negative_min_age_and_an_unknown_scope(tmp_path: Path) -> None:
+    assert run(effects_app(tmp_path), ["cleanup", "--min-age", "-1"])[0] == 2
+    assert run(effects_app(tmp_path), ["cleanup", "--scope", "config"])[0] == 2
+
+
+def test_tool_status_show_side_effects_returns_paths_types_and_sizes_for_all_declared_side_effects(
+    tmp_path: Path,
+) -> None:
+    populate(tmp_path)
+    code, envelope = run(effects_app(tmp_path), ["status", "--show-side-effects"])
+    assert code == 0
+    data = data_of(envelope)
+    assert set(data) == {"side_effects"}
+    effects = data["side_effects"]
+    assert isinstance(effects, list)
+    assert [(e["type"], e["bytes"]) for e in effects] == [
+        ("cache", 100),
+        ("temp", 20),
+        ("log", 7),
+        ("credential", 2),
+    ]
+    assert effects[1]["paths"] == [
+        {"path": str((tmp_path / "tmp" / "fetch-1").resolve()), "bytes": 10},
+        {"path": str((tmp_path / "tmp" / "fetch-2").resolve()), "bytes": 10},
+    ]
+    assert effects[0]["clearable_with"] == "fx cleanup --scope cache"
+
+
+def test_tool_status_show_side_effects_lists_all_paths_declared_by_registered_commands(
+    tmp_path: Path,
+) -> None:
+    code, envelope = run(effects_app(tmp_path), ["status", "--show-side-effects"])
+    effects = data_of(envelope)["side_effects"]
+    assert code == 0 and isinstance(effects, list)
+    declared = {
+        e["path"]
+        for e in effects_app(tmp_path).manifest()["commands"]["fetch"][  # type: ignore[index]
+            "filesystem_side_effects"
+        ]
+    }
+    listed = {e["pattern"] for e in effects}
+    assert len(listed) == len(declared) == 4
+    assert all(e["command"] == "fetch" for e in effects)
+
+
+def test_tool_status_show_state_files_returns_paths_and_summaries_of_all_global_state_files(
+    tmp_path: Path,
+) -> None:
+    populate(tmp_path)
+    home = tmp_path / "home"
+    (home / ".config" / "fx").mkdir(parents=True)
+    (home / ".config" / "fx" / "config.toml").write_text("region = 'eu'\n")
+    code, envelope = run(
+        effects_app(tmp_path), ["status", "--show-state-files"], {"HOME": str(home)}
+    )
+    assert code == 0
+    files = {f["purpose"]: f for f in data_of(envelope)["state_files"]}  # type: ignore[union-attr]
+    assert set(files) == {
+        "project config",
+        "user config",
+        "idempotency records",
+        "audit log",
+        "credential of fetch",
+    }
+    assert files["user config"] == {
+        "path": str((home / ".config" / "fx" / "config.toml").resolve()),
+        "purpose": "user config",
+        "exists": True,
+        "bytes": 14,
+    }
+    assert files["credential of fetch"]["exists"] is True
+    assert "eu" not in json.dumps(envelope)  # values are never echoed
+
+
+def test_the_command_exits_0_and_produces_valid_json_regardless_of_what_state_exists(
+    tmp_path: Path,
+) -> None:
+    app = effects_app(tmp_path / "nothing-here")
+    for env in ({}, {"HOME": str(tmp_path / "missing-home")}):
+        code, envelope = run(app, ["status"], env)
+        assert code == 0
+        spec_validator("response-envelope").validate(envelope)
+        assert set(data_of(envelope)) == {"side_effects", "state_files"}
+    populate(tmp_path / "nothing-here")
+    assert run(app, ["status"], {"HOME": str(tmp_path)})[0] == 0
+
+
+def test_all_path_values_in_the_output_are_absolute(tmp_path: Path) -> None:
+    populate(tmp_path)
+    _, envelope = run(effects_app(tmp_path), ["status"], {"HOME": str(tmp_path)})
+    data = data_of(envelope)
+    paths = [f["path"] for f in data["state_files"]]  # type: ignore[union-attr]
+    for effect in data["side_effects"]:  # type: ignore[union-attr]
+        paths += [effect["pattern"], *(p["path"] for p in effect["paths"])]
+    assert paths and all(Path(p).is_absolute() for p in paths)
+
+
+def test_status_show_config_is_the_show_config_flag(tmp_path: Path) -> None:
+    code, envelope = run(effects_app(tmp_path), ["status", "--show-config"])
+    assert code == 0 and set(data_of(envelope)) >= {"effective_config", "sources"}
+
+
+def test_status_is_safe_and_reports_logged_in_with_credentials(tmp_path: Path) -> None:
+    class Held:
+        def active_scopes(self, ctx: Ctx) -> list[str] | None:
+            return ["read"] if "TOKEN" in ctx.env else None
+
+    app = App("auth", version="1.0.0", credentials=Held())
+    assert app.manifest()["commands"]["status"]["danger_level"] == "safe"  # type: ignore[index]
+    assert data_of(run(app, ["status"], {"TOKEN": "t"})[1])["logged_in"] is True
+    assert data_of(run(app, ["status"])[1])["logged_in"] is False

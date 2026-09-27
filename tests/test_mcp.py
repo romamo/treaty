@@ -63,7 +63,16 @@ def adapter_app() -> App:
 
 def test_one_tool_per_command_except_exec_with_dots_as_underscores() -> None:
     names = [e.name for e in tool_entries(adapter_app())]
-    assert names == ["audit-log", "cleanup", "doctor", "log_tail", "manifest", "push", "version"]
+    assert names == [
+        "audit-log",
+        "cleanup",
+        "doctor",
+        "log_tail",
+        "manifest",
+        "push",
+        "status",
+        "version",
+    ]
     assert tool_name(next(e.path for e in tool_entries(adapter_app()) if e.name == "log_tail")) == (
         "log_tail"
     )
@@ -148,6 +157,7 @@ def test_call_reports_validation_errors_and_unknown_commands() -> None:
         "log.tail",
         "manifest",
         "push",
+        "status",
         "version",
     ]
     assert app.call("exec", {}).error is not None
@@ -174,6 +184,7 @@ def test_call_tool_maps_names_and_passes_unknown_through() -> None:
         "log_tail",
         "manifest",
         "push",
+        "status",
         "version",
     ]
 
@@ -226,6 +237,7 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
         "job_cancel",
         "job_status",
         "manifest",
+        "status",
         "version",
     ]
     rollback = got["rollback"]

@@ -159,13 +159,13 @@ class Deletion:
 
 
 @app.command(
-    "status",
+    "show",
     description="Report whether an item exists",
     danger_level="safe",
     exit_codes=(),
-    examples=[("Check an item", "{n} status widget")],
+    examples=[("Check an item", "{n} show widget")],
 )
-def status(args: ItemArgs, ctx: Ctx) -> Item:
+def show(args: ItemArgs, ctx: Ctx) -> Item:
     return Item(name=args.name, note=None, exists=False)
 
 
@@ -219,8 +219,8 @@ def run(argv: list[str]) -> tuple[int, dict]:
     return code, json.loads(out.getvalue())
 
 
-def test_status() -> None:
-    code, envelope = run(["status", "widget"])
+def test_show() -> None:
+    code, envelope = run(["show", "widget"])
     assert code == 0 and envelope["data"]["name"] == "widget"
 
 
@@ -255,8 +255,10 @@ def test_delete_needs_confirmation() -> None:
     "alternate_value": "plain"
   }},
   "probes": [
-    {{ "name": "status", "argv": ["status", "widget"], "kind": "read" }},
-    {{ "name": "unknown flag", "argv": ["status", "widget", "--no-such-flag"], "kind": "invalid" }},
+    {{ "name": "show", "argv": ["show", "widget"], "kind": "read" }},
+    {{ "name": "unknown flag", "argv": ["show", "widget", "--no-such-flag"], "kind": "invalid" }},
+    {{ "name": "status built-in", "argv": ["status"], "kind": "read" }},
+    {{ "name": "manifest malformed etag", "argv": ["manifest", "--etag", "x"], "kind": "invalid" }},
     {{
       "name": "delete",
       "argv": ["delete", "widget"],
@@ -276,7 +278,7 @@ Built on [treaty](https://github.com/romamo/treaty).
 
 ```bash
 uv sync
-uv run {n} status widget
+uv run {n} show widget
 uv run pytest
 uv run treaty audit {pkg}.cli:app
 uv run treaty conformance {pkg}.cli:app --run

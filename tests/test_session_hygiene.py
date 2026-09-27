@@ -625,7 +625,8 @@ def test_the_cleanup_built_in_removes_output_files(tmp_path: Path) -> None:
         session_app, ["cleanup", "--confirm-destructive"], env={"TMPDIR": str(tmp_path)}
     )
     assert status == 0, envelope
-    assert str(path.parent) in data_of(envelope)["removed"]  # type: ignore[operator]
+    cleaned = data_of(envelope)["cleaned"]
+    assert isinstance(cleaned, list) and str(path.parent) in [c["path"] for c in cleaned]
     assert not path.exists()
 
 
@@ -781,7 +782,9 @@ def test_the_cleanup_built_in_removes_the_cache(tmp_path: Path) -> None:
     status, envelope, _ = run(
         app, ["cleanup", "--confirm-destructive"], env={"XDG_CACHE_HOME": str(tmp_path)}
     )
-    assert status == 0 and data_of(envelope)["removed"] == [str(tmp_path / "cachectl" / "price")]
+    cleaned = data_of(envelope)["cleaned"]
+    assert status == 0 and isinstance(cleaned, list)
+    assert [c["path"] for c in cleaned] == [str(tmp_path / "cachectl" / "price")]
     assert priced(app, tmp_path)[0]["fetched"] is True
 
 

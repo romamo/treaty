@@ -23,6 +23,7 @@ def test_manifest_validates_against_spec(app: App) -> None:
         "cleanup",
         "doctor",
         "manifest",
+        "status",
         "version",
         "exec",
         "deploy.rollback",

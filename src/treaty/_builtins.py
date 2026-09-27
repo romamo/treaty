@@ -1,6 +1,6 @@
 """Built-ins every app gets that yield to an app command of the same name (13-D1):
-``doctor`` (REQ-O-031, REQ-C-018), ``cleanup`` (REQ-C-011), and ``audit-log``
-(REQ-O-030)."""
+``doctor`` (REQ-O-026, REQ-O-031, REQ-C-018), ``cleanup`` (REQ-C-011, REQ-O-027),
+``status`` (REQ-O-028), and ``audit-log`` (REQ-O-030)."""
 
 from __future__ import annotations
 
@@ -9,16 +9,19 @@ import glob
 import os
 import shlex
 import shutil
+import stat
+import time
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+from ._auth import Expired
 from ._cache import cache_dir
-from ._config import user_config
+from ._config import local_config, user_config
 from ._context import Ctx
-from ._declare import CLEARED
+from ._declare import SideEffect, SideEffectType
 from ._deps import (
     Check,
     CheckFn,
@@ -34,6 +37,7 @@ from ._errors import CliExit, ParseError
 from ._flags import Flag
 from ._idempotency import state_dir
 from ._journal import AuditLog, entry_time, log_path, parse_since, read_entries
+from ._out import Out
 from ._redact import scrub
 from ._session import outputs
 from ._values import CommandPath, ExitCodeName
@@ -146,67 +150,231 @@ def _writable(name: str, where: Path) -> Check:
 
 
 CLEANUP_PATH = CommandPath("cleanup")
+SCOPES: dict[str, frozenset[SideEffectType]] = {
+    "all": frozenset({SideEffectType.TEMP, SideEffectType.CACHE, SideEffectType.LOG}),
+    "temp": frozenset({SideEffectType.TEMP}),
+    "cache": frozenset({SideEffectType.CACHE}),
+    "logs": frozenset({SideEffectType.LOG}),
+}
+"""What ``cleanup --scope`` removes; ``credential`` and ``config`` paths never (REQ-O-027)"""
 
 
 @dataclass(frozen=True, slots=True)
 class CleanupArgs:
     dry_run: bool = Flag(default=False, description="List what would be removed; remove nothing")
+    scope: Literal["all", "temp", "cache", "logs"] = Flag(
+        default="all", description="Which declared side effects to remove; all is the other three"
+    )
+    min_age: int = Flag(
+        default=0,
+        description="Keep every path changed within this many seconds; they are listed "
+        "under skipped",
+    )
+
+    def __post_init__(self) -> None:
+        if self.min_age < 0:
+            raise ParseError(
+                "--min-age is a whole number of seconds, 0 or more",
+                context={"flag": "min-age", "value": self.min_age},
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class Freed:
+    path: str
+    type: str
+    bytes_freed: int
 
 
 @dataclass(frozen=True, slots=True)
 class Cleaned:
     effect: str
-    removed: list[str]
-    """Every path removed; empty in a dry run"""
+    total_bytes_freed: int
+    skipped: list[str]
+    """Paths in scope changed within ``--min-age`` seconds, left in place"""
+    cleaned: list[Freed] = Out(sort_key="path")
+    """Every path removed, with the bytes it held; empty in a dry run"""
     would_affect: Affects | None = None
 
 
 def register_cleanup(app: App) -> CommandPath:
     @app.command(
         CLEANUP_PATH.value,
-        description="Remove the temp and cache paths the tool's commands declare in "
-        "filesystem_side_effects, and the output files commands handed out",
+        description="Remove the temp, cache, and log paths the tool's commands declare in "
+        "filesystem_side_effects, its caches, and the output files commands handed out",
         danger_level="destructive",
         exit_codes=(),
-        examples=[("See what would be removed", f"{app.name} cleanup --dry-run")],
+        examples=[
+            ("See what would be removed", f"{app.name} cleanup --dry-run"),
+            (
+                "Remove temp files older than an hour",
+                f"{app.name} cleanup --scope temp --min-age 3600 --confirm-destructive",
+            ),
+        ],
     )
     def cleanup(args: CleanupArgs, ctx: Ctx) -> Cleaned:
-        found = _cleared(app, ctx.env.get("HOME"))
-        if ctx.session is not None:
-            # REQ-F-043: ctx.output_file files; running sessions remove their own
-            found.update(str(p) for p in outputs(ctx.session.root.path))
-        for command_path, command in app.commands.items():
-            where = (
-                None if command.cache is None else cache_dir(app.name, command_path.value, ctx.env)
-            )
-            if where is not None and where.exists():
-                found.add(str(where))  # REQ-O-018: wherever XDG_CACHE_HOME put it
-        paths = sorted(found)
+        kinds = SCOPES[args.scope]
+        found = {p: kind for p, kind in inventory(app, ctx) if kind in kinds}
+        now = time.time()
+        sizes = {p: _measure(Path(p)) for p in sorted(found)}
+        skipped = [p for p, (_, newest) in sizes.items() if now - newest < args.min_age]
+        paths = [p for p in sizes if p not in skipped]
         if args.dry_run:
-            summary = f"Removes {len(paths)} temp and cache paths"
-            return Cleaned("would_delete", [], Affects(summary, tuple(paths), len(paths)))
+            summary = f"Removes {len(paths)} {args.scope} paths"
+            affects = Affects(summary, tuple(paths), len(paths))
+            return Cleaned("would_delete", 0, skipped, [], affects)
         for path in paths:
             target = Path(path)
             if target.is_dir() and not target.is_symlink():
                 shutil.rmtree(target)
             elif target.exists() or target.is_symlink():
                 target.unlink()
-        return Cleaned("deleted" if paths else "noop", paths)
+        freed = [Freed(p, found[p].value, sizes[p][0]) for p in paths]
+        total = sum(f.bytes_freed for f in freed)
+        return Cleaned("deleted" if paths else "noop", total, skipped, freed)
 
     return CLEANUP_PATH
 
 
-def _cleared(app: App, home: str | None) -> set[str]:
-    """Every existing path a temp or cache side effect of a command covers (REQ-C-011)"""
-    found: set[str] = set()
-    for command in app.commands.values():
+def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
+    """Every existing path the tool's side effects cover: the declared ones, the output
+    files commands handed out, and the caches (REQ-C-011, REQ-F-043, REQ-O-018)"""
+    found: dict[str, SideEffectType] = {}
+    for _, effect, _, matches in declared(app, ctx.env.get("HOME")):
+        found.update(dict.fromkeys(matches, effect.kind))
+    if ctx.session is not None:
+        # REQ-F-043: ctx.output_file files; running sessions remove their own
+        found.update(
+            dict.fromkeys((str(p) for p in outputs(ctx.session.root.path)), SideEffectType.TEMP)
+        )
+    for command_path, command in app.commands.items():
+        where = None if command.cache is None else cache_dir(app.name, command_path.value, ctx.env)
+        if where is not None and where.exists():
+            found[str(where)] = SideEffectType.CACHE  # wherever XDG_CACHE_HOME put it
+    return sorted(found.items())
+
+
+def declared(
+    app: App, home: str | None
+) -> Iterator[tuple[CommandPath, SideEffect, str, list[str]]]:
+    """Each declared side effect with its absolute glob and the paths it matches now;
+    a ``~/`` one is left out without a home"""
+    for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         for effect in command.filesystem_side_effects:
-            pattern = effect.pattern(home) if effect.kind in CLEARED else None
+            pattern = effect.pattern(home)
             if pattern is not None:
-                found.update(
-                    glob.glob(glob.escape(pattern).replace("[*]", "*"), include_hidden=True)
-                )
-    return found
+                where = glob.escape(pattern).replace("[*]", "*")
+                yield path, effect, pattern, sorted(glob.glob(where, include_hidden=True))
+
+
+def _measure(path: Path) -> tuple[int, float]:
+    """The bytes of the files under ``path`` and its newest modification time, symlinks
+    not followed"""
+    top = path.lstat()
+    if not stat.S_ISDIR(top.st_mode):
+        return top.st_size, top.st_mtime
+    size, newest = 0, top.st_mtime
+    for root, dirs, files in os.walk(path):
+        for name in (*dirs, *files):
+            st = Path(root, name).lstat()
+            newest = max(newest, st.st_mtime)
+            size += 0 if stat.S_ISDIR(st.st_mode) else st.st_size
+    return size, newest
+
+
+STATUS_PATH = CommandPath("status")
+
+
+@dataclass(frozen=True, slots=True)
+class StatusArgs:
+    show_side_effects: bool = Flag(
+        default=False,
+        description="List every declared filesystem side effect with the paths it covers "
+        "and their sizes",
+    )
+    show_state_files: bool = Flag(
+        default=False,
+        description="List the tool's state files: config, idempotency records, the audit "
+        "log, and declared credential and config paths; values are never shown",
+    )
+
+
+def register_status(app: App) -> CommandPath:
+    @app.command(
+        STATUS_PATH.value,
+        description="Show the tool's local state: side-effect paths with sizes, state files, "
+        "and whether a credential is active; --show-config shows the settings",
+        danger_level="safe",
+        exit_codes=(),
+        ordered=True,  # sorted by command, then declaration order
+        examples=[
+            ("Everything", f"{app.name} status"),
+            ("What cleanup would remove", f"{app.name} status --show-side-effects"),
+            ("The effective settings and their sources", f"{app.name} status --show-config"),
+        ],
+    )
+    def status(args: StatusArgs, ctx: Ctx) -> dict[str, object]:
+        both = not args.show_side_effects and not args.show_state_files
+        report: dict[str, object] = {}
+        if both or args.show_side_effects:
+            report["side_effects"] = _side_effects(app, ctx)
+        if both or args.show_state_files:
+            report["state_files"] = _state_files(app, ctx)
+            if app.credentials is not None:
+                scopes = app.credentials.active_scopes(ctx)
+                report["logged_in"] = scopes is not None and not isinstance(scopes, Expired)
+                if isinstance(scopes, Expired):
+                    report["token_expires"] = scopes.iso
+        return report
+
+    return STATUS_PATH
+
+
+def _side_effects(app: App, ctx: Ctx) -> list[dict[str, object]]:
+    """``status --show-side-effects`` (REQ-C-011, REQ-O-028)"""
+    entries: list[dict[str, object]] = []
+    for command_path, effect, pattern, matches in declared(app, ctx.env.get("HOME")):
+        paths = [{"path": str(Path(m).resolve()), "bytes": _measure(Path(m))[0]} for m in matches]
+        entry: dict[str, object] = {
+            "command": command_path.value,
+            "type": effect.type,
+            "pattern": str(Path(pattern).resolve()),
+            "paths": paths,
+            "bytes": sum(int(p["bytes"]) for p in paths),  # type: ignore[call-overload]
+        }
+        if effect.clearable_with is not None:
+            entry["clearable_with"] = effect.clearable_with
+        entries.append(entry)
+    return entries
+
+
+def _state_files(app: App, ctx: Ctx) -> list[dict[str, object]]:
+    """``status --show-state-files``: where the tool keeps state, never what it holds"""
+    wanted: list[tuple[str, Path | None]] = [
+        ("project config", local_config(app.name, ctx.cwd)),
+        ("user config", user_config(app.name, ctx.env)),
+        ("idempotency records", state_dir(app.name, app.state_dir, ctx.env)),
+    ]
+    if app.audit_log is not None:
+        wanted.append(("audit log", log_path(app.audit_log, app.name, ctx.env)))
+    for command_path, effect, _, matches in declared(app, ctx.env.get("HOME")):
+        if effect.kind in (SideEffectType.CREDENTIAL, SideEffectType.CONFIG):
+            purpose = f"{effect.type} of {command_path.value}"
+            wanted += [(purpose, Path(m)) for m in matches]
+    files: list[dict[str, object]] = []
+    for purpose, where in wanted:
+        if where is None:
+            continue
+        exists = where.exists()
+        files.append(
+            {
+                "path": str(where.resolve()),
+                "purpose": purpose,
+                "exists": exists,
+                "bytes": _measure(where)[0] if exists else 0,
+            }
+        )
+    return files
 
 
 AUDIT_LOG_PATH = CommandPath("audit-log")

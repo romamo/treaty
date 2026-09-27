@@ -383,7 +383,7 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
         written=not args.dry_run,
         next_steps=(
             f"cd {target} && uv sync",
-            f"uv run {name.value} status widget",
+            f"uv run {name.value} show widget",
             "uv run pytest",
             f"uv run treaty audit {name.package}.cli:app",
             f"uv run treaty conformance {name.package}.cli:app --run",
