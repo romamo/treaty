@@ -106,13 +106,25 @@ or `httpx` directly; fix `ctx.http.get(url)`, since only `ctx.http` fills
 
 ## Tasks
 
-- [ ] `ProxyConfig` with env, `--proxy`, `--no-proxy` precedence; unit tests per criterion
-- [ ] `--proxy`/`--no-proxy` framework flags on network commands; env overlay for `ctx.run`
-- [ ] `Http`, `HttpResponse`, CA bundle selection, timeout from `ctx.timeout`
-- [ ] Failure mapping with `NetworkContext`; implicit `UNAVAILABLE` and `TIMEOUT`; tests
-  against a local `http.server` proxy and a refused port
-- [ ] `_walk.py`: `ctx.walk`, ancestor loop detection, depth limit, `symlinks_skipped`
-- [ ] `recursive_traversal=`, `--no-follow-symlinks`, `--max-depth`, manifest and `--schema`
-- [ ] Audit rules `http-client` and `recursive-traversal`; conformance probes for the flags
-- [ ] Update COMPLIANCE.md rows (F-036, F-061, O-019, O-040, and F-037 with 03), README,
+- [x] `ProxyConfig` with env, `--proxy`, `--no-proxy` precedence; unit tests per criterion.
+  `NO_PROXY` is matched by treaty's own `bypassed()`: `urllib.request.proxy_bypass*` read
+  `os.environ` or the macOS system settings, and urllib's `ProxyHandler` does too, so a
+  small `_Proxied` handler routes each request (redirects included) instead
+- [x] `--proxy`/`--no-proxy` framework flags on network commands; env overlay for `ctx.run`
+  (`--no-proxy` sets `NO_PROXY=*`); both together exit 2 from `Invocation.__post_init__`
+- [x] `Http`, `HttpResponse`, CA bundle selection, timeout from `ctx.timeout`. Each request
+  waits what is left of the deadline, not the whole timeout; an unreadable CA bundle exits
+  4 `CA_BUNDLE_INVALID`
+- [x] Failure mapping with `NetworkContext`; implicit `UNAVAILABLE` (`TIMEOUT` was already
+  implicit); tests against a local `http.server` proxy (CONNECT tunnel included), a TLS
+  origin with a checked-in self-signed test certificate, and a refused port. `ctx.http`
+  retries through `Retrier.call(on=, give_up=)`, so exhaustion keeps the network error
+  and its `network_context` with `retries_exhausted` instead of `Retry.exhausted`'s code
+- [x] `_walk.py`: `ctx.walk`, ancestor loop detection, depth limit, `symlinks_skipped`.
+  Any entry deeper than `--max-depth` raises, not only a directory; `hint` comes from a
+  `TraversalStopped` subclass, as `AuthFailure` carries its own
+- [x] `recursive_traversal=`, `--no-follow-symlinks`, `--max-depth`, manifest and `--schema`
+- [x] Audit rules `http-client` and `recursive-traversal`; conformance probes for the flags
+  (`--proxy socks5://...` and `--max-depth 0`, both `invalid`)
+- [x] Update COMPLIANCE.md rows (F-036, F-061, O-019, O-040, and F-037 with 03), README,
   HANDOFF, ROADMAP

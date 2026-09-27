@@ -175,6 +175,14 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   with `ctx.cache`, `--no-cache`, and `--cache-ttl`; audit rules `preserve-locale`,
   `no-chdir`, and `cache-declared`. Behavior changes: children see `LC_ALL=C` and, off a
   terminal, `CI=1`; the scaffold's console script starts in `entry.py`
+- 1.0 plan, network and filesystem utilities (`plans/1.0/10-network-and-fs.md`):
+  `ctx.http` with proxy and CA bundle variables, `--proxy`, `--no-proxy`,
+  `error.network_context`, HTTP 401/403/429/5xx mapping, and retries in `meta.retries`;
+  `recursive_traversal=True` with `ctx.walk`, `SYMLINK_LOOP`, `DEPTH_EXCEEDED`,
+  `--no-follow-symlinks`, and `--max-depth`; exports `HttpResponse` and `WalkEntry`; audit
+  rules `http-client` and `recursive-traversal`. Behavior change: network commands list
+  exit 12 among their implicit codes, and a field named `proxy`, `no-proxy`, `max-depth`,
+  or `no-follow-symlinks` on an opting-in command was already refused
 
 ## 0.1.x: after the first minor release
 

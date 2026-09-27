@@ -429,6 +429,48 @@ what happens instead:
 
 `ctx.headless` tells the handler.
 
+## Network and filesystem
+
+A `has_network_io=True` command gets `ctx.http`, a small stdlib client:
+
+```python
+response = ctx.http.get(url)  # or ctx.http.post(url, json={...}), ctx.http.request(...)
+return Release(**response.json())
+```
+
+- It goes out through `HTTPS_PROXY` or `HTTP_PROXY` (either case), skips the proxy for
+  hosts in `NO_PROXY`, sends Basic proxy auth from `user:password@` in the proxy URL, and
+  verifies TLS against `REQUESTS_CA_BUNDLE`, else `SSL_CERT_FILE`, else the system store,
+  all read from the run's environment (REQ-F-036)
+- `--proxy URL` overrides the variables and `--no-proxy` connects directly; both reach
+  `ctx.run` children too, and only network commands have them (REQ-O-019)
+- Each request waits at most what is left of the command's timeout
+- A failure ends the run with `error.network_context` (`url`, `proxy_used`, null when
+  direct, `proxy_source`, `no_proxy`, `ssl_verify`, `status_code`, and a
+  `curl -v [--proxy P] URL` suggestion, credentials removed): exit `12`
+  `CONNECTION_FAILED` or `TLS_VERIFY_FAILED` (not retryable), `10` `TIMEOUT`, `12`
+  `UPSTREAM_UNAVAILABLE` for 502 to 504, and, when the command declares the exit code,
+  `8` `UNAUTHENTICATED` for 401, `7` `PERMISSION_DENIED` for 403, and `11` `RATE_LIMITED`
+  with `retry_after_ms` for 429. Any other status is returned (REQ-F-037, REQ-F-063)
+- On a `retry=` command, connection failures, timeouts, and 502 to 504 are retried within
+  `--retries`, counted in `meta.retries`
+
+A `recursive_traversal=True` command gets `ctx.walk(root)`, which yields a
+`treaty.WalkEntry(path, depth, is_dir, is_symlink)` per entry, depth first in name order,
+plus `--no-follow-symlinks` and `--max-depth N` (default 50):
+
+- A followed symlink back to a directory above it exits `4` `SYMLINK_LOOP` with `path`,
+  `loop_target`, and `completed_count` in `error.context`; two links to one directory are
+  fine (REQ-F-061)
+- An entry deeper than `--max-depth` exits `4` `DEPTH_EXCEEDED` with `max_depth`, `path`,
+  and `hint`, rather than leaving part of the tree out
+- With `--no-follow-symlinks` symlinks are listed but never entered; the walk's `count`
+  and `symlinks_skipped` are there for the result (REQ-O-040)
+
+The `http-client` audit rule flags `urlopen`, `requests`, and `httpx` in a network command,
+and `recursive-traversal` flags `os.walk`, `rglob`, `shutil.rmtree`, `shutil.copytree`, and
+recursive `glob`.
+
 ## Declarations
 
 Optional keywords on `app.command` tell an agent, before it runs a command, what the
@@ -705,8 +747,8 @@ Every variable treaty reads carries the app's prefix (`DEPLOYCTL_FORMAT`,
 `DEPLOYCTL_MAX_OUTPUT_BYTES`, `DEPLOYCTL_STATE_DIR`, ...), and `--help` lists them under
 Environment; in the manifest, each global flag's description names its variable (the spec's
 manifest has no `environment` key yet). Unprefixed, treaty reads only shared conventions:
-`CI`, `NO_COLOR`, `TERM`, `HOME`, `XDG_*`, `GITHUB_ACTIONS`, `JENKINS_URL`, and
-`TOOL_TRACE_ID`. The `env-prefix` audit rule flags handlers that read an unprefixed
+`CI`, `NO_COLOR`, `TERM`, `HOME`, `XDG_*`, `GITHUB_ACTIONS`, `JENKINS_URL`, the proxy and
+CA bundle variables, and `TOOL_TRACE_ID`. The `env-prefix` audit rule flags handlers that read an unprefixed
 variable such as `DEBUG`.
 
 ## Validation errors
