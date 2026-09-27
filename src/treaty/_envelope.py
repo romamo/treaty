@@ -88,6 +88,8 @@ class ErrorDetail:
     phase: str | None = None
     errors: Sequence[Mapping[str, object]] | None = None
     """Every validation failure of the run (REQ-F-015); present on validation errors only"""
+    alternatives: Sequence[Mapping[str, str]] | None = None
+    """Flags that replace an editor the run could not open (REQ-F-055)"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
@@ -126,6 +128,8 @@ class ErrorDetail:
             out["phase"] = self.phase
         if self.errors is not None:
             out["errors"] = [json_safe(dict(e)) for e in self.errors]
+        if self.alternatives is not None:
+            out["alternatives"] = [dict(a) for a in self.alternatives]
         return out
 
 

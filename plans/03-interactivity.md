@@ -60,11 +60,43 @@ free) and get the `alternatives` list in the manifest. 04 makes children ignore 
 
 ## Tasks
 
-- [ ] `interactive=`, `--yes`, `--non-interactive`; manifest and `--schema` fields
-- [ ] `ctx.prompt`, `ctx.confirm`, `ctx.edit`; `INPUT_REQUIRED` exit 4
-- [ ] Guarded `sys.stdin` during handler execution in non-TTY runs
-- [ ] Audit rule `interactive-declared`
-- [ ] README section "Prompts" with the one example above
+- [x] `interactive=`, `--yes`, `--non-interactive`; manifest and `--schema` fields
+- [x] `ctx.prompt`, `ctx.confirm`, `ctx.edit`; `INPUT_REQUIRED` exit 4
+- [x] Guarded `sys.stdin` during handler execution in non-TTY runs
+- [x] Audit rule `interactive-declared`
+- [x] README section "Prompts" with the one example above
+
+## Deviations as built
+
+- Error codes follow the spec per requirement, all on exit 4 (`PRECONDITION`),
+  `phase: execution`: `INPUT_REQUIRED` for `ctx.prompt` and `ctx.confirm` (F-009),
+  `EDITOR_REQUIRED` with `error.alternatives` for `ctx.edit` (F-055's wire format), and
+  `INTERACTIVE_BLOCKED` for a stray `input()` (F-047). `ErrorDetail` gained
+  `alternatives`; the envelope schema allows extra error keys
+- No `interactive-declared` audit rule: the same source scan that refuses shell strings
+  (plan 04) makes an undeclared `ctx.prompt`, `ctx.confirm`, or `ctx.edit` a
+  `RegistrationError`, which is stronger; the call-time check stays for handlers
+  without source
+- `ctx.edit(initial)` takes no `flag`: the command declares
+  `editor_alternatives=["message"]`, which is both `requires_editor: true` and
+  `non_interactive_alternatives` in the manifest, and registration checks each name is a
+  flag of the command. C-023's "`requires_editor` without an alternative" cannot be
+  written, so it needs no error. No `--<flag>-from-file` is invented; the alternatives are
+  the command's own flags
+- The stdin guard refuses only `readline` (what `input()` calls); `read()`, line
+  iteration, and `buffer` pass through, so a handler reading piped data keeps working.
+  It is installed for the whole `App.run` of a non-interactive run, like the stdout swap,
+  and wraps the run's `stdin=`; `App.call` (MCP) swaps neither stream
+- `--yes` and `--non-interactive` exist only on `interactive=True` commands, as C-005
+  says; on other commands they are unknown flags (exit 2). "`--yes` on a command that
+  never prompts" is tested on an interactive command whose run does not ask
+- A stray `input()` in a command without `interactive=True` exits 4 although that
+  command's manifest does not list 4: it is a command bug reported as the spec asks, like
+  `HANDLER_CRASHED` on 1
+- The PTY test is one; `--non-interactive` on a terminal and the terminal answer path use
+  a `StringIO` whose `isatty()` is true, passed as `App.run(stdin=...)`
+- F-047's "no arguments would drop into a REPL" does not apply: treaty has no REPL, and no
+  arguments print help and exit 0
 
 ## Tests
 

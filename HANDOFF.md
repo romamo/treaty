@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 585 passed |
+| `uv run pytest` | 604 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -157,6 +157,14 @@ The two do not share code.
   true` in `_Run._envelope`, so every envelope of the run carries it. A headless
   `ctx.open_url` records the URL and `_execute` fills `data.open_url` when the handler
   left it `None`
+- **Prompts run through `ctx`, and exit 4 when no one can answer.** `_prompt.Prompter` is
+  built per run in `_Run._ctx`; `InputRequired` is a `BaseException`, caught in `_execute`
+  and `stream` next to `Cancelled`, and becomes `PRECONDITION` (4) with `INPUT_REQUIRED`,
+  `EDITOR_REQUIRED` (plus `error.alternatives`), or `INTERACTIVE_BLOCKED`.
+  `_Run.guard_streams` swaps `sys.stdin` for `NoPromptStdin` in non-interactive runs:
+  `readline` (which `input()` calls) raises, `read`, iteration, and `buffer` pass through.
+  `App.call` swaps neither stream. `--yes` and `--non-interactive` exist only on
+  `interactive=True` commands
 
 ## Layout
 
@@ -190,6 +198,7 @@ src/treaty/
   _paths.py      check_path(): null bytes, percent-encoding, and .. in Path flags
   _secrets.py    secret sources (--x-from-env, --x-from-file) and their resolution
   _scan.py       registration-time scan of a handler's ctx.<method>() calls
+  _prompt.py     Prompter (ctx.prompt, ctx.confirm, ctx.edit), InputRequired, stdin guard
   _subprocess.py Processes (ctx.run, ctx.pipeline, ctx.open_url), Completed, group kill
   _signals.py    SIGINT/SIGTERM handlers, Cancellation (armed windows, held signals)
   _timeout.py    Timeout VO, call_with_timeout()
@@ -219,15 +228,16 @@ tests/           one file per feature; conftest.py holds the shared app fixture
 ## Spec coverage
 
 Implemented: REQ-F-001, F-002, F-003, F-004, F-005, F-006, F-007, F-008, F-009, F-010,
-F-011, F-012, F-013, F-015, F-016, F-034, F-044 (newlines), F-045 (paths), F-048, F-051,
-F-069, C-001, C-002, C-003, C-004, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
-O-021, O-022, O-032, O-039, O-041, O-048, O-050, and from the subprocess API F-044, F-046,
-F-055 (child half), F-057, F-062, F-065. See `COMPLIANCE.md` for the stricter per-criterion status.
+F-011, F-012, F-013, F-015, F-016, F-031, F-034, F-044, F-045 (paths), F-046, F-047, F-048,
+F-051, F-055, F-057, F-062, F-065, F-069, C-001, C-002, C-003, C-004, C-005, C-007, C-012,
+C-013, C-015, C-016, C-020 (all presets), C-023, O-021, O-022, O-032, O-039, O-041, O-048,
+O-050. See `COMPLIANCE.md` for the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema`, `--max-output`, and per
 command `--timeout` (network and streaming), `--confirm-destructive` (destructive),
 `--idempotency-key` (non-safe), `--raw-payload` (opt-in), `--no-stream` (streaming), `--live`
-(`safe_default`), and `--<name>-from-env` / `--<name>-from-file` for each secret field.
+(`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), and
+`--<name>-from-env` / `--<name>-from-file` for each secret field.
 
 ## Gotchas
 

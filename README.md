@@ -281,6 +281,38 @@ on Linux or over SSH): then nothing opens, the URL lands in `data.open_url`, and
 envelope of the run has `meta.headless: true` (REQ-F-057). `ctx.headless` tells the
 handler.
 
+## Prompts
+
+Nothing waits for input an agent cannot give. A command that asks a person declares
+`interactive=True`, which adds `--yes` and `--non-interactive`, and asks through `ctx`:
+
+```python
+@app.command("init", description="Create a project", danger_level="safe", exit_codes=(),
+             interactive=True)
+def init(args: InitArgs, ctx: Ctx) -> Project:
+    name = args.name if args.name is not None else ctx.prompt("Project name", flag="name")
+    return Project(name=name, overwrite=ctx.confirm("Overwrite existing files?"))
+```
+
+- `ctx.prompt(text, flag=...)` asks only when stdin and stdout are terminals and
+  `--non-interactive` is absent; otherwise the run exits `4` with `INPUT_REQUIRED`, the
+  prompt in `context`, and a suggestion naming `--<flag>` (REQ-F-009, REQ-C-005)
+- `ctx.confirm(text)` returns `True` under `--yes` without asking; off a terminal without
+  it, exit `4` suggests `--yes`. `--yes` on an interactive command that never asks changes
+  nothing
+- `ctx.edit(initial)` opens `$VISUAL` or `$EDITOR` on a terminal. The command declares
+  `editor_alternatives=["message"]`, the flags that replace the editor; off a terminal
+  the run exits `4` with `EDITOR_REQUIRED` and those flags in `error.alternatives`
+  (REQ-F-055, REQ-C-023)
+- Off a terminal, `input()` and `sys.stdin.readline()` in a handler exit `4` with
+  `INTERACTIVE_BLOCKED`, even inside `except Exception` (REQ-F-047); `sys.stdin.read()`
+  and line iteration still read piped data
+
+Calling `ctx.prompt`, `ctx.confirm`, or `ctx.edit` without the declaration is a
+`RegistrationError` when the handler's source shows it. The manifest lists
+`interactive`, `requires_editor`, and `non_interactive_alternatives`, and exit `4` for
+these commands. Running with no arguments prints help and exits `0`; treaty has no REPL.
+
 ## Output size
 
 JSON output is capped at 1 MiB per envelope: `App(max_output_bytes=...)` app-wide,

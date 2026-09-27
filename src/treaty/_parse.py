@@ -36,6 +36,8 @@ RAW_PAYLOAD_FLAG = "raw-payload"
 IDEMPOTENCY_FLAG = "idempotency-key"
 NO_STREAM_FLAG = "no-stream"
 LIVE_FLAG = "live"
+YES_FLAG = "yes"
+NON_INTERACTIVE_FLAG = "non-interactive"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +52,10 @@ class Invocation:
     """A streaming command asked for one buffered envelope instead of JSONL"""
     live: bool = False
     """A ``safe_default`` command asked to apply instead of its default dry run"""
+    yes: bool = False
+    """``--yes``: every ``ctx.confirm`` of an interactive command answers yes"""
+    non_interactive: bool = False
+    """``--non-interactive``: an interactive command never prompts, even on a terminal"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +220,7 @@ def parse_command_args(
     key: IdempotencyKey | None = None
     no_stream = False
     live = False
+    switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
     positionals = [f for f in command.fields if f.positional]
     pos_index = 0
     i = 0
@@ -332,6 +339,12 @@ def parse_command_args(
                     live = True
                     i += 1
                     continue
+                if name in switches and command.interactive:
+                    if has_eq:
+                        raise ParseError(f"'{name}' takes no value", context={"flag": name})
+                    switches[name] = True
+                    i += 1
+                    continue
                 found = command.field_by_flag(name)
                 if found is not None and found.secret:
                     errors.add(direct_secret_error(found.flag))
@@ -408,6 +421,7 @@ def parse_command_args(
             (CONFIRM_FLAG, confirmed),
             (NO_STREAM_FLAG, no_stream),
             (LIVE_FLAG, live),
+            *switches.items(),
         ):
             spellings = (flag, flag.replace("-", "_"))
             if given and any(mapping.get(k) is False for k in spellings):
@@ -419,6 +433,8 @@ def parse_command_args(
             idempotency_key=key or built.idempotency_key,
             no_stream=no_stream or built.no_stream,
             live=live or built.live,
+            yes=switches[YES_FLAG] or built.yes,
+            non_interactive=switches[NON_INTERACTIVE_FLAG] or built.non_interactive,
         )
     _apply_secrets(command, values, secrets, env, errors)
     return Invocation(
@@ -428,6 +444,8 @@ def parse_command_args(
         idempotency_key=key,
         no_stream=no_stream,
         live=live,
+        yes=switches[YES_FLAG],
+        non_interactive=switches[NON_INTERACTIVE_FLAG],
     )
 
 
@@ -496,6 +514,8 @@ def known_flags(command: Command) -> list[str]:
         flags.append(NO_STREAM_FLAG)
     if command.safe_default:
         flags.append(LIVE_FLAG)
+    if command.interactive:
+        flags.extend((YES_FLAG, NON_INTERACTIVE_FLAG))
     return flags
 
 
@@ -546,6 +566,7 @@ def build_from_mapping(
     idempotency_key: IdempotencyKey | None = None
     no_stream = False
     live = False
+    switches: dict[str, bool] = {YES_FLAG: False, NON_INTERACTIVE_FLAG: False}
     errors = _Collector()
     for key, value in mapping.items():
         try:
@@ -578,6 +599,13 @@ def build_from_mapping(
                         f"{key!r} expects a boolean", context={"field": key, "value": value}
                     )
                 live = value
+                continue
+            if flag in switches and command.interactive:
+                if not isinstance(value, bool):
+                    raise ParseError(
+                        f"{key!r} expects a boolean", context={"field": key, "value": value}
+                    )
+                switches[flag] = value
                 continue
             found = command.field_by_flag(flag)
             if found is not None and found.secret:
@@ -615,6 +643,8 @@ def build_from_mapping(
         idempotency_key=idempotency_key,
         no_stream=no_stream,
         live=live,
+        yes=switches[YES_FLAG],
+        non_interactive=switches[NON_INTERACTIVE_FLAG],
     )
 
 

@@ -80,6 +80,10 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   editor-free environment and `/dev/null` stdin, raise `SUBPROCESS_FAILED` for any failing
   stage, and stop tracked children on a signal or timeout; `ctx.open_url` with
   `gui_operations=` and `meta.headless`; `no-shell` audit rule
+- Prompts (REQ-F-009, F-047, F-055, C-005, C-023): `interactive=True` adds `--yes` and
+  `--non-interactive`; `ctx.prompt`, `ctx.confirm`, and `ctx.edit` ask only on a terminal
+  and otherwise exit `4` naming the flag that answers; `editor_alternatives=`; a stray
+  `input()` off a terminal exits `4` with `INTERACTIVE_BLOCKED`
 
 ## 0.1.0: first release
 
@@ -117,8 +121,6 @@ landed the same day; what remains under each is follow-up work:
 Every remaining P0 requirement the kit cannot yet check. Each new declaration gets a
 matching audit rule so adoption never requires reading the spec.
 
-- `--yes` and `--non-interactive` for commands declaring `interactive=True` (REQ-C-005),
-  exit `4` when a prompt would block
 - Pagination metadata on list commands: `--limit`, `--cursor`, `meta.pagination`
   (REQ-F-018)
 - `ALREADY_EXISTS` returning the existing resource in `data` (REQ-C-028)

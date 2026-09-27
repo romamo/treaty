@@ -88,6 +88,10 @@ class Command:
     """A destructive command that runs as a dry run unless ``--live`` (REQ-O-048)"""
     gui_operations: tuple[str, ...] = ()
     """Display operations the handler may start; only ``browser_open`` (REQ-C-024)"""
+    interactive: bool = False
+    """The handler may ask through ``ctx.prompt`` and ``ctx.confirm`` (REQ-C-005)"""
+    editor_alternatives: tuple[str, ...] = ()
+    """Flags that replace ``ctx.edit``; non-empty means the command may open an editor"""
 
     @property
     def accepts_timeout(self) -> bool:
@@ -131,13 +135,22 @@ def build_command(
     streaming: bool = False,
     safe_default: bool = False,
     gui_operations: Sequence[str] = (),
+    interactive: bool = False,
+    editor_alternatives: Sequence[str] = (),
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
     args_type, output_type, resources = _inspect_handler(fn, path, streaming)
     _check_gui(path, output_type, gui_operations)
-    _check_ctx_calls(fn, path, gui_operations)
+    _check_ctx_calls(fn, path, gui_operations, interactive, editor_alternatives)
     fields = inspect_fields(args_type, scalars)
+    flags = {f.flag for f in fields}
+    unknown = [name for name in editor_alternatives if name not in flags]
+    if unknown:
+        raise RegistrationError(
+            f"{path}: editor_alternatives {unknown} are not flags of the command; name the "
+            "flags that supply the text instead of the editor (REQ-C-023)"
+        )
     if streaming and danger_level is not DangerLevel.SAFE:
         raise RegistrationError(
             f"{path}: streaming commands must be safe; the effect and idempotency contracts "
@@ -171,6 +184,8 @@ def build_command(
         "confirm-destructive": danger_level is DangerLevel.DESTRUCTIVE,
         "no-stream": streaming,
         "live": safe_default,
+        "yes": interactive,
+        "non-interactive": interactive,
     }
     taken = sorted(
         f.flag
@@ -236,6 +251,8 @@ def build_command(
         resource_graph=resource_graph(resources, str(path), args_type),
         safe_default=safe_default,
         gui_operations=tuple(gui_operations),
+        interactive=interactive,
+        editor_alternatives=tuple(editor_alternatives),
     )
 
 
@@ -253,7 +270,13 @@ def _check_gui(path: CommandPath, output_type: object, gui_operations: Sequence[
         )
 
 
-def _check_ctx_calls(fn: Handler, path: CommandPath, gui_operations: Sequence[str]) -> None:
+def _check_ctx_calls(
+    fn: Handler,
+    path: CommandPath,
+    gui_operations: Sequence[str],
+    interactive: bool,
+    editor_alternatives: Sequence[str],
+) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
     for call in ctx_calls(fn):
         where = f"{path}: ctx.{call.method}() on line {call.line} of the handler"
@@ -265,6 +288,16 @@ def _check_ctx_calls(fn: Handler, path: CommandPath, gui_operations: Sequence[st
         if call.method == "open_url" and BROWSER_OPEN not in gui_operations:
             raise RegistrationError(
                 f"{where} opens a browser; declare gui_operations=[{BROWSER_OPEN!r}] (REQ-C-024)"
+            )
+        if call.method in ("prompt", "confirm") and not interactive:
+            raise RegistrationError(
+                f"{where} asks a person; declare interactive=True, which adds --yes and "
+                "--non-interactive (REQ-C-005)"
+            )
+        if call.method == "edit" and not editor_alternatives:
+            raise RegistrationError(
+                f"{where} opens an editor; declare editor_alternatives=[...] naming the flags "
+                "that supply the text instead (REQ-C-023)"
             )
 
 

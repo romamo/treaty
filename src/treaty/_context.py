@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._mode import Format
+from ._prompt import Prompter
 from ._subprocess import Argv, Completed, Processes
 from ._timeout import Timeout
 
@@ -29,6 +30,7 @@ class Ctx:
     """No person or display to open a window for (REQ-F-057); ``meta.headless`` says so"""
     log_sink: LogSink = field(repr=False, compare=False)
     processes: Processes = field(repr=False, compare=False)
+    prompter: Prompter = field(repr=False, compare=False)
     idempotency_key: str | None = None
 
     def log(self, message: str, **fields: object) -> None:
@@ -80,3 +82,25 @@ class Ctx:
         """Open ``url`` in a browser and return True; when headless, open nothing, return
         False, and the framework puts the URL in ``data.open_url`` (REQ-F-057)"""
         return self.processes.open_url(url)
+
+    def prompt(self, text: str, *, flag: str) -> str:
+        """Ask a person for ``text``; ``--<flag>`` is how an agent supplies the answer
+
+        Only on a terminal (stdin and stdout) without ``--non-interactive``; otherwise the
+        run ends with exit 4, ``INPUT_REQUIRED``, and a suggestion naming ``--<flag>``.
+        Needs ``interactive=True`` on the command (REQ-F-009, REQ-C-005).
+        """
+        return self.prompter.prompt(text, flag=flag)
+
+    def confirm(self, text: str) -> bool:
+        """Ask a yes-or-no question; ``--yes`` answers yes without asking, and off a
+        terminal without it the run ends with exit 4, ``INPUT_REQUIRED``"""
+        return self.prompter.confirm(text)
+
+    def edit(self, initial: str = "") -> str:
+        """Let a person edit ``initial`` in ``$VISUAL`` or ``$EDITOR`` and return the text
+
+        Off a terminal the run ends with exit 4, ``EDITOR_REQUIRED``, and ``alternatives``
+        listing the command's ``editor_alternatives`` flags (REQ-F-055, REQ-C-023).
+        """
+        return self.prompter.edit(initial)

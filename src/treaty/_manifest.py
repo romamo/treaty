@@ -9,7 +9,15 @@ from collections.abc import Mapping, Sequence
 from ._command import Command, DangerLevel
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._mode import Format
-from ._parse import CONFIRM_FLAG, IDEMPOTENCY_FLAG, LIVE_FLAG, NO_STREAM_FLAG, TIMEOUT_FLAG
+from ._parse import (
+    CONFIRM_FLAG,
+    IDEMPOTENCY_FLAG,
+    LIVE_FLAG,
+    NO_STREAM_FLAG,
+    NON_INTERACTIVE_FLAG,
+    TIMEOUT_FLAG,
+    YES_FLAG,
+)
 from ._schema import JsonSchema
 from ._values import CommandPath, Etag
 
@@ -134,6 +142,23 @@ def command_entry(
             "default": False,
             "description": "Required to apply; without it the command previews and exits 2",
         }
+    if command.interactive:
+        flags[YES_FLAG] = {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Answer yes to every confirmation instead of asking",
+        }
+        flags[NON_INTERACTIVE_FLAG] = {
+            "type": "boolean",
+            "required": False,
+            "default": False,
+            "description": "Never prompt, even on a terminal; a needed answer exits 4",
+        }
+    if command.interactive or command.editor_alternatives:
+        # INPUT_REQUIRED or EDITOR_REQUIRED when no one can answer
+        entry = exits.framework(FrameworkCode.PRECONDITION)
+        exit_codes.setdefault(str(entry.code.value), entry.to_json())
     if command.safe_default:
         flags[LIVE_FLAG] = {
             "type": "boolean",
@@ -164,6 +189,11 @@ def command_entry(
         out["streaming_default"] = True
     if command.safe_default:
         out["safe_default"] = True
+    if command.interactive:
+        out["interactive"] = True
+    if command.editor_alternatives:
+        out["requires_editor"] = True
+        out["non_interactive_alternatives"] = list(command.editor_alternatives)
     if command.gui_operations:
         out["gui_operations"] = list(command.gui_operations)
         # The only behavior treaty has: the URL goes to data.open_url (REQ-C-024)
@@ -235,6 +265,17 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
             "default": False,
             "description": "Apply, with confirm_destructive; without it the command runs "
             "as a dry run",
+        }
+    if command.interactive:
+        properties[YES_FLAG] = {
+            "type": "boolean",
+            "default": False,
+            "description": "Answer yes to every confirmation",
+        }
+        properties[NON_INTERACTIVE_FLAG.replace("-", "_")] = {
+            "type": "boolean",
+            "default": False,
+            "description": "Never prompt; a needed answer exits 4",
         }
     if command.streaming and stream_key:
         properties[NO_STREAM_KEY] = {

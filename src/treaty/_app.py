@@ -60,6 +60,7 @@ from ._parse import (
     without_value,
 )
 from ._plain import render_event, render_plain
+from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._resources import Resolver
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
@@ -258,6 +259,8 @@ class App:
         streaming: bool = False,
         safe_default: bool = False,
         gui_operations: Sequence[str] = (),
+        interactive: bool = False,
+        editor_alternatives: Sequence[str] = (),
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes"""
@@ -307,6 +310,8 @@ class App:
                     streaming=streaming,
                     safe_default=safe_default,
                     gui_operations=gui_operations,
+                    interactive=interactive,
+                    editor_alternatives=editor_alternatives,
                 )
             )
             return fn
@@ -502,9 +507,9 @@ class App:
         inp = stdin if stdin is not None else sys.stdin
         environ = env if env is not None else os.environ
         tty = out.isatty() if isatty is None else isatty
-        run = _Run(self, out, err, environ, tty=tty, stdin_tty=inp.isatty())
+        run = _Run(self, out, err, environ, tty=tty, stdin=inp)
         try:
-            with run.guard_stdout():
+            with run.guard_streams():
                 return self._route(run, list(argv), inp, environ)
         except OSError as exc:
             if not _closed_pipe(exc):
@@ -660,6 +665,10 @@ class _Stderr:
     def __init__(self, stream: IO[str]) -> None:
         self._stream = stream
 
+    @property
+    def stream(self) -> IO[str]:
+        return self._stream
+
     def write(self, text: str) -> None:
         try:
             self._stream.write(text)
@@ -771,7 +780,7 @@ class _Run:
         env: Mapping[str, str],
         *,
         tty: bool = False,
-        stdin_tty: bool = False,
+        stdin: IO[str] | None = None,
     ) -> None:
         self.app = app
         self.out = out
@@ -779,7 +788,9 @@ class _Run:
         self.env = env
         self.tty = tty
         """Whether stdout is a terminal"""
-        self.interactive = tty and stdin_tty
+        self.stdin = stdin if stdin is not None else io.StringIO()
+        """What ``ctx.prompt`` reads; ``App.call`` has none"""
+        self.interactive = tty and stdin is not None and stdin.isatty()
         """Whether a person can answer: stdin and stdout are both terminals"""
         self.headless = is_headless(env, interactive=self.interactive, platform=sys.platform)
         self.processes: Processes | None = None
@@ -795,16 +806,19 @@ class _Run:
         """Set by ``_execute`` when the handler outlived its timeout and still runs"""
 
     @contextlib.contextmanager
-    def guard_stdout(self) -> Iterator[None]:
-        """Point ``sys.stdout`` at stderr for the run. Process-wide, not a context-local
+    def guard_streams(self) -> Iterator[None]:
+        """Point ``sys.stdout`` at stderr for the run, and, off a terminal, ``sys.stdin`` at
+        a reader that refuses ``input()`` (REQ-F-047). Process-wide, not a context-local
         redirect, because handlers run on worker threads; one run owns the process."""
-        saved = sys.stdout
+        saved, saved_in = sys.stdout, sys.stdin
         self.stray = _StrayStdout(self.err)
         sys.stdout = cast(TextIO, self.stray)
+        if not self.interactive:
+            sys.stdin = cast(TextIO, NoPromptStdin(self.stdin))
         try:
             yield
         finally:
-            sys.stdout = saved
+            sys.stdout, sys.stdin = saved, saved_in
 
     def _write(self, envelope: Envelope) -> None:
         """One JSON envelope on stdout, warning when text was printed there since the last"""
@@ -825,6 +839,8 @@ class _Run:
         mode: Format,
         timeout: Timeout,
         idempotency_key: str | None = None,
+        *,
+        invocation: Invocation,
     ) -> Ctx:
         deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
         # Output is captured, so a child never colors; editors only for a person
@@ -847,6 +863,16 @@ class _Run:
             headless=self.headless,
             log_sink=self._log_sink(command, args, mode),
             processes=self.processes,
+            prompter=Prompter(
+                command=command.path.value,
+                declared=command.interactive,
+                editor_alternatives=command.editor_alternatives,
+                interactive=self.interactive and not invocation.non_interactive,
+                assume_yes=invocation.yes,
+                stdin=self.stdin,
+                stderr=self.err.stream,
+                env=self.env,
+            ),
             idempotency_key=idempotency_key,
         )
 
@@ -1154,7 +1180,14 @@ class _Run:
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
         key = invocation.idempotency_key
-        ctx = self._ctx(command, invocation.args, mode, timeout, None if key is None else key.value)
+        ctx = self._ctx(
+            command,
+            invocation.args,
+            mode,
+            timeout,
+            None if key is None else key.value,
+            invocation=invocation,
+        )
         args = invocation.args
         preview_only = _previewing(command, invocation)
         if preview_only:
@@ -1197,6 +1230,8 @@ class _Run:
         except KeyboardInterrupt:
             self.abandoned = _still_running(running)
             return self._cancelled(command, CancelSignal("SIGINT", 130), started, full_meta)
+        except InputRequired as exc:
+            return self._input_required(exc, started, full_meta)
         except GeneratorExit:
             raise
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
@@ -1271,7 +1306,7 @@ class _Run:
         started = time.perf_counter()
         timeout = self.app.effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
-        ctx = self._ctx(command, invocation.args, mode, timeout)
+        ctx = self._ctx(command, invocation.args, mode, timeout, invocation=invocation)
         args = invocation.args
         seq = 0
         events: Iterator[object] | None = None
@@ -1358,6 +1393,9 @@ class _Run:
             sig = CancelSignal("SIGINT", 130)
             yield self._cancelled(command, sig, started, {**full_meta, "seq": seq})
             return
+        except InputRequired as exc:
+            yield self._input_required(exc, started, partial())
+            return
         except SchemaError as exc:
             message = f"Command {command.path} yielded {exc}"
             yield self._broken(command, "INVALID_OUTPUT", message, started, partial())
@@ -1378,6 +1416,28 @@ class _Run:
                     self.err.write(self._redactor(command, args)(_traceback(exc)))
         yield self._envelope(
             0, started=started, meta={**full_meta, "seq": seq, "end": True, "total": seq}
+        )
+
+    def _input_required(
+        self, exc: InputRequired, started: float, meta: Mapping[str, object]
+    ) -> Envelope:
+        """Exit 4: the run needs an answer only a person at a terminal could give
+        (REQ-F-009, REQ-F-047, REQ-F-055); the suggestion names the flag that gives it"""
+        entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code=exc.code,
+                message=exc.message,
+                retryable=False,
+                context=exc.context,
+                suggestion=exc.suggestion,
+                fix_required=exc.suggestion,
+                phase="execution",
+                alternatives=exc.alternatives or None,
+            ),
+            started=started,
+            meta=meta,
         )
 
     def _stop_children(self) -> None:
@@ -1446,6 +1506,8 @@ class _Run:
         implicit.add(FrameworkCode.TIMEOUT)
         if command.danger_level is not DangerLevel.SAFE:
             implicit |= {FrameworkCode.CONFLICT, FrameworkCode.PRECONDITION}
+        if command.interactive or command.editor_alternatives:
+            implicit.add(FrameworkCode.PRECONDITION)
         allowed = {ExitCodeName(c.name) for c in implicit}
         if exc.name not in command.exit_codes and exc.name not in allowed:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
