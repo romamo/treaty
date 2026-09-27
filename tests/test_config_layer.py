@@ -607,3 +607,27 @@ def test_audit_flags_first_run_setup_inside_a_command(tmp_path: Path) -> None:
     report = audit(app, "my-tool", limit=3)
     [rule] = [r for r in report.rules if r.id == "init-isolated"]
     assert [f.command for f in rule.findings] == ["store"] and "App(init=" in rule.findings[0].fix
+
+
+# REQ-F-068 with the config layer
+
+
+def test_help_on_a_command_that_would_otherwise_fail_must_succeed_with_exit_0(
+    tmp_path: Path,
+) -> None:
+    user_file(tmp_path, "region = [\n")
+    env = {"XDG_CONFIG_HOME": str(tmp_path)}
+    app = fixture_config_app.app
+    for argv in (["show", "--help"], ["--help"], []):
+        err = io.StringIO()
+        code = app.run(argv, stdout=io.StringIO(), stderr=err, env=env, isatty=False)
+        assert code == 0 and err.getvalue(), argv
+    for argv in (["--version"], ["version"], ["manifest"], ["--schema"], ["show", "--schema"]):
+        code, envelope = configctl(argv, env)
+        assert code == 0 and envelope["ok"] is True, argv
+    assert app.call("version", {}, env=env).ok and app.call("manifest", {}, env=env).ok
+    # What reads the settings still fails, and says why
+    for argv in (["show"], ["--show-config"]):
+        code, envelope = configctl(argv, env)
+        assert code == 2 and envelope["error"]["code"] == "CONFIG_INVALID", argv
+    assert app.call("show", {}, env=env).error.code == "CONFIG_INVALID"
