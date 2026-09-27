@@ -91,6 +91,8 @@ class Invocation:
     """The older output schema ``--schema-version`` pinned; None is the current"""
     stable_output: bool = False
     """``stable_output`` of an exec line or MCP call: the ``--stable-output`` global"""
+    validate_only: bool = False
+    """``--validate-only``: answer once phase 1 passes, without running (REQ-O-009)"""
 
 
 @dataclass(frozen=True, slots=True)

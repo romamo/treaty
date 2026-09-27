@@ -44,6 +44,7 @@ NO_STREAM_FLAG = "no-stream"
 LIVE_FLAG = "live"
 YES_FLAG = "yes"
 NON_INTERACTIVE_FLAG = "non-interactive"
+VALIDATE_ONLY_FLAG = "validate-only"
 
 Parse = Callable[[object, Command], object]
 
@@ -172,6 +173,7 @@ IMPLEMENTED: frozenset[str] = frozenset(
         "instance-id",
         "retries",
         "retry-delay",
+        "validate-only",
     }
 )
 UNIMPLEMENTED: frozenset[str] = (RESERVED_GLOBAL | frozenset(RESERVED_OPT_IN)) - IMPLEMENTED
@@ -463,5 +465,12 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         metavar="DURATION",
         entry=lambda c: {"default": f"{c.retry.delay_ms}ms" if c.retry else None},
         json_extra={"type": ["string", "integer"]},
+    ),
+    _switch(
+        VALIDATE_ONLY_FLAG,
+        "validate_only",
+        lambda c: True,
+        "Check the arguments and exit 0 without running the command; exit 2 lists every "
+        "error. Nothing is changed either way",
     ),
 )

@@ -661,3 +661,62 @@ def test_from_stdin_is_described_in_the_manifest_and_limited_to_one_field() -> N
         @app.command("x", description="X", danger_level="safe", exit_codes=())
         def x(args: Two, ctx: Ctx) -> dict[str, str]:
             return {}
+
+
+# REQ-O-009
+
+
+@dataclass(frozen=True, slots=True)
+class TargetArgs:
+    target: Literal["staging", "prod"] = Flag(description="Environment")
+    replicas: int = Flag(default=1, description="Replicas")
+
+
+def validating_app(effects: list[str]) -> App:
+    app = App("tool", version="1.0.0")
+
+    @app.command("deploy", description="Deploy", danger_level="mutating", exit_codes=())
+    def deploy(args: TargetArgs, ctx: Ctx) -> dict[str, str]:
+        effects.append(args.target)
+        return {"effect": "created"}
+
+    return app
+
+
+def test_validate_only_with_valid_args_exits_0_saying_validation_passed() -> None:
+    effects: list[str] = []
+    code, envelope = run(
+        validating_app(effects), ["deploy", "--target", "staging", "--validate-only"]
+    )
+    assert code == 0 and envelope["ok"] is True and envelope["data"] is None
+    assert envelope["meta"]["validation_only"] is True and effects == []
+
+
+def test_validate_only_with_invalid_args_exits_2_listing_every_error() -> None:
+    effects: list[str] = []
+    argv = ["deploy", "--target", "qa", "--replicas", "x", "--validate-only"]
+    code, envelope = run(validating_app(effects), argv)
+    fields = {e["field"] for e in envelope["error"]["errors"]}
+    assert code == 2 and fields == {"target", "replicas"} and effects == []
+
+
+def test_validate_only_never_causes_side_effects_even_with_valid_args(tmp_path: Any) -> None:
+    effects: list[str] = []
+    app = validating_app(effects)
+    env = {"TOOL_STATE_DIR": str(tmp_path), "TOOL_SESSION": "s1"}
+    argv = ["deploy", "--target", "prod", "--idempotency-key", "k1", "--validate-only"]
+    assert run(app, argv, env=env)[0] == 0
+    assert run(app, argv, env=env)[0] == 0
+    envelope = app.call("deploy", {"target": "prod", "validate_only": True}, env={})
+    assert envelope.exit_code == 0 and envelope.meta.command == "deploy"
+    assert effects == [] and list(tmp_path.iterdir()) == []
+    code, envelope = run(app, ["deploy", "--target", "prod"], env=env)
+    assert code == 0 and effects == ["prod"]
+
+
+def test_the_validate_only_flag_is_present_in_every_commands_help_output() -> None:
+    app = placement_app()
+    for path in ("run", "list", "manifest", "version"):
+        out = io.StringIO()
+        app.run([*path.split("."), "--help"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
+        assert "--validate-only" in out.getvalue(), path

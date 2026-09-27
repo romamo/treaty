@@ -1898,6 +1898,8 @@ class _Run:
             if isinstance(position, Envelope):
                 return position
             invocation = dataclasses.replace(invocation, cursor=position)
+        if invocation.validate_only:
+            return self.validated(meta)
         if command.auth is not None:
             token = self._login_token(command, invocation, meta)
             if isinstance(token, Envelope):
@@ -1936,6 +1938,11 @@ class _Run:
         if not dry_run:
             extra["confirmed"] = True
         return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+
+    def validated(self, meta: Mapping[str, object] | None) -> Envelope:
+        """``--validate-only`` (REQ-O-009): phase 1 passed, so the command would run; the
+        credential gate, the idempotency store, and the handler never do"""
+        return self._envelope(0, meta={**(meta or {}), "validation_only": True})
 
     def _pin(self, command: Command, invocation: Invocation) -> None:
         """Answer in the schema version ``--schema-version`` selected; an older one is
@@ -2431,6 +2438,9 @@ class _Run:
         their count in ``meta.seq`` and marks the response ``partial``.
         """
         self._pin(command, invocation)
+        if invocation.validate_only:
+            yield self.validated(meta)
+            return
         started = time.perf_counter()
         waiting_since = started
         timeout = self.app.effective_timeout(command, invocation.timeout)

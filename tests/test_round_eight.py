@@ -214,10 +214,10 @@ def test_every_framework_flag_surface_agrees() -> None:
     app = make_app()
     command = app.commands[CommandPath("items")]
     names = [f.name for f in framework_flags(command)]
-    assert names == ["raw-payload", "limit", "cursor", "heartbeat-ms"]
+    assert names == ["raw-payload", "limit", "cursor", "heartbeat-ms", "validate-only"]
     entry = command_entry(command, app.exits, app.commands)
     assert set(names) <= set(entry["flags"])  # type: ignore[arg-type]
-    assert known_flags(command)[-4:] == names
+    assert known_flags(command)[-5:] == names
     json_keys = {n.replace("-", "_") for n in known_flags(command, argv=False)}
     assert json_keys == set(payload_schema(command)["properties"])  # type: ignore[arg-type]
     help_text = render_command("r8", command, [])

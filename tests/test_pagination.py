@@ -200,7 +200,7 @@ def test_f019_default_limit_is_in_schema_and_manifest() -> None:
     assert env["data"]["default_limit"] == 7
     _, env = call(app, ["manifest"])
     spec_validator("manifest-response").validate(env["data"])
-    assert set(env["data"]["commands"]["items"]["flags"]) == {"limit", "cursor"}
+    assert set(env["data"]["commands"]["items"]["flags"]) == {"limit", "cursor", "validate-only"}
 
 
 def test_exec_and_call_take_limit_and_cursor() -> None:

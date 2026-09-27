@@ -177,6 +177,7 @@ def test_manifest_does_not_mention_resources() -> None:
         "dry-run",
         "confirm-destructive",
         "idempotency-key",
+        "validate-only",
     }
 
 
