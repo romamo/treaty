@@ -71,6 +71,7 @@ from ._envelope import (
 )
 from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError, SchemaError
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy, SideEffects
+from ._fix import fix_problem
 from ._flags import REDACTED, Arg, Flag
 from ._framework import framework_collisions
 from ._help import global_rows, render_command, render_root
@@ -220,6 +221,7 @@ class App:
         jobs: JobStore | None = None,
         settings: type | None = None,
         init: Init | None = None,
+        companions: Sequence[str] = (),
     ) -> None:
         """``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
@@ -228,7 +230,8 @@ class App:
         config files and ``<APP>_<FIELD>`` variables; a handler gets it by annotating a
         parameter with the class (REQ-F-028). ``init`` is the app's one-time setup: it
         adds the ``init`` built-in, and other commands exit 4 with ``INIT_REQUIRED``
-        until it has run (REQ-F-076)."""
+        until it has run (REQ-F-076). ``companions`` names the other programs a
+        ``fix_command`` may run, such as ``("mkdir",)`` (REQ-C-030)."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -253,6 +256,14 @@ class App:
         self.jobs = jobs
         self.settings = None if settings is None else SettingsSpec.inspect(settings, self.scalars)
         self.init = init
+        if isinstance(companions, str) or not all(
+            isinstance(c, str) and c and c == c.strip() and " " not in c for c in companions
+        ):
+            raise RegistrationError(
+                f"App {name}: companions is a sequence of program names, such as ('mkdir',)"
+            )
+        self.companions = frozenset(companions)
+        self._fixes_checked = False
         self._register_builtins(enable_exec)
         self._builtins = frozenset(self._commands)
 
@@ -395,6 +406,8 @@ class App:
         retry: Retry | None = None,
         sort_key: str | None = None,
         ordered: bool = False,
+        fix_commands: Mapping[str, str] | None = None,
+        refreshes_auth: bool = False,
     ) -> Callable[[Handler], Handler]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -425,6 +438,10 @@ class App:
         Arrays in ``data`` are sorted (REQ-F-020): ``sort_key="id"`` orders an output
         list of objects by that field; ``ordered=True`` keeps the handler's order, for a
         ranking. ``treaty.Out`` declares the same for a field of an output dataclass.
+        ``fix_commands={"STORE_MISSING": "tool init"}`` gives ``error.fix_command`` for an
+        error code when the raise gives none: one command of this app or a companion, run
+        verbatim, never destructive (REQ-C-030). ``refreshes_auth=True`` marks the command
+        that renews expired credentials, named in ``CREDENTIALS_EXPIRED`` (REQ-F-063).
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -481,6 +498,18 @@ class App:
             raise RegistrationError(f"{cmd_path}: {exc}") from None
         # A stream's timeout is an idle limit: the wait for each event (REQ-F-011)
         command_timeout = None if isinstance(timeout, _Inherit) else Timeout(timeout)
+        fixes = dict(fix_commands or {})
+        for error_code, fix in fixes.items():
+            if not isinstance(error_code, str) or not _ERROR_CODE.fullmatch(error_code):
+                raise RegistrationError(
+                    f"{cmd_path}: fix_commands key {error_code!r} is not an UPPER_SNAKE error code"
+                )
+            # The target may register later: only the shape is checked now
+            problem = fix_problem(
+                fix, app_name=self.name, companions=self.companions, commands=None
+            )
+            if problem is not None:
+                raise RegistrationError(f"{cmd_path}: fix_commands[{error_code!r}]: {problem}")
 
         def register(fn: Handler) -> Handler:
             self._register(
@@ -524,6 +553,8 @@ class App:
                     sort_key=sort_key,
                     ordered=ordered,
                     provided=() if self.settings is None else (self.settings.cls,),
+                    fix_commands=fixes,
+                    refreshes_auth=refreshes_auth,
                 )
             )
             return fn
@@ -554,7 +585,35 @@ class App:
                     f"{path}: Retry(exhausted={exhausted.value!r}) is not an exit code of the "
                     f"command; add {exhausted.value!r} to exit_codes"
                 )
+        if command.refreshes_auth:
+            taken = [str(p) for p, c in self._commands.items() if c.refreshes_auth]
+            if taken:
+                raise RegistrationError(
+                    f"{path}: refreshes_auth=True is already on {taken[0]}; one command renews "
+                    "credentials"
+                )
+            if command.danger_level is DangerLevel.DESTRUCTIVE:
+                raise RegistrationError(f"{path}: a refresh command cannot be destructive")
         self._commands[path] = command
+        self._fixes_checked = False
+
+    def check_fixes(self) -> None:
+        """Every declared ``fix_commands`` value names a command that exists and is not
+        destructive; run once the table is in use, since a target may register late"""
+        if self._fixes_checked:
+            return
+        for path, command in self._commands.items():
+            for error_code, fix in command.fix_commands.items():
+                problem = self.fix_problem(fix)
+                if problem is not None:
+                    raise RegistrationError(f"{path}: fix_commands[{error_code!r}]: {problem}")
+        self._fixes_checked = True
+
+    def fix_problem(self, fix: object) -> str | None:
+        """Why ``fix`` cannot be an ``error.fix_command`` of this app, or None"""
+        return fix_problem(
+            fix, app_name=self.name, companions=self.companions, commands=self._commands
+        )
 
     def _check_nesting(self, path: CommandPath) -> None:
         """A command is a leaf: nothing may sit under it, and it may not sit under another
@@ -807,6 +866,7 @@ class App:
         return self._commands
 
     def manifest(self) -> dict[str, object]:
+        self.check_fixes()
         return build_manifest(self._commands, self.exits, self.version, self.formats, self.name)
 
     def environment(self) -> list[tuple[str, str]]:
@@ -851,6 +911,7 @@ class App:
         the MCP adapter.
         """
         environ = env if env is not None else os.environ
+        self.check_fixes()
         # Tracebacks of crashed or late handlers go to the host process's stderr
         run = _Run(self, io.StringIO(), sys.stderr, environ)
         try:
@@ -961,6 +1022,7 @@ class App:
         env: Mapping[str, str] | None = None,
         isatty: bool | None = None,
     ) -> int:
+        self.check_fixes()
         # A closed descriptor leaves its sys stream None: then only the exit code answers,
         # and stdin reads as empty
         out = stdout if stdout is not None else sys.stdout or io.StringIO()
@@ -2509,6 +2571,12 @@ class _Run:
                     f"{exc.retry_strategy!r}; use one of {', '.join(RetryStrategy)}"
                 )
                 return self._broken(command, "INVALID_EXIT", message, started, meta)
+        fix = exc.fix_command if exc.fix_command is not None else command.fix_commands.get(exc.code)
+        if exc.fix_command is not None:
+            problem = self.app.fix_problem(exc.fix_command)
+            if problem is not None:
+                message = f"Command {command.path} raised {exc.name} with fix_command {problem}"
+                return self._broken(command, "INVALID_EXIT", message, started, meta)
         if exc.conflict_id is not None and not isinstance(exc.conflict_id, str):
             message = (
                 f"Command {command.path} raised {exc.name} with a conflict_id that is not text"
@@ -2537,7 +2605,7 @@ class _Run:
                 detail=exc.detail,
                 context=context,
                 suggestion=exc.suggestion if exc.suggestion is not None else entry.suggestion,
-                fix_command=exc.fix_command,
+                fix_command=fix,
                 fix_required=exc.fix_required,
                 retry_after_ms=retry_after if retrying else None,
                 retry_strategy=strategy if retrying else None,

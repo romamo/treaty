@@ -16,7 +16,8 @@ from treaty import Affects, App, Arg, Ctx, Exit, Flag, Format, Out
 
 Priority = Literal["low", "normal", "high"]
 
-app = App("todo", version="1.0.0", description="Track todo items")
+# mkdir is the one other program a fix_command may run (REQ-C-030)
+app = App("todo", version="1.0.0", description="Track todo items", companions=("mkdir",))
 app.exit_code(
     "STORE_CORRUPT",
     79,

@@ -1004,6 +1004,42 @@ def _retry_hint(app: App) -> Iterator[Finding]:
             )
 
 
+def constant_fixes(handler: Callable[..., object]) -> list[tuple[str, str]]:
+    """``(code, fix)`` of each raise in the handler with a literal ``fix_command=``;
+    the code is the ``code=`` literal, else the ``Exit.<NAME>`` it calls"""
+    tree = _handler_tree(handler)
+    if tree is None:
+        return []
+    found: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _dotted(node.func) or ""
+        keywords = {k.arg: k.value for k in node.keywords if k.arg is not None}
+        fix = keywords.get("fix_command")
+        if not isinstance(fix, ast.Constant) or not isinstance(fix.value, str):
+            continue
+        code = keywords.get("code")
+        if isinstance(code, ast.Constant) and isinstance(code.value, str):
+            found.append((code.value, fix.value))
+        elif ".Exit." in f".{name}":
+            found.append((name.rsplit(".", 1)[-1], fix.value))
+    return found
+
+
+def _fix_declared(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        for code, fix in constant_fixes(c.handler):
+            yield Finding(
+                "fix-declared",
+                Severity.ADVICE,
+                c.path.value,
+                f"{code} raises a fixed fix_command, checked only when it is raised; a "
+                "declared one is checked at startup (REQ-C-030)",
+                f"fix_commands={{{code!r}: {fix!r}}}, and drop fix_command= from the raise",
+            )
+
+
 def _effects(schema: object) -> set[str] | None:
     """The ``effect`` values an output schema admits; None when it is open or absent"""
     if not isinstance(schema, dict):
@@ -1196,6 +1232,12 @@ RULES: tuple[Rule, ...] = (
         _env_prefix,
     ),
     Rule("retry-hint", "Rate-limit errors say how long to wait", Severity.WARNING, _retry_hint),
+    Rule(
+        "fix-declared",
+        "Fixed fix commands are declared, so startup checks them",
+        Severity.ADVICE,
+        _fix_declared,
+    ),
     Rule(
         "already-exists",
         "Create commands answer a repeat with the existing resource",

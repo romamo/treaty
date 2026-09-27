@@ -7,7 +7,7 @@ import inspect
 import shlex
 import typing
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -143,6 +143,10 @@ class Command:
     """How ``ctx.retry`` retries (REQ-F-078); adds ``--retries`` and ``--retry-delay``"""
     order: OutSpec = NO_ORDER
     """``sort_key=`` and ``ordered=`` of a command whose output is an array (REQ-F-020)"""
+    fix_commands: Mapping[str, str] = field(default_factory=dict)
+    """``error.code`` to the invocation that fixes it, when the raise gives none (REQ-C-030)"""
+    refreshes_auth: bool = False
+    """Renews expired credentials: ``error.refresh_command`` of ``CREDENTIALS_EXPIRED``"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -246,6 +250,8 @@ def build_command(
     sort_key: str | None = None,
     ordered: bool = False,
     provided: Sequence[type] = (),
+    fix_commands: Mapping[str, str] | None = None,
+    refreshes_auth: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -415,6 +421,8 @@ def build_command(
         project_root=tuple(project_root),
         retry=retry,
         order=order,
+        fix_commands=dict(fix_commands or {}),
+        refreshes_auth=refreshes_auth,
     )
 
 

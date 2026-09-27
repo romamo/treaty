@@ -2,6 +2,7 @@
 
 import io
 import json
+import shlex
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -345,3 +346,147 @@ def test_audit_asks_creates_for_conflict_and_deletes_to_drop_not_found() -> None
     assert not [f for f in audit(resource_app(), "res", limit=3).rules if f.id == "already-exists"][
         0
     ].findings
+
+
+# REQ-C-030
+
+
+@dataclass(frozen=True, slots=True)
+class Setup:
+    effect: str
+
+
+def store_app(fixes: dict[str, str] | None = None) -> tuple[App, list[str]]:
+    """``list`` needs the store ``init`` makes; ``wipe`` is destructive"""
+    made: list[str] = []
+    app = App("st", version="1.0.0", companions=("mkdir",))
+
+    @app.command(
+        "list",
+        description="List",
+        danger_level="safe",
+        exit_codes=["PRECONDITION"],
+        fix_commands=fixes if fixes is not None else {"STORE_MISSING": "st init"},
+    )
+    def list_(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        if not made:
+            raise Exit.PRECONDITION(
+                "no store", code="STORE_MISSING", fix_required="the store must exist"
+            )
+        return {"items": 0}
+
+    @app.command("init", description="Init", danger_level="mutating", exit_codes=())
+    def init(args: NoArgs, ctx: Ctx) -> Setup:
+        if made:
+            return Setup("noop")
+        made.append("store")
+        return Setup("created")
+
+    @app.command("wipe", description="Wipe", danger_level="destructive", exit_codes=())
+    def wipe(args: DeleteArgs, ctx: Ctx) -> Removed:
+        return Removed("deleted", "deleted")
+
+    @app.command("locked", description="Locked", danger_level="safe", exit_codes=["PRECONDITION"])
+    def locked(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        raise Exit.PRECONDITION("read-only", fix_required="make the store writable")
+
+    return app, made
+
+
+def run_fix(app: App, fix: str) -> tuple[int, dict[str, Any]]:
+    words = shlex.split(fix)
+    assert words[0] == app.name
+    return run(app, words[1:])
+
+
+def test_a_caller_correctable_error_with_a_single_safe_fix_includes_error_fix_command() -> None:
+    code, envelope = run(store_app()[0], ["list"])
+    error = envelope["error"]
+    assert code == 4 and error["retryable"] is False and error["fix_required"]
+    assert error["fix_command"] == "st init"
+
+
+def test_error_fix_command_runs_successfully_as_is_with_no_edits() -> None:
+    app, _ = store_app()
+    _, envelope = run(app, ["list"])
+    code, _ = run_fix(app, envelope["error"]["fix_command"])
+    assert code == 0
+
+
+def test_running_error_fix_command_twice_in_a_row_produces_no_additional_side_effects() -> None:
+    app, made = store_app()
+    _, envelope = run(app, ["list"])
+    fix = envelope["error"]["fix_command"]
+    _, first = run_fix(app, fix)
+    _, second = run_fix(app, fix)
+    assert first["data"]["effect"] == "created" and second["data"]["effect"] == "noop"
+    assert made == ["store"]
+
+
+def test_registering_a_fix_command_that_invokes_a_destructive_command_raises() -> None:
+    app, _ = store_app({"STORE_MISSING": "st wipe"})
+    with pytest.raises(RegistrationError, match="destructive"):
+        app.manifest()
+    with pytest.raises(RegistrationError, match="destructive"):
+        app.run(["list"], stdout=io.StringIO(), stderr=io.StringIO(), env={}, isatty=False)
+    app, _ = store_app({"STORE_MISSING": "st nothing"})
+    with pytest.raises(RegistrationError, match="names no command"):
+        app.manifest()
+
+
+@pytest.mark.parametrize(
+    "fix",
+    [
+        "st init --token <your-token>",
+        "st init > log",
+        "st init --project $PROJECT_ID",
+        "st init | cat",
+        "st init; st list",
+        "rm -rf /tmp/x",
+        "st 'init",
+    ],
+)
+def test_registering_a_fix_command_with_placeholder_patterns_raises(fix: str) -> None:
+    with pytest.raises(RegistrationError):
+        store_app({"STORE_MISSING": fix})
+
+
+def test_after_error_fix_command_exits_0_the_reissue_does_not_fail_with_the_same_code() -> None:
+    app, _ = store_app()
+    _, envelope = run(app, ["list"])
+    code, _ = run_fix(app, envelope["error"]["fix_command"])
+    assert code == 0
+    code, envelope = run(app, ["list"])
+    assert code == 0 and envelope["ok"] is True
+
+
+def test_when_no_safe_single_command_fix_exists_fix_command_is_absent() -> None:
+    _, envelope = run(store_app()[0], ["locked"])
+    error = envelope["error"]
+    assert "fix_command" not in error and error["fix_required"] == "make the store writable"
+
+
+def test_a_fix_command_raised_at_run_time_is_checked_too() -> None:
+    app = App("rt", version="1.0.0", companions=("mkdir",))
+    fixes: list[str] = []
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=["PRECONDITION"])
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        raise Exit.PRECONDITION("no dir", fix_required="make it", fix_command=fixes[-1])
+
+    for fix, expected in (("mkdir -p tmp/x", "PRECONDITION"), ("curl http://x", "INVALID_EXIT")):
+        fixes.append(fix)
+        assert run(app, ["go"])[1]["error"]["code"] == expected
+
+
+def test_audit_asks_to_declare_a_fixed_fix_command() -> None:
+    app = App("fx", version="1.0.0")
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=["PRECONDITION"])
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        raise Exit.PRECONDITION("no store", code="STORE_MISSING", fix_command="fx init")
+
+    [rule] = [r for r in audit(app, "fx", limit=3).rules if r.id == "fix-declared"]
+    assert [f.fix for f in rule.findings] == [
+        "fix_commands={'STORE_MISSING': 'fx init'}, and drop fix_command= from the raise"
+    ]

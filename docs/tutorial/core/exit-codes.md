@@ -167,6 +167,19 @@ caller can use:
 help. `save` sets `mkdir -p` only when the directory is missing; a read-only directory has
 no safe one-command fix, so it gets `fix_required` alone.
 
+treaty checks every `fix_command` before it reaches the agent: one command, no `<`, `>`,
+`$`, pipes, or `;`, and never a destructive command of the tool. The program must be the
+tool itself or a companion the app declares, so the todo app names `mkdir`:
+
+<!-- file: examples/tutorial/todo_exit_codes.py -->
+```python
+app = App("todo", version="1.0.0", description="Track todo items", companions=("mkdir",))
+```
+
+A fix that fails the check ends the run as `INVALID_EXIT` instead. A fix that is the same
+for every failure of a code can be declared once, where treaty checks it at startup:
+`@app.command(..., fix_commands={"STORE_MISSING": "todo init"})`.
+
 Loading follows the same pattern. Catch the exceptions that mean "damaged file", and
 nothing wider:
 
