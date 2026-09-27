@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1254 passed |
+| `uv run pytest` | 1488 passed, 1 skipped |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -392,6 +392,11 @@ The two do not share code.
   in place. Retries go through `Retrier.call(on=, give_up=)`, which re-raises the
   `NetworkFailure` with `retried` set; `_Run` reads `network_context`, `retried`, and
   `permanent` (TLS) off it
+- **Built-ins are in `_builtins.py`** (13): each `register_*` returns its path for
+  `App._yielding`. `manifest --etag` raises `NotModified`, which `_Run._run_handler` maps to
+  `data: null` and `meta.not_modified`. `inventory()` and `declared()` feed both `cleanup`
+  and `status`. `mcp-validate` compares through `_tools.tool_fields`, so `_builtins` never
+  imports `_mcp` (which imports `_app`)
 - **`ctx.spawn` children are not in `Processes._live`**, so the run's teardown leaves
   them; their pid and deadline go to `<state>/background/<command>.pids`, and each later
   spawn of the command SIGTERMs expired entries whose pid still leads its process group
@@ -419,12 +424,16 @@ src/treaty/
   _http.py       ProxyConfig, Http, HttpResponse, NetworkFailure: ctx.http (10)
   _walk.py       Walk, WalkEntry, Traversal: ctx.walk, loop and depth limits (10)
   _deps.py       Version, Dependency, doctor's dependency and required-tool checks
-  _builtins.py   doctor, cleanup, audit-log: built-ins that yield to an app command (13-D1)
+  _builtins.py   doctor, cleanup, status, changelog, generate-skills, mcp-validate, audit-log:
+                 built-ins that yield to an app command (13-D1)
+  _changelog.py  ChangelogEntry, manifest field diff: the schema changelog (13)
+  _skills.py     CONTEXT.md and SKILL-<command>.md from the manifest (13)
+  _tools.py      ToolEntry, tool_entries(), tool_list(): MCP tools as plain data, no App import
   _redact.py     SECRET_NAME, secret_field(), scrub(): what a secret name is (REQ-F-034)
   _verbosity.py  Verbosity, Level, resolve_verbosity(), trace(): stderr levels (11)
   _journal.py    AuditLog, Journal, log_path(), read_entries(): the audit log (11)
   _protect.py    protect(), tagged(): masking and trust tags of data (REQ-F-058, F-035)
-  _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
+  _mcp.py        the `treaty-mcp` console script: stdio server over App.call, --list-tools
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _select.py     --fields, TokenBudget, tokenizers, --format id lines (12)
   _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
@@ -499,10 +508,10 @@ F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-0
 F-025, F-026, F-027, F-028, F-029, F-030, F-031, F-032, F-034, F-035, F-036, F-037, F-038, F-040, F-041, F-042, F-043, F-044, F-045 (paths),
 F-046, F-047, F-048, F-050, F-051, F-052, F-053, F-054, F-055, F-057, F-058, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-069,
 F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
-C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-010, C-011 (not `status`), C-012,
+C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-010, C-011, C-012,
 C-013, C-015, C-016, C-017, C-018, C-019,
 C-020 (all presets), C-021, C-022, C-023, C-024, C-025, C-029, O-001, O-002, O-003, O-004, O-005, O-007, O-008, O-010, O-011, O-012, O-013, O-014, O-015, O-016, O-017, O-018, O-019, O-020, O-021, O-022,
-O-023, O-024, O-025, O-030, O-031, O-032, O-033, O-036, O-037, O-039, O-040, O-041, O-042, O-047, O-048, O-049, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
+O-023, O-024, O-025, O-026, O-027, O-028, O-029, O-030, O-031, O-032, O-033, O-034, O-035, O-036, O-037, O-039, O-040, O-041, O-042, O-047, O-048, O-049, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
 Framework flags the parser knows: `--format`, `--help`, `--schema` (and `--print-schema`),

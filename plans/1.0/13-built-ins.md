@@ -141,12 +141,30 @@ data=...)`. `--mcp-server-url`: see 13-D3.
 
 ## Tasks
 
-- [ ] `_tools.py` split out of `_mcp.py`; yielding built-ins; `builtin-shadowed` rule; scaffold `status` renamed
-- [ ] `manifest --etag`, `NotModified`, `meta.not_modified` on the CLI, `App.call`, and `exec`
-- [ ] `Check`, `endpoint`, `App(checks=)`, framework checks in `doctor`; `doctor-fix` rule
-- [ ] `status` with its three flags; `cleanup --scope` and `--min-age` with bytes freed
-- [ ] `App(schema_changelog=)`, `changelog --since`, `treaty changelog-add`, `schema-changelog` rule
-- [ ] `_skills.py` and `generate-skills`; a test parses every frontmatter and counts examples
-- [ ] `treaty-mcp --list-tools` with `cli_version`; `mcp-validate`
-- [ ] Conformance probes for the new built-ins in `examples/deployctl.py` and the scaffold
-- [ ] Update COMPLIANCE.md rows (O-026 to O-029, O-034, O-035, O-041), README, HANDOFF, ROADMAP
+- [x] `_tools.py` split out of `_mcp.py`; yielding built-ins; `builtin-shadowed` rule; scaffold `status` renamed
+  (yielding and the rule landed with 08; the scaffold's `status` is now `show`)
+- [x] `manifest --etag`, `NotModified`, `meta.not_modified` on the CLI, `App.call`, and `exec`
+  (`NotModified` is an exception the handler raises, not a returned marker, so the
+  handler keeps its `dict` return type)
+- [x] `Check`, `endpoint`, `App(checks=)`, framework checks in `doctor`; `doctor-fix` rule
+  (every declared `Dependency` is also a `data.checks` entry, so a missing one is a
+  failed check as the criterion says; `Check(network=)` carries `network_context`; the
+  doctor command gets `has_network_io=True` only when an `endpoint` check exists)
+- [x] `status` with its three flags; `cleanup --scope` and `--min-age` with bytes freed
+  (`--show-config` is the global flag, not a `status` field, since the name is reserved on
+  every command; without a flag `status` shows side effects and state files, not the
+  config. `cleanup` output replaces 08's `removed` with `cleaned`; `--min-age` compares
+  the newest mtime in each tree)
+- [x] `App(schema_changelog=)`, `changelog --since`, `treaty changelog-add`, `schema-changelog` rule
+  (`ChangelogEntry` is not exported: apps pass a path. A missing file means no entries
+  yet, so the first `changelog-add` can create it; `changelog` is registered only when
+  `schema_changelog` is given, like `audit-log`. `changelog-add` on the version already
+  latest merges into that entry)
+- [x] `_skills.py` and `generate-skills`; a test parses every frontmatter and counts examples
+  (one `SKILL-<command>.md` per app command; built-ins are listed in `CONTEXT.md`. The
+  examples always include `--schema` and `--help`, so there are at least three)
+- [x] `treaty-mcp --list-tools` with `cli_version`; `mcp-validate`
+  (a tool in the file that the CLI no longer has is a `removed` entry with `field: null`)
+- [x] Conformance probes for the new built-ins in `examples/deployctl.py` and the scaffold
+  (`status` as a read, `manifest --etag x` as invalid, in generated profiles too)
+- [x] Update COMPLIANCE.md rows (O-026 to O-029, O-034, O-035, O-041), README, HANDOFF, ROADMAP

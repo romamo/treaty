@@ -135,9 +135,19 @@ uv add --editable /path/to/treaty
 ## Built-ins
 
 Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`),
-plus `doctor`, `cleanup` (see Declarations), and `audit-log` (see Audit log), which yield:
-an app command or group of the same name replaces them, and the `builtin-shadowed` audit
-rule says so.
+plus `doctor`, `cleanup`, `status` (see Declarations), `generate-skills`, `mcp-validate`
+(see MCP), and `audit-log` (see Audit log), which yield: an app command or group of the
+same name replaces them, and the `builtin-shadowed` audit rule says so.
+`App(schema_changelog=...)` adds `changelog` (see Schemas).
+
+- `manifest --etag sha256:...` answers exit 0, `data: null`, and `meta.not_modified: true`
+  while the manifest is unchanged, on the CLI, in `exec`, and through `App.call`
+  (REQ-O-041)
+- `generate-skills --output-dir skills` writes `CONTEXT.md` and one `SKILL-<command>.md`
+  per app command: frontmatter with `name`, `description`, `version`, `command`, and the
+  `args` schema (every value JSON, so valid YAML), then at least three examples,
+  guardrails from the danger level and exit codes, and patterns (REQ-O-034). Skill files
+  are always Markdown: `--format` is the envelope's representation
 `App(credentials=...)` adds `check-permissions` (see Credentials) and `App(jobs=...)` adds
 `job status` and `job cancel` (see Async jobs).
 `<app> --version` at the root is an alias for `<app> version`; a command's own `--version`
@@ -562,12 +572,27 @@ def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
 - `doctor` checks every dependency and required tool: `data.dependencies` with
   `found_version` and `ok`, `data.checks` with each tool's `version`, `required`, and a
   `fix`. A failure exits `4` with `DOCTOR_CHECKS_FAILED`; a version above `max_version`
-  is a `DEPENDENCY_ABOVE_MAX` warning
+  is a `DEPENDENCY_ABOVE_MAX` warning. Every dependency is also a `data.checks` entry;
+  `data.checks` also says whether the state and user config directories can be written,
+  and runs `App(checks=[...])`: functions of the ctx returning `treaty.Check(name, ok, fix=..., version=, required=, error=)`, or
+  `treaty.endpoint(url, fix=...)`, a GET through `ctx.http` so proxy variables apply,
+  whose failure carries `network_context` (REQ-O-026). A failing `Check` without `fix` is
+  `INVALID_OUTPUT`; the `doctor-fix` audit rule finds one
 - `filesystem_side_effects=` lists where the command writes: `path` (absolute or `~/`,
   with `{placeholders}` matching any segment), `type` (`cache`, `log`, `temp`,
   `credential`, `config`), `ttl_seconds`, and `clearable_with`, an invocation checked to
   name a command (REQ-C-011). `cleanup` (destructive; `--dry-run` lists) removes every
-  declared `temp` and `cache` path
+  declared `temp`, `cache`, and `log` path, the caches, and handed-out output files;
+  `--scope temp|cache|logs` narrows it, `--min-age SECONDS` keeps anything changed more
+  recently (listed under `skipped`), and `data.cleaned` gives each path's `type` and
+  `bytes_freed`, with `total_bytes_freed` (REQ-O-027). `credential` and `config` paths
+  are never removed
+- `status` (safe, exits 0 whatever exists) lists every declared side effect with the
+  absolute paths it matches and their sizes (`--show-side-effects`), and the state files,
+  config files, idempotency records, the audit log, and declared `credential` and `config`
+  paths, with `purpose`, `exists`, and `bytes`, never their values (`--show-state-files`);
+  with neither flag, both. `App(credentials=)` adds `logged_in`, and `status --show-config`
+  is the global `--show-config` (REQ-O-028)
 - `background=Background("tool stop-watcher", max_lifetime_seconds=3600)` allows
   `ctx.spawn(argv)`, which starts a child in its own session with output to a log under
   the state directory and leaves it running when the run ends; the output carries
@@ -1107,6 +1132,14 @@ that break this, such as a `fetched_at` (rule `volatile-data`).
   without the matching bump. `--schema-version MAJOR` selects a `compat=` shim, warns
   `SCHEMA_DEPRECATED`, and exits 2 with `SCHEMA_VERSION_UNSUPPORTED` for a major the
   command does not serve; `<cmd> --schema` shows `schema_version` and `min_schema_version`
+- **Schema changelog**: `App(schema_changelog=Path(__file__).parent / "schema-changelog.json")`
+  adds `changelog`, the versions newest first with `date`, `breaking`, and the `added`,
+  `removed`, and `changed` field paths (`deploy.flags.target`, `deploy.output.url`,
+  `deploy.exit_codes.10`); `--since 1.0.0` keeps the newer ones (REQ-O-029).
+  `treaty changelog-add myapp.cli:app` diffs the `<app>.manifest.json` snapshot beside the
+  file against the live manifest, marks the entry breaking when anything was removed or
+  retyped or a required flag appeared, and updates the snapshot; the `schema-changelog`
+  audit rule warns when the live manifest is not recorded
 - **Trace**: `TOOL_TRACE_ID` becomes `meta.trace_id`, is inherited by every `ctx.run`
   child, and ends every framework line on stderr (`trace=<id>`, or a `trace_id` key in
   JSON). A value over 256 characters or with control characters exits 2
@@ -1224,6 +1257,11 @@ effect validation, and output caps all apply, and a streaming command returns it
 envelope. Tool annotations map `safe` to read-only and idempotent, `destructive` to
 destructive, and `has_network_io` to open-world. `App.call(path, arguments)` is public
 for other in-process adapters.
+
+`treaty-mcp deployctl:app --list-tools` prints the tools as JSON with `cli_version`, no
+`mcp` package needed; commit it, and `deployctl mcp-validate --mcp-schema-file mcp.json`
+in CI exits `1` with `SCHEMA_DRIFT_DETECTED` when the commands drifted from it: `added`
+and `removed` fields, `changed` types, and `missing_from_mcp` commands (REQ-O-035).
 
 ## Conformance
 

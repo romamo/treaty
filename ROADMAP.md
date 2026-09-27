@@ -198,6 +198,15 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `--token-limit`, `--token-offset`, `--token-count`, `--tokenizer`, `app.tokenizer()`,
   the `treaty[tiktoken]` extra, and the audit rule `id-field`. Behavior change: an app
   with an output `id` field offers `--format id`, listed in the manifest's `format` enum
+- 1.0 plan, built-in commands (`plans/1.0/13-built-ins.md`): `manifest --etag` with
+  `meta.not_modified`; `doctor` checks for the state and config directories and
+  `App(checks=[...])` with `treaty.Check` and `treaty.endpoint`; `status`; `cleanup
+  --scope` and `--min-age` with bytes freed; `App(schema_changelog=)`, `changelog`, and
+  `treaty changelog-add`; `generate-skills`; `mcp-validate` and `treaty-mcp --list-tools`;
+  audit rules `doctor-fix` and `schema-changelog`. Behavior changes: every app has
+  `status`, `generate-skills`, and `mcp-validate` (yielding to an app command), `cleanup`
+  output has `cleaned` instead of `removed` and also removes declared `log` paths, and the
+  scaffold's `status` command is `show`
 
 ## 0.1.x: after the first minor release
 
@@ -241,7 +250,8 @@ matching audit rule so adoption never requires reading the spec.
   cancellation (REQ-C-008): done in 1.0 plan 06, with `--resume-from`,
   `--rollback-on-failure`, and `treaty.Batch`
 - Framework-managed locks with `retry_after_ms` (REQ-F-033): done, `ctx.lock`
-- Dependency declarations and a `doctor` built-in (REQ-O-031)
+- Dependency declarations and a `doctor` built-in (REQ-O-031): done, with custom and
+  network checks in 1.0 plan 13
 - Token budget flags and `--fields` (REQ-O-049, REQ-O-002): done in 1.0 plan 12 as
   `--token-limit`, `--token-offset`, `--token-count`, and `--tokenizer`, the spec's names
 
