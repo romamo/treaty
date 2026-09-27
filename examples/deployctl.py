@@ -25,6 +25,14 @@ app.exit_code(
     retryable=False,
     side_effects="none",
 )
+app.exit_code(
+    "UNKNOWN_SETTING",
+    80,
+    description="The setting name is not one deployctl knows",
+    retryable=False,
+    side_effects="none",
+)
+SETTINGS = ("region", "strategy")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,11 +85,13 @@ class Start:
     "start",
     description="Start deploying a service; poll the returned job for the outcome",
     danger_level="mutating",
-    exit_codes=(),
+    exit_codes=["DEPLOY_CONFLICT"],
     async_job=True,
     examples=[("Start a deployment", "deployctl deploy start api")],
 )
 def start(args: Start, ctx: Ctx) -> Job:
+    if args.service == "locked":
+        raise Exit.DEPLOY_CONFLICT("deployment in progress", context={"service": args.service})
     return Job(f"deploy-{args.service}", "running", effect="created")
 
 
@@ -106,11 +116,15 @@ config = app.group("config", description="Change settings")
     "set",
     description="Set a setting in the project config, or the user config with --global",
     danger_level="mutating",
-    exit_codes=(),
+    exit_codes=["UNKNOWN_SETTING"],
     config_write_scope="local",
     examples=[("Set the region", "deployctl config set region eu-west-1")],
 )
 def set_(args: Setting, ctx: Ctx) -> Written:
+    if args.name not in SETTINGS:
+        raise Exit.UNKNOWN_SETTING(
+            f"no setting named {args.name}", context={"name": args.name, "known": list(SETTINGS)}
+        )
     assert ctx.config_path is not None
     old = ctx.config_path.read_text().splitlines() if ctx.config_path.exists() else []
     kept = [line for line in old if not line.startswith(f"{args.name} =")]
