@@ -13,6 +13,9 @@ lifecycle (06), output security (07), additional command declarations (08), sess
 and process hygiene (09), network and filesystem utilities (10), and logging,
 verbosity, and the audit log (11), output selection and streaming flags (12),
 built-in commands (13), and agent docs (14).
+The spec has no tagged release yet: this assessment is against the spec commit CI pins
+as `SPEC_REF` (`91dedd2`), and the 1.0 tag will name the spec release it conforms to.
+1.0 claims Level 2; the Level 3 score below is published, not claimed (15-D3).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which

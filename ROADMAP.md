@@ -212,15 +212,18 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `CONTEXT.md`, AGENTS.md and its check test from `treaty init`, and the check plus an
   install-twice step in CI. Behavior change: `--version --format plain` prints the bare
   version
+- 1.0 plan, release readiness (`plans/1.0/15-release-readiness.md`), in-repo part:
+  `docs/api.md` with a decision per public item, the `tests/test_public_api.py` snapshot,
+  `CHANGELOG.md`, `docs/guide.md`, "Stability" and "Platforms" in the README. Breaking:
+  `ExecArgs` unexported, `Ctx` run plumbing and seven `App` helpers private, and
+  `framework_version` is treaty's version. Open: the consumer ports, `1.0.0rc1` and its
+  soak, and the tag, which need real consumers
 
 ## 0.1.x: after the first minor release
 
 0.1.0 shipped Level 1 and Level 2 of the spec (see `COMPLIANCE.md`). Still open:
 
-- `CHANGELOG.md`
-- `docs/guide.md`: the judgement calls the audit cannot make (naming paths, what belongs in
-  `error.context`, when a failure deserves its own exit code); short, because every
-  mechanical step is now an audit rule
+- `CHANGELOG.md` and `docs/guide.md`: done in the 1.0 plan (15)
 
 ## 0.1.1: cloudfall adoption
 

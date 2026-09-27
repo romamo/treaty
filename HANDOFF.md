@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1507 passed, 1 skipped |
+| `uv run pytest` | 1510 passed, 1 skipped |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -400,6 +400,13 @@ The two do not share code.
 - **`ctx.spawn` children are not in `Processes._live`**, so the run's teardown leaves
   them; their pid and deadline go to `<state>/background/<command>.pids`, and each later
   spawn of the command SIGTERMs expired entries whose pid still leads its process group
+- **The public surface is snapshotted** (15): `tests/test_public_api.py` fails on any
+  change to exports, keywords, `Ctx` members, wire keys, exit codes, or env vars.
+  Regenerate with `uv run python tests/test_public_api.py > tests/data/public_api.json`,
+  record the decision in `docs/api.md`, and add a `CHANGELOG.md` entry. `Ctx` fields
+  the run uses internally are `_`-prefixed; a new one should be too
+- **`framework_version` is treaty's version**; `removals()` in `_audit.py` takes the
+  released app version from the baseline envelope's `meta.tool_version`
 
 ## Layout
 

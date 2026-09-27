@@ -49,6 +49,10 @@ Workstream 01 adds `meta.schema_version`. Set the envelope and manifest contract
 version `1` at the tag, and document that additive fields keep the version while removals
 or meaning changes bump it.
 
+Deviation: `meta.schema_version` stays the per-command `data` contract that 01 made it,
+and the manifest's `schema_version` is the spec's `"3.0"`. The envelope and manifest are
+versioned by the spec schemas they validate against; `docs/api.md` states the rule.
+
 ### Deprecation policy (after 1.0)
 
 - Removals only in a major release. A deprecated keyword or name works for at least one
@@ -90,14 +94,29 @@ changes. Move the classifier to `4 - Beta` at rc1 and `5 - Production/Stable` at
 
 ## Tasks
 
-- [ ] Inventory script and `docs/api.md` with a keep, rename, private, or remove decision per item
-- [ ] Settle 07-D4, 13-D1, 08-D1 with 13-D2, and `Ctx.config`; fix `framework_version`
-- [ ] Apply the review's renames and removals; migrate examples, scaffold, tutorial
-- [ ] `tests/test_public_api.py` snapshot of the frozen surface
-- [ ] `CHANGELOG.md` from tag history
-- [ ] `docs/guide.md`
-- [ ] Stability and deprecation policy in `README.md`; `DEPRECATED_USAGE` warning and audit rule
-- [ ] Document per-platform behavior (signals on Windows)
+- [x] Inventory script and `docs/api.md` with a keep, rename, private, or remove decision per item
+  (the inventory lives in `tests/test_public_api.py`; running it as a script prints the
+  snapshot, so `tmp/` holds only a wrapper)
+- [x] Settle 07-D4, 13-D1, 08-D1 with 13-D2, and `Ctx.config`; fix `framework_version`
+  (all four had landed with their workstreams: `Out`, yielding built-ins,
+  `status --show-side-effects`, `Ctx._config_file`. `framework_version` is treaty's
+  version; `treaty audit --baseline` reads the released app version from the saved
+  response's `meta.tool_version` instead)
+- [x] Apply the review's renames and removals; migrate examples, scaffold, tutorial
+  (no renames; `ExecArgs` unexported, nine `Ctx` plumbing fields and seven `App` helpers
+  made private. None was used by examples, scaffold, tutorial, or README, so nothing
+  migrated. `ExitCodeName` and `SchemaError` stay public: `CliExit` carries the one and
+  registration raises the other)
+- [x] `tests/test_public_api.py` snapshot of the frozen surface
+- [x] `CHANGELOG.md` from tag history
+- [x] `docs/guide.md`
+- [x] Stability and deprecation policy in `README.md`; `DEPRECATED_USAGE` warning and audit rule
+  (policy only: treaty has no registration-warning channel and nothing is deprecated, so
+  the warning and rule land with the first deprecation after 1.0, on `treaty.Deprecated`)
+- [x] Document per-platform behavior (signals on Windows)
+  (README "Platforms")
 - [ ] Finish cloudfall port; port a second consumer; feed gaps back into Phase A
-- [ ] `1.0.0rc1`, classifier `4 - Beta`; soak with both consumers
+  (needs the user: a real-consumer soak)
+- [ ] `1.0.0rc1`, classifier `4 - Beta`; soak with both consumers (after the consumer ports)
 - [ ] Tag `1.0.0`, classifier `5 - Production/Stable`; update `COMPLIANCE.md`, `README.md`, `HANDOFF.md`, `ROADMAP.md`
+  (after the soak)
