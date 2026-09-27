@@ -3168,7 +3168,6 @@ class _Run:
                     f"{exc.retry_strategy!r}; use one of {', '.join(RetryStrategy)}"
                 )
                 return self._broken(command, "INVALID_EXIT", message, started, meta)
-        fix = exc.fix_command if exc.fix_command is not None else command.fix_commands.get(exc.code)
         if exc.fix_command is not None:
             problem = self.app.fix_problem(exc.fix_command)
             if problem is not None:
@@ -3192,6 +3191,11 @@ class _Run:
         retried = exc.retried if isinstance(exc, RetriesExhausted) else None
         # 03-D1: PRECONDITION is not retryable, but nothing ran behind a held lock
         retrying = (entry.retryable or isinstance(exc, LockHeld)) and not retried
+        fix = exc.fix_command
+        if fix is None and not retrying:
+            # A declared fix is for what a retry cannot clear: fix_command is present only
+            # when retryable is false (REQ-C-030)
+            fix = command.fix_commands.get(exc.code)
         auth = exc if isinstance(exc, AuthFailure) else None  # REQ-F-063: the gate's fields
         return self._envelope(
             entry.code.value,

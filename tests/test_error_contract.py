@@ -845,3 +845,21 @@ def test_a_redirect_needs_a_registered_target_and_a_free_path() -> None:
         @app.command("revert", description="R", danger_level="safe", exit_codes=())
         def revert(args: NoArgs, ctx: Ctx) -> dict[str, str]:
             return {}
+
+
+def test_a_declared_fix_command_is_left_off_a_retryable_error() -> None:
+    app = App("st", version="1.0.0")
+
+    @app.command(
+        "sync",
+        description="Sync",
+        danger_level="safe",
+        exit_codes=["UNAVAILABLE", "PRECONDITION"],
+        fix_commands={"BACKEND_DOWN": "st sync"},
+    )
+    def sync(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        raise Exit.UNAVAILABLE("backend is down", code="BACKEND_DOWN")
+
+    code, envelope = run(app, ["sync"])
+    error = envelope["error"]
+    assert code == 12 and error["retryable"] is True and "fix_command" not in error
