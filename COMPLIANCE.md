@@ -8,7 +8,8 @@ hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declar
 writes), then re-checked after the eighth review round (F-015, F-018, F-052, O-003, O-048), and
 re-audited 2026-09-27 against the source (C-019, F-071, O-038, O-039), then updated for
 the 1.0 plan's reserved names, response metadata (01), output data contract (05), config
-layer (02), error contract (03), and argument grammar (04).
+layer (02), error contract (03), argument grammar (04), and multi-step commands and
+lifecycle (06).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -22,15 +23,15 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 101 | 16 | 42 | **69%** |
+| Level 3: full spec | 159 | 106 | 15 | 38 | **71%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Framework-automatic (F) | 79 | 59 | 8 | 12 | **80%** |
-| Command contract (C) | 30 | 22 | 3 | 5 | **78%** |
-| Opt-in (O) | 50 | 20 | 5 | 25 | **45%** |
+| Command contract (C) | 30 | 25 | 2 | 3 | **87%** |
+| Opt-in (O) | 50 | 22 | 5 | 23 | **49%** |
 
 ## Open mandatory requirements
 
@@ -133,8 +134,8 @@ open.
 | [REQ-C-005](../cli-agent-ergonomics/requirements/c-005-interactive-commands-must-support-yes-non-interact.md) | Interactive Commands Must Support --yes / --non-interactive | P0 | 2 | Done | `interactive=True` adds `--yes` and `--non-interactive` and `interactive: true` in the manifest and `--schema`; a prompt that cannot be shown exits 4 |
 | [REQ-C-006](../cli-agent-ergonomics/requirements/c-006-all-args-validated-in-phase-1.md) | All Args Validated in Phase 1 | P0 | 2 | Done | All phase-1 errors in `error.errors` with field and value |
 | [REQ-C-007](../cli-agent-ergonomics/requirements/c-007-mutating-commands-accept-idempotency-key.md) | Mutating Commands Accept --idempotency-key | P1 | 3 | Done | `--idempotency-key` with replay as `noop`; with `<APP>_SESSION` set, a key derived from session, command, and arguments, in `meta.idempotency_key` |
-| [REQ-C-008](../cli-agent-ergonomics/requirements/c-008-multi-step-commands-emit-step-manifest.md) | Multi-Step Commands Emit Step Manifest | P1 | 3 | Not started | No step manifest (ROADMAP 0.3.0) |
-| [REQ-C-009](../cli-agent-ergonomics/requirements/c-009-multi-step-commands-report-completed-failed-skippe.md) | Multi-Step Commands Report completed/failed/skipped | P1 | 3 | Not started | No batch summary contract |
+| [REQ-C-008](../cli-agent-ergonomics/requirements/c-008-multi-step-commands-emit-step-manifest.md) | Multi-Step Commands Emit Step Manifest | P1 | 3 | Done | `steps=` in the manifest and `--schema`; `ctx.step` logs step start and completion and names the step in heartbeat lines; `data` carries `completed_steps`, `failed_step`, and `skipped_steps` on success, failure, timeout, and signal; a failure after a completed step exits 3 keeping `error.code`; out-of-order steps are `INVALID_STEP` |
+| [REQ-C-009](../cli-agent-ergonomics/requirements/c-009-multi-step-commands-report-completed-failed-skippe.md) | Multi-Step Commands Report completed/failed/skipped | P1 | 3 | Done | A handler returns `treaty.Batch[T]` of `Item`s; `data` is `summary` and `results` with `ok` and a standard `error` (code, message, retryable) per failed item, `Exit` errors taking `retryable` from their exit code; any failed item exits 3 `PARTIAL_FAILURE` |
 | [REQ-C-010](../cli-agent-ergonomics/requirements/c-010-background-process-commands-declare-metadata.md) | Background-Process Commands Declare Metadata | P2 | 3 | Not started | No background-process metadata |
 | [REQ-C-011](../cli-agent-ergonomics/requirements/c-011-commands-declare-filesystem-side-effects.md) | Commands Declare Filesystem Side Effects | P3 | 3 | Not started | No filesystem side-effect declaration |
 | [REQ-C-012](../cli-agent-ergonomics/requirements/c-012-commands-with-network-i-o-support-timeout.md) | Commands with Network I/O Support --timeout | P0 | 2 | Done | `has_network_io` adds `--timeout` (`0` disables it); `ctx.timeout` for handlers; `network-timeout` audit rule flags calls without `timeout=` |
@@ -142,7 +143,7 @@ open.
 | [REQ-C-014](../cli-agent-ergonomics/requirements/c-014-error-responses-include-retryable-and-retry-after-.md) | Error Responses Include retryable and retry_after_ms | P1 | 3 | Done | `retryable` always present; `RATE_LIMITED` without `retry_after_ms` is `INVALID_EXIT`; `retry_strategy` and exit code defaults; a read-only command's `TIMEOUT` is side_effects none and retryable; `retry-hint` rule |
 | [REQ-C-015](../cli-agent-ergonomics/requirements/c-015-commands-declare-input-and-output-schema.md) | Commands Declare Input and Output Schema | P1 | 3 | Done | `--schema` has parameters and output schema, derived from the dataclass |
 | [REQ-C-016](../cli-agent-ergonomics/requirements/c-016-secrets-accepted-only-via-env-var-or-file.md) | Secrets Accepted Only via Env Var or File | P1 | 3 | Done | Secrets only via `--x-from-env`, `--x-from-file`, or `<APP>_<X>` |
-| [REQ-C-017](../cli-agent-ergonomics/requirements/c-017-commands-register-cleanup-hook.md) | Commands Register cleanup() Hook | P1 | 3 | Partial | `cleanup=` runs on signals only, not on normal exit or timeout; no resource `release` |
+| [REQ-C-017](../cli-agent-ergonomics/requirements/c-017-commands-register-cleanup-hook.md) | Commands Register cleanup() Hook | P1 | 3 | Done | Every run tears down once on every exit (result, error, timeout after the grace, signal, closed stdout): each acquired resource's `release`, newest first, then `cleanup=`; a failing hook warns `CLEANUP_FAILED`; audit rule `resource-release` flags resources with `close` and no `release` |
 | [REQ-C-018](../cli-agent-ergonomics/requirements/c-018-commands-declare-platform-requirements.md) | Commands Declare Platform Requirements | P3 | 3 | Not started | No platform or required-tools declaration |
 | [REQ-C-019](../cli-agent-ergonomics/requirements/c-019-subprocess-invoking-commands-declare-argument-sche.md) | Subprocess-Invoking Commands Declare Argument Schema | P1 | 3 | Partial | `ctx.run`/`ctx.pipeline` take argument lists, so REQ-F-044 applies; `os.system` is not flagged and `--schema` has no `subprocess` section |
 | [REQ-C-020](../cli-agent-ergonomics/requirements/c-020-resource-id-fields-declare-validation-pattern.md) | Resource ID Fields Declare Validation Pattern | P1 | 3 | Done | `Flag`/`Arg` `pattern=` or `pattern_type=` (`alphanumeric_id`, `uuid`, `semver`, `url`), or a scalar's, checked in phase 1; the error names the flag and the pattern; the `id-pattern` audit rule is the registration warning (04-D1) |
@@ -170,8 +171,8 @@ open.
 | [REQ-O-007](../cli-agent-ergonomics/requirements/o-007-stable-output-flag.md) | --stable-output Flag | P3 | 3 | Done | Global `--stable-output` (`stable_output` in exec and MCP): no `request_id`, `timestamp`, or `retries`, `duration_ms` 0, `Out(volatile=True)` fields dropped, no heartbeats; byte-identical stdout tested |
 | [REQ-O-008](../cli-agent-ergonomics/requirements/o-008-quiet-verbose-debug-verbosity-flags.md) | --quiet / --verbose / --debug Verbosity Flags | P1 | 3 | Not started | No verbosity flags |
 | [REQ-O-009](../cli-agent-ergonomics/requirements/o-009-validate-only-flag.md) | --validate-only Flag | P1 | 3 | Done | `--validate-only` on every command: phase 1 only, `data: null` and `meta.validation_only: true` with exit 0, exit 2 listing every error; the gate, idempotency store, and handler never run (exit 2 over the schema's 3, X6) |
-| [REQ-O-010](../cli-agent-ergonomics/requirements/o-010-resume-from-flag-for-multi-step-commands.md) | --resume-from Flag for Multi-Step Commands | P2 | 3 | Not started | No `--resume-from` |
-| [REQ-O-011](../cli-agent-ergonomics/requirements/o-011-rollback-on-failure-flag.md) | --rollback-on-failure Flag | P2 | 3 | Not started | No rollback hook |
+| [REQ-O-010](../cli-agent-ergonomics/requirements/o-010-resume-from-flag-for-multi-step-commands.md) | --resume-from Flag for Multi-Step Commands | P2 | 3 | Done | `resumable=True` adds `--resume-from STEP` (an enum of the steps; unknown exits 2); earlier steps' `ctx.step` returns False and they are `skipped_steps`; failures carry `resume_from`; audit rule `resume-guard`; a conformance probe |
+| [REQ-O-011](../cli-agent-ergonomics/requirements/o-011-rollback-on-failure-flag.md) | --rollback-on-failure Flag | P2 | 3 | Done | `rollback=` adds `--rollback-on-failure`; a failed step calls it with the completed steps, newest first, before the teardown; `data.rollback_status` is completed, failed (with `rollback_error`), or not_attempted; exit stays 3; `--schema` says `rollback_available` |
 | [REQ-O-012](../cli-agent-ergonomics/requirements/o-012-heartbeat-interval-flag.md) | --heartbeat-interval Flag | P2 | 3 | Not started | No `--heartbeat-interval` |
 | [REQ-O-013](../cli-agent-ergonomics/requirements/o-013-schema-output-schema-flag.md) | --schema / --output-schema Flag | P1 | 3 | Done | `--schema`, the `--print-schema` alias, and `<cmd> --output-schema` (the `data` schema in an envelope); per-field stability tiers have no criterion or schema field |
 | [REQ-O-014](../cli-agent-ergonomics/requirements/o-014-schema-version-compatibility-flag.md) | --schema-version Compatibility Flag | P2 | 3 | Done | `compat={"1.4": shim}` served by `--schema-version MAJOR` (argv global, `schema_version` in JSON); `SCHEMA_DEPRECATED` warning; `SCHEMA_VERSION_UNSUPPORTED` exit 2; `<cmd> --schema` shows `schema_version` and `min_schema_version` |

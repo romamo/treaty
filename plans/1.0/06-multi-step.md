@@ -146,13 +146,27 @@ completed, so a successful rollback never exits 0.
 
 ## Tasks
 
-- [ ] `StepName`, `StepTracker`, `ctx.step`, `steps=` registration checks, `INVALID_STEP`
-- [ ] Step fields on success, failure, timeout, and `CANCELLED`; `PARTIAL_FAILURE` rewrite; `steps` in manifest
-- [ ] Step log lines and `step` in heartbeat lines
-- [ ] `Batch`, `Item`, `ItemError.from_exit`; schema, serialization, exit 3, effect check
-- [ ] `Teardown`; `release` on resources; `_invoke` finally, timeout, cancel, closed stdout, stream paths
-- [ ] `CLEANUP_FAILED` warning; audit rule `resource-release`; migrate `examples/slowctl.py` and docs for the `cleanup=` change
-- [ ] `resumable=`, `--resume-from`, `resume_from` in failure data; audit rule `resume-guard`
-- [ ] `rollback=`, `--rollback-on-failure`, `rollback_status`; `resumable` and `rollback_available` in `--schema`
-- [ ] Conformance profile: probes for `--resume-from` with a bad step name (exit 2)
-- [ ] Update COMPLIANCE rows C-008, C-009, C-017, O-010, O-011; README, HANDOFF, ROADMAP (0.1.1 `release`, 0.3.0 step manifest)
+- [x] `StepName`, `StepTracker`, `ctx.step`, `steps=` registration checks, `INVALID_STEP`.
+  The error class is `StepError`; `steps=` and `streaming=True` together are refused
+- [x] Step fields on success, failure, timeout, and `CANCELLED`; `PARTIAL_FAILURE` rewrite; `steps` in manifest.
+  Deviation: one post-step, `_Run._stepped`, merges the snapshot into any execution-phase
+  envelope instead of editing `_exit_envelope`, `_crashed`, the timeout branch, and
+  `_cancelled` one by one. `TIMEOUT` and `CANCELLED` keep their exit (10, 130, 143) so the
+  signal and timeout contracts hold; any other failure after a completed step exits 3 with
+  `retryable: false`
+- [x] Step log lines and `step` in heartbeat lines
+- [x] `Batch`, `Item`, `ItemError.from_exit`; schema, serialization, exit 3, effect check.
+  Deviation: no `ItemError.from_exit(exc, exits)`; `Item(id, error=Exit.X(...))` takes a
+  raised `CliExit` directly and the run fills `retryable` from the registry. A batch is
+  refused on destructive commands (one `would_affect` per dry run), with `compat=`,
+  `steps=`, and `paginated=`. The batch `effect` is the items' own when they agree, else
+  `updated`, and `noop` when none succeeded
+- [x] `Teardown`; `release` on resources; `_invoke` finally, timeout, cancel, closed stdout, stream paths.
+  `ctx.lock` keeps releasing in its `with` block and does not register with `Teardown`;
+  a resource that wraps it (`tests/fixture_lifecycle_app.py`) is released on every exit
+- [x] `CLEANUP_FAILED` warning; audit rule `resource-release`; migrate `examples/slowctl.py` and docs for the `cleanup=` change.
+  No changelog file exists yet; the break is in README and HANDOFF for 15's changelog
+- [x] `resumable=`, `--resume-from`, `resume_from` in failure data; audit rule `resume-guard`
+- [x] `rollback=`, `--rollback-on-failure`, `rollback_status`; `resumable` and `rollback_available` in `--schema`
+- [x] Conformance profile: probes for `--resume-from` with a bad step name (exit 2)
+- [x] Update COMPLIANCE rows C-008, C-009, C-017, O-010, O-011; README, HANDOFF, ROADMAP (0.1.1 `release`, 0.3.0 step manifest)

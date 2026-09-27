@@ -100,7 +100,9 @@ Phase B   08 ── 13      09      10      11      12 (after 07)      14 (after
   lands before 01's `volatile-data` audit rule, which suggests it
 - **03 before 04**: 04 uses `App.redirect` and exit 13 from 03 for removed commands
 - **06** provides the run-scoped `Teardown` that 03's `ctx.lock` and 09's session temp
-  directory register with; land its teardown task early
+  directory register with; land its teardown task early. Landed: 09 calls
+  `ctx.teardown.add(name, fn)`; `ctx.lock` kept its `with` block, which a resource's
+  `release` can close
 - **07 before 12**: both extend the one output step `_Run._present` (mask, trust tags,
   `--fields`, token budget, byte cap, in that order)
 - **02 before 14**: 14's env var inventory reads 02's registry of known variables

@@ -165,9 +165,8 @@ landed the same day; what remains under each is follow-up work:
 
 - **Custom scalars**: done, see above, including phase-1 checks for the `alphanumeric_id`,
   `uuid`, `semver`, and `url` presets
-- **Typed resources**: done, see above. Still open from it: a `release` counterpart to
-  `acquire` for resources that hold a lock or a connection, run after the handler and on
-  cancellation alongside `cleanup=`
+- **Typed resources**: done, see above, and `release(self)` on a resource class is called
+  when the run ends by any exit, before `cleanup=` (1.0 plan 06)
 - **Streaming handlers**: done, see above. Still open from it: streaming for
   mutating commands once the effect contract can name the event that carries `effect`
 - **MCP adapter**: done, see above, as the `treaty-mcp` script rather than a `treaty`
@@ -187,7 +186,8 @@ matching audit rule so adoption never requires reading the spec.
 - The resource-id patterns of REQ-F-045 (`?`, `#`, encoded metacharacters) beyond the
   REQ-C-020 presets, which are all done
 - Multi-step commands with a step manifest and `completed_steps` on timeout and
-  cancellation (REQ-C-008)
+  cancellation (REQ-C-008): done in 1.0 plan 06, with `--resume-from`,
+  `--rollback-on-failure`, and `treaty.Batch`
 - Framework-managed locks with `retry_after_ms` (REQ-F-033): done, `ctx.lock`
 - Dependency declarations and a `doctor` built-in (REQ-O-031)
 - Token budget flags `--max-tokens` and `--fields` (REQ-O-049)

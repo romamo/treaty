@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1100 passed |
+| `uv run pytest` | 1150 passed |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -307,6 +307,25 @@ The two do not share code.
   with `corrected_input`
 - **A keyword field is spelled without its trailing underscore.** `for_` is `--for` and
   the JSON key `for` (`_flags.flag_name`); `payload_schema` keys follow the flag
+- **One `Teardown` per handler run** (`_lifecycle.py`), built in `_Run._ctx` and carried
+  on `Ctx.teardown`. `Resolver.get` adds each acquired resource's `release`; `_invoke`
+  calls `begin()` and runs it in a `finally` on the handler's thread, except for a stream,
+  whose `stream()` runs it after closing the generator and before building the terminal
+  envelope. The timeout path (`_after_grace`) and `_cancelled` join the worker for
+  `GRACE_SECONDS` when something is pending, then run it beside the handler (06-D3);
+  `output_closed` runs it for an in-flight stream. Only the first `run()` calls hooks; a
+  concurrent one waits for it. A later workstream's framework resource (09's session temp
+  dir) calls `ctx.teardown.add(name, fn)`; `ctx.lock` still releases in its `with` block
+- **Step fields are added after the envelope is built.** `_Run._execute` wraps
+  `_run_handler` and `_stepped` merges the `StepTracker` snapshot into `data` for any
+  execution-phase envelope, rewriting the exit to 3 when a step completed, unless the
+  error is `TIMEOUT` or `CANCELLED` (they keep 10, 130, 143). Replays and validation-phase
+  envelopes (previews, refusals) pass through untouched. `ctx.step` and rollback run on
+  the handler's thread; rollback in `_invoke`'s `except`, before the teardown, never for
+  `Cancelled` or `KeyboardInterrupt`
+- **`Batch[T]` commands keep `output_type = T`** with `Command.batch`; `_run_handler`
+  builds `summary` and `results` in `_batch_data` without passing the whole `data`
+  through `arrange`, so results keep the handler's order; `_batch_envelope` exits 3
 
 ## Layout
 
@@ -320,6 +339,9 @@ src/treaty/
   _scaffold.py   file templates for `treaty init`; generated projects pass the audit
   _scalars.py    ScalarSpec and ScalarRegistry: custom scalar classes and their constraints
   _resources.py  ResourceSpec, resource_graph(), Resolver: typed handler resources
+  _lifecycle.py  Teardown: one run's release hooks, then cleanup=, once on every exit
+  _steps.py      StepName, StepTracker, Rollback: steps=, ctx.step, resume and rollback
+  _batch.py      Batch, Item, ItemError, batch_schema(): per-item results (REQ-C-009)
   _mcp.py        the `treaty-mcp` console script: tool entries over App.call, stdio server
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap
   _page.py       Page, PageRequest, Limit, Position (cursor tokens), take(): list commands
@@ -393,8 +415,8 @@ F-011, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-0
 F-025 (not the audit log), F-027, F-028, F-031, F-034, F-040, F-044, F-045 (paths),
 F-046, F-047, F-048, F-051, F-052, F-053, F-054, F-055, F-057, F-062, F-064, F-065, F-069,
 F-070, F-072, F-073 (not the manifest list), F-074, F-076, F-078,
-C-001, C-002, C-003, C-004, C-005, C-007, C-012, C-013, C-015, C-016, C-020 (all presets),
-C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-007, O-013, O-014, O-015, O-016, O-021, O-022,
+C-001, C-002, C-003, C-004, C-005, C-007, C-008, C-009, C-012, C-013, C-015, C-016, C-017,
+C-020 (all presets), C-021, C-022, C-023, C-025, C-029, O-001, O-003, O-007, O-010, O-011, O-013, O-014, O-015, O-016, O-021, O-022,
 O-024, O-032, O-033, O-036, O-039, O-041, O-042, O-047, O-048, O-050. Every Level 2 requirement is done. See `COMPLIANCE.md` for
 the stricter per-criterion status.
 
@@ -406,7 +428,8 @@ command `--timeout` (network and streaming), `--confirm-destructive` (destructiv
 (`safe_default`), `--yes` and `--non-interactive` (`interactive=True`), `--limit` and
 `--cursor` (list outputs), `--heartbeat-ms` (`heartbeat=True`), `--input-file`
 (`stdin_input=True`), `--output` (`output_file=True`), `--headless` and `--token-env-var`
-(`auth=`), `--global` (`config_write_scope=`), `--retries` and `--retry-delay` (`retry=`), and
+(`auth=`), `--global` (`config_write_scope=`), `--retries` and `--retry-delay` (`retry=`),
+`--resume-from` (`resumable=True`), `--rollback-on-failure` (`rollback=`), and
 `--<name>-from-env` / `--<name>-from-file` for each secret field. The per-command ones are
 rows of `_framework.FLAGS`: argv parsing, the JSON routes, the `--raw-payload` merge (one
 "given twice with different values" check; `--limit` and `--cursor` from argv win),
