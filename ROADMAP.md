@@ -207,6 +207,11 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `status`, `generate-skills`, and `mcp-validate` (yielding to an app command), `cleanup`
   output has `cleaned` instead of `removed` and also removes declared `log` paths, and the
   scaffold's `status` command is `show`
+- 1.0 plan, agent docs (`plans/1.0/14-agent-docs.md`): `treaty agents-md` and `treaty
+  check-docs` (exit 81 `DOCS_OUT_OF_DATE`), a `cli-version` comment on AGENTS.md and
+  `CONTEXT.md`, AGENTS.md and its check test from `treaty init`, and the check plus an
+  install-twice step in CI. Behavior change: `--version --format plain` prints the bare
+  version
 
 ## 0.1.x: after the first minor release
 

@@ -148,6 +148,13 @@ same name replaces them, and the `builtin-shadowed` audit rule says so.
   `args` schema (every value JSON, so valid YAML), then at least three examples,
   guardrails from the danger level and exit codes, and patterns (REQ-O-034). Skill files
   are always Markdown: `--format` is the envelope's representation
+- `treaty agents-md myapp.cli:app` writes AGENTS.md from the registry: a
+  `<!-- cli-version: -->` line, then Canonical Invocation, Non-Interactive Flags,
+  Environment Variables, Input Conventions, and CI Validation between treaty markers;
+  text outside them, `## Installation` included, is kept. `treaty check-docs myapp.cli:app
+  AGENTS.md skills` exits 81 (`DOCS_OUT_OF_DATE`) when a declared version, a section, or a
+  command, flag, or variable named there disagrees with `--help`, one line per mismatch
+  (REQ-O-043 to REQ-O-046). `treaty init` writes AGENTS.md and a test that runs the check
 `App(credentials=...)` adds `check-permissions` (see Credentials) and `App(jobs=...)` adds
 `job status` and `job cancel` (see Async jobs).
 `<app> --version` at the root is an alias for `<app> version`; a command's own `--version`

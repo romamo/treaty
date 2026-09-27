@@ -14,7 +14,7 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1488 passed, 1 skipped |
+| `uv run pytest` | 1507 passed, 1 skipped |
 | `uv run mypy src` (strict) | clean |
 | `uv run ruff check src tests examples` | clean |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
@@ -408,7 +408,7 @@ src/treaty/
   __init__.py    public API; everything else is private
   _app.py        App, Group, run(), _Run (envelope construction, exec loop, --schema)
   _audit.py      ordered static rules over a registry; RULES tuple is the audit order
-  _cli.py        the `treaty` console script (audit, rules, init, conformance)
+  _cli.py        the `treaty` console script (audit, init, conformance, agents-md, ...)
   _profile.py    probes from examples and danger levels, profile writer, kit runner
   _scaffold.py   file templates for `treaty init`; generated projects pass the audit
   _scalars.py    ScalarSpec and ScalarRegistry: custom scalar classes and their constraints
@@ -428,6 +428,7 @@ src/treaty/
                  built-ins that yield to an app command (13-D1)
   _changelog.py  ChangelogEntry, manifest field diff: the schema changelog (13)
   _skills.py     CONTEXT.md and SKILL-<command>.md from the manifest (13)
+  _agents_md.py  AGENTS.md sections from the registry, marker rewrite, check-docs (14)
   _tools.py      ToolEntry, tool_entries(), tool_list(): MCP tools as plain data, no App import
   _redact.py     SECRET_NAME, secret_field(), scrub(): what a secret name is (REQ-F-034)
   _verbosity.py  Verbosity, Level, resolve_verbosity(), trace(): stderr levels (11)

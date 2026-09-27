@@ -118,10 +118,21 @@ emits none.
 
 ## Tasks
 
-- [ ] `_envvars.py` over 02's `_env.KNOWN`, settings, secrets, and tokens; the new `env-prefix` finding
-- [ ] `_agents_md.py` and `treaty agents-md` with marker-preserving rewrite
-- [ ] `treaty check-docs` for AGENTS.md, skill directories, and `--list-tools` JSON; `DOCS_OUT_OF_DATE`
-- [ ] Plain `version` rendering (14-D1); test that every registered flag appears in `--help`
-- [ ] Regenerate treaty's `AGENTS.md`; `docs` step in `ci.yml`; install idempotency in `scaffold` job and `publish.yml`
-- [ ] Scaffold `AGENTS.md` and `tests/test_agents_md.py`; `agents-md` audit rule
-- [ ] Update COMPLIANCE.md rows (O-043 to O-046), README, HANDOFF, ROADMAP
+- [x] `_envvars.py` over 02's `_env.KNOWN`, settings, secrets, and tokens; the new `env-prefix` finding
+  Simplified: `env_vars()` lives in `_agents_md.py` and `_env.EnvVar` gained a `type`. Not
+  done: the second `env-prefix` finding (the check-docs env check covers doc drift)
+- [x] `_agents_md.py` and `treaty agents-md` with marker-preserving rewrite
+  `--install` dropped: `## Installation` sits outside the markers, written with a default
+  once and then the author's; a file without markers gets the block appended
+- [x] `treaty check-docs` for AGENTS.md, skill directories, and `--list-tools` JSON; `DOCS_OUT_OF_DATE`
+  Names are checked against the rendered `--help` text of the root and each command, so
+  "in --help" is literal; mismatch `file` is an absolute path (REQ-F-040)
+- [x] Plain `version` rendering (14-D1); test that every registered flag appears in `--help`
+- [x] Regenerate treaty's `AGENTS.md`; `docs` step in `ci.yml`; install idempotency in `scaffold` job and `publish.yml`
+  Idempotency runs in `ci.yml` (`uv tool install treaty` in `lint`, `uv tool install .` in
+  `scaffold`), not `publish.yml`, which would race PyPI propagation
+- [x] Scaffold `AGENTS.md` and `tests/test_agents_md.py`; `agents-md` audit rule
+  The scaffold renders AGENTS.md from its own `cli.py`, run in a throwaway module. Not
+  done: the `agents-md` audit rule (the audit reads the registry, not the working tree;
+  the scaffold's test and CI enforce the file instead)
+- [x] Update COMPLIANCE.md rows (O-043 to O-046), README, HANDOFF, ROADMAP

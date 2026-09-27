@@ -11,8 +11,8 @@ the 1.0 plan's reserved names, response metadata (01), output data contract (05)
 layer (02), error contract (03), argument grammar (04), multi-step commands and
 lifecycle (06), output security (07), additional command declarations (08), session
 and process hygiene (09), network and filesystem utilities (10), and logging,
-verbosity, and the audit log (11), output selection and streaming flags (12), and
-built-in commands (13).
+verbosity, and the audit log (11), output selection and streaming flags (12),
+built-in commands (13), and agent docs (14).
 
 Each requirement was checked against its acceptance criteria by reading the source and
 tests and by probing the example apps. This is stricter than the conformance kit, which
@@ -26,7 +26,7 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 152 | 5 | 2 | **97%** |
+| Level 3: full spec | 159 | 156 | 3 | 0 | **99%** |
 
 ## By tier
 
@@ -34,7 +34,7 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Framework-automatic (F) | 79 | 76 | 3 | 0 | **98%** |
 | Command contract (C) | 30 | 30 | 0 | 0 | **100%** |
-| Opt-in (O) | 50 | 46 | 2 | 2 | **94%** |
+| Opt-in (O) | 50 | 50 | 0 | 0 | **100%** |
 
 ## Open mandatory requirements
 
@@ -207,10 +207,10 @@ open.
 | [REQ-O-040](../cli-agent-ergonomics/requirements/o-040-no-follow-symlinks-flag-for-traversal-commands.md) | --no-follow-symlinks Flag for Traversal Commands | P1 | 3 | Done | `recursive_traversal=True` adds `--no-follow-symlinks` (symlinks listed, never entered, counted in `symlinks_skipped`) and `--max-depth N` (default 50) to the command, manifest, and `--schema`; a deeper tree exits 4 `DEPTH_EXCEEDED` with `max_depth`, `path`, and `hint` (10-D2) |
 | [REQ-O-041](../cli-agent-ergonomics/requirements/o-041-tool-manifest-built-in-command.md) | tool manifest Built-In Command | P1 | 3 | Done | `manifest` built-in with a deterministic etag; `manifest --etag sha256:...` answers exit 0, `data: null`, `meta.not_modified: true` while unchanged, on the CLI, in `exec`, and through `App.call`; a malformed etag exits 2 |
 | [REQ-O-042](../cli-agent-ergonomics/requirements/o-042-output-format-env-var-default.md) | Output Format Environment Variable Default | P2 | 3 | Done | `<APP>_FORMAT` defaults `--format`, which wins; a bad value fails as the same `--format` value (exit 2, same code and context, plus `source`); `_FORMAT` and `FORMAT` are ignored; `--help` and the manifest name the variable |
-| [REQ-O-043](../cli-agent-ergonomics/requirements/o-043-agents-md-content-spec.md) | AGENTS.md Required Content | P1 | 3 | Not started | AGENTS.md lacks required sections; `treaty init` generates none |
-| [REQ-O-044](../cli-agent-ergonomics/requirements/o-044-noninteractive-install-command.md) | Non-Interactive Install Command Documentation | P1 | 3 | Partial | AGENTS.md has an install section; heading and app scaffold do not match the spec |
-| [REQ-O-045](../cli-agent-ergonomics/requirements/o-045-integration-artifact-version-declaration.md) | Integration Artifact Version Declaration | P1 | 3 | Partial | MCP adapter generated in-process; no version in static artifacts |
-| [REQ-O-046](../cli-agent-ergonomics/requirements/o-046-agents-md-ci-validation.md) | AGENTS.md CI Validation | P2 | 3 | Not started | No AGENTS.md check in CI |
+| [REQ-O-043](../cli-agent-ergonomics/requirements/o-043-agents-md-content-spec.md) | AGENTS.md Required Content | P1 | 3 | Done | `treaty agents-md module:app` renders Canonical Invocation, Non-Interactive Flags (`--format json` and each prompt flag with the commands it applies to), Environment Variables (every `<APP>_*` variable with type, required or optional, and description, then the unprefixed conventions), Input Conventions, and CI Validation between treaty markers, keeping the rest; line 1 is `<!-- cli-version: X -->`, equal to `--version --format plain` (14-D1); `treaty init` writes one; `check-docs` verifies every command, flag, and variable against `--help` |
+| [REQ-O-044](../cli-agent-ergonomics/requirements/o-044-noninteractive-install-command.md) | Non-Interactive Install Command Documentation | P1 | 3 | Done | `## Installation` in treaty's AGENTS.md and every generated one: the install command, then `<name> --version` as the verification; `uv` opens no browser or wizard. CI runs `uv tool install treaty` and the scaffold's `uv tool install .` twice each with `< /dev/null`, then the installed `--version` |
+| [REQ-O-045](../cli-agent-ergonomics/requirements/o-045-integration-artifact-version-declaration.md) | Integration Artifact Version Declaration | P1 | 3 | Done | AGENTS.md and `CONTEXT.md` carry `<!-- cli-version: -->`, `SKILL-*.md` frontmatter `version:`, `treaty-mcp --list-tools` `"cli_version"`, the live MCP server `serverInfo.version`; all are produced by the binary they describe (option a). `treaty check-docs` checks the version and the command and flag names of each against `--help`. OpenAPI, LangChain, and companion packages: treaty emits none |
+| [REQ-O-046](../cli-agent-ergonomics/requirements/o-046-agents-md-ci-validation.md) | AGENTS.md CI Validation | P2 | 3 | Done | `treaty check-docs module:app AGENTS.md` fails a version, section, command, flag, or variable mismatch with exit 81 `DOCS_OUT_OF_DATE`, `data.mismatches`, and one `- file:line kind name: problem` line each in plain mode; treaty's CI `lint` job runs it on every push and pull request, the scaffold's `tests/test_agents_md.py` runs it under `uv run pytest`, and the generated `## CI Validation` section documents it |
 | [REQ-O-047](../cli-agent-ergonomics/requirements/o-047-tool-check-permissions-built-in-command.md) | tool check-permissions Built-In Command | P0 | 2 | Done | `check-permissions` with and without `--for` over `App(credentials=)`; insufficient scopes exit 8 with `missing_scopes`; gated commands warn `CREDENTIAL_OVER_PRIVILEGED` |
 | [REQ-O-048](../cli-agent-ergonomics/requirements/o-048-destructive-commands-default-dry-run.md) | Destructive Commands Default to Dry-Run Mode | P0 | 2 | Done | `safe_default=True`: dry run and exit 0 without `--live`; `--live` alone applies (it is the confirmation; `requires_confirmation` stays true in `--schema`); `meta.dry_run` on every response, `meta.confirmed` when applied; `safe_default` in the manifest |
 | [REQ-O-049](../cli-agent-ergonomics/requirements/o-049-llm-token-budget-flags.md) | LLM Token Budget Flags | P2 | 3 | Done | Global `--token-limit`, `--token-offset`, `--token-count`, `--tokenizer`, measured over `data` as compact JSON; windows move over whole items of the data array (or the largest array in object data), with `meta.token_offset` and `meta.next_token_offset`; a cut sets `meta.truncated` with `FIELD_TRUNCATED` warnings and no sentinel in `data` (12-D2); `--token-count` runs the command and answers JSON with `data: null` and `meta.token_count` whatever `--format` says; `approx` (bytes over 4) by default, `app.tokenizer()`, and `cl100k_base`/`o200k_base` with `treaty[tiktoken]` |
