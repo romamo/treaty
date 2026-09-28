@@ -125,3 +125,56 @@ def test_handler_exception_becomes_crash_envelope_with_traceback() -> None:
     assert code == 1 and env["error"]["code"] == "HANDLER_CRASHED"
     assert env["error"]["message"] == "Command crash raised ValueError: handler bug."
     assert "Traceback" in err.getvalue() and "handler bug" in err.getvalue()
+
+
+def remaining_app(default_timeout: float | None) -> tuple[App, list[bool]]:
+    app = App("slowctl", version="1.0.0", default_timeout=default_timeout)
+    seen: list[bool] = []
+
+    @app.command("left", description="Reports its time left", danger_level="safe", exit_codes=())
+    def left(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"remaining": ctx.remaining, "expired": ctx.expired}
+
+    @app.command(
+        "drain", description="Works while time is left", danger_level="safe", exit_codes=()
+    )
+    def drain(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        done = 0
+        while (ctx.remaining or 0) > 0.2:
+            time.sleep(0.005)
+            done += 1
+        return {"done": done}
+
+    @app.command("overrun", description="Sleeps past its limit", danger_level="safe", exit_codes=())
+    def overrun(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        time.sleep(0.1)
+        seen.append(ctx.expired)
+        return {}
+
+    return app, seen
+
+
+def test_ctx_remaining_counts_down_from_the_timeout() -> None:
+    code, env = run_json(remaining_app(5)[0], ["left"])
+    assert code == 0 and env["data"]["expired"] is False
+    assert 4 < env["data"]["remaining"] <= 5
+
+
+def test_ctx_remaining_is_none_without_a_limit() -> None:
+    code, env = run_json(remaining_app(None)[0], ["left"])
+    assert code == 0 and env["data"] == {"remaining": None, "expired": False}
+
+
+def test_ctx_remaining_lets_a_handler_return_its_work_before_the_limit() -> None:
+    code, env = run_json(remaining_app(0.5)[0], ["drain"])
+    assert code == 0 and env["data"]["done"] > 0
+
+
+def test_ctx_expired_is_true_once_the_timeout_passes() -> None:
+    app, seen = remaining_app(0.05)
+    code, env = run_json(app, ["overrun"])
+    assert code == 10 and env["error"]["code"] == "TIMEOUT"
+    deadline = time.monotonic() + 1.0
+    while not seen and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert seen == [True]  # the abandoned worker sees its deadline has passed

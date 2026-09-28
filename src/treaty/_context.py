@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
@@ -78,6 +79,23 @@ class Ctx:
     _cache: Cache | None = field(default=None, repr=False, compare=False)
     _http: Http | None = field(default=None, repr=False, compare=False)
     _traversal: Traversal | None = field(default=None, repr=False, compare=False)
+    _deadline: float | None = field(default=None, repr=False, compare=False)
+    """``time.monotonic()`` when the command times out, else None"""
+
+    @property
+    def remaining(self) -> float | None:
+        """Seconds left before the command times out, never below 0; None without a limit.
+        The deadline ``ctx.run``, ``ctx.lock``, and ``ctx.http`` already clamp to: pass it
+        as another client's ``timeout=``, or check it to stop a long loop with the work
+        done so far instead of being abandoned at the limit (REQ-C-012)"""
+        if self._deadline is None:
+            return None
+        return max(0.0, self._deadline - time.monotonic())
+
+    @property
+    def expired(self) -> bool:
+        """The command's time is up: a handler still running is past its ``TIMEOUT``"""
+        return self.remaining == 0.0
 
     @property
     def http(self) -> Http:

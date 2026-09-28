@@ -17,6 +17,9 @@ Apps built on treaty keep their own, structured schema changelog with
   and `app.version` give its semver spelling (`1.0.0-rc.1`). `introduced_in=`,
   `Deprecated(since=, removed_in=)`, and a version string from an update check are read
   the same way. Development and post releases are still refused
+- `ctx.remaining`, the seconds left before the command times out (`None` without a
+  limit), and `ctx.expired`: a handler passes the deadline to a client's `timeout=`,
+  or stops a long loop at the limit instead of running on after `TIMEOUT`
 
 ## [1.0.0rc1] - 2026-09-28
 

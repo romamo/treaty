@@ -305,7 +305,9 @@ Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
 caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
-response. Handlers read `ctx.timeout` to pass the same deadline to their network calls;
+response. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to
+pass the same deadline to their network calls, and `ctx.expired` to stop a long loop
+with the work done so far rather than run on after `TIMEOUT`;
 the `network-timeout` audit rule flags `urlopen`, `http.client` connections,
 `socket.create_connection`, `requests`, and `httpx` calls without `timeout=` in network
 commands (REQ-C-012). An

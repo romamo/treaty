@@ -2407,6 +2407,7 @@ class _Run:
             project_root=self.project_root(command),
             _retrier=self.retrier,
             _locks=Locks(self.locks_dir(), deadline),
+            _deadline=deadline,
             _teardown=self.teardown,
             _steps=self.steps,
             _session=self.processes.session,
