@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from conftest import WINDOWS, spec_validator
 from jsonschema import Draft7Validator
+from packaging.version import Version
 
 from treaty import App, Ctx, Exit, Flag, NoArgs, RegistrationError, Retry
 from treaty._audit import LOCK_FILE, audit, schema_change
@@ -278,9 +279,34 @@ def test_meta_update_available_is_absent_when_no_update_is_available() -> None:
     assert "update_available" not in run(["get"])[1]["meta"]
 
 
-def test_app_version_must_be_semver() -> None:
-    with pytest.raises(RegistrationError, match="semver"):
-        App("t", version="1.0")
+@pytest.mark.parametrize("version", ["1.0", "v1.0.0", "1.0.0.dev1", "1.0.0.post1", "1.0.0rc"])
+def test_app_version_must_be_semver_or_a_pep_440_release(version: str) -> None:
+    with pytest.raises(RegistrationError, match="neither semver"):
+        App("t", version=version)
+
+
+@pytest.mark.parametrize(
+    ("given", "reported"),
+    [
+        ("1.0.0", "1.0.0"),
+        ("1.0.0-rc.1", "1.0.0-rc.1"),
+        ("1.0.0rc1", "1.0.0-rc.1"),
+        ("2.1.0a3", "2.1.0-alpha.3"),
+        ("1.2.3b1", "1.2.3-beta.1"),
+    ],
+)
+def test_a_pep_440_pre_release_is_reported_in_its_semver_spelling(
+    given: str, reported: str
+) -> None:
+    """What importlib.metadata.version() returns works as is; PEP 440 reads the semver
+    spelling back as the same version"""
+    app = App("t", version=given)
+    out = io.StringIO()
+    assert app.run(["--version"], stdout=out, stderr=io.StringIO(), env={}, isatty=False) == 0
+    envelope = json.loads(out.getvalue())
+    assert envelope["data"]["version"] == envelope["meta"]["tool_version"] == reported
+    assert app.version == reported
+    assert Version(reported) == Version(given)
 
 
 # REQ-F-024

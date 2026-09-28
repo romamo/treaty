@@ -10,6 +10,13 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `App(version=)` accepts a PEP 440 release with an `a`, `b`, or `rc` pre-release, such
+  as `importlib.metadata.version` returns (`1.0.0rc1`); `--version`, `meta.tool_version`,
+  and `app.version` give its semver spelling (`1.0.0-rc.1`). A version string from an
+  update check is read the same way. Development and post releases are still refused
+
 ## [1.0.0rc1] - 2026-09-28
 
 The first 1.0 release candidate: every Level 3 requirement that changes the public API,

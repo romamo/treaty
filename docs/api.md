@@ -84,7 +84,8 @@ review), **rename**, **remove**.
 
 ## `App`
 
-Keywords: `name`, `version` (semver), `description`, `state`, `default_timeout`,
+Keywords: `name`, `version` (semver, or a PEP 440 release with an optional `a`, `b`, or
+`rc` pre-release, reported in its semver spelling), `description`, `state`, `default_timeout`,
 `max_output_bytes`, `max_stdin_bytes`, `state_dir`, `enable_exec`, `credentials`, `jobs`,
 `settings`, `init`, `companions`, `dependencies`, `checks`, `update_check`, `audit_log`,
 `schema_changelog`. All keep.

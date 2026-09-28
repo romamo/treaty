@@ -251,6 +251,25 @@ def test_an_older_or_equal_cached_release_is_not_an_update(tmp_path: Path) -> No
         assert "update_available" not in meta_of(envelope), latest
 
 
+def test_a_pep_440_release_from_the_checker_is_cached_in_its_semver_spelling(
+    tmp_path: Path,
+) -> None:
+    """A checker reading PyPI gets 2.0.0rc1; meta.update_available is semver like tool_version"""
+    checker = Checker("2.0.0rc1")
+    app = updating_app(checker, tmp_path)
+    run(app, ["hello"], terminal=True)
+    assert checker.done.wait(5)
+    deadline = time.monotonic() + 5
+    while not (tmp_path / "update.json").exists():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    while json.loads((tmp_path / "update.json").read_text())["latest"] != "2.0.0-rc.1":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    _, envelope, _ = run(app, ["hello"], terminal=True)
+    assert meta_of(envelope)["update_available"] == "2.0.0-rc.1"
+
+
 def test_a_stale_cache_is_refreshed_in_the_background_for_the_next_run(tmp_path: Path) -> None:
     checker = Checker("3.0.0")
     cached(tmp_path, "2.0.0", age=2 * 86_400)

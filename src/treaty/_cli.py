@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import re
 import stat
 import subprocess
 import sys
@@ -38,25 +37,11 @@ from ._profile import (
 )
 from ._scaffold import ProjectName, render
 
-_PEP440_RE = re.compile(r"(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?")
-_PRE_LABELS = {"a": "alpha", "b": "beta", "rc": "rc"}
-
-
-def semver_of(pep440: str) -> str:
-    """The semver spelling of a PEP 440 release, ``1.0.0rc1`` as ``1.0.0-rc.1``;
-    ``App(version=)`` takes semver, and PEP 440 reads the result back as the same version"""
-    match = _PEP440_RE.fullmatch(pep440)
-    if match is None:
-        raise ValueError(f"treaty version {pep440!r} has no semver spelling")
-    release, label, number = match.groups()
-    return release if label is None else f"{release}-{_PRE_LABELS[label]}.{number}"
-
-
 # The treaty CLI keeps no audit log: `treaty audit` is the linter, and a second
 # `audit-log` beside it would only confuse
 cli = App(
     "treaty",
-    version=semver_of(__version__),
+    version=__version__,
     description="Build and audit agent-ready CLIs",
     audit_log=None,
 )

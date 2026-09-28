@@ -135,6 +135,9 @@ _SEMVER_RE = re.compile(
     r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?"
 )
 _SCHEMA_VERSION_RE = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)")
+# A PEP 440 pre-release as packaging normalizes it, such as importlib.metadata reports
+_PEP440_PRE_RE = re.compile(r"((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))(a|b|rc)(0|[1-9]\d*)")
+_PRE_LABELS = {"a": "alpha", "b": "beta", "rc": "rc"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +149,22 @@ class ToolVersion:
     def __post_init__(self) -> None:
         if not _SEMVER_RE.fullmatch(self.value):
             raise InvalidValue(f"version {self.value!r} is not semver MAJOR.MINOR.PATCH")
+
+    @classmethod
+    def of_release(cls, text: str) -> ToolVersion:
+        """A semver version, or the semver spelling of a PEP 440 pre-release: ``1.0.0rc1``
+        is ``1.0.0-rc.1``, which PEP 440 reads back as the same version, and ``a`` and
+        ``b`` are ``alpha`` and ``beta`` so the order holds. Development and post releases
+        have no spelling that sorts the same way, so they stay invalid."""
+        if (match := _PEP440_PRE_RE.fullmatch(text)) is not None:
+            release, label, number = match.groups()
+            return cls(f"{release}-{_PRE_LABELS[label]}.{number}")
+        if not _SEMVER_RE.fullmatch(text):
+            raise InvalidValue(
+                f"version {text!r} is neither semver MAJOR.MINOR.PATCH nor a PEP 440 "
+                "release with an optional a, b, or rc pre-release"
+            )
+        return cls(text)
 
     def __str__(self) -> str:
         return self.value

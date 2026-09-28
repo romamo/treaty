@@ -340,7 +340,10 @@ class App:
         audit_log: AuditLog | None = DEFAULT_AUDIT_LOG,
         schema_changelog: str | Path | None = None,
     ) -> None:
-        """``credentials`` tells treaty which scopes the active credential holds: it gates
+        """``version`` is semver, or a PEP 440 release such as ``importlib.metadata.version``
+        returns, ``a``, ``b``, and ``rc`` pre-releases included; ``--version`` and
+        ``meta.tool_version`` give its semver spelling, ``1.0.0rc1`` as ``1.0.0-rc.1``.
+        ``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
         ``jobs`` looks up the jobs ``async_job=True`` commands start, for the ``job status``
         and ``job cancel`` built-ins. ``settings`` is a frozen dataclass read from the
@@ -370,12 +373,12 @@ class App:
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
-            ToolVersion(version)
-        except InvalidValue as exc:
             # meta.tool_version is semver in every response (REQ-F-023)
-            raise RegistrationError(f"App {name}: {exc}, such as 1.0.0") from None
+            tool_version = ToolVersion.of_release(version)
+        except InvalidValue as exc:
+            raise RegistrationError(f"App {name}: {exc}, such as 1.0.0 or 1.0.0rc1") from None
         self.name = name
-        self.version = version
+        self.version = tool_version.value
         self.description = description
         self.default_timeout = Timeout(default_timeout)
         self.max_output = OutputCap(max_output_bytes)
