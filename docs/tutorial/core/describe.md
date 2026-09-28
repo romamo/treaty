@@ -203,5 +203,4 @@ uv run pytest -q tests/test_tutorial.py -k test_an_example_parses
 ## Next
 
 The audit's next rule is `danger-level`, which checks that a command's danger level
-matches what its name implies; its chapter is not written yet. After it comes
-[Declare exit codes](exit-codes.md).
+matches what its name implies: [Choose each command's danger level](danger-level.md).

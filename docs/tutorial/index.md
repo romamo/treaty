@@ -48,7 +48,7 @@ rule, the finding's suggested fix is the guide:
 | Audit rule | What it asks for | Chapter |
 | --- | --- | --- |
 | `describe` | an example invocation on every command | [Describe every command](core/describe.md) |
-| `danger-level` | danger levels that match what command names imply | not written yet |
+| `danger-level` | danger levels that match what command names imply | [Choose each command's danger level](core/danger-level.md) |
 | `exit-codes` | command-specific exit codes on every non-safe command | [Declare exit codes](core/exit-codes.md) |
 | `retryable` | retryable codes only on idempotent commands | [Declare exit codes](core/exit-codes.md) |
 | `typed-output` | typed return values, so `output_schema` is informative | not written yet |
