@@ -1326,7 +1326,10 @@ checkout instead.
 `init` scaffolds a package with one command per danger level, typed outputs, declared exit
 codes, a test using `app.run()`, and a conformance profile. `conformance` derives probes
 from each command's first example and danger level, writes the profile, and with `--run`
-executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. The kit is found
+executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. An existing
+profile that differs from the generated one as JSON, such as one with hand-written probes,
+is left alone: the command exits `6` with `CONFLICT`, naming the changed keys and probes,
+and `--force` replaces it. An equal profile is not rewritten (`effect: noop`). The kit is found
 via `--spec-dir`, then `TREATY_SPEC_DIR`, then `../cli-agent-ergonomics` relative to the
 current directory; a named location without `conformance/run.py` exits `4` instead of
 falling through. `--out`, `--spec-dir`, and `--directory` reject `..` segments,

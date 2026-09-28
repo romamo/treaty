@@ -15,6 +15,10 @@ Level 3 work, and the API review. See `plans/1.0/` and `docs/api.md`.
 
 ### Breaking
 
+- `treaty conformance` no longer overwrites a profile that differs from the generated one:
+  it exits `6` (`CONFLICT`) naming the changed keys and probes, and `--force` replaces the
+  file; an equal profile is left untouched (`effect: noop`). `treaty init` now scaffolds
+  exactly the profile `conformance` generates
 - `TREATY_FORMAT`, `TREATY_MAX_OUTPUT_BYTES`, `TREATY_MAX_STDIN_BYTES`, and
   `TREATY_STATE_DIR` are now `<APP>_FORMAT` and friends; every variable treaty reads for
   an app carries its prefix, and `<APP>_STATE_DIR` names the directory itself

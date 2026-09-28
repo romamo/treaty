@@ -30,6 +30,7 @@ from ._profile import (
     default_command,
     has_kit,
     probes_for,
+    profile_drift,
     run_kit,
     write_profile,
 )
@@ -599,6 +600,11 @@ class ConformanceArgs:
         "else the app name on PATH",
     )
     run: bool = Flag(default=False, description="Run the spec kit after writing the profile")
+    force: bool = Flag(
+        default=False,
+        description="Replace an existing profile that differs from the generated one; "
+        "without it the command exits 6 and leaves the file alone",
+    )
     spec_dir: Path | None = Flag(
         default=None, description="Spec checkout with conformance/run.py; also TREATY_SPEC_DIR"
     )
@@ -666,7 +672,7 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
     "conformance",
     description="Write a conformance profile from the registry and optionally run the spec kit",
     danger_level="mutating",
-    exit_codes=["CONFORMANCE_FAILED", "NOT_FOUND", "PRECONDITION"],
+    exit_codes=["CONFLICT", "CONFORMANCE_FAILED", "NOT_FOUND", "PRECONDITION"],
     supports_raw_payload=True,
     examples=[("Write and run", "treaty conformance myapp.cli:app --run")],
     timeout=900,
@@ -687,8 +693,24 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
             Path(sys.executable).parent,
             windows=sys.platform == "win32",
         )
-    effect = "updated" if profile_path.exists() else "created"
-    write_profile(build_profile(app, command, probes, beside_profile=beside_profile), profile_path)
+    profile = build_profile(app, command, probes, beside_profile=beside_profile)
+    # A profile may carry hand-written probes; only --force trades them for generated ones
+    drift = profile_drift(profile_path, profile) if profile_path.exists() else {}
+    if drift is None:
+        effect = "noop"
+    elif not profile_path.exists():
+        effect = "created"
+    elif args.force:
+        effect = "updated"
+    else:
+        raise Exit.CONFLICT(
+            f"Profile {profile_path} differs from the one treaty generates",
+            context={"profile": str(profile_path), **drift},
+            fix_required="pass --force to replace it, --out to write the generated profile "
+            "elsewhere, or run the spec kit on the existing profile directly",
+        )
+    if effect != "noop":
+        write_profile(profile, profile_path)
     result = ConformanceOut(effect, str(profile_path), len(probes), False, {}, ())
     if spec_dir is None:
         return result

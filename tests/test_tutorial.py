@@ -230,7 +230,7 @@ PROFILE = ROOT / "examples" / "tutorial" / "conformance" / "todo.json"
 
 
 def test_the_committed_profile_is_what_treaty_writes() -> None:
-    """treaty conformance rewrites it on every run; a stale copy would test old probes"""
+    """treaty conformance refuses to overwrite a differing copy; a stale one tests old probes"""
     app = todo_exit_codes.app
     want = build_profile(app, ["./todo"], probes_for(app), beside_profile=True)
     assert json.loads(PROFILE.read_text()) == want

@@ -188,6 +188,36 @@ def write_profile(profile: dict[str, object], path: Path) -> None:
     path.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
 
 
+def _probes_by_name(probes: object) -> dict[str, object]:
+    if not isinstance(probes, list):
+        return {}
+    return {
+        str(p["name"]): p for p in probes if isinstance(p, dict) and isinstance(p.get("name"), str)
+    }
+
+
+def profile_drift(path: Path, profile: dict[str, object]) -> dict[str, object] | None:
+    """How the profile at ``path`` differs from ``profile`` as JSON, or None when it does not;
+    formatting and key order are not differences, so a hand-formatted copy is left alone"""
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {"reason": f"not valid JSON: {exc.msg} at line {exc.lineno}"}
+    if existing == profile:
+        return None
+    if not isinstance(existing, dict):
+        return {"reason": "not a JSON object"}
+    keys = sorted((existing.keys() | profile.keys()) - {"probes"})
+    ours, theirs = _probes_by_name(profile.get("probes")), _probes_by_name(existing.get("probes"))
+    return {
+        "changed_keys": [k for k in keys if existing.get(k) != profile.get(k)],
+        "probes_only_in_file": sorted(theirs.keys() - ours.keys()),
+        "probes_only_generated": sorted(ours.keys() - theirs.keys()),
+        "probes_changed": sorted(n for n in ours.keys() & theirs.keys() if ours[n] != theirs[n]),
+        "probe_order_changed": list(ours) != list(theirs),
+    }
+
+
 SPEC_FALLBACK = Path("../cli-agent-ergonomics")
 
 

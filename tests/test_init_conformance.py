@@ -11,7 +11,7 @@ from conftest import SPEC_DIR
 
 from treaty._cli import cli, resolve_spec_dir
 from treaty._errors import CliExit
-from treaty._profile import SPEC_FALLBACK, default_command, has_kit, probes_for
+from treaty._profile import SPEC_FALLBACK, build_profile, default_command, has_kit, probes_for
 
 
 def run_cli(argv: list[str], *, isatty: bool = False) -> tuple[int, dict | str]:
@@ -48,6 +48,9 @@ def test_init_scaffolds_a_project_that_passes_audit(tmp_path: Path, monkeypatch)
         module.app.run(["create", "taken"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
         == 6
     )
+    # Equal to what `treaty conformance` writes, so the README's next step leaves it alone
+    want = build_profile(module.app, ["./shop-tool"], probes_for(module.app), beside_profile=True)
+    assert json.loads((project / "conformance" / "shop-tool.json").read_text()) == want
     monkeypatch.chdir(project)
     code, env = run_cli(["audit", "shop_tool.cli:app", "--all"])
     assert code == 0 and env["data"]["failed"] == 0, env["data"]["next_steps"]
@@ -94,6 +97,51 @@ def test_conformance_writes_profile_without_running(tmp_path: Path, monkeypatch)
     assert profile["command"] == ["deployctl"] and len(profile["probes"]) == env["data"]["probes"]
     code, text = run_cli(["conformance", "examples.deployctl:app"], isatty=True)
     assert "add --run" in text
+
+
+def test_conformance_leaves_an_equal_profile_alone(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    code, env = run_cli(["conformance", "examples.deployctl:app"])
+    assert code == 0 and env["data"]["effect"] == "created"
+    path = tmp_path / "conformance" / "deployctl.json"
+    compact = json.dumps(json.loads(path.read_text()))  # same JSON, different formatting
+    path.write_text(compact)
+    code, env = run_cli(["conformance", "examples.deployctl:app"])
+    assert code == 0 and env["data"]["effect"] == "noop"
+    assert path.read_text() == compact
+
+
+def test_conformance_refuses_to_overwrite_a_differing_profile(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    run_cli(["conformance", "examples.deployctl:app"])
+    path = tmp_path / "conformance" / "deployctl.json"
+    profile = json.loads(path.read_text())
+    profile["timeout_seconds"] = 5
+    profile["probes"].append({"name": "hand written", "argv": ["deploy", "x"], "kind": "invalid"})
+    edited = json.dumps(profile, indent=2)
+    path.write_text(edited)
+    code, env = run_cli(["conformance", "examples.deployctl:app"])
+    assert code == 6 and env["error"]["code"] == "CONFLICT"
+    context = env["error"]["context"]
+    assert context["changed_keys"] == ["timeout_seconds"]
+    assert context["probes_only_in_file"] == ["hand written"]
+    assert context["probes_only_generated"] == [] and context["probes_changed"] == []
+    assert "--force" in env["error"]["fix_required"]
+    assert path.read_text() == edited
+    code, env = run_cli(["conformance", "examples.deployctl:app", "--force"])
+    assert code == 0 and env["data"]["effect"] == "updated"
+    assert "hand written" not in path.read_text()
+
+
+def test_conformance_refuses_to_overwrite_invalid_json(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    (tmp_path / "conformance").mkdir()
+    (tmp_path / "conformance" / "deployctl.json").write_text("{not json")
+    code, env = run_cli(["conformance", "examples.deployctl:app"])
+    assert code == 6 and env["error"]["context"]["reason"].startswith("not valid JSON")
 
 
 def test_conformance_runs_kit_against_example(tmp_path: Path, monkeypatch) -> None:

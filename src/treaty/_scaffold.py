@@ -285,9 +285,9 @@ def test_agents_md_matches_the_cli() -> None:
 """,
         f"conformance/{n}.json": f'''{{
   "schema_version": "1.0",
-  "tool": "{n}",
+  "tool": "{n} 0.1.0",
   "command": ["./{n}"],
-  "timeout_seconds": 5,
+  "timeout_seconds": 10,
   "manifest": ["manifest"],
   "argument_order": {{
     "command_path": ["delete", "widget"],
@@ -297,16 +297,17 @@ def test_agents_md_matches_the_cli() -> None:
     "alternate_value": "plain"
   }},
   "probes": [
-    {{ "name": "show", "argv": ["show", "widget"], "kind": "read" }},
-    {{ "name": "unknown flag", "argv": ["show", "widget", "--no-such-flag"], "kind": "invalid" }},
-    {{ "name": "status built-in", "argv": ["status"], "kind": "read" }},
-    {{ "name": "manifest malformed etag", "argv": ["manifest", "--etag", "x"], "kind": "invalid" }},
     {{
       "name": "delete",
       "argv": ["delete", "widget"],
       "kind": "destructive",
       "dry_run_flag": "--dry-run"
-    }}
+    }},
+    {{ "name": "show", "argv": ["show", "widget"], "kind": "read" }},
+    {{ "name": "version", "argv": ["version"], "kind": "read" }},
+    {{ "name": "status built-in", "argv": ["status"], "kind": "read" }},
+    {{ "name": "manifest malformed etag", "argv": ["manifest", "--etag", "x"], "kind": "invalid" }},
+    {{ "name": "unknown flag", "argv": ["delete", "widget", "--no-such-flag"], "kind": "invalid" }}
   ]
 }}
 ''',
