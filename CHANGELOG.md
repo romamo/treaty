@@ -110,6 +110,9 @@ Apps built on treaty keep their own, structured schema changelog with
 - The `generate-skills` example claimed Claude Code finds the files it writes
 - `check-docs` said "1 items in the docs disagree" for a single mismatch; it now says
   "1 item in the docs disagrees"
+- A `Path` argument with `%2e%2e` was refused with a suggestion that decoded it to a `..`
+  path, which was refused in turn; the suggestion is now the absolute path, and a value
+  that decodes to a null byte, a line break, or another encoding gets no path suggested
 
 ## [1.0.0rc2] - 2026-09-28
 

@@ -90,6 +90,28 @@ def test_suggestions_give_the_decoded_or_absolute_form() -> None:
     assert suggestion.startswith(prefix) and Path(suggestion.removeprefix(prefix)).is_absolute()
 
 
+@pytest.mark.parametrize(
+    "raw", ["%2e%2e/etc/passwd", "docs/%2E%2E/%2e%2e/x", "files%2fetc", "../x", "a/../../b"]
+)
+def test_a_suggested_path_passes_the_checks(raw: str) -> None:
+    """Following the suggestion never ends in a second refusal: %2e%2e decodes to a climb"""
+    _, env = run(["copy", raw])
+    suggestion = env["error"]["suggestion"]  # type: ignore[index]
+    assert isinstance(suggestion, str)
+    code, _ = run(["copy", suggestion.split(": --source ", 1)[1]])
+    assert code == 0
+
+
+@pytest.mark.parametrize("raw", ["a%00b", "a%0Ab", "%252e%252e/x"])
+def test_no_path_is_suggested_when_no_decoded_form_passes(raw: str) -> None:
+    """%00 decodes to a null byte and %252e to another encoding: the generic advice stays"""
+    code, env = run(["copy", raw])
+    error = env["error"]
+    assert isinstance(error, dict)
+    assert code == 2 and error["context"]["rejected_pattern"] == "percent_encoded"
+    assert error["suggestion"] == "correct the arguments and reissue"
+
+
 def test_json_routes_apply_the_same_checks() -> None:
     line = json.dumps({"_cmd": "copy", "source": "../etc/passwd"})
     code, env = run(["exec"], stdin=line + "\n")

@@ -19,31 +19,54 @@ _CONTROL = {
     "\n": ("newline", "newline"),
     "\r": ("carriage return", "carriage_return"),
 }
+_PATTERNS_WITHOUT_FIX = frozenset(pattern for _, pattern in _CONTROL.values())
+
+
+def _rejected(raw: str) -> tuple[str, str] | None:
+    """Why ``raw`` is refused, as the message's end and the ``rejected_pattern``, or None"""
+    for char, (what, pattern) in _CONTROL.items():
+        if char in raw:
+            return f"contains a {what}", pattern
+    if _PERCENT_RE.search(raw):
+        return "contains a percent-encoded sequence", "percent_encoded"
+    if ".." in Path(raw).parts:
+        return "escapes its base directory with '..'", "path_traversal"
+    return None
+
+
+def _passing_form(raw: str) -> str | None:
+    """The decoded path, made absolute when it climbs with ``..``, if the checks accept it:
+    ``%2e%2e`` decodes to a climb, and ``%00`` or a double encoding has no form that passes"""
+    candidate = unquote(raw)
+    problem = _rejected(candidate)
+    if problem is not None and problem[1] == "path_traversal":
+        candidate = str(Path(candidate).resolve())
+        problem = _rejected(candidate)
+    return None if problem is not None else candidate
 
 
 def check_path(raw: str, flag: str) -> Path:
     """Return ``raw`` as a ``Path`` or raise a validation-phase ``ParseError``
 
     Rejected, with ``rejected_pattern`` in the error context: null bytes, line breaks,
-    percent-encoded sequences, and any ``..`` segment.
+    percent-encoded sequences, and any ``..`` segment. A suggestion is offered only when
+    it passes these same checks.
     """
-    for char, (what, pattern) in _CONTROL.items():
-        if char in raw:
-            raise ParseError(
-                f"{flag!r} contains a {what}",
-                context={"flag": flag, "value": raw, "rejected_pattern": pattern},
-            )
-    if _PERCENT_RE.search(raw):
-        raise ParseError(
-            f"{flag!r} contains a percent-encoded sequence",
-            context={"flag": flag, "value": raw, "rejected_pattern": "percent_encoded"},
-            suggestion=f"pass the decoded path: --{flag} {unquote(raw)}",
+    problem = _rejected(raw)
+    if problem is None:
+        return Path(raw)
+    what, pattern = problem
+    passing = None if pattern in _PATTERNS_WITHOUT_FIX else _passing_form(raw)
+    suggestion = None
+    if passing is not None:
+        lead = (
+            "pass the decoded path"
+            if pattern == "percent_encoded"
+            else "pass the absolute path if intended"
         )
-    path = Path(raw)
-    if ".." in path.parts:
-        raise ParseError(
-            f"{flag!r} escapes its base directory with '..'",
-            context={"flag": flag, "value": raw, "rejected_pattern": "path_traversal"},
-            suggestion=f"pass the absolute path if intended: --{flag} {path.resolve()}",
-        )
-    return path
+        suggestion = f"{lead}: --{flag} {passing}"
+    raise ParseError(
+        f"{flag!r} {what}",
+        context={"flag": flag, "value": raw, "rejected_pattern": pattern},
+        suggestion=suggestion,
+    )
