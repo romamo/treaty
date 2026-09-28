@@ -37,6 +37,28 @@ Inside, each step ends with a **Check**. Code in the chapters is taken from the 
 files under `examples/tutorial/`, and `tests/test_tutorial.py` fails when the two drift
 apart, so what you copy is what the tests run.
 
+## The example files
+
+Every chapter works on one small CLI, `todo`, and each file under `examples/tutorial/` is
+`todo` at one point in the tutorial. The files do not form a single line: after
+`todo_exit_codes.py`, two chapters each add one command to their own copy, so
+`todo_network.py` has `import` and `todo_payload.py` has `edit`, but neither has the other's.
+
+| File | What it is | Chapters |
+| --- | --- | --- |
+| [`todo_argparse.py`](../../examples/tutorial/todo_argparse.py) | the starting point: a typical argparse CLI | [argparse](B-migrate/argparse.md), and the failing run in [conformance](ship/conformance.md) |
+| [`todo_click.py`](../../examples/tutorial/todo_click.py), [`todo_typer.py`](../../examples/tutorial/todo_typer.py) | the same CLI in click and in typer | [click or typer](B-migrate/click-typer.md) |
+| [`todo_treaty.py`](../../examples/tutorial/todo_treaty.py) | `todo` on treaty, where every starting chapter ends | [new CLI](A-new/start.md), [argparse](B-migrate/argparse.md), [click or typer](B-migrate/click-typer.md) |
+| [`todo_exit_codes.py`](../../examples/tutorial/todo_exit_codes.py) | plus declared exit codes; the version most chapters use | [exit codes](core/exit-codes.md), the other core chapters, and every ship chapter |
+| [`todo_network.py`](../../examples/tutorial/todo_network.py) | plus `import`, which fetches items over HTTP | [network](core/network-io.md), [cleanup](core/cleanup.md) |
+| [`todo_payload.py`](../../examples/tutorial/todo_payload.py) | plus `edit`, which takes its fields as JSON | [raw payload](core/raw-payload.md) |
+| [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md) |
+| [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
+
+[Release what a run holds](core/cleanup.md) also uses [`examples/slowctl.py`](../../examples/slowctl.py),
+the repository's demo of timeouts and cancellation, since `todo` holds nothing to release.
+A chapter that changes `todo` names the file it starts from and the one it ends at.
+
 ## After the first chapter: follow the audit
 
 `treaty audit module:app` checks your commands against every rule `treaty rules` lists, in
