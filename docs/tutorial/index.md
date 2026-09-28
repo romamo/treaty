@@ -39,10 +39,11 @@ apart, so what you copy is what the tests run.
 
 ## After the first chapter: follow the audit
 
-`treaty audit module:app` checks your commands against ten ordered rules and prints the
-first things to fix, with a suggested fix that uses your own names. The core chapters are
-ordered the same way, so the rule named in the audit's first finding is the chapter to read
-next:
+`treaty audit module:app` checks your commands against every rule `treaty rules` lists, in
+that order, and prints the first things to fix, with a suggested fix that uses your own
+names. The core chapters follow the rules below, a subset in the same order, so when the
+audit's first finding names one of them, its chapter is the one to read next. For any other
+rule, the finding's suggested fix is the guide:
 
 | Audit rule | What it asks for | Chapter |
 | --- | --- | --- |
