@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -57,7 +58,7 @@ def _suggestion(raw: str, flag: str, pattern: str, base: Path) -> str | None:
         if pattern == "percent_encoded"
         else "pass the absolute path if intended"
     )
-    return f"{lead}: --{flag} {passing}"
+    return f"{lead}: --{flag} {shlex.quote(passing)}"
 
 
 def check_path(raw: str, flag: str) -> Path:

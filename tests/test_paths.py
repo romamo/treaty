@@ -2,6 +2,7 @@
 
 import io
 import json
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,13 +82,19 @@ def test_hallucination_patterns_are_rejected_before_the_handler(raw: str, patter
         assert context["rejected_pattern"] == pattern and context["value"] == echoed
 
 
+def suggested(suggestion: object) -> str:
+    """The path a suggestion names, read as a shell reads it"""
+    assert isinstance(suggestion, str)
+    return shlex.split(suggestion.split(": ", 1)[1])[-1]
+
+
 def test_suggestions_give_the_decoded_or_absolute_form() -> None:
     _, env = run(["copy", "files%2fetc"])
     assert env["error"]["suggestion"] == "pass the decoded path: --source files/etc"  # type: ignore[index]
     _, env = run(["copy", "../x"])
     prefix = "pass the absolute path if intended: --source "
     suggestion = env["error"]["suggestion"]  # type: ignore[index]
-    assert suggestion.startswith(prefix) and Path(suggestion.removeprefix(prefix)).is_absolute()
+    assert suggestion.startswith(prefix) and Path(suggested(suggestion)).is_absolute()
 
 
 @pytest.mark.parametrize(
@@ -96,9 +103,22 @@ def test_suggestions_give_the_decoded_or_absolute_form() -> None:
 def test_a_suggested_path_passes_the_checks(raw: str) -> None:
     """Following the suggestion never ends in a second refusal: %2e%2e decodes to a climb"""
     _, env = run(["copy", raw])
+    code, _ = run(["copy", suggested(env["error"]["suggestion"])])  # type: ignore[index]
+    assert code == 0
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [("my%20file.txt", "my file.txt"), ("it%27s.txt", "it's.txt"), ("a b/../c.txt", None)],
+)
+def test_a_suggested_path_is_quoted_for_the_shell(raw: str, want: str | None) -> None:
+    """A space or a quote in the path survives a copy and paste into a shell"""
+    _, env = run(["copy", raw])
     suggestion = env["error"]["suggestion"]  # type: ignore[index]
-    assert isinstance(suggestion, str)
-    code, _ = run(["copy", suggestion.split(": --source ", 1)[1]])
+    path = suggested(suggestion)
+    assert path == (want if want is not None else str(Path.cwd() / "c.txt"))
+    assert suggestion.endswith(shlex.quote(path))
+    code, _ = run(["copy", path])
     assert code == 0
 
 
@@ -107,16 +127,14 @@ def test_a_suggested_absolute_path_is_under_cwd(raw: str, tmp_path: Path) -> Non
     """A relative argument resolves under --cwd, so the path it meant is there too"""
     (tmp_path / "sub").mkdir()
     _, env = run(["copy", raw, "--cwd", str(tmp_path / "sub")])
-    suggestion = env["error"]["suggestion"]  # type: ignore[index]
-    assert isinstance(suggestion, str)
-    assert suggestion.split(": --source ", 1)[1] == str(tmp_path / "x.txt")
+    assert suggested(env["error"]["suggestion"]) == str(tmp_path / "x.txt")  # type: ignore[index]
 
 
 def test_every_collected_path_error_is_suggested_under_cwd(tmp_path: Path) -> None:
     (tmp_path / "sub").mkdir()
     _, env = run(["copy", "../a", "--dest", "../b", "--cwd", str(tmp_path / "sub")])
     errors = env["error"]["errors"]  # type: ignore[index]
-    assert [e["suggestion"].rsplit(" ", 1)[1] for e in errors] == [
+    assert [suggested(e["suggestion"]) for e in errors] == [
         str(tmp_path / "a"),
         str(tmp_path / "b"),
     ]

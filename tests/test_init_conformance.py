@@ -2,6 +2,7 @@ import importlib
 import io
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -248,13 +249,15 @@ def test_write_paths_reject_parent_segments(argv: list[str], flag: str, tmp_path
     assert env["error"]["context"]["rejected_pattern"] == "path_traversal"
     prefix = f"pass the absolute path if intended: --{flag} "
     suggestion = env["error"]["suggestion"]
-    assert suggestion.startswith(prefix) and Path(suggestion.removeprefix(prefix)).is_absolute()
+    [path] = shlex.split(suggestion.removeprefix(prefix))
+    assert suggestion.startswith(prefix) and Path(path).is_absolute()
     assert not any(tmp_path.rglob("*"))
 
 
 def test_write_paths_reject_percent_encoding_and_null_bytes(tmp_path: Path) -> None:
     code, env = run_cli(["init", "demo", "--directory", f"{tmp_path}/acme%2Fwidgets"])
-    assert code == 2 and env["error"]["suggestion"].endswith(f"{tmp_path}/acme/widgets")
+    assert code == 2
+    assert shlex.split(env["error"]["suggestion"])[-1] == f"{tmp_path}/acme/widgets"
     code, env = run_cli(["init", "demo", "--directory", f"{tmp_path}/a\x00b"])
     assert code == 2 and "null byte" in env["error"]["message"]
     assert not any(tmp_path.rglob("*"))

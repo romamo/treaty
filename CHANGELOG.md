@@ -116,6 +116,9 @@ Apps built on treaty keep their own, structured schema changelog with
 - The absolute path suggested for a `..` in a `Path` argument was resolved against the
   process's directory, even under `--cwd`, where the argument itself resolves; it is now
   under `--cwd`, and symlinks in it are no longer resolved
+- The path in a `Path` argument's suggestion was not quoted, so one with a space or a quote
+  broke when pasted into a shell; it is quoted with `shlex.quote`, like treaty's other
+  suggested commands
 
 ## [1.0.0rc2] - 2026-09-28
 
