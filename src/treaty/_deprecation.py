@@ -19,7 +19,8 @@ class Deprecated:
     """``since`` is the tool version that deprecated it; ``replacement`` the command path
     (for a command) or flag name (for a flag) to use instead; ``removed_in`` the version
     that will drop it. Versions are semver or PEP 440 releases, as ``App(version=)``
-    takes them, and are kept in their semver spelling: ``2.0.0rc1`` is ``2.0.0-rc.1``"""
+    takes them, and are kept in their semver spelling: ``2.0.0rc1`` is ``2.0.0-rc.1``,
+    ``2.0.0.dev0`` is ``2.0.0-dev.0``"""
 
     since: str
     replacement: str | None = None

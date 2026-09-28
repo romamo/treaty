@@ -1200,8 +1200,9 @@ same kind of reason.
 byte-identical `data`. Everything that changes per call lives in `meta`, which is volatile
 by definition and never part of a diff: `request_id`, `duration_ms`, `timestamp` (ISO 8601
 UTC), `command` (the manifest key, or the app name when no command resolved),
-`schema_version`, `tool_version` (the `App(version=)` in semver: a PEP 440 pre-release
-such as `importlib.metadata.version` returns, `1.0.0rc1`, is given as `1.0.0-rc.1`; also
+`schema_version`, `tool_version` (the `App(version=)` in semver: a PEP 440 release
+such as `importlib.metadata.version` returns, `1.0.0rc1`, is given as `1.0.0-rc.1`,
+`1.0.0.dev0` as `1.0.0-dev.0`, and `1.0.0.post1` as `1.0.0+post.1`; also
 what `--version` prints), and `cwd` (as `pwd` prints it). `trace_id`, `project_root`, and
 `retries` appear only when they apply, never as null. `treaty audit` flags output fields
 that break this, such as a `fetched_at` (rule `volatile-data`).

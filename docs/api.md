@@ -84,8 +84,9 @@ review), **rename**, **remove**.
 
 ## `App`
 
-Keywords: `name`, `version` (semver, or a PEP 440 release with an optional `a`, `b`, or
-`rc` pre-release, reported in its semver spelling), `description`, `state`, `default_timeout`,
+Keywords: `name`, `version` (semver, or a PEP 440 release with optional `a`, `b`, or `rc`,
+`.post`, and `.dev` parts, reported in its semver spelling: `1.0.0.dev0` is `1.0.0-dev.0`,
+`1.0.0.post1` is `1.0.0+post.1`; epochs and local versions are refused), `description`, `state`, `default_timeout`,
 `max_output_bytes`, `max_stdin_bytes`, `state_dir`, `enable_exec`, `credentials`, `jobs`,
 `settings`, `init`, `companions`, `dependencies`, `checks`, `update_check`, `audit_log`,
 `schema_changelog`. All keep.

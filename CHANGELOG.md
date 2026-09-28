@@ -80,6 +80,13 @@ Apps built on treaty keep their own, structured schema changelog with
   declared credential or config path
 - `APP_IMPORT_FAILED` (exit 4) from the `treaty` tooling commands when the app's module
   raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash
+- `App(version=)` accepts PEP 440 development and post releases and their combinations
+  (`0.3.0.dev0`, `0.3.0.post1`, `1.0.0rc1.post2.dev3`), as `introduced_in=`,
+  `Deprecated(...)`, and an update check do (#5). Their semver spelling puts `.devN` in
+  the pre-release (`0.3.0-dev.0`) and `.postN` in the build metadata (`0.3.0+post.1`); a
+  `.devN` of a post release stays in the build metadata (`1.0.0+post.1.dev.0`). Semver
+  orders `dev` between `beta` and `rc`, so the spelling keeps the parts but not PEP 440's
+  order. Epochs and local versions are still refused, and the error says why
 
 ### Fixed
 
