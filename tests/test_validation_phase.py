@@ -133,7 +133,7 @@ def test_a_bad_flag_and_a_failing_post_init_are_reported_together() -> None:
     error = error_of(env)
     assert code == 2 and error["context"]["error_count"] == 2  # type: ignore[index]
     messages = [e["message"] for e in error["errors"]]  # type: ignore[union-attr]
-    assert messages == ["Unknown flag '--bogus'.", "End is before start."]
+    assert messages == ["Unknown flag '--bogus'", "End is before start."]
 
 
 def test_post_init_is_skipped_while_a_field_is_invalid() -> None:

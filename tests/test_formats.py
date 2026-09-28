@@ -125,7 +125,7 @@ def test_a_value_outside_format_is_unknown() -> None:
     out = io.StringIO()
     code = formats_app().run(["show", "--format", "xml"], stdout=out, stderr=io.StringIO(), env={})
     error = json.loads(out.getvalue())["error"]
-    assert code == 2 and error["message"] == "Unknown --format 'xml'."
+    assert code == 2 and error["message"] == "Unknown --format 'xml'"
     assert error["context"]["allowed"] == ["plain", "json", "jsonl", "csv", "tsv"]
 
 

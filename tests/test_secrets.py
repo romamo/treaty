@@ -92,7 +92,7 @@ def test_direct_secret_flag_is_refused_with_the_two_sources() -> None:
 def test_unknown_inline_flag_keeps_only_the_name() -> None:
     _, out, _ = run(["login", "acme", f"--token={SECRET}"])
     error = error_of(out)
-    assert error["message"] == "Unknown flag '--token'." and error["context"]["flag"] == "token"
+    assert error["message"] == "Unknown flag '--token'" and error["context"]["flag"] == "token"
 
 
 def test_non_secret_values_are_still_echoed() -> None:

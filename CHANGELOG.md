@@ -285,6 +285,9 @@ Apps built on treaty keep their own, structured schema changelog with
 - A list cut to a page in a text format (`plain`, `tsv`, a custom renderer) gave no sign that
   more items exist, since text carries no `meta`; stderr now says how many were shown and
   gives the next `--cursor`, as `--format id` already did
+- An error message ending in a path, URL, quoted value, flag, or identifier gets no
+  closing period (REQ-C-013), which would read as part of it: `/nonexistent` no longer
+  becomes `/nonexistent.`, and `Unknown flag '--token'` ends at its quote (#16)
 
 ## [1.0.0rc2] - 2026-09-28
 
