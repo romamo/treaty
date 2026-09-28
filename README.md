@@ -1427,7 +1427,10 @@ profile. The next steps come errors first, then warnings, then advice, in rule o
 each, so what fails `--strict` is never behind advice. `--all` lists
 everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and
 piping the output gives an envelope an agent can act on. Rules see declarations only; the
-conformance kit covers runtime behaviour.
+conformance kit covers runtime behaviour. A target that fails to register (a
+`RegistrationError` or `SyntaxError` at import) exits 4 (`APP_IMPORT_FAILED`) with the
+message and no traceback, on `audit` and every other command that loads a `module:app`
+target.
 
 ## Stability
 

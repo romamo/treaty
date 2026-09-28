@@ -23,7 +23,6 @@ from treaty import (
     NoArgs,
     ParseError,
     RegistrationError,
-    SchemaError,
 )
 from treaty._help import render_command
 from treaty._profile import probes_for
@@ -353,7 +352,7 @@ def test_registration_rejects_what_would_break_later() -> None:
     for args_type in (Priced, Convert, Cache, Tokens):
         with pytest.raises(RegistrationError):
             register(app, args_type)
-    with pytest.raises(SchemaError, match="refers to itself"):
+    with pytest.raises(RegistrationError, match="tree: .*refers to itself"):
 
         @app.command("tree", description="Tree", danger_level="safe", exit_codes=())
         def tree(args: NoArgs, ctx: Ctx) -> Node:

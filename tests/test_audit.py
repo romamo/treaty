@@ -1,8 +1,10 @@
 import io
 import json
 import re
+from pathlib import Path
 
 import fixture_audit_app
+import pytest
 
 from treaty._audit import ADDITIVE, RULES, audit
 from treaty._cli import cli
@@ -736,7 +738,6 @@ def test_every_suggested_example_passes_the_example_check() -> None:
     import re as regex
     from dataclasses import dataclass
     from enum import StrEnum
-    from pathlib import Path
 
     from treaty import App, Arg, Ctx, Flag
 
@@ -1456,3 +1457,53 @@ def test_a_name_is_a_copy_only_when_every_binding_is_one() -> None:
     assert isinstance(commands, dict)
     assert commands["rebound"]["subprocess"]["user_controlled_args"] == ["ref", "base"]
     assert "base" in commands["stdlib"]["subprocess"]["user_controlled_args"]
+
+
+BROKEN_TARGETS = {
+    "bad_version": 'from treaty import App\n\napp = App("spike", version="one")\n',
+    "bad_annotation": """from dataclasses import dataclass
+
+from treaty import App, Arg, Ctx
+
+app = App("spike", version="1.0.0")
+
+
+@dataclass(frozen=True)
+class Point:
+    x: int
+
+
+@dataclass(frozen=True)
+class Args:
+    points: tuple[Point, ...] = Arg(description="Points")
+
+
+@app.command("plot", description="Plot", danger_level="safe", exit_codes=())
+def plot(args: Args, ctx: Ctx) -> dict[str, str]:
+    return {}
+""",
+}
+
+
+@pytest.mark.parametrize(
+    ("module", "said"), [("bad_version", "App spike"), ("bad_annotation", "plot: ")]
+)
+@pytest.mark.parametrize(
+    "command", ["audit", "schema-lock", "changelog-add", "agents-md", "check-docs", "conformance"]
+)
+def test_a_target_that_fails_to_register_is_app_import_failed_without_a_traceback(
+    tmp_path: Path, command: str, module: str, said: str
+) -> None:
+    """The mistake is the target's, not treaty's, on every command that loads a target"""
+    name = f"target_{module}_{command.replace('-', '_')}"
+    (tmp_path / f"{name}.py").write_text(BROKEN_TARGETS[module])
+    out, err = io.StringIO(), io.StringIO()
+    target = f"{name}:app"
+    argv = [command, target, *(["AGENTS.md"] if command == "check-docs" else [])]
+    code = cli.run([*argv, "--cwd", str(tmp_path)], stdout=out, stderr=err, env={}, isatty=False)
+    error = json.loads(out.getvalue())["error"]
+    assert code == 4 and error["code"] == "APP_IMPORT_FAILED"
+    assert error["context"]["target"] == target
+    assert error["context"]["exception"] == "RegistrationError"
+    assert said in error["message"] and said in error["context"]["message"]
+    assert "Traceback" not in out.getvalue() + err.getvalue()

@@ -169,7 +169,12 @@ def load_app(target: str, cwd: Path) -> App:
         raise Exit.PRECONDITION(
             f"Module {module_name} failed to import: {type(exc).__name__}: {exc}",
             code="APP_IMPORT_FAILED",
-            context={"module": module_name, "exception": type(exc).__qualname__},
+            context={
+                "module": module_name,
+                "target": target,
+                "exception": type(exc).__qualname__,
+                "message": str(exc),
+            },
             fix_required="fix the error in the app's module; the message names it",
         ) from None
     obj = getattr(module, attr, None)
