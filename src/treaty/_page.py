@@ -125,7 +125,7 @@ class Position:
         try:
             raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
             body = json.loads(raw)
-        except ValueError:  # binascii.Error, a JSON or UTF-8 decode error
+        except ValueError, RecursionError:  # binascii.Error, bad JSON or UTF-8, deep nesting
             raise invalid_cursor("it does not decode") from None
         if (
             not isinstance(body, dict)

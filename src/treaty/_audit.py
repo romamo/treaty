@@ -11,7 +11,6 @@ import dataclasses
 import inspect
 import json
 import re
-import textwrap
 import typing
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -26,7 +25,7 @@ from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
 from ._redact import secret_field
-from ._scan import ctx_calls
+from ._scan import ctx_calls, source_tree
 from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import InvalidValue, SchemaVersion
 
@@ -259,9 +258,8 @@ def _dotted(node: ast.expr) -> str | None:
 
 def untimed_network_calls(handler: Callable[..., object]) -> list[str]:
     """Network calls in the handler's source without ``timeout=`` (REQ-C-012)"""
-    try:
-        tree = ast.parse(textwrap.dedent(inspect.getsource(handler)))
-    except OSError, TypeError:
+    tree = source_tree(handler)
+    if tree is None:
         return []  # no source to scan (REPL, exec, C extension)
     found: list[str] = []
     for node in ast.walk(tree):
@@ -318,7 +316,7 @@ _WRITES = frozenset({"write_text", "write_bytes", "mkdir", "makedirs", "mkdtemp"
 
 def disk_writes(handler: Callable[..., object]) -> list[str]:
     """Calls in the handler's source that write to disk (REQ-C-011, heuristic)"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return []
     found: list[str] = []
@@ -365,7 +363,7 @@ _CACHE_HINTS = frozenset({"XDG_CACHE_HOME", ".cache"})
 
 def writes_cache(handler: Callable[..., object]) -> bool:
     """The handler writes to disk and names a cache location (REQ-O-018, heuristic)"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None or not disk_writes(handler):
         return False
     return any(
@@ -398,7 +396,7 @@ _TREE_CALLS = frozenset(
 def traversal_calls(handler: Callable[..., object]) -> list[str]:
     """Recursive walks in the handler's source that ``ctx.walk`` would protect from a
     circular symlink and a runaway depth (REQ-F-061, heuristic)"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return []
     params = list(inspect.signature(handler).parameters)
@@ -438,7 +436,7 @@ def _recursive_traversal(app: App) -> Iterator[Finding]:
 
 def direct_http_calls(handler: Callable[..., object]) -> list[str]:
     """HTTP calls in the handler's source that bypass ``ctx.http`` (REQ-F-037)"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return []
     found: list[str] = []
@@ -483,7 +481,7 @@ def _declared_commands(app: App) -> Iterator[Finding]:
 
 def detaches(handler: Callable[..., object]) -> str | None:
     """A call in the handler's source that starts a process outliving it (REQ-C-010)"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return None
     for node in ast.walk(tree):
@@ -545,7 +543,7 @@ def _builtin_shadowed(app: App) -> Iterator[Finding]:
 def unfixed_checks(check: Callable[..., object]) -> list[int]:
     """Lines of ``Check(...)`` calls in a doctor check's source that may fail (``ok`` is
     not the literal True) and pass no ``fix=`` (REQ-O-026)"""
-    tree = _handler_tree(check)
+    tree = source_tree(check)
     if tree is None:
         return []
     found: list[int] = []
@@ -824,13 +822,6 @@ def _config_write_scope(app: App) -> Iterator[Finding]:
             )
 
 
-def _handler_tree(handler: Callable[..., object]) -> ast.AST | None:
-    try:
-        return ast.parse(textwrap.dedent(inspect.getsource(handler)))
-    except OSError, TypeError:
-        return None  # no source to scan (REPL, exec, C extension)
-
-
 def _self_attrs(node: ast.AST) -> list[str]:
     """``self.<name>`` reads under ``node``, in source order, each once"""
     names = [
@@ -846,7 +837,7 @@ def cross_field_checks(args_type: type) -> list[tuple[str, str, object]]:
     reads two fields and raises: ``compared`` is the constant ``first`` is compared
     with (``self.first == "csv"``), or ``...`` when there is none"""
     post_init = args_type.__dict__.get("__post_init__")
-    tree = None if post_init is None else _handler_tree(post_init)
+    tree = None if post_init is None else source_tree(post_init)
     if tree is None:
         return []
     found: list[tuple[str, str, object]] = []
@@ -1124,7 +1115,7 @@ _BASE64_CALLS = frozenset(
 
 def _binary_output(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        tree = _handler_tree(c.handler)
+        tree = source_tree(c.handler)
         if tree is None:
             continue
         if any(
@@ -1162,7 +1153,7 @@ def _len_limits(tree: ast.AST) -> Iterator[str]:
 
 def _field_limits(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        tree = _handler_tree(c.handler)
+        tree = source_tree(c.handler)
         if tree is None:
             continue
         for name in dict.fromkeys(_len_limits(tree)):
@@ -1315,7 +1306,7 @@ _ROOT_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml", "go.mod
 def walks_up_from_cwd(handler: Callable[..., object]) -> str | None:
     """The marker a handler looks for walking up from the cwd itself, ``.git`` when it
     names none; None when it does not walk up"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return None
     nodes = list(ast.walk(tree))
@@ -1334,7 +1325,7 @@ _CHDIR_CALLS = frozenset(
 
 def changes_cwd(fn: Callable[..., object]) -> str | None:
     """A call in ``fn``'s source that changes the process working directory (REQ-F-041)"""
-    tree = _handler_tree(fn)
+    tree = source_tree(fn)
     if tree is None:
         return None
     for node in ast.walk(tree):
@@ -1367,7 +1358,7 @@ _PRINT_CALLS = frozenset({"print", "sys.stderr.write", "sys.stdout.write", "sys.
 
 def prints(fn: Callable[..., object]) -> str | None:
     """A call in ``fn``'s source that writes diagnostics around ``ctx.log`` (REQ-F-038)"""
-    tree = _handler_tree(fn)
+    tree = source_tree(fn)
     if tree is None:
         return None
     for node in ast.walk(tree):
@@ -1413,7 +1404,7 @@ _ENV_GETS = frozenset({"ctx.env.get", "os.environ.get", "environ.get", "os.geten
 
 def env_reads(fn: Callable[..., object]) -> list[str]:
     """Literal variable names ``fn`` reads from ``ctx.env`` or ``os.environ``"""
-    tree = _handler_tree(fn)
+    tree = source_tree(fn)
     if tree is None:
         return []
     names: list[str] = []
@@ -1453,7 +1444,7 @@ _CONFIG_READS = frozenset(
 
 def reads_config_by_hand(fn: Callable[..., object]) -> str | None:
     """The call ``fn`` parses a config file with, when it does so itself"""
-    tree = _handler_tree(fn)
+    tree = source_tree(fn)
     if tree is None:
         return None
     calls = (_dotted(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call))
@@ -1481,7 +1472,7 @@ _SETUP_CALLS = frozenset({"mkdir", "makedirs", "write_text", "write_bytes", "wri
 def first_run_setup(fn: Callable[..., object]) -> str | None:
     """A setup call ``fn`` makes under ``if not <x>.exists():``, the shape of a silent
     first-run init; None when it has none"""
-    tree = _handler_tree(fn)
+    tree = source_tree(fn)
     if tree is None:
         return None
     for node in ast.walk(tree):
@@ -1522,7 +1513,7 @@ _SLEEPS = frozenset({"time.sleep", "sleep"})
 
 def retries_by_hand(handler: Callable[..., object]) -> bool:
     """A loop holding a ``try`` and a ``time.sleep``: a retry the framework cannot count"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return False
     for loop in ast.walk(tree):
@@ -1553,7 +1544,7 @@ def _retry_declared(app: App) -> Iterator[Finding]:
 def unguarded_steps(handler: Callable[..., object]) -> list[str]:
     """``ctx.step(...)`` calls whose result no ``if`` tests, so a resumed run would still
     do the skipped steps' work"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     params = list(inspect.signature(handler).parameters)
     if tree is None or len(params) < 2:
         return []
@@ -1587,7 +1578,7 @@ def _resume_guard(app: App) -> Iterator[Finding]:
 
 def raises_without(handler: Callable[..., object], exit_name: str, keyword: str) -> bool:
     """A call of ``Exit.<exit_name>(...)`` in the handler without ``keyword=``"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return False
     for node in ast.walk(tree):
@@ -1617,7 +1608,7 @@ def _retry_hint(app: App) -> Iterator[Finding]:
 def constant_fixes(handler: Callable[..., object]) -> list[tuple[str, str]]:
     """``(code, fix)`` of each raise in the handler with a literal ``fix_command=``;
     the code is the ``code=`` literal, else the ``Exit.<NAME>`` it calls"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return []
     found: list[tuple[str, str]] = []
@@ -1655,7 +1646,7 @@ _LOCK_CALLS = frozenset({"flock", "lockf", "locking", "FileLock", "SoftFileLock"
 
 def locks_by_hand(handler: Callable[..., object]) -> str | None:
     """The first file-lock call in the handler's source, such as ``fcntl.flock``"""
-    tree = _handler_tree(handler)
+    tree = source_tree(handler)
     if tree is None:
         return None
     for node in ast.walk(tree):

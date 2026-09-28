@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ._atomic import write_atomic
+from ._changelog import version_key
 from ._env import NO_UPDATE, app_var
 from ._values import InvalidValue, ToolVersion
 
@@ -49,7 +50,7 @@ def available(check: UpdateCheck, current: str, state: Path) -> str | None:
             target=_refresh, args=(check, current, path), name="treaty-update", daemon=True
         ).start()
     latest = None if cached is None else cached[1]
-    if latest is None or _precedence(latest) <= _precedence(ToolVersion(current)):
+    if latest is None or version_key(latest.value) <= version_key(ToolVersion(current).value):
         return None
     return latest.value
 
@@ -80,11 +81,3 @@ def _read(path: Path) -> tuple[float, ToolVersion | None] | None:
         return float(checked), ToolVersion(str(latest))
     except InvalidValue:
         return None
-
-
-def _precedence(version: ToolVersion) -> tuple[int, int, int, int]:
-    """Semver order of the core version; a pre-release sorts below its release"""
-    core = version.value.partition("+")[0]
-    numbers, dash, _ = core.partition("-")
-    major, minor, patch = (int(p) for p in numbers.split("."))
-    return major, minor, patch, 0 if dash else 1

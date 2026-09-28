@@ -20,9 +20,12 @@ import queue
 import threading
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._timeout import Timeout, TimeoutExpired
+
+if TYPE_CHECKING:
+    import asyncio
 
 UNAWAITED_TASKS = "UNAWAITED_TASKS"
 
@@ -41,25 +44,60 @@ class Loop:
 
     def __init__(self) -> None:
         self._jobs: queue.SimpleQueue[_Job | None] = queue.SimpleQueue()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task[object] | None = None
         self._thread = threading.Thread(target=self._serve, name="treaty-loop", daemon=True)
         self._thread.start()
 
     def _serve(self) -> None:
-        import asyncio
-
+        try:
+            import asyncio
+        except BaseException as exc:  # noqa: BLE001 - re-raised on each caller's thread
+            self._refuse(exc)
+            return
         with asyncio.Runner() as runner:
+            self._loop = runner.get_loop()
             while (job := self._jobs.get()) is not None:
                 try:
-                    job.result = runner.run(job.coro, context=job.context)
+                    job.result = runner.run(self._tracked(job.coro), context=job.context)
                 except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
                     job.exc = exc
                 job.done.set()
 
+    def _refuse(self, exc: BaseException) -> None:
+        """The loop could not start (on Windows, ``asyncio`` without ``SYSTEMROOT``):
+        every job fails with why, rather than waiting for a loop that never runs"""
+        while (job := self._jobs.get()) is not None:
+            job.coro.close()
+            job.exc = exc
+            job.done.set()
+
+    async def _tracked(self, coro: Coroutine[Any, Any, object]) -> object:
+        import asyncio
+
+        self._task = asyncio.current_task()
+        try:
+            return await coro
+        finally:
+            self._task = None
+
+    def cancel(self) -> None:
+        """Cancel the job running on the loop, so its ``finally`` blocks run now and the
+        jobs queued behind it, such as the async releases, do not wait for it"""
+        loop, task = self._loop, self._task
+        if loop is not None and task is not None:
+            loop.call_soon_threadsafe(task.cancel)
+
     def run[T](self, coro: Coroutine[Any, Any, T]) -> T:
-        """Run ``coro`` to completion on the loop, in a copy of the caller's context"""
+        """Run ``coro`` to completion on the loop, in a copy of the caller's context; a
+        signal raised while this waits cancels it"""
         job = _Job(coro, contextvars.copy_context())
         self._jobs.put(job)
-        job.done.wait()
+        try:
+            job.done.wait()
+        except BaseException:  # noqa: BLE001 - Cancelled or KeyboardInterrupt, re-raised
+            self.cancel()
+            raise
         if job.exc is not None:
             raise job.exc
         return job.result  # type: ignore[return-value]

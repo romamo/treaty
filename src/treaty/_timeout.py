@@ -130,12 +130,11 @@ def call_with_timeout[T](
     Each of ``heartbeats`` ticks on its own interval between waits, outside
     ``interruptible()``.
     """
+    run_in = context if context is not None else contextvars.copy_context()
     if timeout.seconds is None and not heartbeats:
         with interruptible():
-            return fn()
+            return run_in.run(fn)
     slot = Outcome()
-
-    run_in = context if context is not None else contextvars.copy_context()
 
     def target() -> None:
         try:

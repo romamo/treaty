@@ -1654,24 +1654,30 @@ class App:
             return run.help_command(mode, command)
         if config_error is not None and command.path not in PURE_PATHS:
             return run.emit(mode, run.arg_error(config_error, meta=_mode_meta(command)))
-        try:
-            invocation = parse_command_args(
-                command, route.tokens, environ, read_stdin=run.stdin_value
-            )
-        except ParseError as exc:
-            return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
-        except ArgsCrashed as exc:
-            return run.emit(mode, run.args_crashed(command, exc))
-        if pinned is not None:
-            invocation = dataclasses.replace(invocation, schema_version=pinned)
-        refused = self._refused_selection(command, invocation, globals_, mode)
-        if refused is not None:
-            return run.emit(Format.JSON, run.arg_error(refused, meta=_mode_meta(command)))
-        invocation = run.rooted(command, invocation)
-        if run.unprotected:
-            run.unprotected_record()
+        # Installed before the arguments are read: --flag - waits on stdin (REQ-O-006)
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
+            try:
+                invocation = parse_command_args(
+                    command, route.tokens, environ, read_stdin=run.stdin_value
+                )
+            except ParseError as exc:
+                return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
+            except ArgsCrashed as exc:
+                return run.emit(mode, run.args_crashed(command, exc))
+            except Cancelled as exc:  # while --flag - waited on stdin
+                cancelled = run._cancelled(
+                    command, exc.signal, run.started, _mode_meta(command), handler_started=False
+                )
+                return run.emit(mode, cancelled)
+            if pinned is not None:
+                invocation = dataclasses.replace(invocation, schema_version=pinned)
+            refused = self._refused_selection(command, invocation, globals_, mode)
+            if refused is not None:
+                return run.emit(Format.JSON, run.arg_error(refused, meta=_mode_meta(command)))
+            invocation = run.rooted(command, invocation)
+            if run.unprotected:
+                run.unprotected_record()
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
                 run.argv = None  # a line's hint cannot rerun the whole plan
@@ -1779,6 +1785,7 @@ def _call_async(
     teardown = ctx._teardown
     if teardown is not None:
         teardown.add(EVENT_LOOP_HOOK, loop.close, last=True)
+        teardown.on_interrupt(loop.cancel)
     resolver = Resolver(command.resource_graph, args, ctx, provided, loop)
     try:
         return loop.run(
@@ -3852,10 +3859,11 @@ class _Run:
             try:
                 self.out.write(json.dumps(line, separators=(",", ":")) + "\n")
                 self.out.flush()
-            except OSError as exc:
-                if not _closed_pipe(exc):
-                    raise
-                beating[0] = False  # the envelope write reports the closed pipe
+            except OSError:
+                # Raised here, it would end the wait while the handler still runs, and
+                # release its idempotency key: the envelope write, to the same stdout,
+                # reports the failure once the handler is done
+                beating[0] = False
 
         return Heartbeat(ms / 1000, tick)
 
@@ -3948,6 +3956,8 @@ class _Run:
         context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
         # Children first, so the envelope is written after they were signaled (REQ-F-031)
         self._stop_children(sig)
+        if handler_started and self.teardown is not None:
+            self.teardown.interrupt()
         for pending in running:
             # Waiting on a child or its next event, not stuck: a stream's generator is
             # handed back so it can be closed, and cleanup never races the handler
@@ -4138,8 +4148,16 @@ class _Run:
             self.err.write(f"{where}, but failed:\n")
             self.err.write(redact("".join(traceback.format_exception(outcome.exc))))
             return
+        # Serialized as the response would have been, so the replay matches it
+        batch_problem: str | None = None
+        data: object
         try:
-            data = self._payload(outcome.result, *self._output(command))
+            if command.batch:
+                data, batch_problem = self._batch_data(
+                    command, invocation.args, outcome.result, preview=False
+                )
+            else:
+                data = self._payload(self._shimmed(command, outcome.result), *self._output(command))
         except SchemaError as exc:
             self.err.write(f"{where}; its result was not recorded: {redact(str(exc))}\n")
             return
@@ -4147,7 +4165,7 @@ class _Run:
             self.err.write(f"{where}; serializing its result failed:\n")
             self.err.write(redact(_traceback(exc)))
             return
-        problem = effect_problem(data, preview=False)
+        problem = batch_problem or effect_problem(data, preview=False)
         if problem is not None:
             self.err.write(f"{where}; its result was not recorded: {problem}\n")
             return
@@ -4666,14 +4684,18 @@ class _Run:
             )
         cap = StdinCap.resolve(self.env, self.app.max_stdin, self.app.name)
         try:
-            text = stdin.read(cap.bytes + 1)
+            # A writer that keeps the pipe open must still be able to cancel the read
+            with self.cancellation.armed():
+                text = stdin.read(cap.bytes + 1)
+            size = len(text.encode("utf-8"))
         except (UnicodeDecodeError, UnicodeEncodeError) as exc:
+            # A strict stdin fails to decode; a surrogateescape one fails to re-encode
             raise ParseError(
                 f"stdin is not valid UTF-8: {exc.reason}",
                 code="STDIN_NOT_UTF8",
                 context={"flag": flag},
             ) from None
-        if len(text.encode("utf-8")) > cap.bytes:
+        if size > cap.bytes:
             raise ParseError(
                 f"stdin exceeds the {cap.bytes}-byte limit",
                 code="STDIN_TOO_LARGE",

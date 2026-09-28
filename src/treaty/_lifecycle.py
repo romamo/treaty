@@ -27,6 +27,7 @@ class Teardown:
     def __init__(self, cleanup: Hook | None, failed: Failed) -> None:
         self._hooks: list[tuple[str, Hook]] = []
         self._last: list[tuple[str, Hook]] = []
+        self._interrupts: list[Hook] = []
         self._cleanup = cleanup
         self._failed = failed
         self._lock = threading.Lock()
@@ -44,6 +45,19 @@ class Teardown:
         ``last`` runs it after ``cleanup=``, which may still use what it removes."""
         with self._lock:
             (self._last if last else self._hooks).append((name, release))
+
+    def on_interrupt(self, hook: Hook) -> None:
+        """Call ``hook`` when a signal ends the run, before the handler's grace: what
+        stops the handler itself, such as cancelling an ``async def`` one's task"""
+        with self._lock:
+            self._interrupts.append(hook)
+
+    def interrupt(self) -> None:
+        """A signal ends the run: stop the handler, so its teardown does not wait on it"""
+        with self._lock:
+            hooks, self._interrupts = self._interrupts, []
+        for hook in hooks:
+            hook()
 
     @property
     def pending(self) -> bool:

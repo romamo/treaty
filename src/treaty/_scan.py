@@ -40,14 +40,26 @@ class CtxCall:
     """``ctx.run``'s argument list, when it is a list or tuple literal"""
 
 
+def source_tree(fn: Callable[..., object]) -> ast.Module | None:
+    """The syntax tree of ``fn``'s source, lines numbered from its first; None without
+    source (a REPL, ``exec``, a C extension). A nested function holding a multi-line
+    string at column 0 cannot be dedented, so it is parsed inside an ``if`` block."""
+    try:
+        source = inspect.getsource(fn)
+    except OSError, TypeError:
+        return None
+    try:
+        return ast.parse(textwrap.dedent(source))
+    except IndentationError:
+        tree = ast.parse("if 1:\n" + source)
+        return ast.increment_lineno(tree, -1)
+
+
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     """Every ``<ctx>.<method>(...)`` call in the handler, ``<ctx>`` its second parameter"""
     params = list(inspect.signature(fn).parameters)
-    if len(params) < 2:
-        return []
-    try:
-        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
-    except OSError, TypeError:
+    tree = None if len(params) < 2 else source_tree(fn)
+    if tree is None:
         return []
     calls: list[CtxCall] = []
     for node in ast.walk(tree):
@@ -77,11 +89,8 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
 def ctx_attribute(fn: Callable[..., object], name: str) -> int | None:
     """The first line of the handler reading ``<ctx>.<name>``, such as ``ctx.http``"""
     params = list(inspect.signature(fn).parameters)
-    if len(params) < 2:
-        return None
-    try:
-        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
-    except OSError, TypeError:
+    tree = None if len(params) < 2 else source_tree(fn)
+    if tree is None:
         return None
     lines = [
         node.lineno
@@ -132,7 +141,7 @@ def shell_calls(fn: Callable[..., object]) -> list[ShellCall]:
     """Calls in the handler's source that hand a string to a shell (REQ-F-044, REQ-C-019):
     ``os.system``, ``os.popen``, ``subprocess.getoutput``, and ``subprocess.run``,
     ``Popen``, and the rest with a ``shell=`` that is not a false constant"""
-    tree = _tree(fn)
+    tree = source_tree(fn)
     if tree is None:
         return []
     found: list[ShellCall] = []
@@ -160,13 +169,6 @@ def dotted(node: ast.expr) -> str | None:
         base = dotted(node.value)
         return None if base is None else f"{base}.{node.attr}"
     return None
-
-
-def _tree(fn: Callable[..., object]) -> ast.AST | None:
-    try:
-        return ast.parse(textwrap.dedent(inspect.getsource(fn)))
-    except OSError, TypeError:
-        return None  # no source to scan (REPL, exec, C extension)
 
 
 def _text(node: ast.expr) -> bool:
