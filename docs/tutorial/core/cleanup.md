@@ -189,5 +189,5 @@ the process do the same; `tests/test_lifecycle.py` covers each exit path that wa
 
 ## Next
 
-The audit's next rules, `settings-declared` and `env-prefix`, are about how a command reads
-its settings and secrets: [Read settings and secrets](config.md).
+The audit's next rule is `async-job`, for work that takes long or goes on after the command
+returns: [Run long work an agent can follow](long-running.md).

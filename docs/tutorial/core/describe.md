@@ -180,6 +180,7 @@ EXAMPLE_APPS = [
     todo_payload.app,
     todo_config.app,
     todo_pages.app,
+    todo_batch.app,
 ]
 """todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 

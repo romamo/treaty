@@ -45,7 +45,7 @@ Every chapter works on one small CLI, `todo`, and each file under `examples/tuto
 `todo` at one point in the tutorial. The files do not form a single line: after
 `todo_exit_codes.py`, chapters change their own copy: `todo_network.py` adds `import`,
 `todo_payload.py` adds `edit`, and `todo_pages.py` changes how `list` pages, but none has the
-others' changes. `todo_config.py` builds on `todo_network.py` in turn.
+others' changes. `todo_config.py` and `todo_batch.py` build on `todo_network.py` in turn.
 
 | File | What it is | Chapters |
 | --- | --- | --- |
@@ -57,6 +57,7 @@ others' changes. `todo_config.py` builds on `todo_network.py` in turn.
 | [`todo_payload.py`](../../examples/tutorial/todo_payload.py) | plus `edit`, which takes its fields as JSON | [raw payload](core/raw-payload.md) |
 | [`todo_config.py`](../../examples/tutorial/todo_config.py) | `todo_network.py` plus settings and a token for `import` | [settings and secrets](core/config.md) |
 | [`todo_pages.py`](../../examples/tutorial/todo_pages.py) | a `list` that pages by item id | [pagination](core/pagination.md) |
+| [`todo_batch.py`](../../examples/tutorial/todo_batch.py) | `todo_network.py` plus `import-all`, several feeds in one call | [long-running work](core/long-running.md) |
 | [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
@@ -84,6 +85,7 @@ rule, the finding's suggested fix is the guide:
 | `path-typed` | `pathlib.Path` on path-like fields | [Type path arguments as Path](core/path-typed.md) |
 | `raw-payload` | `--raw-payload` on wide mutating commands | [Accept a raw JSON payload](core/raw-payload.md) |
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
+| `async-job` | a job descriptor from commands that start work | [Run long work an agent can follow](core/long-running.md) |
 | `stable-order` | a declared order for arrays of objects | [Page long lists](core/pagination.md) |
 | `settings-declared` | config read through `App(settings=)`, not parsed by a handler | [Read settings and secrets](core/config.md) |
 | `env-prefix` | handlers read only the app's own environment variables | [Read settings and secrets](core/config.md) |

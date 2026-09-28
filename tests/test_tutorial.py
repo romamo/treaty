@@ -15,6 +15,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ import pytest
 from conftest import SPEC_DIR, needs_posix_permissions, needs_sh_launcher
 
 from examples.tutorial import (
+    todo_batch,
     todo_config,
     todo_exit_codes,
     todo_network,
@@ -229,6 +231,7 @@ EXAMPLE_APPS = [
     todo_payload.app,
     todo_config.app,
     todo_pages.app,
+    todo_batch.app,
 ]
 """todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 
@@ -250,6 +253,7 @@ EXAMPLES = ROOT / "examples" / "tutorial"
 BRANCHES = [
     ("todo_exit_codes.py", "todo_network.py", ()),
     ("todo_exit_codes.py", "todo_payload.py", ()),
+    ("todo_network.py", "todo_batch.py", ()),
     # A list that pages by id instead of by position
     ("todo_exit_codes.py", "todo_pages.py", ("def list_items(",)),
     # Settings change how the app is built, and import reads them and takes a token
@@ -370,6 +374,72 @@ def test_a_url_without_a_list_of_items_changes_nothing(
     assert env.exit_code == 81 and env.error is not None
     assert env.error.code == "FEED_INVALID"
     assert not db.exists()
+
+
+# Long-running work
+
+
+class _Feeds(http.server.BaseHTTPRequestHandler):
+    """A feed per path: /slow… answers after a second, /bad… with an object, not a list"""
+
+    def do_GET(self) -> None:
+        if self.path.startswith("/slow"):
+            time.sleep(1.0)
+        items = (
+            {"oops": 1}
+            if self.path.startswith("/bad")
+            else [{"text": self.path, "priority": "normal"}]
+        )
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(json.dumps(items).encode())
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def feeds() -> Iterator[str]:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Feeds)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _results(env: Envelope) -> list[tuple[bool, object]]:
+    assert isinstance(env.data, dict)
+    return [(r["ok"], r.get("error", {}).get("code")) for r in env.data["results"]]
+
+
+def test_import_all_reports_each_feed_and_fails_partly(feeds: str, tmp_path: Path) -> None:
+    urls = [f"{feeds}/a", f"{feeds}/bad"]
+    env = todo_batch.app.call("import-all", {"urls": urls, "db": str(tmp_path / "t.json")}, env={})
+    assert env.exit_code == 3 and env.error is not None
+    assert env.error.code == "PARTIAL_FAILURE"
+    assert _results(env) == [(True, None), (False, "FEED_INVALID")]
+
+
+def test_import_all_leaves_the_feeds_it_has_no_time_for(feeds: str, tmp_path: Path) -> None:
+    """Three one-second feeds in 2.5 seconds: the third is not started, and says so"""
+    urls = [f"{feeds}/slow1", f"{feeds}/slow2", f"{feeds}/slow3"]
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 2.5}
+    env = todo_batch.app.call("import-all", args, env={})
+    assert env.exit_code == 3
+    assert _results(env) == [(True, None), (True, None), (False, "NOT_STARTED")]
+    assert isinstance(env.data, dict)
+    assert env.data["results"][2]["error"]["retryable"] is True
+
+
+def test_import_all_marks_what_it_imported_as_external(feeds: str, tmp_path: Path) -> None:
+    env = todo_batch.app.call(
+        "import-all", {"urls": [f"{feeds}/a"], "db": str(tmp_path / "t.json")}, env={}
+    )
+    assert env.exit_code == 0 and isinstance(env.data, dict)
+    assert env.data["_trusted"] is False
+    assert [w.code for w in env.warnings] == ["UNTRUSTED_CONTENT"]
 
 
 # Read settings and secrets
