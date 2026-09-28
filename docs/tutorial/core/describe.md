@@ -173,8 +173,8 @@ def app_examples(app: App) -> list[str]:
     ]
 
 
-EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app]
-"""todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its two branches"""
+EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app, todo_config.app]
+"""todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 
 
 @pytest.mark.parametrize(

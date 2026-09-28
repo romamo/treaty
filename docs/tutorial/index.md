@@ -45,6 +45,7 @@ Every chapter works on one small CLI, `todo`, and each file under `examples/tuto
 `todo` at one point in the tutorial. The files do not form a single line: after
 `todo_exit_codes.py`, two chapters each add one command to their own copy, so
 `todo_network.py` has `import` and `todo_payload.py` has `edit`, but neither has the other's.
+`todo_config.py` builds on `todo_network.py` in turn.
 
 | File | What it is | Chapters |
 | --- | --- | --- |
@@ -54,6 +55,7 @@ Every chapter works on one small CLI, `todo`, and each file under `examples/tuto
 | [`todo_exit_codes.py`](../../examples/tutorial/todo_exit_codes.py) | plus declared exit codes; the version most chapters use | [exit codes](core/exit-codes.md), the other core chapters, and every ship chapter |
 | [`todo_network.py`](../../examples/tutorial/todo_network.py) | plus `import`, which fetches items over HTTP | [network](core/network-io.md), [cleanup](core/cleanup.md) |
 | [`todo_payload.py`](../../examples/tutorial/todo_payload.py) | plus `edit`, which takes its fields as JSON | [raw payload](core/raw-payload.md) |
+| [`todo_config.py`](../../examples/tutorial/todo_config.py) | `todo_network.py` plus settings and a token for `import` | [settings and secrets](core/config.md) |
 | [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
@@ -80,6 +82,8 @@ rule, the finding's suggested fix is the guide:
 | `path-typed` | `pathlib.Path` on path-like fields | [Type path arguments as Path](core/path-typed.md) |
 | `raw-payload` | `--raw-payload` on wide mutating commands | [Accept a raw JSON payload](core/raw-payload.md) |
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
+| `settings-declared` | config read through `App(settings=)`, not parsed by a handler | [Read settings and secrets](core/config.md) |
+| `env-prefix` | handlers read only the app's own environment variables | [Read settings and secrets](core/config.md) |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |
 
 ### Advice you can leave

@@ -23,7 +23,7 @@ import jsonschema
 import pytest
 from conftest import SPEC_DIR, needs_posix_permissions, needs_sh_launcher
 
-from examples.tutorial import todo_exit_codes, todo_network, todo_payload
+from examples.tutorial import todo_config, todo_exit_codes, todo_network, todo_payload
 from examples.tutorial.todo_treaty import app
 from treaty import App, Ctx, Envelope, Exit, NoArgs, RegistrationError
 from treaty._cli import cli
@@ -216,8 +216,8 @@ def app_examples(app: App) -> list[str]:
     ]
 
 
-EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app]
-"""todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its two branches"""
+EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app, todo_config.app]
+"""todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 
 
 @pytest.mark.parametrize(
@@ -233,7 +233,15 @@ def test_an_example_parses(cli_app: App, example: str) -> None:
 
 # The branches of todo_exit_codes.py
 
-BASE = ROOT / "examples" / "tutorial" / "todo_exit_codes.py"
+EXAMPLES = ROOT / "examples" / "tutorial"
+BRANCHES = [
+    ("todo_exit_codes.py", "todo_network.py", ()),
+    ("todo_exit_codes.py", "todo_payload.py", ()),
+    # Settings change how the app is built, and import reads them and takes a token
+    ("todo_network.py", "todo_config.py", ("app = App(", "class Import(", "def import_items(")),
+]
+"""Each file, the file it copies, and how the statements it may replace begin, after any
+decorators"""
 
 
 def _statements(path: Path) -> list[str]:
@@ -248,6 +256,11 @@ def _statements(path: Path) -> list[str]:
     ]
 
 
+def _head(statement: str) -> str:
+    """The first line of a statement that is not a decorator"""
+    return next(line for line in statement.splitlines() if not line.startswith("@"))
+
+
 def _imported(path: Path) -> set[str]:
     tree = ast.parse(path.read_text())
     return {
@@ -258,21 +271,23 @@ def _imported(path: Path) -> set[str]:
     }
 
 
-@pytest.mark.parametrize("name", ["todo_network.py", "todo_payload.py"])
-def test_a_branch_keeps_every_statement_of_todo_exit_codes(name: str) -> None:
-    """A fix to todo_exit_codes.py has to reach the files that copied it: each of its
-    statements is in the branch unchanged and in the same order, among the branch's own"""
-    branch = BASE.with_name(name)
-    theirs = _statements(branch)
+@pytest.mark.parametrize(("base", "name", "replaced"), BRANCHES, ids=lambda v: str(v))
+def test_a_branch_keeps_every_statement_of_its_base(
+    base: str, name: str, replaced: tuple[str, ...]
+) -> None:
+    """A fix to a file has to reach the files that copied it: each of its statements is in
+    the branch unchanged and in the same order, among the branch's own, unless the branch
+    declares it replaced"""
+    theirs = _statements(EXAMPLES / name)
     missing: list[str] = []
     at = 0
-    for statement in _statements(BASE):
+    for statement in _statements(EXAMPLES / base):
         if statement in theirs[at:]:
             at = theirs.index(statement, at) + 1
-        else:
+        elif not _head(statement).startswith(replaced):
             missing.append(statement)
-    assert missing == [], f"{name} lost or changed statements of todo_exit_codes.py"
-    assert _imported(BASE) <= _imported(branch)
+    assert missing == [], f"{name} lost or changed statements of {base}"
+    assert _imported(EXAMPLES / base) <= _imported(EXAMPLES / name)
 
 
 # Type every command's output
@@ -340,6 +355,60 @@ def test_a_url_without_a_list_of_items_changes_nothing(
     assert env.exit_code == 81 and env.error is not None
     assert env.error.code == "FEED_INVALID"
     assert not db.exists()
+
+
+# Read settings and secrets
+
+
+class _Private(http.server.BaseHTTPRequestHandler):
+    """A feed that answers only a request carrying the bearer token s3cret"""
+
+    def do_GET(self) -> None:
+        if self.headers.get("Authorization") != "Bearer s3cret":
+            self.send_response(401)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(json.dumps([{"text": "Buy milk", "priority": "high"}]).encode())
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def private_feed() -> Iterator[str]:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Private)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/todo.json"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_import_reads_the_feed_setting_and_sends_the_token(
+    private_feed: str, tmp_path: Path
+) -> None:
+    env = {"TODO_FEED_URL": private_feed, "TODO_TOKEN": "s3cret"}
+    got = todo_config.app.call("import", {"db": str(tmp_path / "todo.json")}, env=env)
+    assert got.exit_code == 0 and isinstance(got.data, dict)
+    assert [i["text"] for i in got.data["added"]] == ["Buy milk"]
+    assert "s3cret" not in json.dumps(got.to_json())
+
+
+def test_a_refused_token_is_unauthenticated(private_feed: str, tmp_path: Path) -> None:
+    env = {"TODO_TOKEN": "wrong"}
+    args = {"url": private_feed, "db": str(tmp_path / "todo.json")}
+    got = todo_config.app.call("import", args, env=env)
+    assert got.exit_code == 8 and got.error is not None
+    assert got.error.code == "UNAUTHENTICATED" and "wrong" not in json.dumps(got.to_json())
+
+
+def test_import_without_a_feed_is_a_precondition(tmp_path: Path) -> None:
+    got = todo_config.app.call("import", {"db": str(tmp_path / "todo.json")}, env={})
+    assert got.exit_code == 4 and got.error is not None
+    assert got.error.fix_required == "pass --url, or set feed_url in .todo.toml or TODO_FEED_URL"
 
 
 # Declare exit codes

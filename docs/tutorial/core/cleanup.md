@@ -189,5 +189,5 @@ the process do the same; `tests/test_lifecycle.py` covers each exit path that wa
 
 ## Next
 
-That is the last rule the core chapters follow. The audit's final rule, `profile`, asks for a
-conformance profile, which [Run the conformance kit](../ship/conformance.md) writes and runs.
+The audit's next rules, `settings-declared` and `env-prefix`, are about how a command reads
+its settings and secrets: [Read settings and secrets](config.md).
