@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -190,6 +191,33 @@ def test_only_exit_codes_findings_remain() -> None:
     """The argparse chapter's Done when: the next chapter's rule is the only one left"""
     _, steps = _audit("examples.tutorial.todo_treaty:app")
     assert {s["rule"] for s in steps if s["severity"] == "warning"} == {"exit-codes"}
+
+
+# Describe every command
+
+
+def app_examples(app: App) -> list[str]:
+    """Every example of the app's own commands, in manifest order; built-ins have their own"""
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    builtins = {path.value for path in app.builtins}
+    return [
+        example["command"]
+        for name, command in commands.items()
+        if name not in builtins
+        for example in command.get("examples", [])
+    ]
+
+
+@pytest.mark.parametrize("example", app_examples(todo_exit_codes.app))
+def test_an_example_parses(example: str) -> None:
+    """Registration checks only the quoting: a renamed flag or a <placeholder> fails here"""
+    argv = shlex.split(example)[1:]  # without the program name
+    out = io.StringIO()
+    code = todo_exit_codes.app.run(
+        [*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={}
+    )
+    assert code == 0, out.getvalue()
 
 
 # Declare exit codes
