@@ -108,6 +108,8 @@ Apps built on treaty keep their own, structured schema changelog with
   character, and a prompt's answer kept a Windows terminal's `\r`
 - Nested `armed()` signal windows were caught by an `assert`, which `python -O` drops
 - The `generate-skills` example claimed Claude Code finds the files it writes
+- `check-docs` said "1 items in the docs disagree" for a single mismatch; it now says
+  "1 item in the docs disagrees"
 
 ## [1.0.0rc2] - 2026-09-28
 
