@@ -40,6 +40,7 @@ _cleanup_seconds = [0.0]
 )
 def fetch(args: Fetch, ctx: Ctx) -> dict[str, object]:
     _cleanup_seconds[0] = args.cleanup_seconds
+    ctx.log("fetching", seconds=args.seconds)  # with --verbose, tests wait for it to signal
     time.sleep(args.seconds)
     return {"slept": args.seconds, "timeout_s": ctx.timeout.seconds}
 

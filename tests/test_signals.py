@@ -14,13 +14,16 @@ SLOWCTL = Path(__file__).resolve().parents[1] / "examples" / "slowctl.py"
 
 
 def start(*argv: str) -> subprocess.Popen[str]:
+    """slowctl, once its handler runs: a signal before that meets Python's default action"""
     proc = subprocess.Popen(
-        [sys.executable, str(SLOWCTL), *argv],
+        [sys.executable, str(SLOWCTL), *argv, "--verbose"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
-    time.sleep(0.4)  # let the interpreter start and the handler enter its sleep
+    assert proc.stderr is not None
+    line = proc.stderr.readline()  # the handler's "fetching" line; blocks until it is written
+    assert "fetching" in line, line + proc.stderr.read()
     return proc
 
 
