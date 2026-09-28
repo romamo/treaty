@@ -220,6 +220,7 @@ from ._subprocess import (
     HeadlessBehavior,
     Processes,
 )
+from ._suggest import closest, hint
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._tools import EXEC_PATH
@@ -1236,12 +1237,20 @@ class App:
             path = None
         command = None if path is None else self._commands.get(path)
         if command is None:
+            context: dict[str, object] = {
+                "for": name,
+                "available": sorted(p.value for p in self._commands),
+            }
+            fix = "pass --for one of the available commands"
+            if near := closest(".".join(name.split()), self._key_names()):
+                context["did_you_mean"] = near
+                fix = f"pass --for {near[0]}, the closest command"
             raise CliExit(
                 ExitCodeName("NOT_FOUND"),
                 f"no command {name!r} to check",
                 code="UNKNOWN_COMMAND",
-                context={"for": name, "available": sorted(p.value for p in self._commands)},
-                fix_required="pass --for one of the available commands",
+                context=context,
+                fix_required=fix,
             )
         return command
 
@@ -1294,6 +1303,27 @@ class App:
         if not paths:
             paths = list(self._commands)
         return sorted(f"{self.name} {' '.join(p.parts)}" for p in paths)
+
+    def _typed_names(self, prefix: tuple[str, ...]) -> list[tuple[str, str]]:
+        """What a mistyped word under ``prefix`` is compared with, each with the invocation
+        it suggests: the next word, a deeper command's own name, and its dot path, which
+        agents copy from the manifest"""
+        names: list[tuple[str, str]] = []
+        for path in (*self._commands, *self._groups):
+            rest = path.parts[len(prefix) :]
+            if path.parts[: len(prefix)] != prefix or not rest:
+                continue
+            names.append((rest[0], f"{self.name} {' '.join((*prefix, rest[0]))}"))
+            if len(rest) > 1:
+                whole = f"{self.name} {' '.join(path.parts)}"
+                names += [(rest[-1], whole), (".".join(rest), whole)]
+        return names
+
+    def _key_names(self) -> list[tuple[str, str]]:
+        """What a mistyped command path is compared with, each with the path it suggests:
+        the path and its command's own name"""
+        paths = (p for p in self._commands if p != EXEC_PATH)
+        return [(key, p.value) for p in paths for key in (p.value, p.parts[-1])]
 
     def _budget(self, globals_: GlobalOptions) -> TokenBudget | None:
         """The run's token budget (REQ-O-049); None when no token flag was given"""
@@ -1448,11 +1478,12 @@ class App:
             return run.redirected(source, moved, moved.to.value, meta=meta)
         if command is None or command_path == EXEC_PATH:
             available = sorted(p.value for p in self._commands if p != EXEC_PATH)
+            context: dict[str, object] = {"_cmd": path, "available": available}
+            near = [] if command is not None else closest(path, self._key_names())
+            if near:
+                context["did_you_mean"] = near
             return run.arg_error(
-                ParseError(
-                    f"unknown command {path}",
-                    context={"_cmd": path, "available": available},
-                ),
+                ParseError(f"unknown command {path}", context=context, suggestion=hint(near)),
                 code="UNKNOWN_COMMAND",
                 meta=meta,
             )
@@ -1641,18 +1672,20 @@ class App:
             # otherwise answer with exit 0 about the enclosing group
             if route.tokens[0].startswith("-") and format_hint(route.tokens[0]) is None:
                 return run.emit(mode, run.arg_error(self._misplaced_flag(route)))
+            typed = without_value(route.tokens[0])
+            context = {
+                "argument": typed,
+                "prefix": ".".join(route.prefix),
+                "available": self._invocations(route.prefix),
+            }
+            suggestion = format_hint(route.tokens[0])
+            if suggestion is None and (near := closest(typed, self._typed_names(route.prefix))):
+                context["did_you_mean"] = near
+                suggestion = hint(near)
             return run.emit(
                 mode,
                 run.arg_error(
-                    ParseError(
-                        f"unknown command {without_value(route.tokens[0])!r}",
-                        context={
-                            "argument": without_value(route.tokens[0]),
-                            "prefix": ".".join(route.prefix),
-                            "available": self._invocations(route.prefix),
-                        },
-                        suggestion=format_hint(route.tokens[0]),
-                    )
+                    ParseError(f"unknown command {typed!r}", context=context, suggestion=suggestion)
                 ),
             )
         command = None if route.path is None else self._commands[route.path]

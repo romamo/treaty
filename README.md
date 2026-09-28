@@ -883,6 +883,15 @@ message and context and lists itself. Framework flags (`--timeout`, `--idempoten
 a repeat with a different value) and a flag with no value at the end are collected the same
 way; only invalid `--raw-payload` JSON stops parsing at once.
 
+A command path that matches nothing exits `2` with `context.available`, the invocations
+under the group it was typed in. When a registered name is close, `context.did_you_mean`
+lists up to three invocations, best first, and `suggestion` names them: `deployctl rollbak`
+and `deployctl deploy.rollback` (the registry key, as agents copy it from the manifest) both
+suggest `deployctl deploy rollback`. A name is close within one typo per three characters
+typed, a swap of neighbors counting as one, or when it starts with what was typed; two
+characters get no guess. `App.call`, `exec`, MCP, and `check-permissions --for` suggest the
+dot path the same way on `UNKNOWN_COMMAND`.
+
 ## Paths
 
 A field annotated `pathlib.Path` (or `Path | None`, `tuple[Path, ...]`) reaches the handler as a

@@ -42,6 +42,13 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Added
 
+- Did-you-mean on an unknown command: `context.did_you_mean` lists up to three close
+  registered commands, best first, and `suggestion` names them, on the command line (as
+  invocations, matching a mistyped word, a command's own name without its group, or the
+  dot path) and on `UNKNOWN_COMMAND` from `App.call`, `exec`, MCP, and
+  `check-permissions --for` (as dot paths). Close is one typo per three characters typed,
+  a swap of neighbors counting as one, or a prefix of a one-word name
+
 - `completion` built-in: `<app> completion bash` or `zsh` prints a completion script
   generated from the manifest, covering commands, nested groups, flags, and the values of
   enum and path flags and positionals, `--flag=value` included. The script is static, so a
