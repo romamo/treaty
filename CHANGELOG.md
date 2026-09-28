@@ -113,6 +113,9 @@ Apps built on treaty keep their own, structured schema changelog with
 - A `Path` argument with `%2e%2e` was refused with a suggestion that decoded it to a `..`
   path, which was refused in turn; the suggestion is now the absolute path, and a value
   that decodes to a null byte, a line break, or another encoding gets no path suggested
+- The absolute path suggested for a `..` in a `Path` argument was resolved against the
+  process's directory, even under `--cwd`, where the argument itself resolves; it is now
+  under `--cwd`, and symlinks in it are no longer resolved
 
 ## [1.0.0rc2] - 2026-09-28
 

@@ -102,6 +102,26 @@ def test_a_suggested_path_passes_the_checks(raw: str) -> None:
     assert code == 0
 
 
+@pytest.mark.parametrize("raw", ["../x.txt", "%2e%2e/x.txt"])
+def test_a_suggested_absolute_path_is_under_cwd(raw: str, tmp_path: Path) -> None:
+    """A relative argument resolves under --cwd, so the path it meant is there too"""
+    (tmp_path / "sub").mkdir()
+    _, env = run(["copy", raw, "--cwd", str(tmp_path / "sub")])
+    suggestion = env["error"]["suggestion"]  # type: ignore[index]
+    assert isinstance(suggestion, str)
+    assert suggestion.split(": --source ", 1)[1] == str(tmp_path / "x.txt")
+
+
+def test_every_collected_path_error_is_suggested_under_cwd(tmp_path: Path) -> None:
+    (tmp_path / "sub").mkdir()
+    _, env = run(["copy", "../a", "--dest", "../b", "--cwd", str(tmp_path / "sub")])
+    errors = env["error"]["errors"]  # type: ignore[index]
+    assert [e["suggestion"].rsplit(" ", 1)[1] for e in errors] == [
+        str(tmp_path / "a"),
+        str(tmp_path / "b"),
+    ]
+
+
 @pytest.mark.parametrize("raw", ["a%00b", "a%0Ab", "%252e%252e/x"])
 def test_no_path_is_suggested_when_no_decoded_form_passes(raw: str) -> None:
     """%00 decodes to a null byte and %252e to another encoding: the generic advice stays"""

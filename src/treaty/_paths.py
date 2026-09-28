@@ -6,6 +6,7 @@ argv and the JSON (``exec``, ``--raw-payload``) routes, before any handler runs.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from urllib.parse import unquote
@@ -20,6 +21,7 @@ _CONTROL = {
     "\r": ("carriage return", "carriage_return"),
 }
 _PATTERNS_WITHOUT_FIX = frozenset(pattern for _, pattern in _CONTROL.values())
+_PATTERNS_WITH_FIX = frozenset({"percent_encoded", "path_traversal"})
 
 
 def _rejected(raw: str) -> tuple[str, str] | None:
@@ -34,15 +36,28 @@ def _rejected(raw: str) -> tuple[str, str] | None:
     return None
 
 
-def _passing_form(raw: str) -> str | None:
-    """The decoded path, made absolute when it climbs with ``..``, if the checks accept it:
-    ``%2e%2e`` decodes to a climb, and ``%00`` or a double encoding has no form that passes"""
+def _passing_form(raw: str, base: Path) -> str | None:
+    """The decoded path, made absolute under ``base`` when it climbs with ``..``, if the
+    checks accept it: ``%2e%2e`` decodes to a climb, and ``%00`` or a double encoding has
+    no form that passes. Symlinks are not resolved, as ``--cwd`` does not resolve them"""
     candidate = unquote(raw)
     problem = _rejected(candidate)
     if problem is not None and problem[1] == "path_traversal":
-        candidate = str(Path(candidate).resolve())
+        candidate = os.path.normpath(base / candidate)
         problem = _rejected(candidate)
     return None if problem is not None else candidate
+
+
+def _suggestion(raw: str, flag: str, pattern: str, base: Path) -> str | None:
+    passing = None if pattern in _PATTERNS_WITHOUT_FIX else _passing_form(raw, base)
+    if passing is None:
+        return None
+    lead = (
+        "pass the decoded path"
+        if pattern == "percent_encoded"
+        else "pass the absolute path if intended"
+    )
+    return f"{lead}: --{flag} {passing}"
 
 
 def check_path(raw: str, flag: str) -> Path:
@@ -56,17 +71,22 @@ def check_path(raw: str, flag: str) -> Path:
     if problem is None:
         return Path(raw)
     what, pattern = problem
-    passing = None if pattern in _PATTERNS_WITHOUT_FIX else _passing_form(raw)
-    suggestion = None
-    if passing is not None:
-        lead = (
-            "pass the decoded path"
-            if pattern == "percent_encoded"
-            else "pass the absolute path if intended"
-        )
-        suggestion = f"{lead}: --{flag} {passing}"
+    try:
+        suggestion = _suggestion(raw, flag, pattern, Path.cwd())
+    except FileNotFoundError:  # the working directory was removed: no absolute form to give
+        suggestion = None
     raise ParseError(
         f"{flag!r} {what}",
         context={"flag": flag, "value": raw, "rejected_pattern": pattern},
         suggestion=suggestion,
     )
+
+
+def rebase_suggestions(exc: ParseError, base: Path) -> None:
+    """Give ``exc``'s path suggestions, and those of the errors it collected, their absolute
+    form under ``base``, the run's ``--cwd``: :func:`check_path` does not know it, and a
+    relative argument is resolved there, not in the process's directory"""
+    for e in (exc, *exc.errors):
+        pattern, raw, flag = (e.context.get(k) for k in ("rejected_pattern", "value", "flag"))
+        if pattern in _PATTERNS_WITH_FIX and isinstance(raw, str) and isinstance(flag, str):
+            e.suggestion = _suggestion(raw, flag, pattern, base)

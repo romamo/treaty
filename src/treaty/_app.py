@@ -176,6 +176,7 @@ from ._parse import (
     strict_argv,
     without_value,
 )
+from ._paths import rebase_suggestions
 from ._plain import render_event, render_plain
 from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._protect import (
@@ -2814,6 +2815,7 @@ class _Run:
         )
 
     def arg_error(self, exc: ParseError, *, code: str | None = None, **kw: Any) -> Envelope:
+        rebase_suggestions(exc, self.cwd)
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
         corrected = exc.context.get("corrected_input")
         return self._envelope(
