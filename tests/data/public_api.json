@@ -649,7 +649,11 @@
         "retries",
         "delay_ms",
         "on",
-        "exhausted"
+        "exhausted",
+        "backoff",
+        "max_delay_ms",
+        "jitter",
+        "retry_if"
       ],
       "kind": "class",
       "methods": []

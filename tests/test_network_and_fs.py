@@ -23,6 +23,7 @@ from treaty import App, Ctx, Exit, Flag, HttpResponse, NoArgs, RegistrationError
 from treaty._audit import Finding, audit
 from treaty._http import Http, NetworkFailure, ProxyConfig
 from treaty._profile import probes_for
+from treaty._retry import Retrier
 from treaty._values import ExitCodeName
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -36,8 +37,9 @@ BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT
 
 
 class Origin(BaseHTTPRequestHandler):
-    """``/status/N`` answers N, ``/slow`` waits 2 s, ``/flaky`` answers 503 once, and
-    anything else 200 with the path in JSON"""
+    """``/status/N`` answers N, ``/slow`` waits 2 s, ``/flaky`` answers 503 once, as
+    ``/flaky-after`` does with ``Retry-After: 3``, and anything else 200 with the path in
+    JSON"""
 
     server: Recording
 
@@ -48,13 +50,15 @@ class Origin(BaseHTTPRequestHandler):
         status = 200
         if self.path.startswith("/status/"):
             status = int(self.path.rsplit("/", 1)[1])
-        if self.path == "/flaky" and self.server.flaky:
+        if self.path in ("/flaky", "/flaky-after") and self.server.flaky:
             self.server.flaky -= 1
             status = 503
         body = json.dumps({"via": "origin", "path": self.path}).encode()
         self.send_response(status)
         if status == 429:
             self.send_header("Retry-After", "7")
+        if status == 503 and self.path == "/flaky-after":
+            self.send_header("Retry-After", "3")
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -530,6 +534,16 @@ def test_a_retried_request_goes_through_the_proxy_again(
     code, envelope = run(net_app(), ["sturdy", "--url", f"{tls_origin.url}/flaky"], env)
     assert code == 0 and envelope["meta"]["retries"] == 1  # type: ignore[index]
     assert [m for m, _, _ in proxy.seen] == ["CONNECT", "CONNECT"]
+
+
+def test_a_503s_retry_after_lengthens_the_backoffs_wait(origin: Recording) -> None:
+    origin.flaky = 1
+    waits: list[float] = []
+    policy = Retry(retries=2, delay_ms=1)
+    retrier = Retrier(policy, retries=2, delay_ms=1, deadline=None, sleep=waits.append)
+    http = Http(ProxyConfig({}), deadline=None, retrier=retrier, declared=())
+    assert http.get(f"{origin.url}/flaky-after").status == 200
+    assert waits == [3.0] and retrier.count == 1
 
 
 def test_exhausted_http_retries_keep_network_context(refused: str) -> None:
