@@ -11,7 +11,7 @@ the next chapter clears:
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_treaty:app \
-  | jq -e '[.data.next_steps[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
+  | jq -e '[.data.rules[].findings[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
 ```
 
 The chapter migrates one small CLI, `todo`, from start to finish. The starting point is

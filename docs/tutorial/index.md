@@ -58,6 +58,7 @@ others' changes. `todo_config.py` and `todo_batch.py` build on `todo_network.py`
 | [`todo_config.py`](../../examples/tutorial/todo_config.py) | `todo_network.py` plus settings and a token for `import` | [settings and secrets](core/config.md) |
 | [`todo_pages.py`](../../examples/tutorial/todo_pages.py) | a `list` that pages by item id | [pagination](core/pagination.md) |
 | [`todo_batch.py`](../../examples/tutorial/todo_batch.py) | `todo_network.py` plus `import-all`, several feeds in one call | [long-running work](core/long-running.md) |
+| [`todo_v2.py`](../../examples/tutorial/todo_v2.py) | release 1.1.0: `done` renamed `complete`, `--all` deprecated | [stability](ship/stability.md) |
 | [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
@@ -87,10 +88,12 @@ rule, the finding's suggested fix is the guide:
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
 | `async-job` | a job descriptor from commands that start work | [Run long work an agent can follow](core/long-running.md) |
 | `stable-order` | a declared order for arrays of objects | [Page long lists](core/pagination.md) |
+| `schema-version` | an output change that bumps the command's `schema_version` | [Change the contract safely](ship/stability.md) |
 | `log-not-print` | handlers log through `ctx`, never `print()` | [Log without touching stdout](core/logging.md) |
 | `settings-declared` | config read through `App(settings=)`, not parsed by a handler | [Read settings and secrets](core/config.md) |
 | `env-prefix` | handlers read only the app's own environment variables | [Read settings and secrets](core/config.md) |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |
+| `additive` | nothing in the last release's manifest removed without notice (`--baseline`) | [Change the contract safely](ship/stability.md) |
 
 ### Advice you can leave
 
@@ -111,8 +114,10 @@ the fix, or leave it when the guess does not fit your command. `todo` keeps two,
 You are done with the core when `treaty audit module:app --strict` exits 0. Shipping comes
 after that: [Run the conformance kit](ship/conformance.md) puts the CLI through the spec's
 runtime checks and gates CI on them, [Serve commands over MCP](ship/mcp.md) gives agents
-without a shell the same commands as tools, and [Ship the agent docs](ship/agent-docs.md)
-generates the AGENTS.md, skill files, and MCP tool list agents read, and checks them in CI.
+without a shell the same commands as tools, [Ship the agent docs](ship/agent-docs.md)
+generates the AGENTS.md, skill files, and MCP tool list agents read, and checks them in CI,
+and [Change the contract safely](ship/stability.md) takes a release to the next without
+breaking the agents that learned it.
 
 ## For agents
 
@@ -123,6 +128,11 @@ uv run treaty audit myapp.cli:app --strict          # exit 0: done
 uv run treaty audit myapp.cli:app | jq '.data.next_steps[0]'
 # read .rule, open that chapter, apply .fix, run the project's tests, repeat
 ```
+
+`next_steps` holds the first few findings in the order the rules run, not by severity, so
+an error from a late rule can sit behind advice from an early one. `--all` lists every
+finding, and `.data.rules[].findings` holds them all in JSON; a check that a rule is clear
+reads that, not `next_steps`.
 
 Rules only see declarations. After the loop ends, `treaty conformance myapp.cli:app --run`
 checks runtime behaviour against the spec kit.

@@ -13,7 +13,7 @@ holds anything past its handler has a hook that gives it back:
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_network:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "resource-release")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "resource-release")] == []'
 ```
 
 The chapter looks at `todo`'s `import` in
@@ -118,7 +118,7 @@ nothing gives back. `release` should only give back: a `release` that raises is 
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_network:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "resource-release")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "resource-release")] == []'
 ```
 
 ## Step 3: Use `cleanup=` for what outlives a resource

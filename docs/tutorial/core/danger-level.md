@@ -11,7 +11,7 @@ clears the audit rule `danger-level`
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_exit_codes:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "danger-level")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "danger-level")] == []'
 ```
 
 The chapter uses `todo` as [Declare exit codes](exit-codes.md) left it,

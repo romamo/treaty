@@ -31,6 +31,7 @@ from examples.tutorial import (
     todo_network,
     todo_pages,
     todo_payload,
+    todo_v2,
 )
 from examples.tutorial.todo_treaty import app
 from treaty import App, Ctx, Envelope, Exit, NoArgs, RegistrationError
@@ -232,6 +233,7 @@ EXAMPLE_APPS = [
     todo_config.app,
     todo_pages.app,
     todo_batch.app,
+    todo_v2.app,
 ]
 """todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 
@@ -256,6 +258,12 @@ BRANCHES = [
     ("todo_network.py", "todo_batch.py", ()),
     # A list that pages by id instead of by position
     ("todo_exit_codes.py", "todo_pages.py", ("def list_items(",)),
+    # 1.1.0: done renamed to complete, and list's --all deprecated for --include-done
+    (
+        "todo_exit_codes.py",
+        "todo_v2.py",
+        ("app = App(", "class ListArgs(", "def list_items(", "def done("),
+    ),
     # Settings change how the app is built, and import reads them and takes a token
     ("todo_network.py", "todo_config.py", ("app = App(", "class Import(", "def import_items(")),
 ]

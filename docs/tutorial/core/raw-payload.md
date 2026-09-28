@@ -12,7 +12,7 @@ this chapter clears the audit rule `raw-payload`
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_payload:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "raw-payload")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "raw-payload")] == []'
 ```
 
 The chapter gives `todo` an `edit` command that changes an item's text or priority. It starts

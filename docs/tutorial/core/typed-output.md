@@ -11,7 +11,7 @@ clears the audit rule `typed-output`
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_exit_codes:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "typed-output")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "typed-output")] == []'
 ```
 
 The chapter uses `todo` as [Declare exit codes](exit-codes.md) left it,

@@ -13,7 +13,7 @@ warnings, which the next chapter clears:
 ```bash
 uv run pytest -q
 uv run treaty audit todo.cli:app \
-  | jq -e '[.data.next_steps[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
+  | jq -e '[.data.rules[].findings[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
 ```
 
 The chapter builds one small CLI, `todo`, from an empty directory: add items, list them,
@@ -429,7 +429,7 @@ is the next chapter's subject, and every chapter after it follows the audit the 
 ```bash
 uv run pytest -q
 uv run treaty audit todo.cli:app \
-  | jq -e '[.data.next_steps[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
+  | jq -e '[.data.rules[].findings[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
 ```
 
 ## Next

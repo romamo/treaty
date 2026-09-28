@@ -12,7 +12,7 @@ cursor survives a change to the list between pages:
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_pages:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "paginated-list" or .rule == "stable-order")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "paginated-list" or .rule == "stable-order")] == []'
 ```
 
 The chapter starts from

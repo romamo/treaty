@@ -12,7 +12,7 @@ clears the audit rule `describe`
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_exit_codes:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "describe")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "describe")] == []'
 ```
 
 The chapter uses `todo` as [Declare exit codes](exit-codes.md) left it,
@@ -181,6 +181,7 @@ EXAMPLE_APPS = [
     todo_config.app,
     todo_pages.app,
     todo_batch.app,
+    todo_v2.app,
 ]
 """todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 

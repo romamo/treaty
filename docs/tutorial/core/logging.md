@@ -11,7 +11,7 @@ this chapter clears the audit rule `log-not-print`
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_config:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "log-not-print")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "log-not-print")] == []'
 ```
 
 The chapter uses [`examples/tutorial/todo_config.py`](../../../examples/tutorial/todo_config.py),

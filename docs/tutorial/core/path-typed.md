@@ -12,7 +12,7 @@ clears the audit rule `path-typed`
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_exit_codes:app \
-  | jq -e '[.data.next_steps[] | select(.rule == "path-typed")] == []'
+  | jq -e '[.data.rules[].findings[] | select(.rule == "path-typed")] == []'
 ```
 
 The chapter uses `todo` as [Declare exit codes](exit-codes.md) left it,
