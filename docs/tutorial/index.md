@@ -43,9 +43,9 @@ apart, so what you copy is what the tests run.
 
 Every chapter works on one small CLI, `todo`, and each file under `examples/tutorial/` is
 `todo` at one point in the tutorial. The files do not form a single line: after
-`todo_exit_codes.py`, two chapters each add one command to their own copy, so
-`todo_network.py` has `import` and `todo_payload.py` has `edit`, but neither has the other's.
-`todo_config.py` builds on `todo_network.py` in turn.
+`todo_exit_codes.py`, chapters change their own copy: `todo_network.py` adds `import`,
+`todo_payload.py` adds `edit`, and `todo_pages.py` changes how `list` pages, but none has the
+others' changes. `todo_config.py` builds on `todo_network.py` in turn.
 
 | File | What it is | Chapters |
 | --- | --- | --- |
@@ -56,6 +56,7 @@ Every chapter works on one small CLI, `todo`, and each file under `examples/tuto
 | [`todo_network.py`](../../examples/tutorial/todo_network.py) | plus `import`, which fetches items over HTTP | [network](core/network-io.md), [cleanup](core/cleanup.md) |
 | [`todo_payload.py`](../../examples/tutorial/todo_payload.py) | plus `edit`, which takes its fields as JSON | [raw payload](core/raw-payload.md) |
 | [`todo_config.py`](../../examples/tutorial/todo_config.py) | `todo_network.py` plus settings and a token for `import` | [settings and secrets](core/config.md) |
+| [`todo_pages.py`](../../examples/tutorial/todo_pages.py) | a `list` that pages by item id | [pagination](core/pagination.md) |
 | [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
@@ -78,10 +79,12 @@ rule, the finding's suggested fix is the guide:
 | `exit-codes` | command-specific exit codes on every non-safe command | [Declare exit codes](core/exit-codes.md) |
 | `retryable` | retryable codes only on idempotent commands | [Declare exit codes](core/exit-codes.md) |
 | `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
+| `paginated-list` | list commands keep the framework's pagination | [Page long lists](core/pagination.md) |
 | `network-io` | `has_network_io=True` on commands that call out | [Declare network commands](core/network-io.md) |
 | `path-typed` | `pathlib.Path` on path-like fields | [Type path arguments as Path](core/path-typed.md) |
 | `raw-payload` | `--raw-payload` on wide mutating commands | [Accept a raw JSON payload](core/raw-payload.md) |
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
+| `stable-order` | a declared order for arrays of objects | [Page long lists](core/pagination.md) |
 | `settings-declared` | config read through `App(settings=)`, not parsed by a handler | [Read settings and secrets](core/config.md) |
 | `env-prefix` | handlers read only the app's own environment variables | [Read settings and secrets](core/config.md) |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |

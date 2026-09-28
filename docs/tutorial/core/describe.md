@@ -173,7 +173,14 @@ def app_examples(app: App) -> list[str]:
     ]
 
 
-EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app, todo_config.app]
+EXAMPLE_APPS = [
+    app,
+    todo_exit_codes.app,
+    todo_network.app,
+    todo_payload.app,
+    todo_config.app,
+    todo_pages.app,
+]
 """todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 
 

@@ -23,7 +23,13 @@ import jsonschema
 import pytest
 from conftest import SPEC_DIR, needs_posix_permissions, needs_sh_launcher
 
-from examples.tutorial import todo_config, todo_exit_codes, todo_network, todo_payload
+from examples.tutorial import (
+    todo_config,
+    todo_exit_codes,
+    todo_network,
+    todo_pages,
+    todo_payload,
+)
 from examples.tutorial.todo_treaty import app
 from treaty import App, Ctx, Envelope, Exit, NoArgs, RegistrationError
 from treaty._cli import cli
@@ -216,7 +222,14 @@ def app_examples(app: App) -> list[str]:
     ]
 
 
-EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app, todo_config.app]
+EXAMPLE_APPS = [
+    app,
+    todo_exit_codes.app,
+    todo_network.app,
+    todo_payload.app,
+    todo_config.app,
+    todo_pages.app,
+]
 """todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 
 
@@ -237,6 +250,8 @@ EXAMPLES = ROOT / "examples" / "tutorial"
 BRANCHES = [
     ("todo_exit_codes.py", "todo_network.py", ()),
     ("todo_exit_codes.py", "todo_payload.py", ()),
+    # A list that pages by id instead of by position
+    ("todo_exit_codes.py", "todo_pages.py", ("def list_items(",)),
     # Settings change how the app is built, and import reads them and takes a token
     ("todo_network.py", "todo_config.py", ("app = App(", "class Import(", "def import_items(")),
 ]

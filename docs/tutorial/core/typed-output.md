@@ -188,5 +188,5 @@ uv run pytest -q tests/test_tutorial.py -k test_every_result_matches_its_output_
 
 ## Next
 
-The audit's next rule is `network-io`, for commands that call out:
-[Declare network commands](network-io.md).
+The audit's next rule is `paginated-list`, for commands that return a list:
+[Page long lists](pagination.md).
