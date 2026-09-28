@@ -8,8 +8,9 @@ from pathlib import Path
 import fixture_audit_app
 import pytest
 from conftest import SPEC_DIR
+from packaging.version import Version
 
-from treaty._cli import cli, resolve_spec_dir
+from treaty._cli import cli, resolve_spec_dir, semver_of
 from treaty._errors import CliExit
 from treaty._profile import SPEC_FALLBACK, build_profile, default_command, has_kit, probes_for
 
@@ -269,3 +270,23 @@ def test_scaffold_pins_the_treaty_version_it_was_generated_by() -> None:
 
     pyproject = render(ProjectName("demo"))["pyproject.toml"]
     assert f'dependencies = ["treaty>={__version__}"]' in pyproject
+
+
+@pytest.mark.parametrize(
+    ("pep440", "semver"),
+    [
+        ("1.0.0", "1.0.0"),
+        ("1.0.0rc1", "1.0.0-rc.1"),
+        ("2.1.0a3", "2.1.0-alpha.3"),
+        ("1.2.3b1", "1.2.3-beta.1"),
+    ],
+)
+def test_treaty_reports_its_pep440_version_as_semver(pep440: str, semver: str) -> None:
+    assert semver_of(pep440) == semver
+    assert Version(semver) == Version(pep440)
+
+
+@pytest.mark.parametrize("pep440", ["1.0", "1.0.0.dev1", "1.0.0.post1", "1.0.0rc"])
+def test_a_version_without_a_semver_spelling_fails_loudly(pep440: str) -> None:
+    with pytest.raises(ValueError, match="no semver spelling"):
+        semver_of(pep440)
