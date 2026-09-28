@@ -353,7 +353,11 @@ pass the same deadline to their network calls, and `ctx.expired` to stop a long 
 with the work done so far rather than run on after `TIMEOUT`;
 the `network-timeout` audit rule flags `urlopen`, `http.client` connections,
 `socket.create_connection`, `requests`, and `httpx` calls without `timeout=` in network
-commands (REQ-C-012). An
+commands (REQ-C-012). The `timeout-budget` rule warns when a command's `retry=Retry(...)`
+may wait longer in all than its timeout, with a `timeout=` sized to the waits, and when a
+`heartbeat=True` command inherits the app default; the `explicit-timeout` advice asks a
+mutating or destructive command on the app default to declare `timeout=` (the default
+itself counts, `None` runs unbounded). An
 idempotency key stays locked until a timed-out or cancelled handler really finishes, so a
 retry never runs beside it: it waits up to its own timeout, then replays the recorded
 result or exits `10` with `IDEMPOTENCY_KEY_BUSY`. An unusable state directory or a damaged
@@ -1429,7 +1433,8 @@ untyped outputs, undeclared network I/O, path-like fields not typed `Path`, wide
 commands without `--raw-payload`, missing cleanup hooks, blanket scopes, login commands
 without `auth=`, commands that start work without returning a job, config writes without a
 scope, per-call values in output data, output schema changes without a `schema_version`
-bump, handlers that find a project root or retry by hand, and a missing conformance
+bump, handlers that find a project root or retry by hand, retry waits longer than the
+timeout, mutating commands left on the default timeout, and a missing conformance
 profile. The next steps come errors first, then warnings, then advice, in rule order within
 each, so what fails `--strict` is never behind advice. `--all` lists
 everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and

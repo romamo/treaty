@@ -201,6 +201,7 @@ def show(args: ItemArgs, ctx: Ctx) -> Item:
     exit_codes=["CONFLICT"],
     supports_raw_payload=True,
     examples=[("Create an item", "{n} create widget --note first")],
+    timeout=30,
 )
 def create(args: CreateArgs, ctx: Ctx) -> Creation:
     if args.name == "taken":
@@ -217,6 +218,7 @@ def create(args: CreateArgs, ctx: Ctx) -> Creation:
     danger_level="destructive",
     exit_codes=["ITEM_IN_USE"],
     examples=[("Preview a deletion", "{n} delete widget --dry-run")],
+    timeout=30,
 )
 def delete(args: DeleteArgs, ctx: Ctx) -> Deletion:
     if args.name == "busy":

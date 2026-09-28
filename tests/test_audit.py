@@ -2,11 +2,13 @@ import io
 import json
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import fixture_audit_app
 import pytest
 
+from treaty import Affects, Flag
 from treaty._audit import ADDITIVE, RULES, audit
 from treaty._cli import cli
 from treaty._scan import reached_functions
@@ -38,10 +40,11 @@ def test_audit_finds_each_planted_problem(tmp_path) -> None:
     assert [f.command for f in by_rule["raw-payload"].findings] == ["create-item"]
     assert [f.command for f in by_rule["cleanup"].findings] == []
     assert [f.command for f in by_rule["already-exists"].findings] == ["create-item"]
+    assert [f.command for f in by_rule["explicit-timeout"].findings] == ["create-item"]
     assert not by_rule["profile"].passed
     # The fixture's findings are warnings and advice: warnings lead, in rule order
     assert [f.rule for f in report.next_steps] == ["danger-level", "retryable", "network-io"]
-    assert report.failed == 11
+    assert report.failed == 12
 
 
 def test_audit_passes_a_clean_app(tmp_path) -> None:
@@ -76,13 +79,13 @@ def test_cli_audit_json_and_plain(tmp_path) -> None:
     code, out = run_cli(["audit", "fixture_audit_app:app", "--limit", "2", *where], isatty=False)
     assert code == 0
     data = json.loads(out)["data"]
-    assert data["rules_total"] == len(RULES) and data["failed"] == 11
+    assert data["rules_total"] == len(RULES) and data["failed"] == 12
     assert len(data["next_steps"]) == 2
     code, out = run_cli(["audit", "fixture_audit_app:app", "--all", *where], isatty=True)
     assert code == 0
     assert "Next steps" in out and "1. (warning) danger-level [" in out
     assert "(advice) describe [create-item]" in out
-    assert out.count("fix:") == 14
+    assert out.count("fix:") == 15
 
 
 def test_cli_audit_bad_targets() -> None:
@@ -276,7 +279,7 @@ def test_delete_not_found_is_only_for_commands_that_delete() -> None:
     """A restore from a missing snapshot is a real failure, not a delete of something gone"""
     from dataclasses import dataclass
 
-    from treaty import Affects, App, Arg, Ctx, Flag
+    from treaty import App, Arg, Ctx, Flag
 
     @dataclass(frozen=True, slots=True)
     class ById:
@@ -1659,3 +1662,101 @@ def test_the_report_says_what_the_source_rules_read() -> None:
     assert code == 0 and "first-party modules 3 calls deep" in scope
     code, out = run_cli(["audit", "fixture_follow_app:app"], isatty=True)
     assert out.splitlines()[1] == f"Scope: {scope}"
+
+
+@dataclass(frozen=True, slots=True)
+class Restarted:
+    effect: str
+    would_affect: Affects | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RestartArgs:
+    dry_run: bool = Flag(default=False, description="Preview the restart")
+
+
+def _timeout_app(**declared: object) -> dict[str, list[tuple[str | None, str, str]]]:
+    """``restart``, destructive, registered with ``declared``; the findings of the two
+    timeout rules as (command, message, fix)"""
+    from treaty import App, Ctx
+
+    app = App("ops", version="1.0.0")
+
+    @app.command(
+        "restart",
+        description="Restart the service",
+        examples=[("Restart", "ops restart")],
+        danger_level="destructive",
+        exit_codes=["UNAVAILABLE"],
+        **declared,  # type: ignore[arg-type]
+    )
+    def restart(args: RestartArgs, ctx: Ctx) -> Restarted:
+        return Restarted("restarted")
+
+    rules = {r.id: r for r in audit(app, "ops", limit=10).rules}
+    return {
+        rule: [(f.command, f.message, f.fix) for f in rules[rule].findings]
+        for rule in ("explicit-timeout", "timeout-budget")
+    }
+
+
+def test_explicit_timeout_advises_a_destructive_command_on_the_default() -> None:
+    [(command, message, fix)] = _timeout_app()["explicit-timeout"]
+    assert command == "restart"
+    assert message.startswith("a destructive command inherits the app's 60 s default")
+    assert "timeout=None" in fix and "timeout=60 keeps the default" in fix
+
+
+def test_explicit_timeout_is_silent_once_timeout_is_declared_even_at_the_default() -> None:
+    assert _timeout_app(timeout=60)["explicit-timeout"] == []
+    assert _timeout_app(timeout=None)["explicit-timeout"] == []
+
+
+def test_explicit_timeout_is_advice_and_skips_safe_commands() -> None:
+    from treaty import App, Ctx, NoArgs
+
+    rule = next(r for r in RULES if r.id == "explicit-timeout")
+    assert rule.severity.value == "advice"
+    app = App("ops", version="1.0.0")
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx) -> NoArgs:
+        return args
+
+    assert [r for r in audit(app, "ops", limit=5).rules if r.id == rule.id][0].passed
+
+
+def test_timeout_budget_flags_retry_waits_over_the_timeout() -> None:
+    from treaty import Retry
+
+    # 60 s, then 120 s capped, 19 more times: 2340 s against the inherited 60 s
+    retry = Retry(retries=20, delay_ms=60_000, backoff=2.0, max_delay_ms=120_000)
+    [(command, message, fix)] = _timeout_app(retry=retry)["timeout-budget"]
+    assert command == "restart"
+    assert "may wait 2340 s in all, over the app's default 60 s timeout" in message
+    assert fix.startswith("timeout=2820 on restart")
+
+
+def test_timeout_budget_counts_jitter_and_an_explicit_timeout() -> None:
+    from treaty import Retry
+
+    retry = Retry(retries=3, delay_ms=10_000, jitter=0.5)  # 3 waits of at most 15 s
+    [(_, message, fix)] = _timeout_app(retry=retry, timeout=30)["timeout-budget"]
+    assert "may wait 45 s in all, over its 30 s timeout" in message
+    assert fix.startswith("timeout=60 on restart")
+
+
+def test_timeout_budget_passes_a_retry_that_fits() -> None:
+    from treaty import Retry
+
+    retry = Retry(retries=20, delay_ms=60_000, backoff=2.0, max_delay_ms=120_000)
+    assert _timeout_app(retry=retry, timeout=2820)["timeout-budget"] == []
+    assert _timeout_app(retry=Retry(retries=3, delay_ms=500))["timeout-budget"] == []
+    assert _timeout_app(retry=retry, timeout=None)["timeout-budget"] == []
+
+
+def test_timeout_budget_flags_a_heartbeat_on_the_default_timeout() -> None:
+    [(command, message, fix)] = _timeout_app(heartbeat=True)["timeout-budget"]
+    assert command == "restart" and "heartbeat=True" in message and "60 s" in message
+    assert "timeout=None" in fix
+    assert _timeout_app(heartbeat=True, timeout=3600)["timeout-budget"] == []
