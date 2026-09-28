@@ -154,6 +154,5 @@ command may touch:
 
 ## Next
 
-The audit's next rules are `raw-payload`, for wide mutating commands, and `cleanup`, for
-network commands. Their chapters are not written yet; each finding's suggested fix is the
-guide until then.
+The audit's next rule is `raw-payload`, for mutating commands with many fields:
+[Accept a raw JSON payload](raw-payload.md).

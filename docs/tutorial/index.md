@@ -54,7 +54,7 @@ rule, the finding's suggested fix is the guide:
 | `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
 | `network-io` | `has_network_io=True` on commands that call out | [Declare network commands](core/network-io.md) |
 | `path-typed` | `pathlib.Path` on path-like fields | [Type path arguments as Path](core/path-typed.md) |
-| `raw-payload` | `--raw-payload` on wide mutating commands | not written yet |
+| `raw-payload` | `--raw-payload` on wide mutating commands | [Accept a raw JSON payload](core/raw-payload.md) |
 | `cleanup` | a cleanup hook on network commands | not written yet |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |
 
