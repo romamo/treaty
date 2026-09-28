@@ -118,8 +118,13 @@ def test_a_stale_session_that_cannot_be_removed_does_not_crash_the_next_run(
     assert code == 0, out
 
 
-def test_a_relative_tmpdir_gives_an_absolute_session_directory(tmp_path: Path) -> None:
-    code, out = session_run(["scratch"], {"TMPDIR": os.path.relpath(tmp_path)})
+def test_a_relative_tmpdir_gives_an_absolute_session_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Relative to a directory on tmp_path's drive: Windows has no path from D: to C:
+    (tmp_path / "tmp").mkdir()
+    monkeypatch.chdir(tmp_path)
+    code, out = session_run(["scratch"], {"TMPDIR": "tmp"})
     assert code == 0, out
     assert Path(json.loads(out)["meta"]["session_tmp_dir"]).is_absolute()
 

@@ -1129,6 +1129,8 @@ all three. Where the operating system lacks a mechanism, the behavior differs:
 | Private temp dirs and files | Mode `0700` and `0600` | No permission bits; the user profile's ACLs apply |
 | Headless detection | No `DISPLAY` or `WAYLAND_DISPLAY` on Linux and the BSDs, or over SSH | A console session is never headless for lack of a display |
 | Output line endings | LF | LF: `App.main` never writes CRLF |
+| Child locale (`ctx.run` sets `LC_ALL=C`) | Children format numbers and dates in the C locale | Native children take the locale from the user profile and ignore `LC_ALL` |
+| Venv `python.exe` children | The pid treaty tracks is the interpreter | The pid treaty tracks is the venv launcher, which starts the interpreter as its child |
 | `cleanup_command` in `data.cleanup` | `rm -f ...` | `del /f /q ...` |
 | `platform=` | `sys.platform` values | `win32` |
 

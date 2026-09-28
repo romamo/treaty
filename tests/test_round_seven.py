@@ -116,14 +116,16 @@ def test_protocol_typed_resources_register_and_check_members() -> None:
 
 
 @pytest.mark.parametrize("argv", [["--schema"], ["--help"], ["--bogus"], ["nope"]])
-def test_closed_reader_on_builtins_and_errors_exits_141(argv: list[str]) -> None:
-    proc = subprocess.Popen(
-        [sys.executable, str(SLOWCTL), *argv], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    assert proc.stdout is not None and proc.stderr is not None
-    proc.stdout.close()  # gone before the child writes anything
-    code = proc.wait(timeout=10)
-    err = proc.stderr.read().decode()
+def test_closed_reader_on_builtins_and_errors_exits_141(argv: list[str], tmp_path: Path) -> None:
+    # stderr to a file: --help fills an unread pipe, whose buffer is 4 KiB on Windows
+    with (tmp_path / "stderr").open("wb") as stderr:
+        proc = subprocess.Popen(
+            [sys.executable, str(SLOWCTL), *argv], stdout=subprocess.PIPE, stderr=stderr
+        )
+        assert proc.stdout is not None
+        proc.stdout.close()  # gone before the child writes anything
+        code = proc.wait(timeout=10)
+    err = (tmp_path / "stderr").read_text(encoding="utf-8")
     assert code == 141 and "Traceback" not in err, err
 
 

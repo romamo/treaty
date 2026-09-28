@@ -158,7 +158,9 @@ FORMATTED = (
 
 def test_a_subprocess_that_would_emit_a_german_number_emits_dot_decimals() -> None:
     status, envelope, _ = run(session_app, ["child", "--code", FORMATTED], env=GERMAN)
-    assert status == 0 and data_of(envelope)["stdout"] == "1234.56\n"
+    assert status == 0
+    if not WINDOWS:  # Windows children take the locale from the user profile, not LC_ALL
+        assert data_of(envelope)["stdout"] == "1234.56\n"
     assert child_env(session_app, ("LC_ALL", "LC_NUMERIC"), env=GERMAN) == {
         "LC_ALL": "C",
         "LC_NUMERIC": "C",
@@ -510,7 +512,7 @@ def test_the_session_tracking_file_exists_and_is_readable_while_children_are_run
 ) -> None:
     status, envelope, _ = run(session_app, ["kids"], env={"TMPDIR": str(tmp_path)})
     assert status == 0, envelope
-    listed, own = str(data_of(envelope)["stdout"]).rsplit("\n", 2)[:2]
+    listed, own = str(data_of(envelope)["stdout"]).splitlines()[-2:]
     assert listed.split() == [own]
 
 
@@ -666,7 +668,8 @@ def test_the_intercepted_string_appears_as_a_warning_with_its_text() -> None:
         {
             "code": "THIRD_PARTY_STDOUT",
             "message": "Third-party code wrote to stdout; the text went to stderr",
-            "context": {"text": "initialized", "bytes": len("initialized\n")},
+            # bytes counts what reached descriptor 1: print ends lines with \r\n on Windows
+            "context": {"text": "initialized", "bytes": len("initialized" + os.linesep)},
         }
     ]
 

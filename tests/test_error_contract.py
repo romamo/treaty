@@ -617,7 +617,11 @@ LOCKCTL = Path(__file__).resolve().parent / "fixture_lock_app.py"
 
 def holding(state: Path, seconds: float) -> subprocess.Popen[str]:
     """A process holding the lock, once it says so"""
-    env = {**os.environ, "LOCKCTL_STATE_DIR": str(state)}
+    env = {
+        **os.environ,
+        "LOCKCTL_STATE_DIR": str(state),
+        "LOCKCTL_PID_FILE": str(state / "holder.pid"),
+    }
     proc = subprocess.Popen(
         [sys.executable, str(LOCKCTL), "hold", "--seconds", str(seconds)],
         env=env,
@@ -625,9 +629,9 @@ def holding(state: Path, seconds: float) -> subprocess.Popen[str]:
         stderr=subprocess.PIPE,
         text=True,
     )
-    holder = state / "locks" / "deploy.holder"
+    holder = state / "holder.pid"
     deadline = time.monotonic() + 30
-    while not holder.exists():
+    while not holder.exists() or not holder.read_text(encoding="utf-8"):
         assert proc.poll() is None and time.monotonic() < deadline, proc.communicate()
         time.sleep(0.02)
     return proc
@@ -652,7 +656,8 @@ def test_a_command_waiting_for_a_held_lock_exits_with_lock_held_after_the_timeou
         proc.communicate()
     error = envelope["error"]
     assert code == 4 and error["code"] == "LOCK_HELD" and error["retryable"] is True
-    assert error["context"]["holder_pid"] == proc.pid
+    # Not proc.pid: on Windows proc is the venv launcher, and the interpreter it starts holds it
+    assert error["context"]["holder_pid"] == int((tmp_path / "holder.pid").read_text("utf-8"))
     assert error["context"]["holder_age_ms"] >= 0
     assert error["context"]["lock_file"] == str(tmp_path / "locks" / "deploy.lock")
 

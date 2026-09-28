@@ -676,6 +676,8 @@ def test_a_settings_post_init_that_refuses_a_value_exits_2_and_spares_help() -> 
         ("deep.toml", "region = " + "[" * 100_000 + "]" * 100_000 + "\n"),
         ("big.json", '{"retries": ' + "9" * 5000 + "}"),
     ],
+    # Short ids: pytest puts the id in PYTEST_CURRENT_TEST, capped at 32767 chars on Windows
+    ids=["deep.json", "deep.toml", "big.json"],
 )
 def test_a_config_file_too_deep_or_too_big_to_decode_is_config_invalid(
     tmp_path: Path, name: str, text: str

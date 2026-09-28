@@ -46,8 +46,9 @@ class Interceptor:
         atexit.register(self.close)
 
     def take(self) -> tuple[str, int]:
-        """The text (cut to ``TEXT_CAP`` bytes) and the byte count that reached descriptor
-        1 since the last call, once everything written before this call arrived"""
+        """The text (cut to ``TEXT_CAP`` bytes, Windows line endings as ``\\n``) and the byte
+        count that reached descriptor 1 since the last call, once everything written before
+        this call arrived"""
         with self._cond:
             if self._closed:
                 return "", 0
@@ -58,7 +59,7 @@ class Interceptor:
             text, count = bytes(self._text), self._bytes
             self._text.clear()
             self._bytes = 0
-        return text.decode("utf-8", "replace"), count
+        return text.decode("utf-8", "replace").replace("\r\n", "\n"), count
 
     def close(self) -> None:
         """Descriptor 1 is stdout again; the reader passes on what is left and stops"""

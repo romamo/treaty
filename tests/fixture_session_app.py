@@ -110,13 +110,16 @@ def report(args: Keep, ctx: Ctx) -> dict[str, object]:
 WATCH_PIDS = """
 import os, sys, time
 path = os.path.join(os.environ["TMPDIR"], "children.pids")
+# The tracked child is this interpreter, or on Windows the venv launcher that started it
+mine = [str(os.getpid()), str(os.getppid())]
 deadline = time.monotonic() + 10
-while time.monotonic() < deadline:
-    if os.path.exists(path) and str(os.getpid()) in open(path).read().split():
-        break
+tracked = None
+while tracked is None and time.monotonic() < deadline:
+    listed = open(path).read().split() if os.path.exists(path) else []
+    tracked = next((pid for pid in mine if pid in listed), None)
     time.sleep(0.01)
 print(open(path).read(), end="")
-print(os.getpid())
+print(tracked or os.getpid())
 """
 
 

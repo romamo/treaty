@@ -404,7 +404,7 @@ def test_tool_status_show_state_files_returns_paths_and_summaries_of_all_global_
     populate(tmp_path)
     home = tmp_path / "home"
     (home / ".config" / "fx").mkdir(parents=True)
-    (home / ".config" / "fx" / "config.toml").write_text("region = 'eu'\n")
+    (home / ".config" / "fx" / "config.toml").write_bytes(b"region = 'eu'\n")  # 14 bytes
     code, envelope = run(
         effects_app(tmp_path), ["status", "--show-state-files"], {"HOME": str(home)}
     )

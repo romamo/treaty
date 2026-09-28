@@ -278,7 +278,8 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
 def declared(
     app: App, home: str | None
 ) -> Iterator[tuple[CommandPath, SideEffect, str, list[str]]]:
-    """Each declared side effect with its absolute glob and the paths it matches now;
+    """Each declared side effect with its absolute glob and the paths it matches now, in
+    native form (declarations use ``/``, which Windows would leave mixed with ``\\``);
     a ``~/`` one is left out without a home"""
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         for effect in command.filesystem_side_effects:
@@ -286,7 +287,8 @@ def declared(
             if pattern is not None:
                 where = glob.escape(pattern).replace("[*]", "*")
                 found = glob.glob(where, include_hidden=True)
-                yield path, effect, pattern, sorted(m for m in found if not _linked(m, pattern))
+                matches = (os.path.normpath(m) for m in found if not _linked(m, pattern))
+                yield path, effect, pattern, sorted(matches)
 
 
 def _linked(match: str, pattern: str) -> bool:

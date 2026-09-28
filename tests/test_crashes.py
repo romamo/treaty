@@ -148,7 +148,7 @@ def test_broken_results_are_general_error(command: str, code: str) -> None:
 def test_exit_context_is_serialized() -> None:
     code, [env], _ = run(crash_app(), ["where"])
     assert code != 0 and env["error"]["code"] == "NOT_FOUND"
-    assert env["error"]["context"] == {"path": str(Path("/srv/app"))}
+    assert env["error"]["context"] == {"path": str(Path("/srv/app").absolute())}
 
 
 def test_signal_cannot_be_swallowed_by_handler_code() -> None:

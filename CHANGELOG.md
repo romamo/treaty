@@ -112,6 +112,14 @@ semver spelling (`1.0.0-rc.1`), which `App(version=)` requires.
 - `docs/api.md` (the frozen surface), `docs/guide.md`, this changelog, a stability policy,
   and per-platform notes in the README
 
+### Fixed
+
+- On Windows: `cleanup` and `status` report matched side-effect paths in native form
+  instead of mixing `/` and `\`, and a `THIRD_PARTY_STDOUT` warning's `text` ends lines
+  with `\n` (its `bytes` still counts what was written)
+- `treaty conformance` refreshes a profile's `command` without a conflict: it is derived
+  from the machine (the console script on Windows), not written by hand
+
 ## [0.1.0] - 2026-09-27
 
 CLI Agent Spec Level 1 and Level 2.

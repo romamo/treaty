@@ -25,7 +25,8 @@ SNAPSHOT = Path(__file__).resolve().parent / "data" / "public_api.json"
 
 
 def _signature(obj: object) -> str:
-    return re.sub(r" at 0x[0-9a-f]+", "", str(inspect.signature(obj)))  # type: ignore[arg-type]
+    # Windows prints the address in upper case
+    return re.sub(r" at 0x[0-9a-fA-F]+", "", str(inspect.signature(obj)))  # type: ignore[arg-type]
 
 
 def _export(name: str) -> dict[str, object]:
