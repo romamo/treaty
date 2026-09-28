@@ -60,7 +60,13 @@ from ._steps import StepName
 from ._timeout import Timeout
 from ._types import Classified, FlagType
 from ._values import CommandPath, InvalidValue, SchemaVersion
-from ._verbosity import DEBUG_FLAG, QUIET_FLAG, VERBOSE_FLAG, WARNINGS_AS_ERRORS_FLAG
+from ._verbosity import (
+    DEBUG_FLAG,
+    QUIET_FLAG,
+    VERBOSE_FLAG,
+    WARNINGS_AS_ERRORS_FLAG,
+    short_verbosity,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,11 +254,16 @@ def format_hint(token: str) -> str | None:
     return None
 
 
-def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
+def split_globals(
+    argv: list[str], *, short_verbose: bool = True
+) -> tuple[GlobalOptions, list[str]]:
     """Global options in any position; a valued one repeated with a different value is
-    an error rather than last-wins (REQ-F-067, REQ-F-079)"""
+    an error rather than last-wins (REQ-F-067, REQ-F-079). With ``short_verbose``, ``-v``
+    is ``--verbose`` and ``-vv`` or ``-v -v`` is ``--debug``; without it, when the command
+    declares its own ``-v``, those tokens stay for the command"""
     valued: dict[str, str] = {}
     switches: set[str] = set()
+    vs = 0
     help_ = False
     schema = False
     rest: list[str] = []
@@ -269,6 +280,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
             schema = True  # REQ-O-013: --print-schema is an alias
         elif not eq and name in SWITCH_GLOBALS:
             switches.add(name)
+        elif short_verbose and short_verbosity(tok):
+            vs += short_verbosity(tok)
         elif name in RESERVED_GLOBAL and name in UNIMPLEMENTED:
             raise reserved_flag(name)
         elif name in VALUED_GLOBALS:
@@ -284,6 +297,8 @@ def split_globals(argv: list[str]) -> tuple[GlobalOptions, list[str]]:
         else:
             rest.append(tok)
         i += 1
+    if vs:
+        switches.add(VERBOSE_FLAG if vs == 1 else DEBUG_FLAG)
     fields = valued.get(FIELDS_FLAG)
     limit, offset = valued.get(TOKEN_LIMIT_FLAG), valued.get(TOKEN_OFFSET_FLAG)
     return (
@@ -338,7 +353,7 @@ def _takes_value(command: Command, tok: str) -> bool:
 
 def _global(tok: str) -> bool:
     """Whether ``split_globals`` takes ``tok`` as a global option"""
-    if tok in ("-h", "--help", "--schema", "--print-schema"):
+    if tok in ("-h", "--help", "--schema", "--print-schema") or short_verbosity(tok):
         return True
     name = tok[2:].partition("=")[0] if tok.startswith("--") else ""
     return name in SWITCH_GLOBALS or name in VALUED_GLOBALS
@@ -355,7 +370,11 @@ def _command_at(
         tok = argv[i]
         if tok.startswith("-") and tok != "-":
             name, eq, _ = tok[2:].partition("=")
-            if tok in ("-h", "--help", "--schema", "--print-schema") or name in SWITCH_GLOBALS:
+            if (
+                tok in ("-h", "--help", "--schema", "--print-schema")
+                or name in SWITCH_GLOBALS
+                or short_verbosity(tok)
+            ):
                 i += 1
             elif tok.startswith("--") and name in VALUED_GLOBALS:
                 i += 1 if eq else 2

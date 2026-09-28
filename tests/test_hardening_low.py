@@ -160,7 +160,7 @@ def echo_app() -> App:
     return app
 
 
-@pytest.mark.parametrize("value", ["-h", "--help", "--format", "--schema"])
+@pytest.mark.parametrize("value", ["-h", "--help", "--format", "--schema", "-v", "-vv"])
 def test_a_global_options_name_is_a_flags_value_when_the_flag_takes_one(value: str) -> None:
     code, envelope, _ = run(echo_app(), ["echo", "--say", value])
     assert code == 0, envelope

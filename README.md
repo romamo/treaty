@@ -226,7 +226,8 @@ command flags (`--config`, `--quiet`, `--verbose`, `--debug`, `--fields`, `--cwd
 rest of `RESERVED_GLOBAL` in `_framework.py`) cannot be field names either: registration
 refuses a field that would never reach the handler. A name reserved before its feature
 lands exits `2` with `RESERVED_FLAG` when passed; every reserved name is implemented today.
-Every other flag,
+The short `-v` (`--verbose`, and `-vv` for `--debug`) is not reserved: a command may still
+declare `short="v"` and keeps it (see [Logging and verbosity](#logging-and-verbosity)). Every other flag,
 including `--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`,
 belongs to a command and goes after the full command path:
 
@@ -400,6 +401,11 @@ and fields named like credentials (`token`, `password`, `API_KEY`, `DB_PASS`,
 | `--verbose` | Info and progress anywhere, even under `CI` |
 | `--debug` | Also `ctx.debug` and the framework's trace: config resolution, each `ctx.http` request (headers redacted), each child's argv and exit, locks, the audit log; records of any `logging` logger, such as urllib3's, go through the same redaction; a stray `print()` is attributed to its file and line |
 | `--quiet` | Nothing, not even errors: the envelope carries them |
+
+`-v` is short for `--verbose`, and `-vv` or `-v -v` for `--debug`, in any position. Unlike
+`-h`, they yield: a command that declares `Flag(short="v")` keeps `-v` for its own flag, on
+that command only, where the long forms still work. The manifest keeps them out of the root
+`flags` shorts, so no command's own `-v` collides there.
 
 The three flags are exclusive (two exit `2`). Stray `print()` text off a terminal is
 dropped, and still reported in `THIRD_PARTY_STDOUT`. The `log-not-print` audit rule flags
