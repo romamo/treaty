@@ -32,6 +32,8 @@ from ._values import ExitCodeName, InstanceId
 
 OUT_DIR = "out"
 INSTANCES_DIR = "instances"
+BACKGROUND_DIR = "background"
+"""``ctx.spawn``'s pid files when the app has no state directory; never pruned"""
 PID_FILE = "children.pids"
 STALE_SESSION_SECONDS = 86_400
 """A session directory this old belongs to a run that was killed; the next run removes it"""
@@ -132,7 +134,8 @@ def prune(root: SessionRoot, now: float) -> None:
         return
     due: list[str] = []
     for entry in os.scandir(root.path):
-        if entry.name in (OUT_DIR, INSTANCES_DIR) or not entry.is_dir(follow_symlinks=False):
+        kept = (OUT_DIR, INSTANCES_DIR, BACKGROUND_DIR)
+        if entry.name in kept or not entry.is_dir(follow_symlinks=False):
             continue
         if now - entry.stat(follow_symlinks=False).st_mtime > STALE_SESSION_SECONDS:
             due.append(entry.path)
@@ -149,10 +152,13 @@ def prune(root: SessionRoot, now: float) -> None:
             continue
 
 
-def outputs(root: Path) -> list[Path]:
-    """Every directory of output files under ``root``, for the ``cleanup`` built-in"""
-    out = root / OUT_DIR
-    return sorted(Path(e.path) for e in os.scandir(out)) if out.is_dir() else []
+def outputs(root: SessionRoot) -> list[Path]:
+    """Every directory of output files under ``root``, for the ``cleanup`` built-in; like
+    ``prune``, nothing under a root or ``out`` that is a symlink or someone else's"""
+    out = root.path / OUT_DIR
+    if not (root.owned() and _owned_dir(out)):
+        return []
+    return sorted(Path(e.path) for e in os.scandir(out) if e.is_dir(follow_symlinks=False))
 
 
 def cleanup_command(paths: Collection[Path]) -> str:

@@ -163,6 +163,8 @@ SCOPES: dict[str, frozenset[SideEffectType]] = {
     "logs": frozenset({SideEffectType.LOG}),
 }
 """What ``cleanup --scope`` removes; ``credential`` and ``config`` paths never (REQ-O-027)"""
+KEPT = frozenset({SideEffectType.CREDENTIAL, SideEffectType.CONFIG})
+"""Paths ``cleanup`` never removes, even when a wider glob or a directory covers them"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,18 +263,30 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     """Every existing path the tool's side effects cover: the declared ones, the output
     files commands handed out, and the caches (REQ-C-011, REQ-F-043, REQ-O-018)"""
     found: dict[str, SideEffectType] = {}
+    kept: list[Path] = []
     for _, effect, _, matches in declared(app, ctx.env.get("HOME")):
-        found.update(dict.fromkeys(matches, effect.kind))
+        if effect.kind in KEPT:
+            kept.extend(Path(m) for m in matches)
+        else:
+            found.update(dict.fromkeys(matches, effect.kind))
     if ctx._session is not None:
         # REQ-F-043: ctx.output_file files; running sessions remove their own
         found.update(
-            dict.fromkeys((str(p) for p in outputs(ctx._session.root.path)), SideEffectType.TEMP)
+            dict.fromkeys((str(p) for p in outputs(ctx._session.root)), SideEffectType.TEMP)
         )
     for command_path, command in app.commands.items():
         where = None if command.cache is None else cache_dir(app.name, command_path.value, ctx.env)
         if where is not None and where.exists():
             found[str(where)] = SideEffectType.CACHE  # wherever XDG_CACHE_HOME put it
-    return sorted(found.items())
+    # REQ-O-027: a path another glob also declares, or a directory holding one, stays
+    held = sorted(p for p in found if any(k.is_relative_to(p) for k in kept))
+    if held:
+        ctx.warn(
+            "CLEANUP_KEPT",
+            f"{len(held)} paths are or hold a credential or config path; left in place",
+            paths=held,
+        )
+    return sorted((p, kind) for p, kind in found.items() if p not in held)
 
 
 def declared(

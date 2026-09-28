@@ -13,7 +13,13 @@ exit 12 ``UPSTREAM_UNAVAILABLE`` for 502, 503, and 504, and, when the command de
 them, exit 8 ``UNAUTHENTICATED`` for 401, exit 7 ``PERMISSION_DENIED`` for 403, and exit
 11 ``RATE_LIMITED`` for 429 (REQ-F-063). Any other status is returned. On a ``retry=``
 command, connection failures, timeouts, and 502 to 504 are retried through ``ctx.retry``'s
-budget, so ``meta.retries`` counts them.
+budget, so ``meta.retries`` counts them; a ``Retry-After`` lengthens the delay. A POST or
+PATCH may have taken effect before it failed, so it is retried only when it never reached
+the server: a refused connection or an unknown host.
+
+A redirect to another origin (scheme, host, or port) carries only the content
+negotiation headers: ``Authorization``, cookies, and any custom header such as an API key
+stay with the origin the caller addressed.
 """
 
 from __future__ import annotations
@@ -21,7 +27,9 @@ from __future__ import annotations
 import base64
 import http.client
 import json as jsonlib
+import math
 import shlex
+import socket
 import ssl
 import time
 import urllib.error
@@ -30,6 +38,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from typing import IO
 from urllib.parse import SplitResult, unquote, urlsplit
 
 from ._envelope import NetworkContext, without_userinfo
@@ -44,6 +53,12 @@ CA_BUNDLE_VARS = ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
 """The CA bundle variables, the first set one wins"""
 DEFAULT_RETRY_AFTER_MS = 1000
 """A 429 without a readable ``Retry-After`` still says to wait (REQ-C-014)"""
+MAX_RETRY_AFTER_MS = 60_000
+"""A longer ``Retry-After`` ends the run with it, for the caller to wait, rather than sleep"""
+IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"})
+"""RFC 9110 9.2.2: sending one twice has the effect of sending it once"""
+CROSS_ORIGIN_HEADERS = frozenset({"Accept", "Accept-encoding", "Accept-language", "User-agent"})
+"""The headers a redirect to another origin keeps, in urllib's capitalization"""
 
 
 def _proxy_problem(raw: str) -> str | None:
@@ -184,6 +199,7 @@ class NetworkFailure(CliExit):
         network: NetworkContext,
         transient: bool,
         permanent: bool = False,
+        unsent: bool = False,
         retry_after_ms: int | None = None,
         fix_required: str | None = None,
     ) -> None:
@@ -199,6 +215,8 @@ class NetworkFailure(CliExit):
         """``ctx.retry`` tries again: a connection failure, a timeout, or 502 to 504"""
         self.permanent = permanent
         """Not retryable whatever the exit code says: a certificate failure"""
+        self.unsent = unsent
+        """The request never reached a server: a refused connection or an unknown host"""
         self.retried: int | None = None
         """The retries ``ctx.retry`` made before this one, when it gave up"""
 
@@ -215,6 +233,45 @@ def _give_up(exc: BaseException, retried: int) -> BaseException:
     assert isinstance(exc, _Exhausted)
     exc.failure.retried = retried
     return exc.failure
+
+
+def _asked(exc: BaseException) -> float | None:
+    """The seconds a failure's ``Retry-After`` asks for; one too long to sleep gives up"""
+    assert isinstance(exc, _Exhausted)
+    ms = exc.failure.retry_after_ms
+    if ms is None:
+        return None
+    return math.inf if ms > MAX_RETRY_AFTER_MS else ms / 1000
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    return (
+        scheme,
+        (parts.hostname or "").lower(),
+        parts.port or {"http": 80, "https": 443}.get(scheme),
+    )
+
+
+class _Redirects(urllib.request.HTTPRedirectHandler):
+    """urllib's redirects, except that a hop to another origin drops the caller's
+    credentials: urllib copies every header to wherever the server points"""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and _origin(newurl) != _origin(req.full_url):
+            for name in [n for n in new.headers if n not in CROSS_ORIGIN_HEADERS]:
+                new.remove_header(name)
+        return new
 
 
 class _Proxied(urllib.request.BaseHandler):
@@ -301,15 +358,17 @@ class Http:
         if self.retrier is None:
             return once()
 
+        idempotent = method.upper() in IDEMPOTENT_METHODS
+
         def attempt() -> HttpResponse:
             try:
                 return once()
             except NetworkFailure as failure:
-                if failure.transient:
+                if failure.transient and (idempotent or failure.unsent):
                     raise _Exhausted(failure) from failure
                 raise
 
-        return self.retrier.call(attempt, on=(_Exhausted,), give_up=_give_up)
+        return self.retrier.call(attempt, on=(_Exhausted,), give_up=_give_up, wait=_asked)
 
     def _send(self, request: urllib.request.Request) -> HttpResponse:
         url = request.full_url
@@ -362,6 +421,7 @@ class Http:
             self._opener = urllib.request.build_opener(
                 urllib.request.ProxyHandler({}),
                 _Proxied(self.proxies),
+                _Redirects(),
                 urllib.request.HTTPSHandler(context=context),
             )
         return self._opener
@@ -380,7 +440,11 @@ class Http:
                 "signed the server's certificate",
             )
         return self._failure(
-            url, "UNAVAILABLE", "CONNECTION_FAILED", f"could not connect: {reason}"
+            url,
+            "UNAVAILABLE",
+            "CONNECTION_FAILED",
+            f"could not connect: {reason}",
+            unsent=isinstance(reason, (ConnectionRefusedError, socket.gaierror)),
         )
 
     def _status(self, url: str, response: HttpResponse) -> HttpResponse:
@@ -427,6 +491,7 @@ class Http:
         *,
         status: int | None = None,
         permanent: bool = False,
+        unsent: bool = False,
         retry_after_ms: int | None = None,
         fix_required: str | None = None,
     ) -> NetworkFailure:
@@ -454,6 +519,7 @@ class Http:
             network=network,
             transient=code in ("CONNECTION_FAILED", "TIMEOUT", "UPSTREAM_UNAVAILABLE"),
             permanent=permanent,
+            unsent=unsent,
             retry_after_ms=retry_after_ms,
             fix_required=fix_required,
         )

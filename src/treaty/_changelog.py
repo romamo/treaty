@@ -24,11 +24,20 @@ _KEYS = ("version", "date", "breaking", "added", "removed", "changed", "etag")
 _NOTES = frozenset({"description", "title", "examples", "properties", "required", "items"})
 
 
-def version_key(version: str) -> tuple[int, int, int, int, str]:
-    """Semver precedence, close enough for a changelog: a pre-release sorts first"""
+type PreRelease = tuple[tuple[int, int, str], ...]
+
+
+def version_key(version: str) -> tuple[int, int, int, int, PreRelease]:
+    """Semver precedence (semver 11): a pre-release sorts before its release, and its
+    dot-separated identifiers compare numerically when numeric, so ``rc.10`` follows
+    ``rc.9``, and before any alphanumeric one; build metadata is ignored"""
     core, dash, pre = version.partition("+")[0].partition("-")
     major, minor, patch = (int(p) for p in core.split("."))
-    return major, minor, patch, 0 if dash else 1, pre
+    identifiers = tuple(
+        (0, int(part), "") if part.isascii() and part.isdigit() else (1, 0, part)
+        for part in pre.split(".")
+    )
+    return major, minor, patch, 0 if dash else 1, identifiers if dash else ()
 
 
 @dataclass(frozen=True, slots=True)

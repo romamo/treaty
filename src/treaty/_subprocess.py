@@ -30,7 +30,7 @@ from typing import IO, Any
 
 from ._atomic import write_atomic
 from ._errors import CliExit, RegistrationError
-from ._session import Session
+from ._session import BACKGROUND_DIR, Session, SessionRoot, private_dir
 from ._signals import Cancelled, CancelSignal
 from ._timeout import Timeout
 from ._values import ExitCodeName
@@ -93,10 +93,25 @@ class BackgroundSlot:
     directory: Path
     command: str
     lifetime_seconds: int
+    root: SessionRoot | None = None
+    """The temp root ``directory`` is under when the app has no state directory"""
+
+    @classmethod
+    def in_temp(cls, root: SessionRoot, command: str, lifetime_seconds: int) -> BackgroundSlot:
+        """Under the user's private temp root: a shared temp directory would let another
+        user plant the pid file, and have this run signal the pids in it"""
+        return cls(root.path / BACKGROUND_DIR, command, lifetime_seconds, root)
 
     @property
     def pid_file(self) -> Path:
         return self.directory / f"{self.command}.pids"
+
+    def make(self) -> Path:
+        """The directory; under a temp root, private, and refused when planted"""
+        if self.root is None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            return self.directory
+        return private_dir(self.root.make() / BACKGROUND_DIR)
 
 
 _DETACHED: list[subprocess.Popen[bytes]] = []
@@ -307,7 +322,7 @@ class Processes:
         with self._lock:
             if self._closed:
                 raise self._refusal(parts)
-        slot.directory.mkdir(parents=True, exist_ok=True)
+        slot.make()
         kept = reap(slot.pid_file)
         log_path = slot.directory / f"{slot.command}.{time.time_ns()}.log"
         detach: dict[str, Any]

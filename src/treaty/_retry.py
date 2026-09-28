@@ -114,20 +114,25 @@ class Retrier:
         *,
         on: tuple[type[BaseException], ...] | None = None,
         give_up: Callable[[BaseException, int], BaseException] | None = None,
+        wait: Callable[[BaseException], float | None] | None = None,
     ) -> T:
         """``fn`` under the budget; ``on`` and ``give_up`` replace the policy's exceptions
-        and ``RetriesExhausted``, for ``ctx.http``, whose failures carry their own error"""
+        and ``RetriesExhausted``, for ``ctx.http``, whose failures carry their own error.
+        ``wait`` is the seconds a failure asks for, such as a ``Retry-After``: the delay is
+        at least that, and a wait over ``MAX_DELAY_MS`` gives up rather than sleeping."""
         retried = 0
         retry_on = self.policy.on if on is None else on
         while True:
             try:
                 return fn()
             except retry_on as exc:
-                late = self.deadline is not None and time.monotonic() + self.delay >= self.deadline
-                if retried >= self.retries or late:
+                asked = None if wait is None else wait(exc)
+                delay = self.delay if asked is None else max(self.delay, asked)
+                late = self.deadline is not None and time.monotonic() + delay >= self.deadline
+                if retried >= self.retries or late or delay * 1000 > MAX_DELAY_MS:
                     if give_up is not None:
                         raise give_up(exc, retried) from exc
                     raise RetriesExhausted(self.policy, exc, retried) from exc
-            time.sleep(self.delay)
+            time.sleep(delay)
             retried += 1
             self.count += 1

@@ -16,7 +16,6 @@ import os
 import re
 import shlex
 import sys
-import tempfile
 import threading
 import time
 import traceback
@@ -2549,17 +2548,16 @@ class _Run:
             )
 
     def background_slot(self, command: Command) -> BackgroundSlot | None:
-        """``background/`` of the state directory, or of the temp directory without one"""
+        """``background/`` of the state directory, or of the user's temp root without one"""
         if command.background is None:
             return None
-        base = state_dir(
-            self.app.name, self.app.state_dir, self.env, self.settings.options.instance_id
-        )
+        instance = self.settings.options.instance_id
+        lifetime = command.background.max_lifetime_seconds
+        base = state_dir(self.app.name, self.app.state_dir, self.env, instance)
         if base is None:
-            base = Path(tempfile.gettempdir()) / f"treaty-{self.app.name}"
-        return BackgroundSlot(
-            base / "background", command.path.value, command.background.max_lifetime_seconds
-        )
+            root = SessionRoot.of(self.app.name, self.env, instance)
+            return BackgroundSlot.in_temp(root, command.path.value, lifetime)
+        return BackgroundSlot(base / "background", command.path.value, lifetime)
 
     def locks_dir(self) -> Path | None:
         """``locks/`` of the state directory, for ``ctx.lock`` (REQ-F-033)"""
