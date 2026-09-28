@@ -107,6 +107,14 @@ def waits_ms(policy: Retry, retries: int, delay_ms: int) -> Iterator[float]:
         wait = min(wait * policy.backoff, cap)
 
 
+def budget_ms(policy: Retry) -> float:
+    """The most ``policy`` may sleep in one run with its declared defaults: every wait at
+    its cap and moved the full ``jitter`` up"""
+    cap = cap_ms(policy)
+    waits = waits_ms(policy, policy.retries, policy.delay_ms)
+    return sum(min(w * (1 + policy.jitter), cap) for w in waits)
+
+
 _DURATION = re.compile(r"(\d{1,10})(ms|s)?")
 
 
