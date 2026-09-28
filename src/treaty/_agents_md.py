@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from ._auth import HEADLESS_FLAG
 from ._command import INPUT_FILE_FLAG, Command
 from ._env import KNOWN, UNPREFIXED, app_var
-from ._errors import RegistrationError
+from ._errors import Exit, RegistrationError
 from ._framework import (
     CONFIRM_FLAG,
     LIVE_FLAG,
@@ -243,8 +243,16 @@ def render_file(
     if lines and _VERSION.fullmatch(lines[0].strip()):
         lines = lines[1:]
     text = "".join(lines)
-    start, end = text.find(BEGIN), text.find(END)
-    if start != -1 and end > start:
+    start = text.find(BEGIN)
+    if start != -1:
+        # The end marker after the begin one: prose may quote the marker earlier
+        end = text.find(END, start)
+        if end == -1:
+            raise Exit.PRECONDITION(
+                f"The file has {BEGIN} but no {END} after it",
+                context={"begin_marker": BEGIN, "end_marker": END},
+                fix_required=f"add {END} where the generated sections end, or remove {BEGIN}",
+            )
         return head + text[:start] + block + text[end + len(END) :].removeprefix("\n")
     text = text.rstrip("\n") + "\n\n"
     if not re.search(r"^## Installation\s*$", text, re.MULTILINE):
@@ -357,7 +365,7 @@ def check(app: App, label: Path, text: str, *, agents_md: bool) -> list[Mismatch
     env_names = set(_ENV_NAME.findall(every)) | UNPREFIXED
     prefix = app_var(app.name, "x").removesuffix("X")
     for line, span, section in _mentions(text):
-        words = span.split()
+        words = _invoked(span.split())
         if words and words[0] == app.name:
             parts, unknown = _command(app, words[1:])
             if unknown is not None:
@@ -381,6 +389,21 @@ def check(app: App, label: Path, text: str, *, agents_md: bool) -> list[Mismatch
             if span not in env_names:
                 found.append(Mismatch(label, line, "env", span, f"not a variable {app.name} reads"))
     return found
+
+
+_LAUNCHERS = (("uv", "run"), ("uvx",), ("pipx", "run"))
+"""What runs a tool in a doc's command line before the tool's own name"""
+
+
+def _invoked(words: list[str]) -> list[str]:
+    """A command line from the tool's name on: a shell prompt's ``$`` and a launcher such
+    as ``uv run`` come off, so ``uv run tool nosuch`` is checked like ``tool nosuch``"""
+    if words[:1] == ["$"]:
+        words = words[1:]
+    for launcher in _LAUNCHERS:
+        if tuple(words[: len(launcher)]) == launcher:
+            return words[len(launcher) :]
+    return words
 
 
 def _has(text: str, flag: str) -> bool:

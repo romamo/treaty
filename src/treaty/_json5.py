@@ -18,17 +18,30 @@ _WORD_END = frozenset(" \t\r\n{}[]:,\"'")
 _IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _NUMBER = re.compile(r"-?(0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?")
 _LITERALS = {"true": True, "false": False, "null": None}
+_NOT_NUMBERS = frozenset({"Infinity", "NaN"})
+"""JavaScript numbers JSON has no form for"""
 
 
 def _no_constant(name: str) -> object:
     raise ValueError(f"{name} is not valid JSON")
 
 
+def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """An object whose keys each appear once: argv refuses a repeated flag, so a payload
+    must not settle one silently by taking the last"""
+    members: dict[str, object] = {}
+    for key, value in pairs:
+        if key in members:
+            raise ValueError(f"key {key!r} appears twice in one object")
+        members[key] = value
+    return members
+
+
 def loads_strict(text: str) -> object:
-    """``json.loads`` without the NaN and Infinity extensions; also raises ``ValueError``
-    for an integer longer than the interpreter's digit limit"""
+    """``json.loads`` without the NaN and Infinity extensions or repeated keys; also
+    raises ``ValueError`` for an integer longer than the interpreter's digit limit"""
     try:
-        return json.loads(text, parse_constant=_no_constant)
+        return json.loads(text, parse_constant=_no_constant, object_pairs_hook=_unique)
     except RecursionError:
         raise ValueError("JSON nested too deeply") from None
 
@@ -95,7 +108,8 @@ def _tokens(text: str) -> list[_Token]:
             i = _string(text, i, out)
         else:
             start = i
-            while i < n and text[i] not in _WORD_END:
+            # A comment ends a bare word too: 1/* c */ is the number 1
+            while i < n and text[i] not in _WORD_END and not text.startswith(("//", "/*"), i):
                 i += 1
             out.append(_Token("word", text[start:i]))
     return out
@@ -170,6 +184,9 @@ class _Parser:
             return _LITERALS[tok.text]
         if _NUMBER.fullmatch(tok.text):
             return loads_strict(tok.text)
+        if tok.text[0] in "+-.0123456789" or tok.text in _NOT_NUMBERS:
+            # Meant as a number, which quoting would turn into a string: no correction
+            raise Unreadable(f"{tok.text!r} is not a JSON number")
         self.repairs.append(f"{tok.text!r} is not quoted")
         return tok.text
 
@@ -198,6 +215,8 @@ class _Parser:
                 return members if obj else items
             if obj:
                 name = self.key()
+                if name in members:
+                    raise Unreadable(f"key {name!r} appears twice in one object")
                 if not self.punct(":"):
                     self.repairs.append(f"':' is missing after key {name!r}")
                 members[name] = self.value()

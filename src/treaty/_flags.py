@@ -203,6 +203,11 @@ class FieldInfo:
         if target is None:
             raise RegistrationError(f"{self.name}: array without item type")
         try:
+            if target.flag_type in (FlagType.INTEGER, FlagType.NUMBER):
+                # The number's own text, as the JSON route checks it: 1.50 is 1.5 on both
+                value = coerce_text(target, raw, self.flag, secret=self.secret)
+                self.check_pattern(str(value))
+                return value
             if target.flag_type is FlagType.STRING:
                 self.check_text(raw)
             self.check_pattern(raw)
@@ -399,6 +404,11 @@ def apply_scalar(
         ) from None
 
 
+_INTEGER = re.compile(r"-?[0-9]+")
+_NUMBER = re.compile(r"-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?")
+"""JSON's number, leading zeros allowed: argv has no reason to refuse ``007``"""
+
+
 def coerce_text(target: Classified, raw: str, flag: str, *, secret: bool) -> object:
     base = _coerce_base(target, raw, flag)
     if target.scalar is None:
@@ -411,19 +421,17 @@ def _coerce_base(target: Classified, raw: str, flag: str) -> object:
         case FlagType.STRING:
             return check_path(raw, flag) if target.path else raw
         case FlagType.INTEGER:
-            try:
-                return int(raw)
-            except ValueError:
+            # ASCII digits only, as JSON writes them: int() also takes 1_000, " 7", +3, and
+            # other scripts' digits, which the published schema does not
+            if not _INTEGER.fullmatch(raw):
                 raise ParseError(
                     f"{flag!r} expects an integer", context={"flag": flag, "value": raw}
-                ) from None
+                )
+            return int(raw)
         case FlagType.NUMBER:
-            try:
-                number = float(raw)
-            except ValueError:
-                raise ParseError(
-                    f"{flag!r} expects a number", context={"flag": flag, "value": raw}
-                ) from None
+            if not _NUMBER.fullmatch(raw):
+                raise ParseError(f"{flag!r} expects a number", context={"flag": flag, "value": raw})
+            number = float(raw)
             if not math.isfinite(number):
                 # JSON has no NaN or Infinity, and they defeat minimum/maximum checks
                 raise ParseError(

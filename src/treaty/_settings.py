@@ -224,8 +224,13 @@ def resolve(
     context = opts.context or next(
         (str(d[CURRENT_CONTEXT_KEY]) for _, d in loaded if CURRENT_CONTEXT_KEY in d), None
     )
-    layers = [(p, _layer(p, d, context)) for p, d in loaded]
-    if context is not None:
+    # The selected context outranks every file's top level: the project file's context,
+    # the user file's, then the project's top level and the user's
+    chosen = [] if context is None else [(p, _contexts(p, d).get(context, {})) for p, d in loaded]
+    layers = [*chosen, *((p, _top(d)) for p, d in loaded)]
+    # A context only selects among files that are read: --no-config, or an app without
+    # settings, reads none, so an <APP>_CONTEXT set for other runs has nothing to miss
+    if context is not None and candidates:
         available = sorted({n for p, d in loaded for n in _contexts(p, d)})
         if context not in available:
             raise ParseError(
@@ -326,12 +331,9 @@ def _contexts(path: Path, data: Mapping[str, object]) -> dict[str, dict[str, obj
     return contexts
 
 
-def _layer(path: Path, data: Mapping[str, object], context: str | None) -> dict[str, object]:
-    """The file's top level, with the selected context's table over it"""
-    layer = {k: v for k, v in data.items() if k not in (CONTEXTS_KEY, CURRENT_CONTEXT_KEY)}
-    if context is not None:
-        layer |= _contexts(path, data).get(context, {})
-    return layer
+def _top(data: Mapping[str, object]) -> dict[str, object]:
+    """The file's settings outside any context"""
+    return {k: v for k, v in data.items() if k not in (CONTEXTS_KEY, CURRENT_CONTEXT_KEY)}
 
 
 def _from_text(setting: Setting, raw: str, var: str) -> object:

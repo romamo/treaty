@@ -184,7 +184,7 @@ def without_value(token: str) -> str:
     return token.partition("=")[0] if token.startswith("--") else token
 
 
-_NEGATIVE_NUMBER = re.compile(r"-(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?")
+_NEGATIVE_NUMBER = re.compile(r"-([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?")
 
 
 def _is_negative(tok: str, command: Command) -> bool:
@@ -879,16 +879,16 @@ def _check_patterned(field: FieldInfo, target: Classified, value: object) -> obj
         if target.flag_type is FlagType.STRING:
             field.check_text(value)
         field.check_pattern(value)
-    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+    base = check_json_base(target, value, field.flag)
+    if isinstance(base, (int, float)) and not isinstance(base, bool):
         try:
-            token = str(value)  # the token argv would have carried
+            token = str(base)  # the number's own text, as argv checks it: 2.0 is 2 on both
         except ValueError:
             raise ParseError(
                 f"{field.flag!r} is too large",
-                context={"field": field.flag, "value": describe_number(value)},
+                context={"field": field.flag, "value": describe_number(base)},
             ) from None
         field.check_pattern(token)
-    base = check_json_base(target, value, field.flag)
     if target.scalar is None:
         return base
     return apply_scalar(target.scalar, base, field.flag, secret=field.secret)

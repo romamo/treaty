@@ -899,6 +899,21 @@ class App:
             raise RegistrationError(f"{path} is already registered")
         if path in self._groups:
             raise RegistrationError(f"{path} is already a group")
+        flat = path.value.replace(".", "-")
+        twin = next(
+            (
+                p
+                for p in self._commands
+                if p not in self.builtins and p.value.replace(".", "-") == flat
+            ),
+            None,
+        )
+        if twin is not None:
+            # One skill file and skill name for both: SKILL-<path, dots as hyphens>.md
+            raise RegistrationError(
+                f"{path} and {twin} differ only in '.' and '-', which their skill files "
+                "cannot tell apart; rename one"
+            )
         if any(
             r == path or r.is_ancestor_of(path) or path.is_ancestor_of(r) for r in self._redirects
         ):

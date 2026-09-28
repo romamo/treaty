@@ -49,6 +49,13 @@ jobs:
           uv tool install treaty < /dev/null
           "$(uv tool dir --bin)/treaty" --version
 
+      - name: Install this checkout as a tool; its --version is the project's
+        run: |
+          uv tool install --reinstall . < /dev/null
+          got="$("$(uv tool dir --bin)/treaty" --version --format plain)"
+          want="$(uv run python -c 'import sys; from treaty._values import ToolVersion; print(ToolVersion.of_release(sys.argv[1]))' "$(uv version --short)")"
+          test "$got" = "$want" || { echo "treaty --version is $got, pyproject says $want"; exit 1; }
+
   test:
     strategy:
       fail-fast: false
