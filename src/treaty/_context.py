@@ -311,4 +311,4 @@ class Ctx:
         Off a terminal the run ends with exit 4, ``EDITOR_REQUIRED``, and ``alternatives``
         listing the command's ``editor_alternatives`` flags (REQ-F-055, REQ-C-023).
         """
-        return self._prompter.edit(initial)
+        return self._prompter.edit(initial, lambda: self.temp_file(".txt"))

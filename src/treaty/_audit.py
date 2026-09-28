@@ -1244,24 +1244,25 @@ def schema_change(old: object, new: object) -> Change:
     return Change.ADDITIVE if Change.ADDITIVE in changes else Change.NONE
 
 
-def _read_lock() -> dict[str, dict[str, object]] | None:
-    if not LOCK_FILE.is_file():
+def _read_lock(root: Path) -> dict[str, dict[str, object]] | None:
+    lock = root / LOCK_FILE
+    if not lock.is_file():
         return None
     try:
-        commands = json.loads(LOCK_FILE.read_text(encoding="utf-8"))["commands"]
+        commands = json.loads(lock.read_text(encoding="utf-8"))["commands"]
         if not isinstance(commands, dict):
             raise TypeError("commands is not an object")
         return commands
     except (ValueError, KeyError, TypeError) as exc:
         raise Exit.PRECONDITION(
             f"{LOCK_FILE} is not a schema lock: {exc}",
-            context={"lock": str(LOCK_FILE)},
+            context={"lock": str(lock)},
             fix_required="delete it and run treaty schema-lock module:app again",
         ) from None
 
 
-def _schema_version(app: App) -> Iterator[Finding]:
-    locked = _read_lock()
+def _schema_version(app: App, root: Path = Path(".")) -> Iterator[Finding]:
+    locked = _read_lock(root)
     if locked is None:
         return
     for c in user_commands(app):
@@ -1729,8 +1730,8 @@ def _delete_not_found(app: App) -> Iterator[Finding]:
             )
 
 
-def _profile(app: App) -> Iterator[Finding]:
-    if not any(Path("conformance").glob("*.json")):
+def _profile(app: App, root: Path = Path(".")) -> Iterator[Finding]:
+    if not any((root / "conformance").glob("*.json")):
         yield Finding(
             "profile",
             Severity.ADVICE,
@@ -2101,9 +2102,16 @@ def audit(
     limit: int,
     baseline: Mapping[str, object] | None = None,
     released: str | None = None,
+    root: Path = Path("."),
 ) -> AuditReport:
+    """Every rule against ``app``; the schema lock and the conformance profile are looked
+    for under ``root``, the run's ``--cwd`` for ``treaty audit``"""
     results: list[RuleResult] = []
-    rules = list(RULES)
+    rooted: dict[object, Callable[[App], Iterator[Finding]]] = {
+        _schema_version: lambda a: _schema_version(a, root),
+        _profile: lambda a: _profile(a, root),
+    }
+    rules = [dataclasses.replace(r, check=rooted.get(r.check, r.check)) for r in RULES]
     if baseline is not None:
         rules.append(dataclasses.replace(ADDITIVE, check=lambda a: removals(a, baseline, released)))
     for rule in rules:

@@ -11,16 +11,15 @@ REQ-C-005, REQ-F-055). A stray ``input()`` that no one can answer ends the same 
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
-import tempfile
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
-from ._errors import RegistrationError
+from ._errors import CliExit, RegistrationError
+from ._values import ExitCodeName
 
 
 class InputRequired(BaseException):
@@ -54,6 +53,16 @@ def blocked_read(call: str) -> InputRequired:
         suggestion="no flag supplies this input; run it in a terminal, or ask the command "
         "author to declare interactive=True and read it with ctx.prompt(..., flag=...)",
         context={"call": call},
+    )
+
+
+def _editor_failed(editor: str, what: str) -> CliExit:
+    return CliExit(
+        ExitCodeName("GENERAL_ERROR"),
+        f"The editor {editor!r} {what}; the edit was abandoned",
+        code="EDITOR_FAILED",
+        context={"editor": editor},
+        suggestion="set VISUAL or EDITOR to an editor that exits 0 once the file is saved",
     )
 
 
@@ -109,6 +118,8 @@ class Prompter:
     declared: bool
     """``interactive=True`` on the command"""
     editor_alternatives: tuple[str, ...]
+    flags: frozenset[str]
+    """The command's own flags, one of which ``prompt(flag=)`` must name"""
     interactive: bool
     assume_yes: bool
     stdin: IO[str] = field(repr=False)
@@ -117,6 +128,12 @@ class Prompter:
 
     def prompt(self, text: str, *, flag: str) -> str:
         self._check_declared("prompt")
+        if flag not in self.flags:
+            # The suggestion off a terminal names it: a flag the command lacks is a dead end
+            raise RegistrationError(
+                f"{self.command}: ctx.prompt(flag={flag!r}) names no flag of the command; "
+                "flag= is the one that supplies the answer instead"
+            )
         if not self.interactive:
             raise InputRequired(
                 "INPUT_REQUIRED",
@@ -139,8 +156,9 @@ class Prompter:
             )
         return self._ask(f"{text} [y/N] ", flag="yes").strip().lower() in ("y", "yes")
 
-    def edit(self, initial: str = "") -> str:
-        """The text after a person edited ``initial`` in ``$VISUAL`` or ``$EDITOR``"""
+    def edit(self, initial: str, where: Callable[[], Path]) -> str:
+        """The text after a person edited ``initial`` in ``$VISUAL`` or ``$EDITOR``, in a
+        file from ``where``, the run's own temp directory"""
         if not self.editor_alternatives:
             raise RegistrationError(
                 f"{self.command}: ctx.edit needs editor_alternatives=[...] naming the flags "
@@ -159,16 +177,20 @@ class Prompter:
                 ],
             )
         editor = self.env.get("VISUAL") or self.env.get("EDITOR") or "vi"
-        fd, name = tempfile.mkstemp(suffix=".txt", text=True)
-        path = Path(name)
+        path = where()
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as file:
-                file.write(initial)
+            path.write_text(initial, encoding="utf-8")
             # The person's terminal, not captured: this child is the interaction
-            subprocess.run([*shlex.split(editor), str(path)], check=True, env=dict(self.env))
+            try:
+                done = subprocess.run([*shlex.split(editor), str(path)], env=dict(self.env))
+            except FileNotFoundError:
+                raise _editor_failed(editor, "was not found") from None
+            if done.returncode != 0:
+                # Quitting with an error is how a person abandons the edit, as with git
+                raise _editor_failed(editor, f"exited with {done.returncode}")
             return path.read_text(encoding="utf-8")
         finally:
-            path.unlink()
+            path.unlink(missing_ok=True)
 
     def _check_declared(self, method: str) -> None:
         if not self.declared:
@@ -188,4 +210,4 @@ class Prompter:
                 suggestion=f"pass --{flag}",
                 context={"prompt": question.strip(), "flag": flag},
             )
-        return answer.rstrip("\n")
+        return answer.removesuffix("\n").removesuffix("\r")  # a Windows terminal sends \r\n

@@ -40,6 +40,9 @@ jobs:
       - run: uv run ruff format --check src tests examples
       - run: uv run mypy src examples
 
+      - name: Audit treaty's own CLI, warnings included
+        run: uv run treaty audit treaty._cli:cli --strict --format plain
+
       - name: Check AGENTS.md against the CLI (REQ-O-046)
         run: uv run treaty check-docs treaty._cli:cli AGENTS.md --format plain
 

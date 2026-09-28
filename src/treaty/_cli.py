@@ -138,14 +138,15 @@ class AuditOut:
     """In the order they are checked"""
 
 
-def load_app(target: str) -> App:
-    """The App at ``target``; the commands check its shape in phase 1, ``treaty-mcp`` here"""
+def load_app(target: str, cwd: Path) -> App:
+    """The App at ``target``, importable from ``cwd``, the run's ``--cwd``; the commands
+    check its shape in phase 1, ``treaty-mcp`` here"""
     module_name, sep, attr = target.partition(":")
     if not sep or not module_name or not attr:
         raise Exit.ARG_ERROR("target must be module:attribute", context={"target": target})
-    cwd = str(Path.cwd())
-    if cwd not in sys.path:
-        sys.path.insert(0, cwd)
+    where = str(cwd)
+    if where not in sys.path:
+        sys.path.insert(0, where)
     try:
         module = importlib.import_module(module_name)
     except ModuleNotFoundError as exc:
@@ -254,9 +255,11 @@ def render_audit(data: Any) -> str:
     danger_level="safe",
 )
 def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
-    app = load_app(args.target)
+    app = load_app(args.target, ctx.cwd)
     baseline, released = (None, None) if args.baseline is None else read_baseline(args.baseline)
-    report = audit(app, args.target, limit=args.limit, baseline=baseline, released=released)
+    report = audit(
+        app, args.target, limit=args.limit, baseline=baseline, released=released, root=ctx.cwd
+    )
     out = _to_out(report, args.all)
     if args.strict:
         blocking = [f for r in report.rules for f in r.findings if f.severity in BLOCKING]
@@ -275,6 +278,7 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     description="List the audit rules in the order they are checked",
     danger_level="safe",
     exit_codes=(),
+    examples=[("See what treaty audit checks, and in which order", "treaty rules")],
     default_limit=0,  # a short, fixed list
     ordered=True,
 )
@@ -311,16 +315,17 @@ class SchemaLockOut:
 )
 def schema_lock_command(args: SchemaLockArgs, ctx: Ctx) -> SchemaLockOut:
     """The schema-version audit rule compares the registry against this file (REQ-F-022)"""
-    app = load_app(args.target)
+    app = load_app(args.target, ctx.cwd)
     lock = schema_lock(app)
     text = json.dumps(lock, indent=2, sort_keys=True) + "\n"
-    old = LOCK_FILE.read_text(encoding="utf-8") if LOCK_FILE.is_file() else None
+    lock_path = ctx.cwd / LOCK_FILE
+    old = lock_path.read_text(encoding="utf-8") if lock_path.is_file() else None
     effect = "noop" if old == text else "created" if old is None else "updated"
     if effect != "noop":
-        write_atomic(LOCK_FILE, text, new_mode=0o644)
+        write_atomic(lock_path, text, new_mode=0o644)
     commands = lock["commands"]
     assert isinstance(commands, dict)
-    return SchemaLockOut(effect, str(LOCK_FILE), len(commands))
+    return SchemaLockOut(effect, str(lock_path), len(commands))
 
 
 # changelog-add
@@ -353,7 +358,7 @@ class ChangelogAddOut:
 )
 def changelog_add_command(args: ChangelogAddArgs, ctx: Ctx) -> ChangelogAddOut:
     """The manifest snapshot ``<app>.manifest.json`` sits beside the changelog (REQ-O-029)"""
-    app = load_app(args.target)
+    app = load_app(args.target, ctx.cwd)
     path = app.schema_changelog
     if path is None:
         raise Exit.PRECONDITION(
@@ -408,7 +413,7 @@ class AgentsMdOut:
 )
 def agents_md_command(args: AgentsMdArgs, ctx: Ctx) -> AgentsMdOut:
     """REQ-O-043, REQ-O-044: ``treaty check-docs`` keeps the result current"""
-    app = load_app(args.target)
+    app = load_app(args.target, ctx.cwd)
     path = ctx.cwd / args.path
     old = path.read_text(encoding="utf-8") if path.is_file() else None
     text = render_file(app, old, args.target, args.invocation or app.name)
@@ -474,7 +479,7 @@ def _doc_files(path: Path) -> list[Path]:
 )
 def check_docs_command(args: CheckDocsArgs, ctx: Ctx) -> CheckDocsOut:
     """REQ-O-045, REQ-O-046: drift exits 81 with one mismatch per item"""
-    app = load_app(args.target)
+    app = load_app(args.target, ctx.cwd)
     files: list[Path] = []
     mismatches: list[Mismatch] = []
     for given in args.paths:
@@ -562,14 +567,14 @@ def render_init(data: Any) -> str:
 )
 def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
     name = ProjectName(args.name)
-    target = args.directory if args.directory is not None else Path(name.value)
+    target = args.directory if args.directory is not None else ctx.cwd / name.value
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise Exit.CONFLICT(
             f"Directory {target} exists and is not empty",
             context={"directory": str(target)},
             fix_required="choose an empty directory with --directory",
         )
-    source = str(Path(args.treaty_source).resolve()) if args.treaty_source else None
+    source = str((ctx.cwd / args.treaty_source).resolve()) if args.treaty_source else None
     files = render(name, source)
     if not args.dry_run:
         for rel, content in files.items():
@@ -688,11 +693,11 @@ def resolve_spec_dir(explicit: Path | None, env: Mapping[str, str]) -> Path:
     renderers={Format.PLAIN: render_conformance},
 )
 def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
-    app = load_app(args.target)
+    app = load_app(args.target, ctx.cwd)
     out = args.out
     spec_dir = resolve_spec_dir(args.spec_dir, ctx.env) if args.run else None
     probes = probes_for(app)
-    profile_path = out or Path("conformance") / f"{app.name}.json"
+    profile_path = out or ctx.cwd / "conformance" / f"{app.name}.json"
     if args.command:
         command, beside_profile = list(args.command), False
     else:

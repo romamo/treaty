@@ -3,6 +3,8 @@
 import io
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -70,6 +72,9 @@ def test_the_effective_config_hash_does_not_cover_secret_setting_values() -> Non
 # F-032, F-043: the session temp root and its pruning
 
 
+SESSIONCTL = Path(__file__).resolve().parent / "fixture_session_app.py"
+
+
 def session_run(argv: list[str], env: dict[str, str], stdin: str = "") -> tuple[int, str]:
     out, err = io.StringIO(), io.StringIO()
     code = session_app.run(
@@ -118,15 +123,22 @@ def test_a_stale_session_that_cannot_be_removed_does_not_crash_the_next_run(
     assert code == 0, out
 
 
-def test_a_relative_tmpdir_gives_an_absolute_session_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Relative to a directory on tmp_path's drive: Windows has no path from D: to C:
+def test_a_relative_tmpdir_gives_an_absolute_session_directory(tmp_path: Path) -> None:
+    # Relative to the process's directory, on tmp_path's drive: Windows has no path from D:
+    # to C:. A process of its own, so this one's working directory never changes
     (tmp_path / "tmp").mkdir()
-    monkeypatch.chdir(tmp_path)
-    code, out = session_run(["scratch"], {"TMPDIR": "tmp"})
-    assert code == 0, out
-    assert Path(json.loads(out)["meta"]["session_tmp_dir"]).is_absolute()
+    done = subprocess.run(
+        [sys.executable, str(SESSIONCTL), "scratch", "--format", "json"],
+        cwd=tmp_path,
+        env={**os.environ, "TMPDIR": "tmp"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    made = Path(json.loads(done.stdout)["meta"]["session_tmp_dir"])
+    assert made.is_absolute() and made.is_relative_to(tmp_path.resolve() / "tmp")
 
 
 def test_two_exec_lines_each_get_their_own_output_file(tmp_path: Path) -> None:

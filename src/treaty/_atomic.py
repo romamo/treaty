@@ -78,6 +78,13 @@ def write_atomic(path: Path, text: str, *, new_mode: int = 0o600) -> None:
     finally:
         if not replaced:
             tmp.unlink(missing_ok=True)
+    if sys.platform != "win32":
+        # The rename itself is durable only once the directory holding it is on disk
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
 
 @contextmanager

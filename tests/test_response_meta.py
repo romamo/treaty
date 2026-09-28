@@ -255,7 +255,8 @@ def test_schema_change_classifies_readers_breakage() -> None:
 
 def test_schema_lock_twice_is_a_noop(tmp_path: Path) -> None:
     code, env = treaty_cli(["schema-lock", "fixture_meta_app:app"], tmp_path)
-    assert code == 0 and env["data"] == {"effect": "created", "lock": str(LOCK_FILE), "commands": 1}
+    assert code == 0 and env["data"]["effect"] == "created" and env["data"]["commands"] == 1
+    assert Path(env["data"]["lock"]).resolve() == (tmp_path / LOCK_FILE).resolve()
     lock = json.loads((tmp_path / LOCK_FILE).read_text())
     assert lock["commands"]["where"]["schema_version"] == "1.0"
     code, env = treaty_cli(["schema-lock", "fixture_meta_app:app"], tmp_path)

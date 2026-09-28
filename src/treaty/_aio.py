@@ -116,25 +116,27 @@ async def within[T](
 ) -> T:
     """Acquire the resources, then await the handler, until the deadline; then cancel
     and raise ``TimeoutExpired``. Tasks the handler started and left running are
-    cancelled and reported as ``UNAWAITED_TASKS``: their work would otherwise stop
-    silently when the loop closes. A resource's own tasks, such as a pool's, stay."""
+    cancelled, so they never outlive it into its resources' release: on a return they are
+    reported as ``UNAWAITED_TASKS``, as their work would otherwise stop silently when the
+    loop closes. A resource's own tasks, such as a pool's, stay."""
     import asyncio
 
     current = asyncio.current_task()
+    before: set[asyncio.Task[Any]] | None = None
     try:
         async with asyncio.timeout(remaining) as scope:
             resources = await acquire()
             before = asyncio.all_tasks()
             result = await handler(resources)
-    except TimeoutError:
-        if scope.expired():
+    except BaseException as exc:  # noqa: BLE001 - re-raised once the handler's tasks stop
+        if before is not None:
+            await _stop(_strays(before, current))
+        if isinstance(exc, TimeoutError) and scope.expired():
             raise TimeoutExpired(timeout) from None
         raise
-    stray = [t for t in asyncio.all_tasks() - before if t is not current and not t.done()]
+    stray = _strays(before, current)
     if stray:
-        for task in stray:
-            task.cancel()
-        await asyncio.gather(*stray, return_exceptions=True)
+        await _stop(stray)
         names = sorted(t.get_name() for t in stray)
         warn(
             UNAWAITED_TASKS,
@@ -143,3 +145,20 @@ async def within[T](
             {"tasks": names},
         )
     return result
+
+
+def _strays(
+    before: set[asyncio.Task[Any]], current: asyncio.Task[Any] | None
+) -> list[asyncio.Task[Any]]:
+    """The tasks started since ``before`` that still run, the handler's own left out"""
+    import asyncio
+
+    return [t for t in asyncio.all_tasks() - before if t is not current and not t.done()]
+
+
+async def _stop(tasks: list[asyncio.Task[Any]]) -> None:
+    import asyncio
+
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)

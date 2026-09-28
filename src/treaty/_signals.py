@@ -64,7 +64,9 @@ class Cancellation:
     @contextmanager
     def armed(self) -> Iterator[None]:
         """Let a signal raise ``Cancelled`` here; one held since the last window raises now"""
-        assert not self._armed, "armed() windows do not nest"
+        if self._armed:
+            # An inner window's exit would disarm the outer one: a signal then goes unheard
+            raise RuntimeError("armed() windows do not nest")
         # Armed before the check, so a signal between the two raises instead of being held
         self._armed = True
         try:

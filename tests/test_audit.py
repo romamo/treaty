@@ -13,9 +13,9 @@ def test_rules_are_ordered_and_unique() -> None:
     assert ids[0] == "describe" and ids[-1] == "profile"
 
 
-def test_audit_finds_each_planted_problem(monkeypatch, tmp_path) -> None:
-    monkeypatch.chdir(tmp_path)  # no ./conformance here
-    report = audit(fixture_audit_app.app, "fixture_audit_app:app", limit=3)
+def test_audit_finds_each_planted_problem(tmp_path) -> None:
+    # No conformance/ under tmp_path
+    report = audit(fixture_audit_app.app, "fixture_audit_app:app", limit=3, root=tmp_path)
     by_rule = {r.id: r for r in report.rules}
     assert not by_rule["describe"].passed
     assert {f.command for f in by_rule["describe"].findings} == {"delete-item", "create-item"}
@@ -36,10 +36,9 @@ def test_audit_finds_each_planted_problem(monkeypatch, tmp_path) -> None:
     assert report.failed == 10
 
 
-def test_audit_passes_a_clean_app(monkeypatch, tmp_path) -> None:
+def test_audit_passes_a_clean_app(tmp_path) -> None:
     (tmp_path / "conformance").mkdir()
     (tmp_path / "conformance" / "x.json").write_text("{}")
-    monkeypatch.chdir(tmp_path)
     from treaty import App, Ctx, NoArgs
 
     app = App("clean", version="1.0.0")
@@ -54,7 +53,7 @@ def test_audit_passes_a_clean_app(monkeypatch, tmp_path) -> None:
     def ping(args: NoArgs, ctx: Ctx) -> NoArgs:
         return args
 
-    report = audit(app, "clean", limit=3)
+    report = audit(app, "clean", limit=3, root=tmp_path)
     assert report.failed == 0 and report.next_steps == ()
 
 
@@ -64,14 +63,14 @@ def run_cli(argv: list[str], *, isatty: bool) -> tuple[int, str]:
     return code, out.getvalue()
 
 
-def test_cli_audit_json_and_plain(monkeypatch, tmp_path) -> None:
-    monkeypatch.chdir(tmp_path)
-    code, out = run_cli(["audit", "fixture_audit_app:app", "--limit", "2"], isatty=False)
+def test_cli_audit_json_and_plain(tmp_path) -> None:
+    where = ["--cwd", str(tmp_path)]
+    code, out = run_cli(["audit", "fixture_audit_app:app", "--limit", "2", *where], isatty=False)
     assert code == 0
     data = json.loads(out)["data"]
     assert data["rules_total"] == len(RULES) and data["failed"] == 10
     assert len(data["next_steps"]) == 2
-    code, out = run_cli(["audit", "fixture_audit_app:app", "--all"], isatty=True)
+    code, out = run_cli(["audit", "fixture_audit_app:app", "--all", *where], isatty=True)
     assert code == 0
     assert "Next steps" in out and "1. (advice) describe [create-item]" in out
     assert out.count("fix:") == 12
@@ -86,15 +85,14 @@ def test_cli_audit_bad_targets() -> None:
     assert code == 4 and json.loads(out)["error"]["code"] == "PRECONDITION"
 
 
-def test_cli_rules_and_own_audit(monkeypatch, tmp_path) -> None:
+def test_cli_rules_and_own_audit(tmp_path) -> None:
     code, out = run_cli(["rules"], isatty=False)
     ids = [r["id"] for r in json.loads(out)["data"]]
     assert code == 0 and ids == [r.id for r in (*RULES, ADDITIVE)]
-    monkeypatch.chdir(tmp_path)
-    code, out = run_cli(["audit", "treaty._cli:cli", "--all"], isatty=False)
+    code, out = run_cli(["audit", "treaty._cli:cli", "--all", "--cwd", str(tmp_path)], isatty=False)
     assert code == 0
     failing = [r["id"] for r in json.loads(out)["data"]["rules"] if not r["passed"]]
-    assert failing == ["describe", "profile"]
+    assert failing == ["profile"]  # no conformance profile in an empty directory
 
 
 def test_cli_audit_strict() -> None:

@@ -19,6 +19,7 @@ import io
 import json
 import sys
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, TextIO, cast
 
 from ._app import App, _Run
@@ -159,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("usage: treaty-mcp module:app [--list-tools]\n")
         return 2
     try:
-        app = load_app(args[0])
+        app = load_app(args[0], Path.cwd())
     except CliExit as exc:
         sys.stderr.write(f"treaty-mcp: {exc.code}: {exc.message}\n")
         return 2

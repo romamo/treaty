@@ -2453,6 +2453,7 @@ class _Run:
                 command=command.path.value,
                 declared=command.interactive,
                 editor_alternatives=command.editor_alternatives,
+                flags=frozenset(n for f in command.fields for n in f.exposed_flags()),
                 interactive=self.interactive and not invocation.non_interactive,
                 assume_yes=invocation.yes,
                 stdin=self.stdin,
@@ -3493,20 +3494,8 @@ class _Run:
             self.abandoned = exc.pending
             self._stop_children()
             self._after_grace(running)
-            entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
-            return self._envelope(
-                entry.code.value,
-                error=ErrorDetail(
-                    code="TIMEOUT",
-                    message=f"Command {command.path} exceeded its {timeout.seconds}s timeout",
-                    retryable=entry.retryable,
-                    retry_strategy=entry.retry_strategy,
-                    context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
-                    phase="execution",
-                ),
-                started=started,
-                meta=full_meta,
-            )
+            code, error = self._timed_out(command, timeout, "timeout")
+            return self._envelope(code, error=error, started=started, meta=full_meta)
         except Cancelled as exc:
             self.abandoned = _still_running(running)
             # A held signal raised before fn() or before the worker started: nothing ran
@@ -3788,21 +3777,10 @@ class _Run:
         except TimeoutExpired:
             self._stop_children()
             self._grace(running)
-            entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
             what = "timeout" if whole else "timeout waiting for its next event"
+            code, error = self._timed_out(command, timeout, what)
             terminal = functools.partial(
-                self._envelope,
-                entry.code.value,
-                error=ErrorDetail(
-                    code="TIMEOUT",
-                    message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
-                    retryable=entry.retryable,
-                    retry_strategy=entry.retry_strategy,
-                    context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
-                    phase="execution",
-                ),
-                started=started,
-                meta=partial(),
+                self._envelope, code, error=error, started=started, meta=partial()
             )
         except Cancelled as exc:
             ran = events is not None or not exc.held or bool(running)
@@ -3841,6 +3819,20 @@ class _Run:
             self._restore_cwd(before)
         # Built after the teardown, so a CLEANUP_FAILED warning reaches it
         yield self._present(command, terminal())
+
+    def _timed_out(self, command: Command, timeout: Timeout, what: str) -> tuple[int, ErrorDetail]:
+        """The exit code and ``TIMEOUT`` error of a handler or stream past ``timeout``: a
+        read-only command's is retryable, as it changed nothing (REQ-C-014)"""
+        entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
+        error = ErrorDetail(
+            code="TIMEOUT",
+            message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
+            retryable=entry.retryable,
+            retry_strategy=entry.retry_strategy,
+            context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
+            phase="execution",
+        )
+        return entry.code.value, error
 
     def _heartbeats(
         self, command: Command, invocation: Invocation, mode: Format, started: float

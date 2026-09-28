@@ -11,6 +11,7 @@ last once ``intercept_stdout()`` runs before the app is imported.
 from __future__ import annotations
 
 import atexit
+import codecs
 import json
 import os
 import sys
@@ -59,7 +60,10 @@ class Interceptor:
             text, count = bytes(self._text), self._bytes
             self._text.clear()
             self._bytes = 0
-        return text.decode("utf-8", "replace").replace("\r\n", "\n"), count
+        # Cut at TEXT_CAP bytes, the last character may be split: dropped, not replaced
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        decoded = decoder.decode(text, final=count <= len(text))
+        return decoded.replace("\r\n", "\n"), count
 
     def close(self) -> None:
         """Descriptor 1 is stdout again; the reader passes on what is left and stops"""
