@@ -191,5 +191,4 @@ idempotency key, previews and confirms `purge`, and checks where a relative path
 
 That is the end of the shipping chapters: `todo` passes the audit and the conformance kit,
 and serves the same contract to agents with a shell and without one. The remaining
-chapters cover the audit rules `todo` never triggered, and Track A, which starts a new CLI
-with `treaty init`.
+chapters cover the audit rules `todo` never triggered.

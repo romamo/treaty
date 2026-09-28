@@ -12,7 +12,7 @@ It is written for two readers. A developer reads the prose; a coding agent follo
 
 | Track | You start from | First chapter |
 | --- | --- | --- |
-| A: New CLI | nothing | not written yet |
+| A: New CLI | nothing | [Start a new CLI](A-new/start.md) |
 | B: Migrate | an argparse CLI | [Migrate an argparse CLI](B-migrate/argparse.md) |
 | B: Migrate | a click or typer CLI | [Migrate a click or typer CLI](B-migrate/click-typer.md) |
 

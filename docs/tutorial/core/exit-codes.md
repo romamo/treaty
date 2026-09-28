@@ -3,8 +3,9 @@
 **Goal:** every way a command can fail that a caller can act on has its own exit code,
 declared in the manifest with whether a retry is safe and what state the failure left behind
 
-**You need:** a treaty app, such as the end of [Migrate an argparse CLI](../B-migrate/argparse.md)
-or [Migrate a click or typer CLI](../B-migrate/click-typer.md);
+**You need:** a treaty app, such as the end of [Start a new CLI](../A-new/start.md),
+[Migrate an argparse CLI](../B-migrate/argparse.md), or
+[Migrate a click or typer CLI](../B-migrate/click-typer.md);
 this chapter clears the audit rules `exit-codes` and `retryable`
 
 **Done when:** the strict audit exits 0:
