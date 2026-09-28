@@ -246,5 +246,5 @@ README.
 
 ## Next
 
-The audit's last rule, `profile`, asks for a conformance profile, which
-[Run the conformance kit](../ship/conformance.md) writes and runs.
+The audit's `log-not-print` rule is about what a command writes while it runs, and uses the
+`todo` this chapter built: [Log without touching stdout](logging.md).

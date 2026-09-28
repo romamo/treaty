@@ -87,6 +87,7 @@ rule, the finding's suggested fix is the guide:
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
 | `async-job` | a job descriptor from commands that start work | [Run long work an agent can follow](core/long-running.md) |
 | `stable-order` | a declared order for arrays of objects | [Page long lists](core/pagination.md) |
+| `log-not-print` | handlers log through `ctx`, never `print()` | [Log without touching stdout](core/logging.md) |
 | `settings-declared` | config read through `App(settings=)`, not parsed by a handler | [Read settings and secrets](core/config.md) |
 | `env-prefix` | handlers read only the app's own environment variables | [Read settings and secrets](core/config.md) |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |

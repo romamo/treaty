@@ -376,6 +376,52 @@ def test_a_url_without_a_list_of_items_changes_nothing(
     assert not db.exists()
 
 
+# Log without touching stdout
+
+
+def _log_lines(argv: list[str]) -> tuple[int, str, list[dict[str, Any]]]:
+    out, err = io.StringIO(), io.StringIO()
+    code = todo_network.app.run(argv, stdout=out, stderr=err, env={}, isatty=False)
+    return code, out.getvalue(), [json.loads(line) for line in err.getvalue().splitlines()]
+
+
+def test_import_logs_what_it_did_only_under_verbose(feed: str, tmp_path: Path) -> None:
+    argv = ["import", "--url", f"{feed}/todo.json", "--db", str(tmp_path / "t.json")]
+    code, _, quiet = _log_lines(argv)
+    assert code == 0 and quiet == []
+    code, out, lines = _log_lines([*argv, "--verbose"])
+    [line] = [x for x in lines if x["message"] == "imported feed"]
+    assert line["fields"] == {"url": f"{feed}/todo.json", "added": 2}
+    assert json.loads(out)["ok"] is True  # stdout is still the envelope alone
+
+
+def test_a_stray_print_never_reaches_stdout() -> None:
+    probe = App("probe", version="1.0.0")
+
+    @probe.command("go", description="Go", danger_level="safe", exit_codes=[])
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        print("loading items")
+        return {"loaded": True}
+
+    out = io.StringIO()
+    code = probe.run(["go"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+    envelope = json.loads(out.getvalue())
+    assert code == 0 and envelope["data"] == {"loaded": True}
+    [warning] = envelope["warnings"]
+    assert warning["code"] == "THIRD_PARTY_STDOUT" and warning["context"]["text"] == "loading items"
+
+
+def test_debug_logs_the_request_with_the_token_redacted(private_feed: str, tmp_path: Path) -> None:
+    out, err = io.StringIO(), io.StringIO()
+    argv = ["import", "--url", private_feed, "--db", str(tmp_path / "t.json"), "--debug"]
+    code = todo_config.app.run(
+        argv, stdout=out, stderr=err, env={"TODO_TOKEN": "s3cret"}, isatty=False
+    )
+    [request] = [json.loads(x) for x in err.getvalue().splitlines() if '"http request"' in x]
+    assert code == 0 and request["fields"]["headers"]["Authorization"] == "[REDACTED]"
+    assert "s3cret" not in out.getvalue() + err.getvalue()
+
+
 # Long-running work
 
 

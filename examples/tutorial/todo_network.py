@@ -264,6 +264,7 @@ def import_items(args: Import, ctx: Ctx, store: Store) -> Imported:
     if not added:
         return Imported(effect="noop", added=[])
     store.save([*items, *added])
+    ctx.log("imported feed", url=args.url, added=len(added))
     return Imported(effect="created", added=added)
 
 
