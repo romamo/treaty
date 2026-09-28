@@ -55,7 +55,7 @@ rule, the finding's suggested fix is the guide:
 | `network-io` | `has_network_io=True` on commands that call out | [Declare network commands](core/network-io.md) |
 | `path-typed` | `pathlib.Path` on path-like fields | [Type path arguments as Path](core/path-typed.md) |
 | `raw-payload` | `--raw-payload` on wide mutating commands | [Accept a raw JSON payload](core/raw-payload.md) |
-| `cleanup` | a cleanup hook on network commands | not written yet |
+| `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |
 
 You are done with the core when `treaty audit module:app --strict` exits 0. Shipping comes

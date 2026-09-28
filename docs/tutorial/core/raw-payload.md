@@ -189,5 +189,4 @@ object with `"_cmd": "edit"` added, and `todo exec --input-file plan.jsonl` runs
 ## Next
 
 The audit's next rule is `cleanup`, which asks network commands for a hook that runs however
-the run ends. Its chapter is not written yet; the finding's suggested fix is the guide until
-then.
+the run ends: [Release what a run holds](cleanup.md).
