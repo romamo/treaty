@@ -80,7 +80,7 @@ def test_a_chapters_checks_pass_in_order(page: Path) -> None:
         pytest.skip("the checks need bash and jq")
     if page.name == "conformance.md" and not (SPEC_DIR / "conformance" / "run.py").is_file():
         pytest.skip(f"conformance kit not found at {SPEC_DIR}; set TREATY_SPEC_DIR")
-    if page.name == "mcp.md" and importlib.util.find_spec("mcp") is None:
+    if page.name in ("mcp.md", "agent-docs.md") and importlib.util.find_spec("mcp") is None:
         pytest.skip("the mcp extra is not installed")
     if page.name == "exit-codes.md" and os.geteuid() == 0:
         pytest.skip("root ignores the read-only directory the checks rely on")

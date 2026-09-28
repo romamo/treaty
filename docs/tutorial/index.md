@@ -60,8 +60,9 @@ rule, the finding's suggested fix is the guide:
 
 You are done with the core when `treaty audit module:app --strict` exits 0. Shipping comes
 after that: [Run the conformance kit](ship/conformance.md) puts the CLI through the spec's
-runtime checks and gates CI on them, and [Serve commands over MCP](ship/mcp.md) gives agents
-without a shell the same commands as tools.
+runtime checks and gates CI on them, [Serve commands over MCP](ship/mcp.md) gives agents
+without a shell the same commands as tools, and [Ship the agent docs](ship/agent-docs.md)
+generates the AGENTS.md, skill files, and MCP tool list agents read, and checks them in CI.
 
 ## For agents
 

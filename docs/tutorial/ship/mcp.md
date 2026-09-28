@@ -189,6 +189,6 @@ idempotency key, previews and confirms `purge`, and checks where a relative path
 
 ## Next
 
-That is the end of the shipping chapters: `todo` passes the audit and the conformance kit,
-and serves the same contract to agents with a shell and without one. The remaining
-chapters cover the audit rules `todo` never triggered.
+`todo` passes the audit and the conformance kit, and serves the same contract to agents
+with a shell and without one. The last step is the docs those agents read before they call:
+[Ship the agent docs](agent-docs.md).
