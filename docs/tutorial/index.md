@@ -14,7 +14,7 @@ It is written for two readers. A developer reads the prose; a coding agent follo
 | --- | --- | --- |
 | A: New CLI | nothing | not written yet |
 | B: Migrate | an argparse CLI | [Migrate an argparse CLI](B-migrate/argparse.md) |
-| B: Migrate | a click or typer CLI | not written yet |
+| B: Migrate | a click or typer CLI | [Migrate a click or typer CLI](B-migrate/click-typer.md) |
 
 Both tracks end in the same place: a treaty app that `treaty audit` can inspect. From there
 the core chapters take you through the audit's rules one at a time.
