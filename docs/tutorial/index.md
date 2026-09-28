@@ -51,7 +51,7 @@ rule, the finding's suggested fix is the guide:
 | `danger-level` | danger levels that match what command names imply | [Choose each command's danger level](core/danger-level.md) |
 | `exit-codes` | command-specific exit codes on every non-safe command | [Declare exit codes](core/exit-codes.md) |
 | `retryable` | retryable codes only on idempotent commands | [Declare exit codes](core/exit-codes.md) |
-| `typed-output` | typed return values, so `output_schema` is informative | not written yet |
+| `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
 | `network-io` | `has_network_io=True` on commands that call out | not written yet |
 | `path-typed` | `pathlib.Path` on path-like fields | not written yet |
 | `raw-payload` | `--raw-payload` on wide mutating commands | not written yet |

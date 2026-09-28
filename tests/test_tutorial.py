@@ -14,6 +14,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+import jsonschema
 import pytest
 from conftest import SPEC_DIR, needs_posix_permissions, needs_sh_launcher
 
@@ -218,6 +219,28 @@ def test_an_example_parses(example: str) -> None:
         [*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={}
     )
     assert code == 0, out.getvalue()
+
+
+# Type every command's output
+
+
+def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
+    """treaty does not check a handler's return value against its annotation; this does"""
+    app = todo_exit_codes.app
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    db = str(tmp_path / "todo.json")
+    calls = [
+        ("add", {"text": "Buy milk", "priority": "high", "db": db}),
+        ("done", {"id": 1, "db": db}),
+        ("list", {"all": True, "db": db}),
+        ("purge", {"dry_run": True, "db": db}),
+        ("purge", {"confirm_destructive": True, "db": db}),
+    ]
+    for name, args in calls:
+        env = app.call(name, args)
+        assert env.ok, env.error
+        jsonschema.validate(env.data, commands[name]["output_schema"])
 
 
 # Declare exit codes
