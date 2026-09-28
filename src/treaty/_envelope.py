@@ -65,17 +65,25 @@ def clean(value: object) -> object:
     return value
 
 
+# A last word no period may follow, which would read as part of it: a URL, a path, a
+# quoted value, a flag, or an identifier (snake_case, dotted, camelCase)
+_CODE_TAIL = re.compile(r"://|^[~.]|['\"`]$|[_/\\=]|\w\.\w|^-|[a-z][A-Z]")
+
+
 def sentence(text: str) -> str:
     """An error message as a complete sentence (REQ-C-013): a lowercase first word is
     capitalized and closing punctuation is added when missing. A first word that is a path,
     a file name, or an identifier (``out.json``, ``tmp/x``, ``sort_key``) keeps its case,
-    since capitalizing it names another file. Escapes go first, so a colored message is
-    judged by its text."""
+    since capitalizing it names another file, and a message ending in a path, URL, quoted
+    value, flag, or identifier gets no period, which would read as part of it. Escapes go
+    first, so a colored message is judged by its text."""
     text = _ESCAPES.sub("", text).strip()
-    first = text.split(maxsplit=1)[0] if text else ""
-    if text[:1].islower() and _WORD.fullmatch(first):
+    words = text.split()
+    if not words:
+        return text
+    if text[:1].islower() and _WORD.fullmatch(words[0]):
         text = text[0].upper() + text[1:]
-    if text and text[-1] not in ".!?":
+    if text[-1] not in ".!?" and not _CODE_TAIL.search(words[-1]):
         text += "."
     return text
 

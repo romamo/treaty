@@ -14,6 +14,7 @@ from conftest import WINDOWS, spec_validator
 from fixture_hygiene_app import app
 
 from treaty import App, Ctx, Exit, NoArgs, ParseError
+from treaty._envelope import sentence
 
 HYGIENECTL = Path(__file__).resolve().parent / "fixture_hygiene_app.py"
 needs_sh = pytest.mark.skipif(WINDOWS, reason="the child is a /bin/sh command")
@@ -262,7 +263,8 @@ def test_output_is_byte_identical_across_locales() -> None:
 
 # REQ-C-013: code, message as a sentence, suggestion when recoverable
 
-_SENTENCE = re.compile(r"^[^a-z].*[.!?]$", re.DOTALL)
+# A quoted value closes a message without a period, which would read as part of it
+_SENTENCE = re.compile(r"^[^a-z].*[.!?'\"]$", re.DOTALL)
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 
 
@@ -319,6 +321,56 @@ def test_every_framework_error_message_is_a_sentence(argv: list[str]) -> None:
     if error["retryable"] or "fix_required" in error:
         assert error["suggestion"]
     assert "Traceback" not in out.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("no such release", "No such release."),
+        ("the disk is full!", "The disk is full!"),
+        ("  \x1b[31mnot found\x1b[0m ", "Not found."),
+        ("", ""),
+        # A first word with an underscore, dot, slash, digit, or leading dash keeps its case;
+        # a hyphenated or camelCase one is a plain word and is capitalized
+        (
+            "project_directory_missing: directory does not exist: /nonexistent",
+            "project_directory_missing: directory does not exist: /nonexistent",
+        ),
+        ("config.toml is unreadable", "config.toml is unreadable."),
+        ("--region is required", "--region is required."),
+        ("v2 is not supported", "v2 is not supported."),
+        ("schema-lock found drift", "Schema-lock found drift."),
+        ("maxRetries is negative", "MaxRetries is negative."),
+        # No period after a path, URL, quoted value, or code
+        ("cannot read ~/.config/app.toml", "Cannot read ~/.config/app.toml"),
+        ("cannot reach https://example.com/api", "Cannot reach https://example.com/api"),
+        ("unknown region 'xx'", "Unknown region 'xx'"),
+        ('unknown region "xx"', 'Unknown region "xx"'),
+        ("set the variable APP_TOKEN", "Set the variable APP_TOKEN"),
+        ("pass --confirm-destructive", "Pass --confirm-destructive"),
+        ("the tag is 9.9", "The tag is 9.9"),
+        ("the path is C:\\temp", "The path is C:\\temp"),
+        ("retry after 5 seconds", "Retry after 5 seconds."),
+        ("the limit is 5", "The limit is 5."),
+    ],
+)
+def test_a_message_becomes_a_sentence_without_changing_code_in_it(
+    message: str, expected: str
+) -> None:
+    assert sentence(message) == expected
+
+
+def test_an_error_code_leading_the_message_is_kept_verbatim() -> None:
+    demo = App("msgrepro", version="0.1.0")
+
+    @demo.command("go", description="Fail", danger_level="safe", exit_codes=())
+    def go(args: NoArgs, ctx: Ctx) -> None:
+        raise Exit.PRECONDITION("project_directory_missing: directory does not exist: /nonexistent")
+
+    out = io.StringIO()
+    demo.run(["go"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+    message = json.loads(out.getvalue())["error"]["message"]
+    assert message == "project_directory_missing: directory does not exist: /nonexistent"
 
 
 def test_a_declared_suggestion_fills_the_error() -> None:

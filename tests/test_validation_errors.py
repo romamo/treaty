@@ -68,7 +68,7 @@ def test_unknown_flag_missing_positional_and_bad_value_in_one_run() -> None:
     errors = error_of(env)["errors"]
     assert isinstance(errors, list)
     assert [e["message"] for e in errors] == [
-        "Unknown flag '--regoin'.",
+        "Unknown flag '--regoin'",
         "'replicas' expects an integer.",
         "Missing required: service.",
     ]
