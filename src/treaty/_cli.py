@@ -32,6 +32,7 @@ from ._profile import (
     has_kit,
     probes_for,
     profile_drift,
+    profile_matches,
     run_kit,
     write_profile,
 )
@@ -710,12 +711,11 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
         )
     profile = build_profile(app, command, probes, beside_profile=beside_profile)
     # A profile may carry hand-written probes; only --force trades them for generated ones
-    drift = profile_drift(profile_path, profile) if profile_path.exists() else {}
-    if drift is None:
-        effect = "noop"
-    elif not profile_path.exists():
+    if not profile_path.exists():
         effect = "created"
-    elif args.force:
+    elif profile_matches(profile_path, profile):
+        effect = "noop"
+    elif (drift := profile_drift(profile_path, profile)) is None or args.force:
         effect = "updated"
     else:
         raise Exit.CONFLICT(

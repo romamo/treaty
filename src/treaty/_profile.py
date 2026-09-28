@@ -196,18 +196,33 @@ def _probes_by_name(probes: object) -> dict[str, object]:
     }
 
 
+# Derived from the machine (the launcher, or the console script on Windows), never written
+# by hand, so a profile that differs only here is refreshed without a conflict
+_MACHINE_KEYS = frozenset({"command"})
+
+
+def profile_matches(path: Path, profile: dict[str, object]) -> bool:
+    """The profile at ``path`` equals ``profile`` as JSON; formatting and key order aside"""
+    try:
+        return bool(json.loads(path.read_text(encoding="utf-8")) == profile)
+    except json.JSONDecodeError:
+        return False
+
+
 def profile_drift(path: Path, profile: dict[str, object]) -> dict[str, object] | None:
-    """How the profile at ``path`` differs from ``profile`` as JSON, or None when it does not;
-    formatting and key order are not differences, so a hand-formatted copy is left alone"""
+    """How the profile at ``path`` differs from ``profile`` as JSON outside the machine keys,
+    or None when it does not"""
     try:
         existing = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return {"reason": f"not valid JSON: {exc.msg} at line {exc.lineno}"}
-    if existing == profile:
-        return None
     if not isinstance(existing, dict):
         return {"reason": "not a JSON object"}
-    keys = sorted((existing.keys() | profile.keys()) - {"probes"})
+    if {k: v for k, v in existing.items() if k not in _MACHINE_KEYS} == {
+        k: v for k, v in profile.items() if k not in _MACHINE_KEYS
+    }:
+        return None
+    keys = sorted((existing.keys() | profile.keys()) - {"probes"} - _MACHINE_KEYS)
     ours, theirs = _probes_by_name(profile.get("probes")), _probes_by_name(existing.get("probes"))
     return {
         "changed_keys": [k for k in keys if existing.get(k) != profile.get(k)],

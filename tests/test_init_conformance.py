@@ -113,6 +113,19 @@ def test_conformance_leaves_an_equal_profile_alone(tmp_path: Path, monkeypatch) 
     assert path.read_text() == compact
 
 
+def test_conformance_refreshes_a_profile_that_differs_only_in_command(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The command is machine-derived (a console script on Windows), not hand-written"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    run_cli(["conformance", "examples.deployctl:app"])
+    code, env = run_cli(["conformance", "examples.deployctl:app", "--command", "/opt/dctl"])
+    assert code == 0 and env["data"]["effect"] == "updated"
+    profile = json.loads((tmp_path / "conformance" / "deployctl.json").read_text())
+    assert profile["command"] == ["/opt/dctl"]
+
+
 def test_conformance_refuses_to_overwrite_a_differing_profile(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
