@@ -33,7 +33,7 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, NoReturn, TextIO, cast
+from typing import IO, Any, NoReturn, TextIO, TypeGuard, cast
 
 from ._aio import Loop, within
 from ._atomic import write_atomic
@@ -823,6 +823,7 @@ class App:
             )
             if problem is not None:
                 raise RegistrationError(f"{cmd_path}: fix_commands[{error_code!r}]: {problem}")
+        pairs = _example_pairs(cmd_path, examples, f"{self.name} {' '.join(cmd_path.parts)}")
 
         def register(fn: H) -> H:
             self._register(
@@ -834,7 +835,7 @@ class App:
                     danger_level=DangerLevel(danger_level),
                     required_scopes=[Scope(s) for s in required_scopes],
                     exit_codes=[ExitCodeName(n) for n in exit_codes],
-                    examples=[Example(d, c) for d, c in examples],
+                    examples=[Example(d, c) for d, c in pairs],
                     has_network_io=has_network_io,
                     timeout=command_timeout,
                     supports_raw_payload=supports_raw_payload,
@@ -2063,6 +2064,37 @@ _BUILT_IN: Mapping[Format, Renderer] = {Format.TSV: table("\t")}
 def _json_text(data: Any) -> str:
     """Machine output in a text mode: the data alone, indented, without the envelope"""
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
+
+
+def _example_pairs(path: CommandPath, examples: object, usage: str) -> list[tuple[str, str]]:
+    """``examples=`` as (description, command) pairs, refused at registration with the
+    shape to write: a bare string would otherwise unpack character by character"""
+    if isinstance(examples, tuple) and _is_pair(examples):
+        raise RegistrationError(
+            f"{path}: examples= takes a list of (description, command) pairs, got the "
+            f"single pair {examples!r}; write examples=[{examples!r}]"
+        )
+    items = (
+        examples if isinstance(examples, Sequence) and not isinstance(examples, str) else [examples]
+    )
+    pairs = []
+    for item in items:
+        if not _is_pair(item):
+            command = item if isinstance(item, str) else usage
+            raise RegistrationError(
+                f"{path}: examples= takes (description, command) pairs, got {item!r}; "
+                f'write examples=[("Typical call", {json.dumps(command)})]'
+            )
+        pairs.append((item[0], item[1]))
+    return pairs
+
+
+def _is_pair(item: object) -> TypeGuard[tuple[str, str] | list[str]]:
+    return (
+        isinstance(item, (tuple, list))
+        and len(item) == 2
+        and all(isinstance(part, str) for part in item)
+    )
 
 
 def _check_renderer(where: str, mode: object, render: object) -> None:

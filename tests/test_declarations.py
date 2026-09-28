@@ -12,6 +12,7 @@ from conftest import spec_validator
 from treaty import Affects, App, Arg, Ctx, Flag, NoArgs, RegistrationError
 from treaty._audit import untimed_network_calls
 from treaty._profile import probes_for
+from treaty._values import CommandPath
 
 APPLIED: list[str] = []
 
@@ -90,6 +91,71 @@ def test_each_missing_declaration_is_named() -> None:
         app.command("x", description="x", exit_codes=())
     with pytest.raises(RegistrationError, match=r"add exit_codes=\(\), or"):
         app.command("x", description="x", danger_level="safe")
+
+
+# examples= is a list of (description, command) pairs
+
+
+@pytest.mark.parametrize(
+    ("examples", "got", "write"),
+    [
+        (["exrepro go"], "'exrepro go'", '[("Typical call", "exrepro go")]'),
+        # Two characters would otherwise unpack into a description and a command
+        (["ab"], "'ab'", '[("Typical call", "ab")]'),
+        ("exrepro go", "'exrepro go'", '[("Typical call", "exrepro go")]'),
+        ([("Only a description",)], "('Only a description',)", '[("Typical call", "exrepro go")]'),
+        ([("Typical call", 1)], "('Typical call', 1)", '[("Typical call", "exrepro go")]'),
+        ([None], "None", '[("Typical call", "exrepro go")]'),
+    ],
+)
+def test_an_example_not_a_pair_of_strings_fails_registration(
+    examples: object, got: str, write: str
+) -> None:
+    app = App("exrepro", version="1.0.0")
+    with pytest.raises(RegistrationError) as info:
+        app.command("go", description="Go", danger_level="safe", exit_codes=(), examples=examples)  # type: ignore[arg-type]
+    assert str(info.value) == (
+        f"go: examples= takes (description, command) pairs, got {got}; write examples={write}"
+    )
+
+
+def test_a_single_pair_is_asked_to_be_wrapped_in_a_list() -> None:
+    app = App("exrepro", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"write examples=\[\('Go', 'exrepro go'\)\]"):
+        app.command(
+            "go",
+            description="Go",
+            danger_level="safe",
+            exit_codes=(),
+            examples=("Go", "exrepro go"),  # type: ignore[arg-type]
+        )
+
+
+def test_a_group_command_checks_its_examples_too() -> None:
+    app = App("exrepro", version="1.0.0")
+    group = app.group("db", description="Databases")
+    with pytest.raises(
+        RegistrationError,
+        match=r'^db\.go: .*write examples=\[\("Typical call", "exrepro db go"\)\]',
+    ):
+        group.command("go", description="Go", danger_level="safe", exit_codes=(), examples=[1])
+
+
+def test_pairs_as_tuples_or_lists_register() -> None:
+    app = App("exrepro", version="1.0.0")
+
+    @app.command(
+        "go",
+        description="Go",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[("Typical call", "exrepro go"), ["Again", "exrepro go"]],  # type: ignore[list-item]
+    )
+    def go(args: NoArgs, ctx: Ctx) -> None:
+        return None
+
+    examples = app.commands[CommandPath("go")].examples
+    assert [e.command for e in examples] == ["exrepro go", "exrepro go"]
 
 
 def test_schema_lists_success_and_danger_level() -> None:

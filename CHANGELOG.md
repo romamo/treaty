@@ -288,6 +288,10 @@ Apps built on treaty keep their own, structured schema changelog with
 - An error message ending in a path, URL, quoted value, flag, or identifier gets no
   closing period (REQ-C-013), which would read as part of it: `/nonexistent` no longer
   becomes `/nonexistent.`, and `Unknown flag '--token'` ends at its quote (#16)
+- `examples=` on `app.command` and a group's `command` refuses anything but
+  (description, command) pairs of strings with a `RegistrationError` that names the
+  command and the shape to write, instead of a raw `ValueError` for a plain string or a
+  silent unpacking of a two-character one
 
 ## [1.0.0rc2] - 2026-09-28
 
