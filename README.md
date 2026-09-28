@@ -555,12 +555,14 @@ return Release(**response.json())
 - A failure ends the run with `error.network_context` (`url`, `proxy_used`, null when
   direct, `proxy_source`, `no_proxy`, `ssl_verify`, `status_code`, and a
   `curl -v [--proxy P] URL` suggestion, credentials removed): exit `12`
-  `CONNECTION_FAILED` or `TLS_VERIFY_FAILED` (not retryable), `10` `TIMEOUT`, `12`
-  `UPSTREAM_UNAVAILABLE` for 502 to 504, and, when the command declares the exit code,
+  `CONNECTION_FAILED`, and `12` `UPSTREAM_UNAVAILABLE` for 502 to 504, both retryable;
+  `12` `TLS_VERIFY_FAILED`, not retryable until the CA bundle changes; `10` `TIMEOUT`,
+  retryable on a `safe` command only; and, when the command declares the exit code,
   `8` `UNAUTHENTICATED` for 401, `7` `PERMISSION_DENIED` for 403, and `11` `RATE_LIMITED`
   with `retry_after_ms` for 429. Any other status is returned (REQ-F-037, REQ-F-063)
 - On a `retry=` command, connection failures, timeouts, and 502 to 504 are retried within
-  `--retries`, counted in `meta.retries`
+  `--retries`, counted in `meta.retries`; a failure that outlasts those retries is not
+  retryable, so an agent does not retry on top of them
 
 A `recursive_traversal=True` command gets `ctx.walk(root)`, which yields a
 `treaty.WalkEntry(path, depth, is_dir, is_symlink)` per entry, depth first in name order,
@@ -1283,8 +1285,10 @@ class Report:
   content hash to compare). Rule `high-entropy`
 - **Tagged**: `external=True` on a command whose `data` comes from outside the tool (a
   file, an API response), or `Out(external=True)` on the field that holds it, adds
-  `"_source": "external", "_trusted": false` to `data` (to each object of a list) and an
-  `UNTRUSTED_CONTENT` warning. `--no-injection-protection` drops the tags, sets
+  `"_source": "external", "_trusted": false` to the top of `data`, or to each object when
+  `data` is a list, and an `UNTRUSTED_CONTENT` warning. A field marked
+  `Out(external=True)` tags `data` as a whole whenever the field is not `null`, not each
+  object inside the field. `--no-injection-protection` drops the tags, sets
   `meta.injection_protection: false`, and reports its use on stderr. Rule `external-data`
 
 ```python
