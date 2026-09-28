@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,9 +16,10 @@ from conftest import WINDOWS, spec_validator
 from jsonschema import Draft7Validator
 from packaging.version import Version
 
-from treaty import App, Ctx, Exit, Flag, NoArgs, RegistrationError, Retry
+from treaty import App, CliExit, Ctx, Exit, Flag, NoArgs, RegistrationError, Retry
 from treaty._audit import LOCK_FILE, audit, schema_change
 from treaty._manifest import payload_schema
+from treaty._retry import Retrier, RetriesExhausted
 
 METACTL = Path(__file__).resolve().parent / "fixture_meta_app.py"
 
@@ -626,6 +628,155 @@ def test_retry_values_are_checked() -> None:
         Retry(retries=-1)
     with pytest.raises(RegistrationError):
         Retry(on=())
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"backoff": 0.5},
+        {"backoff": float("nan")},
+        {"backoff": True},
+        {"jitter": -0.1},
+        {"jitter": 1.5},
+        {"jitter": float("inf")},
+        {"max_delay_ms": -1},
+        {"max_delay_ms": 100, "delay_ms": 500},
+        {"max_delay_ms": 7_200_000},
+        {"retry_if": 3},
+    ],
+)
+def test_malformed_backoff_values_fail_registration(bad: dict[str, object]) -> None:
+    with pytest.raises(RegistrationError, match="Retry"):
+        Retry(**bad)  # type: ignore[arg-type]
+
+
+def retrier(
+    policy: Retry, deadline: float | None = None, rng: float = 0.5
+) -> tuple[Retrier, list[float]]:
+    """``policy``'s retrier, whose waits land in the list instead of sleeping"""
+    slept: list[float] = []
+    out = Retrier(
+        policy,
+        retries=policy.retries,
+        delay_ms=policy.delay_ms,
+        deadline=deadline,
+        rng=lambda: rng,
+        sleep=slept.append,
+    )
+    return out, slept
+
+
+def failing(times: int) -> Callable[[], str]:
+    calls: list[int] = []
+
+    def attempt() -> str:
+        calls.append(1)
+        if len(calls) <= times:
+            raise ConnectionError("refused")
+        return "ok"
+
+    return attempt
+
+
+def test_backoff_multiplies_each_wait_up_to_the_cap() -> None:
+    policy = Retry(retries=5, delay_ms=100, backoff=2.0, max_delay_ms=500)
+    r, slept = retrier(policy)
+    assert r.call(failing(5)) == "ok"
+    assert slept == [0.1, 0.2, 0.4, 0.5, 0.5]
+
+
+def test_backoff_1_keeps_the_fixed_delay() -> None:
+    r, slept = retrier(Retry(retries=3, delay_ms=200))
+    assert r.call(failing(3)) == "ok"
+    assert slept == [0.2, 0.2, 0.2]
+
+
+@pytest.mark.parametrize(("rng", "expected"), [(0.0, 0.8), (0.5, 1.0), (1.0, 1.2)])
+def test_jitter_spreads_the_wait_by_its_fraction_either_way(rng: float, expected: float) -> None:
+    policy = Retry(retries=1, delay_ms=1000, jitter=0.2)
+    r, slept = retrier(policy, rng=rng)
+    assert r.call(failing(1)) == "ok"
+    assert slept == [pytest.approx(expected)]
+
+
+def test_jitter_never_waits_past_the_cap() -> None:
+    policy = Retry(retries=1, delay_ms=1000, max_delay_ms=1000, jitter=0.5)
+    r, slept = retrier(policy, rng=1.0)
+    assert r.call(failing(1)) == "ok"
+    assert slept == [1.0]
+
+
+def test_backoff_stops_before_a_wait_that_ends_past_the_deadline() -> None:
+    policy = Retry(retries=10, delay_ms=300, backoff=2.0)
+    r, slept = retrier(policy, deadline=time.monotonic() + 1.0)
+    with pytest.raises(RetriesExhausted) as caught:
+        r.call(failing(10))
+    assert slept == [0.3, 0.6] and caught.value.retried == 2
+
+
+def test_a_retry_after_on_the_raised_error_lengthens_the_computed_wait() -> None:
+    calls: list[int] = []
+
+    def attempt() -> str:
+        calls.append(1)
+        if len(calls) == 1:
+            raise Exit.RATE_LIMITED("slow down", retry_after_ms=2500)
+        return "ok"
+
+    policy = Retry(delay_ms=10, backoff=3.0, on=(CliExit,), exhausted="RATE_LIMITED")
+    r, slept = retrier(policy)
+    assert r.call(attempt) == "ok"
+    assert slept == [2.5]
+
+
+def test_a_retry_after_shorter_than_the_computed_wait_keeps_the_computed_one() -> None:
+    raised = [Exit.RATE_LIMITED("slow down", retry_after_ms=100)]
+
+    def attempt() -> str:
+        if raised:
+            raise raised.pop()
+        return "ok"
+
+    policy = Retry(delay_ms=400, on=(CliExit,), exhausted="RATE_LIMITED")
+    r, slept = retrier(policy)
+    assert r.call(attempt) == "ok"
+    assert slept == [0.4]
+
+
+def test_a_retry_after_over_a_minute_ends_the_run_with_the_raised_error() -> None:
+    def attempt() -> str:
+        raise Exit.RATE_LIMITED("slow down", retry_after_ms=600_000)
+
+    policy = Retry(delay_ms=10, on=(CliExit,), exhausted="RATE_LIMITED")
+    r, slept = retrier(policy)
+    with pytest.raises(CliExit) as caught:
+        r.call(attempt)
+    assert not isinstance(caught.value, RetriesExhausted)
+    assert caught.value.retry_after_ms == 600_000 and slept == []
+
+
+def test_retry_if_retries_a_returned_value_until_it_no_longer_holds() -> None:
+    answers = iter([{"code": 1019}, {"code": 1019}, {"code": 0}])
+    policy = Retry(retries=5, delay_ms=10, backoff=2.0, retry_if=lambda r: r["code"] == 1019)
+    r, slept = retrier(policy)
+    assert r.call(lambda: next(answers)) == {"code": 0}
+    assert slept == [0.01, 0.02]
+
+
+def test_retry_if_that_still_holds_exits_with_the_exhausted_code() -> None:
+    app, _ = retry_app(0, Retry(retries=2, delay_ms=1, retry_if=lambda n: n < 10))
+    code, env, _ = run(["fetch"], app=app)
+    assert code == 12 and env["meta"]["retries"] == 2
+    error = env["error"]
+    assert error["code"] == "UNAVAILABLE" and error["retryable"] is False
+    assert error["retries_exhausted"] == 2 and "retry_if" in error["message"]
+
+
+def test_retry_delay_sets_the_base_that_backoff_grows() -> None:
+    app, calls = retry_app(10, Retry(retries=2, delay_ms=500, backoff=2.0))
+    code, env, _ = run(["fetch", "--retry-delay", "20ms"], app=app)
+    assert code == 12 and len(calls) == 3
+    assert 60 <= env["meta"]["duration_ms"] < 500
 
 
 def test_a_hand_rolled_retry_loop_gets_retry_declared_advice() -> None:

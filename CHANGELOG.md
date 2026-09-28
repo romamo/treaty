@@ -87,6 +87,14 @@ Apps built on treaty keep their own, structured schema changelog with
   `.devN` of a post release stays in the build metadata (`1.0.0+post.1.dev.0`). Semver
   orders `dev` between `beta` and `rc`, so the spelling keeps the parts but not PEP 440's
   order. Epochs and local versions are still refused, and the error says why
+- `Retry(backoff=, max_delay_ms=, jitter=, retry_if=)` (#11): each wait grows by
+  `backoff` from `delay_ms`, which `--retry-delay` still sets, up to `max_delay_ms` (an
+  hour when unset), moved by up to `jitter` of itself either way. A `CliExit` raised
+  inside `ctx.retry` with `retry_after_ms` lengthens the wait as a `Retry-After` does in
+  `ctx.http`, and one over 60 s ends the run with that error instead. `retry_if` retries
+  on a returned value it holds for, and ends with the `exhausted` code when it still
+  holds. The defaults keep the fixed delay, and the command's timeout still bounds every
+  wait
 
 ### Fixed
 

@@ -161,10 +161,11 @@ class Ctx:
         return self._steps.step(name)
 
     def retry(self, fn: Callable[[], T]) -> T:
-        """Call ``fn``, and again after ``--retry-delay`` while it raises one of the
-        command's ``Retry.on`` exceptions, up to ``--retries`` times and never past the
-        timeout; then the run exits with ``Retry.exhausted``. Needs ``retry=`` on the
-        command; the retries made are ``meta.retries`` (REQ-F-078)."""
+        """Call ``fn``, and again after ``--retry-delay`` (growing by ``Retry.backoff``)
+        while it raises one of the command's ``Retry.on`` exceptions or ``Retry.retry_if``
+        holds for its result, up to ``--retries`` times and never past the timeout; then
+        the run exits with ``Retry.exhausted``. Needs ``retry=`` on the command; the
+        retries made are ``meta.retries`` (REQ-F-078)."""
         if self._retrier is None:
             raise RegistrationError("ctx.retry needs retry=treaty.Retry(...) on the command")
         return self._retrier.call(fn)

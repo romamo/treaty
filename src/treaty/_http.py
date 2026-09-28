@@ -27,7 +27,6 @@ from __future__ import annotations
 import base64
 import http.client
 import json as jsonlib
-import math
 import shlex
 import socket
 import ssl
@@ -43,7 +42,7 @@ from urllib.parse import SplitResult, unquote, urlsplit
 
 from ._envelope import NetworkContext, without_userinfo
 from ._errors import CliExit, ParseError
-from ._retry import Retrier
+from ._retry import Retrier, retry_after
 from ._values import ExitCodeName
 from ._verbosity import trace
 
@@ -53,8 +52,6 @@ CA_BUNDLE_VARS = ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
 """The CA bundle variables, the first set one wins"""
 DEFAULT_RETRY_AFTER_MS = 1000
 """A 429 without a readable ``Retry-After`` still says to wait (REQ-C-014)"""
-MAX_RETRY_AFTER_MS = 60_000
-"""A longer ``Retry-After`` ends the run with it, for the caller to wait, rather than sleep"""
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"})
 """RFC 9110 9.2.2: sending one twice has the effect of sending it once"""
 CROSS_ORIGIN_HEADERS = frozenset({"Accept", "Accept-encoding", "Accept-language", "User-agent"})
@@ -238,10 +235,7 @@ def _give_up(exc: BaseException, retried: int) -> BaseException:
 def _asked(exc: BaseException) -> float | None:
     """The seconds a failure's ``Retry-After`` asks for; one too long to sleep gives up"""
     assert isinstance(exc, _Exhausted)
-    ms = exc.failure.retry_after_ms
-    if ms is None:
-        return None
-    return math.inf if ms > MAX_RETRY_AFTER_MS else ms / 1000
+    return retry_after(exc.failure)
 
 
 def _origin(url: str) -> tuple[str, str, int | None]:

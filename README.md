@@ -1243,6 +1243,12 @@ that break this, such as a `fetched_at` (rule `volatile-data`).
   `Retry.exhausted` (default `UNAVAILABLE`, which the command declares) with
   `retryable: false` and `retries_exhausted`, so an agent does not retry on top.
   `--retries 0` fails on the first error
+- **Backoff**: `Retry(backoff=2.0)` doubles each wait from `delay_ms` (which
+  `--retry-delay` sets), `max_delay_ms` caps one wait, and `jitter=0.1` moves each by up
+  to a tenth either way. A raised error's `retry_after_ms`, as a 503's `Retry-After` does
+  through `ctx.http`, lengthens the computed wait, and one over 60 s ends the run with
+  that error instead. `retry_if=lambda r: r.pending` retries a returned value too, for a
+  job API that answers "not ready yet" with a 200
 
 ## Output data
 

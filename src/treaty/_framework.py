@@ -528,7 +528,7 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         "retry_delay_ms",
         lambda c: c.retry is not None,
         "string",
-        "Wait between retries, such as 500ms or 2s; the timeout bounds every attempt",
+        "First wait between retries, such as 500ms or 2s; the timeout bounds every attempt",
         parse=lambda v, c: parse_delay(v),
         from_json=lambda v, c: parse_delay(v),
         metavar="DURATION",
