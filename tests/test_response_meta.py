@@ -280,9 +280,20 @@ def test_meta_update_available_is_absent_when_no_update_is_available() -> None:
     assert "update_available" not in run(["get"])[1]["meta"]
 
 
-@pytest.mark.parametrize("version", ["1.0", "v1.0.0", "1.0.0.dev1", "1.0.0.post1", "1.0.0rc"])
+@pytest.mark.parametrize("version", ["1.0", "v1.0.0", "1.0.0.dev", "1.0.0post1", "1.0.0rc"])
 def test_app_version_must_be_semver_or_a_pep_440_release(version: str) -> None:
     with pytest.raises(RegistrationError, match="neither semver"):
+        App("t", version=version)
+
+
+@pytest.mark.parametrize(
+    ("version", "reason"),
+    [("1!1.0.0", "epoch"), ("1.0.0rc1+abc", "local version"), ("1.0.0.post1+abc", "local")],
+)
+def test_app_version_refuses_a_pep_440_epoch_or_local_version_and_says_why(
+    version: str, reason: str
+) -> None:
+    with pytest.raises(RegistrationError, match=f"{reason}.* has no semver spelling"):
         App("t", version=version)
 
 
@@ -294,6 +305,8 @@ def test_app_version_must_be_semver_or_a_pep_440_release(version: str) -> None:
         ("1.0.0rc1", "1.0.0-rc.1"),
         ("2.1.0a3", "2.1.0-alpha.3"),
         ("1.2.3b1", "1.2.3-beta.1"),
+        ("0.3.0.dev0", "0.3.0-dev.0"),
+        ("1.0.0rc1.dev3", "1.0.0-rc.1.dev.3"),
     ],
 )
 def test_a_pep_440_pre_release_is_reported_in_its_semver_spelling(
@@ -308,6 +321,26 @@ def test_a_pep_440_pre_release_is_reported_in_its_semver_spelling(
     assert envelope["data"]["version"] == envelope["meta"]["tool_version"] == reported
     assert app.version == reported
     assert Version(reported) == Version(given)
+
+
+@pytest.mark.parametrize(
+    ("given", "reported"),
+    [
+        ("0.3.0.post1", "0.3.0+post.1"),
+        ("1.0.0.post1.dev0", "1.0.0+post.1.dev.0"),
+        ("1.0.0rc1.post2.dev3", "1.0.0-rc.1+post.2.dev.3"),
+        ("2.1.0a3.post1", "2.1.0-alpha.3+post.1"),
+    ],
+)
+def test_a_pep_440_post_release_is_reported_with_post_in_the_build_metadata(
+    given: str, reported: str
+) -> None:
+    """Semver has no version between a release and the next, so .postN is build metadata
+    and a .devN of it stays there: the version never sorts below the release it follows"""
+    app = App("t", version=given)
+    assert app.version == reported
+    assert Version(reported).release == Version(given).release
+    assert Version(reported).pre == Version(given).pre
 
 
 # REQ-F-024

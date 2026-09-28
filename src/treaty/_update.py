@@ -58,7 +58,7 @@ def available(check: UpdateCheck, current: str, state: Path) -> str | None:
 def _refresh(check: UpdateCheck, current: str, path: Path) -> None:
     latest = check.latest(current, CHECK_TIMEOUT_SECONDS)
     if latest is not None:
-        # Semver, or a PEP 440 pre-release such as PyPI lists; anything else is a bug, on stderr
+        # Semver, or a PEP 440 release such as PyPI lists; anything else is a bug, on stderr
         latest = ToolVersion.of_release(latest).value
     path.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(path, json.dumps({"checked_at": time.time(), "latest": latest}))

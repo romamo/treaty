@@ -361,8 +361,9 @@ class App:
         schema_changelog: str | Path | None = None,
     ) -> None:
         """``version`` is semver, or a PEP 440 release such as ``importlib.metadata.version``
-        returns, ``a``, ``b``, and ``rc`` pre-releases included; ``--version`` and
-        ``meta.tool_version`` give its semver spelling, ``1.0.0rc1`` as ``1.0.0-rc.1``.
+        returns, ``a``, ``b``, ``rc``, ``.post``, and ``.dev`` parts included; ``--version``
+        and ``meta.tool_version`` give its semver spelling, ``1.0.0rc1`` as ``1.0.0-rc.1``,
+        ``1.0.0.dev0`` as ``1.0.0-dev.0``, and ``1.0.0.post1`` as ``1.0.0+post.1``.
         ``credentials`` tells treaty which scopes the active credential holds: it gates
         ``requires_auth=True`` commands and adds the ``check-permissions`` built-in.
         ``jobs`` looks up the jobs ``async_job=True`` commands start, for the ``job status``
@@ -396,7 +397,9 @@ class App:
             # meta.tool_version is semver in every response (REQ-F-023)
             tool_version = ToolVersion.of_release(version)
         except InvalidValue as exc:
-            raise RegistrationError(f"App {name}: {exc}, such as 1.0.0 or 1.0.0rc1") from None
+            raise RegistrationError(
+                f"App {name}: {exc}; give one such as 1.0.0, 1.0.0rc1, or 1.0.0.dev0"
+            ) from None
         self.name = name
         self.version = tool_version.value
         self.description = description

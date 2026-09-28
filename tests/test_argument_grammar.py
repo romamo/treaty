@@ -917,7 +917,12 @@ def test_pep_440_versions_in_introduced_in_and_deprecated_are_kept_in_semver_spe
     assert "deprecated since 2.0.0-rc.1" in envelope["warnings"][0]["message"]
 
 
-@pytest.mark.parametrize("version", ["2.0.0.dev1", "2.0.0.post1", "2.0"])
+def test_dev_and_post_releases_in_deprecated_are_kept_in_semver_spelling() -> None:
+    old = Deprecated("2.0.0.dev1", removed_in="3.0.0.post1")
+    assert (old.since, old.removed_in) == ("2.0.0-dev.1", "3.0.0+post.1")
+
+
+@pytest.mark.parametrize("version", ["2.0.0.dev", "1!2.0.0", "2.0"])
 def test_introduced_in_and_deprecated_refuse_versions_app_version_refuses(version: str) -> None:
     with pytest.raises(RegistrationError, match="tool version"):
         Deprecated(version)

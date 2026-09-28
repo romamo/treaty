@@ -135,8 +135,9 @@ _SEMVER_RE = re.compile(
     r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?"
 )
 _SCHEMA_VERSION_RE = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)")
-# A PEP 440 pre-release as packaging normalizes it, such as importlib.metadata reports
-_PEP440_PRE_RE = re.compile(r"((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))(a|b|rc)(0|[1-9]\d*)")
+# A PEP 440 public version as packaging normalizes it, such as importlib.metadata reports
+_N = r"(?:0|[1-9]\d*)"
+_PEP440_RE = re.compile(rf"({_N}\.{_N}\.{_N})(?:(a|b|rc)({_N}))?(?:\.post({_N}))?(?:\.dev({_N}))?")
 _PRE_LABELS = {"a": "alpha", "b": "beta", "rc": "rc"}
 
 
@@ -152,19 +153,42 @@ class ToolVersion:
 
     @classmethod
     def of_release(cls, text: str) -> ToolVersion:
-        """A semver version, or the semver spelling of a PEP 440 pre-release: ``1.0.0rc1``
-        is ``1.0.0-rc.1``, which PEP 440 reads back as the same version, and ``a`` and
-        ``b`` are ``alpha`` and ``beta`` so the order holds. Development and post releases
-        have no spelling that sorts the same way, so they stay invalid."""
-        if (match := _PEP440_PRE_RE.fullmatch(text)) is not None:
-            release, label, number = match.groups()
-            return cls(f"{release}-{_PRE_LABELS[label]}.{number}")
-        if not _SEMVER_RE.fullmatch(text):
-            raise InvalidValue(
-                f"version {text!r} is neither semver MAJOR.MINOR.PATCH nor a PEP 440 "
-                "release with an optional a, b, or rc pre-release"
+        """A semver version, or the semver spelling of a PEP 440 public version as packaging
+        normalizes it: a pre-release ``1.0.0rc1`` is ``1.0.0-rc.1``, with ``a`` and ``b``
+        as ``alpha`` and ``beta`` so the order holds; a development release ``1.0.0.dev0``
+        is ``1.0.0-dev.0``; a post release ``1.0.0.post1`` is ``1.0.0+post.1``, build
+        metadata, since semver has no version after a release but before the next one.
+
+        A ``.devN`` of a post release stays in the build metadata, ``1.0.0.post1.dev0`` as
+        ``1.0.0+post.1.dev.0``, so it never sorts below ``1.0.0``. PEP 440 reads every
+        spelling without ``+post`` back as the same version. Semver orders ``dev`` between
+        ``beta`` and ``rc`` and a ``.devN`` of a pre-release after it, where PEP 440 puts
+        development releases first; the spelling keeps the parts, not that order. Epochs
+        (``1!1.0.0``) and local versions (``1.0.0rc1+abc``) have no semver spelling."""
+        if (match := _PEP440_RE.fullmatch(text)) is not None:
+            release, label, pre, post, dev = match.groups()
+            pre_parts = [] if label is None else [_PRE_LABELS[label], pre]
+            build_parts = [] if post is None else ["post", post]
+            if dev is not None:
+                (pre_parts if post is None else build_parts).extend(["dev", dev])
+            spelled = release
+            if pre_parts:
+                spelled += "-" + ".".join(pre_parts)
+            if build_parts:
+                spelled += "+" + ".".join(build_parts)
+            return cls(spelled)
+        if _SEMVER_RE.fullmatch(text):
+            return cls(text)
+        if "!" in text:
+            reason = "a PEP 440 epoch has no semver spelling"
+        elif "+" in text and _PEP440_RE.fullmatch(text.partition("+")[0]):
+            reason = "a PEP 440 local version has no semver spelling"
+        else:
+            reason = (
+                "it is neither semver MAJOR.MINOR.PATCH nor a PEP 440 release with optional "
+                "aN, bN, or rcN, .postN, and .devN parts"
             )
-        return cls(text)
+        raise InvalidValue(f"version {text!r}: {reason}")
 
     def __str__(self) -> str:
         return self.value
