@@ -487,6 +487,7 @@ command.
 | `type=int`, `type=float`, `type=Path` | the field's annotation |
 | `choices=[...]` | `Literal[...]` or a `StrEnum` |
 | `action="store_true"` | `bool = Flag(default=False, ...)` |
+| `"-v", action="count"` verbosity | built in: `-v` (`--verbose`), `-vv` (`--debug`) |
 | `nargs="*"`, `action="append"` | `tuple[str, ...]` (repeated flags accumulate) |
 | `"-a", "--all"` | `Flag(short="a", ...)` |
 | `help=` | `description=` (required on every field) |

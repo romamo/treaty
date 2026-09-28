@@ -186,14 +186,16 @@ _FIXED_GLOBAL_FLAGS: dict[str, object] = {
         "required": False,
         "default": False,
         "description": "Write info and progress lines on stderr even off a terminal or under "
-        "CI, where only errors and warnings are written",
+        "CI, where only errors and warnings are written; -v for short, on a command without "
+        "a -v of its own",
     },
     "debug": {
         "type": "boolean",
         "required": False,
         "default": False,
         "description": "Write the framework's trace on stderr too: config resolution, HTTP "
-        "requests, child processes, locks, and the audit log, secrets redacted",
+        "requests, child processes, locks, and the audit log, secrets redacted; -vv or -v -v "
+        "for short, on a command without a -v of its own",
     },
     "warnings-as-errors": {
         "type": "boolean",

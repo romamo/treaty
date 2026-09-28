@@ -2,12 +2,14 @@
 
 A person at a terminal sees info and progress lines; an agent, off a terminal or under
 ``CI``, sees only errors and warnings, so logs never cost it tokens. ``--quiet``,
-``--verbose``, and ``--debug`` override either default.
+``--verbose``, and ``--debug`` override either default; ``-v`` is short for ``--verbose``
+and ``-vv`` for ``--debug`` on every command without a ``-v`` of its own.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from enum import Enum, IntEnum
 
@@ -17,6 +19,10 @@ QUIET_FLAG = "quiet"
 VERBOSE_FLAG = "verbose"
 DEBUG_FLAG = "debug"
 WARNINGS_AS_ERRORS_FLAG = "warnings-as-errors"
+VERBOSE_SHORT = "v"
+"""``-v`` is ``--verbose``, ``-vv`` or ``-v -v`` is ``--debug``; a command that declares
+``short="v"`` keeps ``-v`` for its own flag"""
+_SHORT_VERBOSE = re.compile(rf"-{VERBOSE_SHORT}+")
 
 TRACE = logging.getLogger("treaty")
 """The framework's own debug trace; ``--debug`` routes it, and every other logger's
@@ -80,6 +86,11 @@ def resolve_verbosity(flags: frozenset[str], env: Mapping[str, str], tty: bool) 
     if given:
         return _FLAGS[given[0]]
     return Verbosity.AUTO if not tty or env.get("CI") else Verbosity.NORMAL
+
+
+def short_verbosity(token: str) -> int:
+    """How many ``v`` a ``-v``, ``-vv``, ... token counts; 0 for any other token"""
+    return len(token) - 1 if _SHORT_VERBOSE.fullmatch(token) else 0
 
 
 def trace(event: str, **fields: object) -> None:

@@ -236,7 +236,7 @@ from ._values import (
     Scope,
     ToolVersion,
 )
-from ._verbosity import TRACE_FIELDS, Level, Verbosity, resolve_verbosity, trace
+from ._verbosity import TRACE_FIELDS, VERBOSE_SHORT, Level, Verbosity, resolve_verbosity, trace
 from ._walk import DEFAULT_MAX_DEPTH, Traversal, TraversalStopped
 
 CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
@@ -898,6 +898,14 @@ class App:
             return fn
 
         return register
+
+    def _claims_v(self, argv: list[str]) -> bool:
+        """Whether the command ``argv`` runs declares its own ``-v``, which ``-v`` for
+        ``--verbose`` then yields to on that command only"""
+        _, rest = split_globals(argv)
+        route = resolve_path(rest, self._commands)
+        command = None if route.path is None else self._commands[route.path]
+        return command is not None and command.field_by_short(VERBOSE_SHORT) is not None
 
     def _yield_to(self, path: CommandPath) -> None:
         """Drop each yielding built-in that ``path`` would clash with (13-D1)"""
@@ -1645,7 +1653,7 @@ class App:
         out = run.out
         try:
             bound = bind_values(strict_argv(argv, self._commands), self._commands)
-            globals_, rest = split_globals(bound)
+            globals_, rest = split_globals(bound, short_verbose=not self._claims_v(bound))
             run.err.verbosity = resolve_verbosity(globals_.verbosity, environ, run.tty)
             run.warnings_as_errors = globals_.warnings_as_errors
             mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)

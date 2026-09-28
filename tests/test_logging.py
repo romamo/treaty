@@ -211,6 +211,43 @@ def test_the_verbosity_flags_are_mutually_exclusive() -> None:
     assert error["context"]["flags"] == ["debug", "quiet"]
 
 
+def levels(err: str) -> set[str]:
+    return {json.loads(line)["level"] for line in err.splitlines()}
+
+
+def test_v_is_short_for_verbose_and_vv_for_debug_in_any_position() -> None:
+    for argv in (["chat", "-v"], ["-v", "chat"]):
+        code, _, err = run(make_app(), argv)
+        assert code == 0 and levels(err) == {"info", "progress", "error"}, argv
+    for argv in (["chat", "-vv"], ["chat", "-v", "-v"], ["-v", "chat", "-v"]):
+        code, _, err = run(make_app(), argv)
+        assert code == 0 and "debug" in levels(err), argv
+    code, out, _ = run(make_app(), ["chat", "-v", "--quiet"])
+    assert code == 2 and json.loads(out)["error"]["context"]["flags"] == ["quiet", "verbose"]
+
+
+@dataclass(frozen=True, slots=True)
+class Grep:
+    invert: bool = Flag(default=False, short="v", description="Select non-matching lines")
+
+
+def test_a_command_with_its_own_short_v_keeps_it() -> None:
+    app = make_app()
+
+    @app.command("grep", description="Match lines", danger_level="safe", exit_codes=())
+    def grep(args: Grep, ctx: Ctx) -> dict[str, bool]:
+        ctx.log("matching")
+        return {"invert": args.invert}
+
+    code, out, err = run(app, ["grep", "-v"])
+    assert code == 0 and json.loads(out)["data"] == {"invert": True} and err == ""
+    code, out, err = run(app, ["grep", "--verbose"])
+    assert json.loads(out)["data"] == {"invert": False} and levels(err) == {"info"}
+    # Only that command: -v is still --verbose on the others
+    _, _, err = run(app, ["chat", "-v"])
+    assert "progress" in levels(err)
+
+
 class _Origin(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - the http.server API
         self.send_response(200)

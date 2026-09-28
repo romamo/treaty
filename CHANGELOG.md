@@ -105,6 +105,9 @@ Apps built on treaty keep their own, structured schema changelog with
   `conformance` (#4)
 - `treaty audit` reports its `scope` in JSON and on a `Scope:` line in plain output: what
   the source rules read, so a clean audit is not taken for a runtime check
+- `-v` is short for `--verbose`, and `-vv` or `-v -v` for `--debug`, before or after the
+  command path. A command that declares its own `short="v"` keeps `-v` for its flag on that
+  command only; the `--verbose` and `--debug` descriptions in the manifest and help say so (#13)
 
 ### Fixed
 
