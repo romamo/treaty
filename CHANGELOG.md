@@ -10,6 +10,36 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- `ctx.http` retries a POST or PATCH only when it never reached a server (a refused
+  connection or an unknown host): a timeout or a 502 to 504 may come after the server
+  acted. GET, HEAD, OPTIONS, TRACE, PUT, and DELETE retry as before. A `Retry-After`
+  lengthens the delay, and one over 60 s ends the run with `retry_after_ms` instead
+- An integer or number on argv is written as JSON writes it: `1_000`, `+3`, `" 7"`, and
+  digits of other scripts are argument errors. `pattern=` on a number is checked against
+  the parsed number on argv and JSON alike, so `--price 1.50` and `{"price": 1.50}` agree
+- A JSON object that repeats a key is refused (`--raw-payload` and `exec` lines) instead
+  of taking the last value, as argv already refused a repeated flag
+- The forgiving JSON reader offers no `corrected_input` for a near-number (`+1`, `0x1F`,
+  `.5`, `NaN`, `Infinity`): quoting it would have sent a string
+- Two commands that differ only in `.` and `-`, such as `cache.clear` and `cache-clear`,
+  fail registration: they would share a skill file and skill name
+- A flag default that breaks its own `pattern`, `pattern_type`, or `max_bytes` fails
+  registration
+- An empty `--config=`, `--context=`, or `--instance-id=` is an argument error instead of
+  falling back to the variable or the default files
+- `--schema-version` takes a major or a `MAJOR.MINOR` the command serves: `1.garbage` and
+  an unserved minor such as `1.5` are argument errors
+- `ctx.prompt(flag=)` must name a flag of the command
+- `ctx.edit` reports an editor that exits non-zero, or is missing, as `EDITOR_FAILED`
+  (exit 1) instead of a crash
+- `treaty audit`, `schema-lock`, `conformance`, and `init` resolve the target module, the
+  schema lock, `conformance/`, and the new project against `--cwd` instead of the
+  process's directory; `schema-lock` reports the lock's absolute path
+- A background pid file entry carries the child's start time; entries written by rc2 are
+  still read
+
 ### Added
 
 - `completion` built-in: `<app> completion bash` or `zsh` prints a completion script
@@ -17,6 +47,60 @@ Apps built on treaty keep their own, structured schema changelog with
   enum and path flags and positionals, `--flag=value` included. The script is static, so a
   tab press runs no Python. It yields to an app command named `completion`, and MCP serves
   no tool for it. Every app lists one more command, so every manifest etag changes once
+- `CLEANUP_KEPT` warning: `cleanup` names the paths it left because they are, or hold, a
+  declared credential or config path
+- `APP_IMPORT_FAILED` (exit 4) from the `treaty` tooling commands when the app's module
+  raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash
+
+### Fixed
+
+- `cleanup` followed an `out/` directory that was a symlink and deleted what it pointed
+  at; it now lists output files only under a temp root and `out/` the user owns
+- `cleanup` deleted a declared credential or config path when a cache, temp, or log glob
+  also matched it, or a cleaned directory held it
+- `ctx.http` sent `Authorization`, cookies, and custom headers to a redirect's other
+  origin; a cross-origin hop now keeps only the `Accept` headers and `User-Agent`
+- Without a state directory, `ctx.spawn`'s pid files lived in a temp directory shared by
+  all users, where another user could plant them; they now live under the user's private
+  temp root, and a planted directory is refused with `TEMP_DIR_UNSAFE`
+- A signal did not cancel an `async def` handler: its teardown waited for it to finish.
+  The handler is cancelled, so its `finally` blocks and async releases run at once
+- An async command hung forever when `asyncio` could not load; it now fails with why
+- A timed-out `Batch` result was never recorded for its idempotency key, so a retry ran
+  the mutation again
+- A heartbeat line that could not be written answered `HANDLER_CRASHED` and freed the
+  idempotency key while the handler still ran
+- A handler without a timeout could change the caller's contextvars
+- `--flag -` crashed on stdin that was not UTF-8 under `surrogateescape`, and a signal
+  during its read gave a traceback instead of `CANCELLED`
+- A deeply nested `--cursor` crashed with a traceback; it is `INVALID_CURSOR`
+- Registration and `treaty audit` crashed on a nested handler holding a multi-line string
+  at column 0
+- Changelog versions compared pre-releases as text, so `rc.10` sorted before `rc.9`, and
+  a second `changelog-add` at `rc.10` left an app that could not import. The update check
+  now tells an rc user about a later rc
+- `reap` could signal a process that reused an expired child's pid, sent only SIGTERM,
+  and lost entries when two spawns rewrote the pid file at once; it now checks the start
+  time, follows SIGTERM with SIGKILL, and rewrites the file under a lock
+- `prune` deleted the temp directory of a run still going after a day; a run now holds a
+  lock on it
+- `--say -h` ran `--help` instead of passing `-h` to `--say`, and likewise for the names
+  of other global options, when the command's flag takes a value
+- A renderer returning anything but text crashed the run; its traceback is now redacted
+- The conformance kit outlived a timeout, as only `uv` was killed; it now runs in a
+  process group of its own, with the run's environment
+- `agents-md` appended a new generated block on every run when prose quoted the end marker
+  before the begin marker; a begin marker without an end marker is now an error
+- `check-docs` did not check command lines behind `$`, `uv run`, `uvx`, or `pipx run`
+- `<APP>_CONTEXT` failed every run that read no config file (`--no-config`, or an app
+  without settings), and a context in the user file lost to the project file's top level
+- The forgiving JSON reader read `{a: 1/* c */}` as a string and an invented key
+- A failing async handler's tasks kept running while its resources were released
+- `write_atomic` now also syncs the directory, so a rename survives a crash
+- Captured third-party stdout could end in a stray `U+FFFD` where the 4 KiB cut split a
+  character, and a prompt's answer kept a Windows terminal's `\r`
+- Nested `armed()` signal windows were caught by an `assert`, which `python -O` drops
+- The `generate-skills` example claimed Claude Code finds the files it writes
 
 ## [1.0.0rc2] - 2026-09-28
 
