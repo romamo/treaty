@@ -608,3 +608,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
 Run the audit. For `todo`, the one warning left is `exit-codes`: `add` and `purge` change state
 but declare no failures of their own, so an agent cannot tell their failures apart. The
 [Declare exit codes](../core/exit-codes.md) chapter clears it.
+
+The audit's first two rules, `describe` and `danger-level`, already pass for `todo`: this
+chapter gave every command an example and a danger level. For your own CLI,
+[Describe every command](../core/describe.md) and
+[Choose each command's danger level](../core/danger-level.md) cover both in full.

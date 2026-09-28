@@ -437,3 +437,8 @@ uv run treaty audit todo.cli:app \
 [Declare exit codes](../core/exit-codes.md) gives each failure an exit code an agent can act
 on and clears the audit's `exit-codes` warnings. It continues this same `todo`, from the
 same code.
+
+The audit's first two rules, `describe` and `danger-level`, already pass for `todo`: this
+chapter gave every command an example and a danger level. For your own CLI,
+[Describe every command](../core/describe.md) and
+[Choose each command's danger level](../core/danger-level.md) cover both in full.

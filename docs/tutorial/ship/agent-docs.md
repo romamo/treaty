@@ -265,6 +265,9 @@ uv run treaty check-docs examples.tutorial.todo_exit_codes:app \
 
 ## Next
 
-That is the end of the shipping chapters: `todo` passes the audit and the conformance kit,
-serves the same contract over MCP, and ships docs that CI keeps honest. The remaining
-chapters cover the audit rules `todo` never triggered.
+That is the end of the tutorial: `todo` passes the strict audit and the conformance kit,
+serves the same contract over MCP, and ships docs that CI keeps honest.
+
+From here, keep the audit in the loop. A new command, flag, or dependency can bring back any
+rule, and [the index](../index.md#after-the-first-chapter-follow-the-audit) maps each rule
+to its chapter.
