@@ -188,6 +188,5 @@ uv run pytest -q tests/test_tutorial.py -k test_every_result_matches_its_output_
 
 ## Next
 
-The audit's next rules are `network-io` and `path-typed`, whose chapters are not written
-yet; after them, `raw-payload` and `cleanup`. Each finding's suggested fix is the guide
-until then.
+The audit's next rule is `network-io`, for commands that call out:
+[Declare network commands](network-io.md).

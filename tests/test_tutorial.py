@@ -1,6 +1,8 @@
 """The tutorial's code matches its example files, and the finished examples behave as told"""
 
 import asyncio
+import functools
+import http.server
 import importlib.util
 import io
 import json
@@ -11,6 +13,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +22,7 @@ import jsonschema
 import pytest
 from conftest import SPEC_DIR, needs_posix_permissions, needs_sh_launcher
 
-from examples.tutorial import todo_exit_codes
+from examples.tutorial import todo_exit_codes, todo_network
 from examples.tutorial.todo_treaty import app
 from treaty import App, Ctx, Envelope, Exit, NoArgs, RegistrationError
 from treaty._cli import cli
@@ -241,6 +245,51 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
         env = app.call(name, args)
         assert env.ok, env.error
         jsonschema.validate(env.data, commands[name]["output_schema"])
+
+
+# Declare network commands
+
+
+class _Quiet(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def feed(tmp_path: Path) -> Iterator[str]:
+    """A local server for tmp_path/feed: todo.json holds two items, bad.json is not a list"""
+    root = tmp_path / "feed"
+    root.mkdir()
+    items = [{"text": "Buy milk", "priority": "high"}, {"text": "Walk dog", "priority": "normal"}]
+    (root / "todo.json").write_text(json.dumps(items))
+    (root / "bad.json").write_text('{"oops": 1}')
+    handler = functools.partial(_Quiet, directory=str(root))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_import_adds_the_items_at_a_url_marked_untrusted(feed: str, tmp_path: Path) -> None:
+    db = str(tmp_path / "todo.json")
+    env = todo_network.app.call("import", {"url": f"{feed}/todo.json", "db": db}, env={})
+    assert env.exit_code == 0 and isinstance(env.data, dict)
+    assert env.data["_source"] == "external" and env.data["_trusted"] is False
+    assert [(i["id"], i["text"]) for i in env.data["added"]] == [(1, "Buy milk"), (2, "Walk dog")]
+
+
+@pytest.mark.parametrize("name", ["missing.json", "bad.json"])
+def test_a_url_without_a_list_of_items_changes_nothing(
+    feed: str, tmp_path: Path, name: str
+) -> None:
+    db = tmp_path / "todo.json"
+    env = todo_network.app.call("import", {"url": f"{feed}/{name}", "db": str(db)}, env={})
+    assert env.exit_code == 81 and env.error is not None
+    assert env.error.code == "FEED_INVALID"
+    assert not db.exists()
 
 
 # Declare exit codes

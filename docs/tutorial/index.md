@@ -52,7 +52,7 @@ rule, the finding's suggested fix is the guide:
 | `exit-codes` | command-specific exit codes on every non-safe command | [Declare exit codes](core/exit-codes.md) |
 | `retryable` | retryable codes only on idempotent commands | [Declare exit codes](core/exit-codes.md) |
 | `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
-| `network-io` | `has_network_io=True` on commands that call out | not written yet |
+| `network-io` | `has_network_io=True` on commands that call out | [Declare network commands](core/network-io.md) |
 | `path-typed` | `pathlib.Path` on path-like fields | not written yet |
 | `raw-payload` | `--raw-payload` on wide mutating commands | not written yet |
 | `cleanup` | a cleanup hook on network commands | not written yet |
