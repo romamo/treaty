@@ -24,6 +24,8 @@ the core chapters take you through the audit's rules one at a time.
 - Python 3.14 and [uv](https://docs.astral.sh/uv/)
 - `uv add treaty` inside your project, and `uv tool install treaty` for the `treaty` command
 - Verify with `treaty --version`: it prints a JSON envelope and exits 0
+- Read [The response envelope](envelope.md) once: every chapter reads its keys, and it
+  defines the terms the chapters use
 
 ## How a chapter is laid out
 

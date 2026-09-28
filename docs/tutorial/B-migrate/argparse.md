@@ -31,9 +31,9 @@ todo() { uv run examples/tutorial/todo_treaty.py "$@"; }
 rm -rf tmp/tutorial && mkdir -p tmp/tutorial
 ```
 
-In your own project, `todo` is your CLI's command. Piped output is a JSON envelope, and each
-check pipes it into `jq -e`, which exits 1 when the condition is false: a check passes when
-every line in it exits 0. `tests/test_tutorial.py` runs the checks the same way.
+In your own project, `todo` is your CLI's command. Piped output is a JSON
+[envelope](../envelope.md), and each check pipes it into `jq -e`, which exits 1 when the
+condition is false: a check passes when every line in it exits 0. `tests/test_tutorial.py` runs the checks the same way.
 
 ## What is wrong with the argparse version
 

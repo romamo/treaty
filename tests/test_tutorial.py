@@ -76,8 +76,9 @@ def _checked_pages() -> list[Path]:
     return [p for p in sorted(TUTORIAL.rglob("*.md")) if _CHECK.search(p.read_text())]
 
 
-def test_every_chapter_has_checks_that_run() -> None:
-    assert {p.name for p in _checked_pages()} == {p.name for p in TUTORIAL.rglob("*/*.md")}
+def test_every_page_but_the_index_has_checks_that_run() -> None:
+    pages = {p.relative_to(TUTORIAL) for p in TUTORIAL.rglob("*.md")} - {Path("index.md")}
+    assert {p.relative_to(TUTORIAL) for p in _checked_pages()} == pages
 
 
 @needs_sh_launcher

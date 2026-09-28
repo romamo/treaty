@@ -216,10 +216,10 @@ What each part is for:
 - **`effect`** is required on mutating and destructive results: `created`, `updated`,
   `deleted`, or `noop`. An agent that retries reads `noop` and knows nothing changed
 
-The handler never prints. It returns data, and treaty writes the envelope: JSON when stdout
-is not a terminal, `key: value` lines when it is. Mutating commands also get
-`--idempotency-key` without any code: a second call with the same key returns the first
-result instead of adding a second item.
+The handler never prints. It returns data, and treaty writes the
+[envelope](../envelope.md): JSON when stdout is not a terminal, `key: value` lines when it
+is. Mutating commands also get `--idempotency-key` without any code: a second call with the
+same key returns the first result instead of adding a second item.
 
 **Check:** the first item is created, and a value outside the `Literal` exits 2 before the
 handler runs
