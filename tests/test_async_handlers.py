@@ -6,6 +6,8 @@ import asyncio
 import contextvars
 import io
 import json
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -233,3 +235,10 @@ def test_async_streaming_is_refused_at_registration() -> None:
         @app.command("g", description="G", danger_level="safe", exit_codes=(), streaming=True)
         async def g(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:  # type: ignore[misc]
             yield {"n": 1}
+
+
+def test_importing_treaty_does_not_import_asyncio() -> None:
+    """On Windows asyncio loads _overlapped, which fails without SYSTEMROOT"""
+    probe = "import sys, treaty; print('asyncio' in sys.modules)"
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert proc.returncode == 0 and proc.stdout.strip() == "False", proc.stderr

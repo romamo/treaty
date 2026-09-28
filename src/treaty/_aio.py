@@ -7,11 +7,14 @@ behind the handler instead of racing it, and a handler that ignores cancellation
 keep the process from exiting. The handler runs under ``ctx.remaining``: at the deadline
 it is cancelled, so its ``finally`` blocks and ``async with`` exits run, and the run
 answers ``TIMEOUT`` as for a sync handler.
+
+``asyncio`` is imported only once an async command runs: on Windows it loads
+``_overlapped``, which fails without ``SYSTEMROOT`` (``WinError 10106``), so importing it
+with treaty would break every app started with a stripped environment.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextvars
 import queue
 import threading
@@ -42,6 +45,8 @@ class Loop:
         self._thread.start()
 
     def _serve(self) -> None:
+        import asyncio
+
         with asyncio.Runner() as runner:
             while (job := self._jobs.get()) is not None:
                 try:
@@ -75,6 +80,8 @@ async def within[T](
     and raise ``TimeoutExpired``. Tasks the handler started and left running are
     cancelled and reported as ``UNAWAITED_TASKS``: their work would otherwise stop
     silently when the loop closes. A resource's own tasks, such as a pool's, stay."""
+    import asyncio
+
     current = asyncio.current_task()
     try:
         async with asyncio.timeout(remaining) as scope:
