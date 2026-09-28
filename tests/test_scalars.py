@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, Ctx, Flag, RegistrationError, SchemaError
+from treaty import App, Arg, Ctx, Flag, RegistrationError
 
 _ID = re.compile(r"[a-z][a-z0-9-]{0,62}")
 # Manifest and JSON Schema patterns are anchored; treaty matches with re.fullmatch
@@ -288,13 +288,13 @@ def test_pattern_type_preset_reaches_manifest_and_schema() -> None:
 # Registration
 
 
-def test_unregistered_class_is_a_registration_time_schema_error() -> None:
+def test_unregistered_class_is_a_registration_error_naming_the_command() -> None:
     @dataclass(frozen=True, slots=True)
     class Args:
         service: ResourceId = Arg(description="Service")
 
     app = App("fleet", version="1.0.0")
-    with pytest.raises(SchemaError, match="register a class with app.scalar"):
+    with pytest.raises(RegistrationError, match="deploy: .*register a class with app.scalar"):
 
         @app.command("deploy", description="Deploy", danger_level="safe", exit_codes=())
         def deploy(args: Args, ctx: Ctx) -> None:

@@ -39,6 +39,10 @@ Apps built on treaty keep their own, structured schema changelog with
   process's directory; `schema-lock` reports the lock's absolute path
 - A background pid file entry carries the child's start time; entries written by rc2 are
   still read
+- A command whose arguments or output have no schema, such as a `tuple[SomeDataclass,
+  ...]` field, raises `RegistrationError` naming the command at registration, instead of a
+  bare `SchemaError` (#6). Code that caught `SchemaError` there catches
+  `RegistrationError` now, or `TreatyError` for both
 
 ### Added
 
@@ -95,6 +99,10 @@ Apps built on treaty keep their own, structured schema changelog with
   on a returned value it holds for, and ends with the `exhausted` code when it still
   holds. The defaults keep the fixed delay, and the command's timeout still bounds every
   wait
+  raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash. Its
+  context carries `target`, `exception`, and the registration `message`, with no
+  traceback, on `audit`, `schema-lock`, `changelog-add`, `agents-md`, `check-docs`, and
+  `conformance` (#4)
 
 ### Fixed
 

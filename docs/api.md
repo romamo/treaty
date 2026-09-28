@@ -72,7 +72,7 @@ review), **rename**, **remove**.
 | `Exit` | keep | `Exit.NOT_FOUND(...)` factory for `CliExit` |
 | `CliExit` | keep | Raised by handlers |
 | `ParseError` | keep | Raised by argument validation |
-| `TreatyError`, `RegistrationError`, `SchemaError` | keep | `SchemaError` is raised to app authors at registration (an unserializable output type), so it stays public |
+| `TreatyError`, `RegistrationError`, `SchemaError` | keep | A type with no schema at registration is a `RegistrationError` naming the command; `SchemaError` stays public for values that cannot be serialized |
 | `FrameworkCode` | keep | Exit codes 0 to 13, below |
 | `ExitCodeEntry`, `SideEffects` | keep | `app.exit_code` and the manifest's exit code table |
 
