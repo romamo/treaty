@@ -896,6 +896,45 @@ def test_a_deprecated_replacement_must_be_a_registered_command() -> None:
         Deprecated("soon")
 
 
+def test_pep_440_versions_in_introduced_in_and_deprecated_are_kept_in_semver_spelling() -> None:
+    """The same versions App(version=) takes, reported as meta.tool_version is"""
+    old = Deprecated("2.0.0rc1", replacement="new", removed_in="3.0.0b2")
+    assert (old.since, old.removed_in) == ("2.0.0-rc.1", "3.0.0-beta.2")
+    app = App("tool", version="2.0.0rc1")
+
+    @app.command(
+        "new", description="New", danger_level="safe", exit_codes=(), introduced_in="2.0.0a1"
+    )
+    def new(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    @app.command("old", description="Old", danger_level="safe", exit_codes=(), deprecated=old)
+    def old_command(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    _, envelope, _ = run_err(app, ["new", "--schema"])
+    assert envelope["data"]["introduced_in"] == "2.0.0-alpha.1"
+    _, envelope, _ = run_err(app, ["old", "--schema"])
+    assert envelope["data"]["deprecated_in"] == "2.0.0-rc.1"
+    assert envelope["data"]["removed_in"] == "3.0.0-beta.2"
+    _, envelope, _ = run_err(app, ["old"])
+    assert "deprecated since 2.0.0-rc.1" in envelope["warnings"][0]["message"]
+
+
+@pytest.mark.parametrize("version", ["2.0.0.dev1", "2.0.0.post1", "2.0"])
+def test_introduced_in_and_deprecated_refuse_versions_app_version_refuses(version: str) -> None:
+    with pytest.raises(RegistrationError, match="tool version"):
+        Deprecated(version)
+    app = App("tool", version="1.0.0")
+    with pytest.raises(RegistrationError, match="introduced_in"):
+
+        @app.command(
+            "a", description="A", danger_level="safe", exit_codes=(), introduced_in=version
+        )
+        def a(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+            return {}
+
+
 def test_a_baseline_audit_reads_the_released_app_version_from_meta_tool_version(
     tmp_path: Any,
 ) -> None:

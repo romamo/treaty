@@ -671,7 +671,8 @@ class App:
         ``introduced_in="1.2.0"`` records the tool version that added the command, and
         ``deprecated=Deprecated("2.0.0", replacement="deploy.rollback", removed_in="3.0.0")``
         keeps a retiring command working with a warning on every run; both are in
-        ``--schema`` (REQ-F-075). Once it is removed, ``redirect`` keeps its path answering.
+        ``--schema`` (REQ-F-075), their versions as ``App(version=)`` takes and spells them.
+        Once it is removed, ``redirect`` keeps its path answering.
         ``steps=["backup", "apply_schema"]`` declares a multi-step command: the handler
         calls ``ctx.step(name)`` before each step, and every response's ``data`` lists
         ``completed_steps``, ``failed_step``, and ``skipped_steps``; a failure after a
@@ -754,7 +755,7 @@ class App:
         added: ToolVersion | None = None
         if introduced_in is not None:
             try:
-                added = ToolVersion(introduced_in)
+                added = ToolVersion.of_release(introduced_in)
             except InvalidValue as exc:
                 raise RegistrationError(f"{cmd_path}: introduced_in: {exc}") from None
         if option_placement not in OptionPlacement:

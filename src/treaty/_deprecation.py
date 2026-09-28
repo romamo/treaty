@@ -18,7 +18,8 @@ from ._values import InvalidValue, ToolVersion
 class Deprecated:
     """``since`` is the tool version that deprecated it; ``replacement`` the command path
     (for a command) or flag name (for a flag) to use instead; ``removed_in`` the version
-    that will drop it"""
+    that will drop it. Versions are semver or PEP 440 releases, as ``App(version=)``
+    takes them, and are kept in their semver spelling: ``2.0.0rc1`` is ``2.0.0-rc.1``"""
 
     since: str
     replacement: str | None = None
@@ -30,11 +31,12 @@ class Deprecated:
             if value is None and name == "removed_in":
                 continue
             try:
-                ToolVersion(value)
+                spelled = ToolVersion.of_release(value).value
             except InvalidValue, TypeError:
                 raise RegistrationError(
-                    f"Deprecated({name}={value!r}): a tool version such as 1.2.0"
+                    f"Deprecated({name}={value!r}): a tool version such as 1.2.0 or 1.2.0rc1"
                 ) from None
+            object.__setattr__(self, name, spelled)  # frozen: the one normalizing write
         if self.replacement is not None and not (
             isinstance(self.replacement, str) and self.replacement
         ):
