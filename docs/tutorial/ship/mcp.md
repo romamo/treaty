@@ -30,12 +30,17 @@ work as they do on the command line, so there is no second implementation to dri
 uv add "treaty[mcp]"
 ```
 
-**Check:** `uv run treaty-mcp` with no arguments prints `usage: treaty-mcp module:app` and
-exits 2
+**Check:** with no arguments, `treaty-mcp` prints its usage and exits 2
+
+<!-- check -->
+```bash
+uv run treaty-mcp 2>&1 | grep -q '^usage: treaty-mcp module:app'
+```
 
 ## Step 2: Look at the tools you get
 
-For `todo`, a client sees six tools:
+For `todo`, a client sees twelve tools: the four commands `todo` registers, and eight of
+treaty's built-ins:
 
 | Command | Tool | Hints |
 | --- | --- | --- |
@@ -45,9 +50,27 @@ For `todo`, a client sees six tools:
 | `todo purge` | `purge` | destructive |
 | `todo manifest` | `manifest` | read-only, idempotent |
 | `todo version` | `version` | read-only, idempotent |
+| `todo doctor`, `todo status`, `todo audit-log`, `todo mcp-validate` | the same names | read-only, idempotent |
+| `todo cleanup` | `cleanup` | destructive |
+| `todo generate-skills` | `generate-skills` | |
+
+`treaty-mcp --list-tools` prints the tool list a client would get, without starting a
+session.
+
+**Check:** the list has the twelve tools, with `list` read-only and `purge` destructive
+
+<!-- check -->
+```bash
+uv run treaty-mcp examples.tutorial.todo_exit_codes:app --list-tools | jq -e '
+  ([.tools[].name] | sort) == ["add", "audit-log", "cleanup", "doctor", "done",
+    "generate-skills", "list", "manifest", "mcp-validate", "purge", "status", "version"]
+  and (.tools[] | select(.name == "list") | .annotations.readOnlyHint)
+  and (.tools[] | select(.name == "purge") | .annotations.destructiveHint)'
+```
 
 - **Names** are command paths with dots as underscores: a `deploy.rollback` command is the
-  `deploy_rollback` tool. `exec` is not served; a client batches by making several calls
+  `deploy_rollback` tool. `exec` is not served, since a client batches by making several
+  calls, and neither is `completion`, which only a shell can use
 - **Hints** come from the danger level (`safe` is read-only and idempotent, `destructive` is
   destructive) and from `has_network_io`, which sets the open-world hint
 - **Descriptions** get the danger level spelled out: `purge`'s tells the model that without
@@ -85,7 +108,7 @@ command:
 
 In this repository, the target is `examples.tutorial.todo_exit_codes:app`.
 
-**Check:** the client lists the six tools, and calling `version` returns
+**Check:** the client lists the twelve tools, and calling `version` returns
 `{"ok": true, "data": {"name": "todo", "version": "1.0.0"}, ...}`
 
 ## Step 4: What a caller sees

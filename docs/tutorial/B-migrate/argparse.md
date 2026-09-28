@@ -8,10 +8,10 @@ manifest an agent can read
 **Done when:** your tests pass, and `treaty audit` reports only `exit-codes` warnings, which
 the next chapter clears:
 
+<!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_treaty:app \
-  | jq -c '[.data.next_steps[] | select(.severity == "warning") | .rule] | unique'
-# ["exit-codes"]
+  | jq -e '[.data.next_steps[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
 ```
 
 The chapter migrates one small CLI, `todo`, from start to finish. The starting point is
@@ -19,15 +19,31 @@ The chapter migrates one small CLI, `todo`, from start to finish. The starting p
 result is [`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py).
 Keep both open; the steps below show the parts that change.
 
+## Running the checks
+
+Run the **Check** commands from the root of a treaty checkout, in order: each one uses the
+item file the one before it left behind. Start with a `todo` command that runs the finished
+example, and an empty scratch directory:
+
+<!-- check -->
+```bash
+todo() { uv run examples/tutorial/todo_treaty.py "$@"; }
+rm -rf tmp/tutorial && mkdir -p tmp/tutorial
+```
+
+In your own project, `todo` is your CLI's command. Piped output is a JSON envelope, and each
+check pipes it into `jq -e`, which exits 1 when the condition is false: a check passes when
+every line in it exits 0. `tests/test_tutorial.py` runs the checks the same way.
+
 ## What is wrong with the argparse version
 
 Nothing, for a person at a terminal. Run it the way an agent does, with stdout piped and no
 terminal on stdin, and it fails in the four common ways:
 
 ```bash
-$ todo --db tmp/b.json done 9
+$ uv run examples/tutorial/todo_argparse.py --db tmp/tutorial/old.json done 9
 error: no item #9                     # prose on stderr, exit 1
-$ todo --db tmp/b.json purge </dev/null
+$ uv run examples/tutorial/todo_argparse.py --db tmp/tutorial/old.json purge </dev/null
 Delete 0 completed items? [y/N] Traceback (most recent call last):
   ...
 EOFError: EOF when reading a line     # a prompt, then a crash, exit 1
@@ -110,9 +126,10 @@ segments, percent-encoded bytes, and null bytes exit 2.
 **Check:** the old order fails with the new order in the suggestion, so a caller that still
 uses it is told how to fix the call
 
+<!-- check -->
 ```bash
-$ todo --db tmp/todo.json list
-# exit 2, error.suggestion: "flags go after the command: todo list [arguments] --db"
+todo --db tmp/tutorial/todo.json list | jq -e '.meta.exit_code == 2
+  and .error.suggestion == "flags go after the command: todo list [arguments] --db"'
 ```
 
 ## Step 4: Migrate one command end to end
@@ -158,7 +175,8 @@ The handler returns data instead of printing it:
 )
 def add(args: Add, ctx: Ctx, store: Store) -> Changed:
     items = store.load()
-    item = Item(id=len(items) + 1, text=args.text, priority=args.priority, done=False)
+    next_id = max((i.id for i in items), default=0) + 1
+    item = Item(id=next_id, text=args.text, priority=args.priority, done=False)
     store.save([*items, item])
     return Changed(effect="created", item=item)
 ```
@@ -179,13 +197,15 @@ Mutating commands also get `--idempotency-key` for free. `add` is not safe to re
 retry adds a second item), and the key is how a caller makes it safe: the second call with
 the same key returns the first result without running the handler.
 
-**Check:**
+**Check:** the first item is created, and a value outside the `Literal` exits 2 before the
+handler runs
 
+<!-- check -->
 ```bash
-$ todo add "Buy milk" --priority high --db tmp/todo.json
-{"data":{"effect":"created","item":{"done":false,"id":1,"priority":"high","text":"Buy milk"}},"error":null,"meta":{...},"ok":true,"warnings":[]}
-$ todo add "x" --priority urgent --db tmp/todo.json
-# exit 2, error.message: "'priority' must be one of low, normal, high."
+todo add "Buy milk" --priority high --db tmp/tutorial/todo.json | jq -e '.data == {
+  "effect": "created", "item": {"id": 1, "text": "Buy milk", "priority": "high", "done": false}}'
+todo add "x" --priority urgent --db tmp/tutorial/todo.json \
+  | jq -e '.meta.exit_code == 2 and (.error.message | endswith("must be one of low, normal, high."))'
 ```
 
 ## Step 5: Replace `sys.exit(1)` with a named exit code
@@ -219,8 +239,17 @@ your own in the 79 to 125 range with `app.exit_code(...)`; the next chapter does
 `done` also shows the `noop` effect: completing an item that is already completed changes
 nothing, and says so.
 
-**Check:** `todo done 9 --db tmp/todo.json` exits 5 with `error.code` `NOT_FOUND` and the
-suggestion in `error.suggestion`
+**Check:** a missing item exits 5 with `NOT_FOUND` and the suggestion; completing an item
+twice is `updated`, then `noop`
+
+<!-- check -->
+```bash
+todo done 9 --db tmp/tutorial/todo.json | jq -e '.meta.exit_code == 5 and .error.code == "NOT_FOUND"
+  and .error.suggestion == "todo list --all shows every item number"'
+todo add "Walk dog" --db tmp/tutorial/todo.json | jq -e '.data.item.id == 2'
+todo done 1 --db tmp/tutorial/todo.json | jq -e '.data.effect == "updated"'
+todo done 1 --db tmp/tutorial/todo.json | jq -e '.data.effect == "noop"'
+```
 
 ## Step 6: Replace the prompt with a danger level
 
@@ -261,13 +290,18 @@ Without `--confirm-destructive`, treaty runs the handler as a dry run and exits 
 caller what would have been deleted. That preview is what the prompt used to show a person;
 now an agent gets it too, as data. `--confirm-destructive` replaces `--yes`.
 
-**Check:**
+**Check:** without confirmation, `purge` exits 2 and lists item 1, the one completed item,
+without deleting it; with confirmation it deletes item 1 and keeps item 2
 
+<!-- check -->
 ```bash
-$ todo purge --db tmp/todo.json
-# exit 2, error.code CONFIRMATION_REQUIRED, data.effect "would_delete", data.deleted lists the items
-$ todo purge --db tmp/todo.json --confirm-destructive
-# exit 0, data.effect "deleted"
+todo purge --db tmp/tutorial/todo.json | jq -e '.meta.exit_code == 2
+  and .error.code == "CONFIRMATION_REQUIRED" and .data.effect == "would_delete"
+  and [.data.deleted[].id] == [1]'
+todo list -a --db tmp/tutorial/todo.json | jq -e '[.data[].id] == [1, 2]'
+todo purge --db tmp/tutorial/todo.json --confirm-destructive \
+  | jq -e '.meta.exit_code == 0 and .data.effect == "deleted" and [.data.deleted[].id] == [1]'
+todo list -a --db tmp/tutorial/todo.json | jq -e '[.data[].id] == [2]'
 ```
 
 ## Step 7: Keep the output people are used to
@@ -293,12 +327,18 @@ not change; the renderer only decides what a person sees.
 calls return identical bytes; `sort_key` says which field orders an array of objects, and
 `ordered=True` keeps the handler's order instead.
 
-**Check:**
+**Check:** add a third item and complete it, then compare the plain output with the old
+format. The new item is #3, not #2: `add` numbers after the highest id, so a purged number
+is never handed out again
 
+<!-- check -->
 ```bash
-$ todo list -a --db tmp/todo.json --format plain
-[x] #1 Buy milk (high)
+todo add "Call mom" --priority low --db tmp/tutorial/todo.json | jq -e '.data.item.id == 3'
+todo done 3 --db tmp/tutorial/todo.json | jq -e '.data.effect == "updated"'
+diff <(todo list -a --db tmp/tutorial/todo.json --format plain) - <<'EOF'
 [ ] #2 Walk dog (normal)
+[x] #3 Call mom (low)
+EOF
 ```
 
 ## Step 8: Swap the entry point
@@ -323,7 +363,13 @@ can guard it. Point the script at a small entry module that calls
 `treaty.intercept_stdout()` and only then imports the app, as the `entry.py` of
 `treaty init` does; the text then goes to stderr and into a `THIRD_PARTY_STDOUT` warning.
 
-**Check:** `todo manifest` prints every command, and `todo --version` prints the version
+**Check:** the manifest lists the four commands, and `--version` reports the app's version
+
+<!-- check -->
+```bash
+todo manifest | jq -e '.data.commands | has("add") and has("list") and has("done") and has("purge")'
+todo --version | jq -e '.data == {"name": "todo", "version": "1.0.0"}'
+```
 
 ## Step 9: Test through the envelope
 
@@ -339,7 +385,7 @@ assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) tests the finished example both
 ways.
 
-**Check:** the chapter's **Done when** command prints `["exit-codes"]`
+**Check:** the chapter's **Done when** command exits 0
 
 ## Migrating a large CLI one command at a time
 

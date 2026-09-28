@@ -8,14 +8,24 @@ this chapter clears the audit rules `exit-codes` and `retryable`
 
 **Done when:** the strict audit exits 0:
 
+<!-- check -->
 ```bash
-uv run treaty audit examples.tutorial.todo_exit_codes:app --strict
-# exit 0; "Nothing left to do here"
+uv run treaty audit examples.tutorial.todo_exit_codes:app --strict > /dev/null
 ```
 
 The chapter continues the `todo` CLI. It starts from
 [`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py) and ends at
 [`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py).
+
+Run the **Check** commands from the root of a treaty checkout, in order, as in the
+[migration chapter](../B-migrate/argparse.md#running-the-checks). Here `todo` runs this
+chapter's finished example:
+
+<!-- check -->
+```bash
+todo() { uv run examples/tutorial/todo_exit_codes.py "$@"; }
+rm -rf tmp/tutorial && mkdir -p tmp/tutorial
+```
 
 ## What an agent does with an exit code
 
@@ -38,12 +48,14 @@ for example on the way out). An agent can safely reissue a call only if it faile
 
 ## Where todo stands
 
-Point `todo` at a damaged file and it crashes:
+Point the migrated `todo` at a damaged file and it crashes:
 
+<!-- check -->
 ```bash
-$ echo '{not json' > tmp/bad.json
-$ todo add x --db tmp/bad.json
-{"data":null,"error":{"code":"HANDLER_CRASHED","message":"Command add raised JSONDecodeError: ...",...},"meta":{"exit_code":1,...},"ok":false,...}
+echo '{not json' > tmp/tutorial/bad.json
+uv run examples/tutorial/todo_treaty.py add x --db tmp/tutorial/bad.json 2> /dev/null \
+  | jq -e '.meta.exit_code == 1 and .error.code == "HANDLER_CRASHED"
+    and (.error.message | startswith("Command add raised JSONDecodeError"))'
 ```
 
 The message is honest, but the exit code misleads. Exit 1 is `GENERAL_ERROR`, declared with
@@ -52,7 +64,9 @@ nothing was written. It also cannot tell this case from a real bug. The audit po
 same gap:
 
 ```bash
-$ uv run treaty audit examples.tutorial.todo_treaty:app
+$ uv run treaty audit examples.tutorial.todo_treaty:app --format plain
+...
+  1. (warning) exit-codes [add]: non-safe command declares no command-specific exit codes; agents cannot tell failures apart
   2. (warning) exit-codes [purge]: non-safe command declares no command-specific exit codes; agents cannot tell failures apart
 ```
 
@@ -115,7 +129,21 @@ file is either the old version or the new one:
 Declaring `none` when a failure can leave half a file is worse than declaring nothing.
 
 **Check:** add an item, make the directory read-only, and add another. The run exits 80,
-the file still holds the first item, and no `.partial` file is left behind
+the file still holds the first item, and no `.partial` file is left behind. The second
+`add` fails on purpose, so its output goes to a file and the directory is made writable
+again before anything is checked (run this as a normal user: root ignores the read-only bit)
+
+<!-- check -->
+```bash
+mkdir tmp/tutorial/ro
+todo add first --db tmp/tutorial/ro/todo.json | jq -e '.data.effect == "created"'
+chmod a-w tmp/tutorial/ro
+todo add second --db tmp/tutorial/ro/todo.json > tmp/tutorial/second.json || true
+chmod u+w tmp/tutorial/ro
+jq -e '.meta.exit_code == 80 and .error.code == "STORE_UNWRITABLE"' tmp/tutorial/second.json
+jq -e '[.[].text] == ["first"]' tmp/tutorial/ro/todo.json
+test "$(ls -A tmp/tutorial/ro)" = todo.json
+```
 
 ## Step 3: Register the codes
 
@@ -228,15 +256,17 @@ Forgetting one does not fail silently. A handler that raises a code it did not d
 Mutating and destructive commands also get `CONFLICT` without declaring it, and every
 command gets `GENERAL_ERROR`, `ARG_ERROR`, `PRECONDITION`, and `TIMEOUT`.
 
-**Check:**
+**Check:** the damaged file from [Where todo stands](#where-todo-stands) is now
+`STORE_CORRUPT` and left as it was, a missing directory gets its `fix_command`, and the
+schema lists both codes
 
+<!-- check -->
 ```bash
-$ todo add x --db tmp/bad.json
-# exit 79, error.code STORE_CORRUPT, tmp/bad.json unchanged
-$ todo add x --db tmp/nodir/todo.json
-# exit 80, error.fix_command "mkdir -p tmp/nodir"
-$ todo add --schema | jq '.data.exit_codes | keys'
-# includes "79" and "80"
+todo add x --db tmp/tutorial/bad.json | jq -e '.meta.exit_code == 79 and .error.code == "STORE_CORRUPT"'
+test "$(cat tmp/tutorial/bad.json)" = '{not json'
+todo add x --db tmp/tutorial/nodir/todo.json | jq -e '.meta.exit_code == 80
+  and .error.fix_command == "mkdir -p tmp/tutorial/nodir"'
+todo add --schema | jq -e '.data.exit_codes | has("79") and has("80")'
 ```
 
 ## Retryable codes

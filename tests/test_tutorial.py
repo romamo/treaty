@@ -1,9 +1,12 @@
 """The tutorial's code matches its example files, and the finished examples behave as told"""
 
 import asyncio
+import importlib.util
 import io
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -55,6 +58,52 @@ def test_a_sourced_block_is_in_its_file(page: str, path: str, code: str) -> None
     n = len(want.splitlines())
     windows = ("\n".join(lines[i : i + n]) for i in range(len(lines) - n + 1))
     assert any(textwrap.dedent(w) == want for w in windows), f"{page}: block not in {path}"
+
+
+# A Check the reader runs is a bash block preceded by <!-- check -->: every line exits 0 when
+# it passes, and a chapter's blocks run in order, each on the state the one before it left
+_CHECK = re.compile(r"<!-- check -->\n```bash\n(?P<code>.*?)```", re.S)
+
+
+def _checked_pages() -> list[Path]:
+    return [p for p in sorted(TUTORIAL.rglob("*.md")) if _CHECK.search(p.read_text())]
+
+
+def test_every_chapter_has_checks_that_run() -> None:
+    assert {p.name for p in _checked_pages()} == {p.name for p in TUTORIAL.rglob("*/*.md")}
+
+
+@needs_sh_launcher
+@pytest.mark.parametrize("page", _checked_pages(), ids=lambda p: p.name)
+def test_a_chapters_checks_pass_in_order(page: Path) -> None:
+    if shutil.which("bash") is None or shutil.which("jq") is None:
+        pytest.skip("the checks need bash and jq")
+    if page.name == "conformance.md" and not (SPEC_DIR / "conformance" / "run.py").is_file():
+        pytest.skip(f"conformance kit not found at {SPEC_DIR}; set TREATY_SPEC_DIR")
+    if page.name == "mcp.md" and importlib.util.find_spec("mcp") is None:
+        pytest.skip("the mcp extra is not installed")
+    if page.name == "exit-codes.md" and os.geteuid() == 0:
+        pytest.skip("root ignores the read-only directory the checks rely on")
+    # A run that failed between chmod a-w and chmod u+w leaves a directory rm -rf cannot empty
+    leftover = ROOT / "tmp" / "tutorial" / "ro"
+    if leftover.is_dir():
+        leftover.chmod(0o755)
+    script = "\n".join(m["code"] for m in _CHECK.finditer(page.read_text()))
+    env = {
+        **os.environ,
+        "TODO_AUDIT_LOG": "off",
+        "TREATY_AUDIT_LOG": "off",
+        "TREATY_SPEC_DIR": str(SPEC_DIR),
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _run(*argv: str) -> tuple[int, str]:

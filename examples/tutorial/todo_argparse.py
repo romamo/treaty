@@ -29,7 +29,8 @@ def save(db: Path, items: list[Item]) -> None:
 
 def cmd_add(args: argparse.Namespace) -> None:
     items = load(args.db)
-    item = {"id": len(items) + 1, "text": args.text, "priority": args.priority, "done": False}
+    next_id = max((i["id"] for i in items), default=0) + 1
+    item = {"id": next_id, "text": args.text, "priority": args.priority, "done": False}
     items.append(item)
     save(args.db, items)
     print(f"Added #{item['id']}: {item['text']}")

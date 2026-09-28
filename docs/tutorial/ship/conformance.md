@@ -8,10 +8,11 @@ it stops passing
 
 **Done when:** the kit reports every level as passing:
 
+<!-- check -->
 ```bash
 uv run treaty conformance examples.tutorial.todo_exit_codes:app \
-  --out examples/tutorial/conformance/todo.json --run | jq -c .data.levels
-# {"level_1":"pass","level_2":"pass","level_3":"pass"}
+  --out examples/tutorial/conformance/todo.json --run \
+  | jq -e '.data.levels == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}'
 ```
 
 In your own project, drop `--out`: the profile goes to `conformance/<name>.json`, where
@@ -56,7 +57,11 @@ Anywhere else works too: pass `--spec-dir PATH` or set `TREATY_SPEC_DIR`. A loca
 name that has no `conformance/run.py` exits 4 (`PRECONDITION`) rather than falling back to
 the default.
 
-**Check:** `ls ../cli-agent-ergonomics/conformance/run.py` finds the file
+**Check:** the kit's runner is where treaty looks for it
+
+```bash
+test -f "${TREATY_SPEC_DIR:-../cli-agent-ergonomics}/conformance/run.py"
+```
 
 ## Step 2: Keep the probes away from real data
 
@@ -96,8 +101,13 @@ has a launcher, without a sandbox; add one as soon as a command reads or writes 
 On Windows the `/bin/sh` launcher cannot run. treaty falls back to the app's console script
 in the current environment, or you pass `--command` with an executable of your own.
 
-**Check:** `examples/tutorial/conformance/todo list` prints an envelope with `"data":[]`,
-because the sandbox starts empty
+**Check:** the launcher runs the CLI against the sandbox, which holds no items: probes never
+run a mutating command, and the destructive probe is only ever previewed or refused
+
+<!-- check -->
+```bash
+examples/tutorial/conformance/todo list | jq -e '.ok and .data == []'
+```
 
 ## Step 3: Write the profile and run the kit
 

@@ -69,7 +69,8 @@ class Changed:
 )
 def add(args: Add, ctx: Ctx, store: Store) -> Changed:
     items = store.load()
-    item = Item(id=len(items) + 1, text=args.text, priority=args.priority, done=False)
+    next_id = max((i.id for i in items), default=0) + 1
+    item = Item(id=next_id, text=args.text, priority=args.priority, done=False)
     store.save([*items, item])
     return Changed(effect="created", item=item)
 
