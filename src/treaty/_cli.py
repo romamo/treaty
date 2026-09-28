@@ -497,8 +497,10 @@ def check_docs_command(args: CheckDocsArgs, ctx: Ctx) -> CheckDocsOut:
                 mismatches += check(app, path, text, agents_md=path.name == AGENTS_FILE)
     out = CheckDocsOut(app.version, tuple(files), tuple(mismatches))
     if mismatches:
+        count = len(mismatches)
+        disagree = "item in the docs disagrees" if count == 1 else "items in the docs disagree"
         raise Exit.DOCS_OUT_OF_DATE(
-            f"{len(mismatches)} items in the docs disagree with {app.name} {app.version}",
+            f"{count} {disagree} with {app.name} {app.version}",
             context={"files": [str(f) for f in files]},
             fix_required=f"run treaty agents-md {args.target}, then fix what it does not write",
             data=out,
