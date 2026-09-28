@@ -197,6 +197,5 @@ Only mark what really came from outside: an id the tool computed, or a count, is
 ## Next
 
 The audit still has advice for `import`: the `cleanup` rule asks network commands for a
-hook that runs however the run ends. The chapters for it and for the rules between,
-`path-typed` and `raw-payload`, are not written yet; each finding's suggested fix is the
-guide until then.
+hook that runs however the run ends; its chapter is not written yet. The audit's next rule
+with a chapter is `path-typed`: [Type path arguments as Path](path-typed.md).
