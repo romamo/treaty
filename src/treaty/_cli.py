@@ -20,7 +20,7 @@ from ._atomic import write_atomic
 from ._audit import ADDITIVE, LOCK_FILE, RULES, AuditReport, Severity, audit, schema_lock
 from ._changelog import ChangelogEntry, diff, dump_changelog, load_changelog, record
 from ._context import Ctx
-from ._errors import Exit, ParseError
+from ._errors import Exit, ParseError, RegistrationError
 from ._flags import Arg, Flag
 from ._mode import Format
 from ._out import Out
@@ -153,6 +153,14 @@ def load_app(target: str) -> App:
             f"cannot import {module_name}",
             context={"module": module_name, "missing": exc.name},
             suggestion="run from the project root inside its environment: uv run treaty audit ...",
+        ) from None
+    except (RegistrationError, SyntaxError) as exc:
+        # The app's own mistake, found as it imports: not a crash of the treaty command
+        raise Exit.PRECONDITION(
+            f"Module {module_name} failed to import: {type(exc).__name__}: {exc}",
+            code="APP_IMPORT_FAILED",
+            context={"module": module_name, "exception": type(exc).__qualname__},
+            fix_required="fix the error in the app's module; the message names it",
         ) from None
     obj = getattr(module, attr, None)
     if obj is None:
@@ -717,7 +725,8 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
     # The kit's deadline ends first, so it is killed rather than orphaned by the TIMEOUT path
     seconds = ctx.timeout.seconds
     try:
-        kit = run_kit(spec_dir, profile_path, None if seconds is None else max(seconds - 5, 1))
+        deadline = None if seconds is None else max(seconds - 5, 1)
+        kit = run_kit(spec_dir, profile_path, deadline, ctx.env)
     except subprocess.TimeoutExpired as exc:
         raise Exit.PRECONDITION(
             f"the kit did not finish within {exc.timeout:g}s",

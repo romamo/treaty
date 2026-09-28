@@ -6,11 +6,13 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
-from collections.abc import Sequence
+import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ._audit import user_commands
 from ._command import Command, DangerLevel
@@ -247,28 +249,47 @@ class KitRun:
     stderr: str
 
 
-def run_kit(spec_dir: Path, profile: Path, timeout: float | None) -> KitRun:
-    uv = shutil.which("uv")
+def run_kit(spec_dir: Path, profile: Path, timeout: float | None, env: Mapping[str, str]) -> KitRun:
+    """The spec kit on ``profile``, through ``uv`` in the run's environment. The kit runs
+    in a process group of its own, so a timeout stops ``uv`` and the kit it started,
+    rather than orphaning the kit."""
+    uv = shutil.which("uv", path=env.get("PATH"))
     if uv is None:
         raise FileNotFoundError("uv is not on PATH; the conformance kit runs through uv")
-    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
-    result = subprocess.run(
-        [
-            uv,
-            "run",
-            "--project",
-            str(spec_dir),
-            str(spec_dir / "conformance" / "run.py"),
-            str(profile),
-        ],
-        capture_output=True,
+    argv = [uv, "run", "--project", str(spec_dir), str(spec_dir / "conformance" / "run.py")]
+    group: dict[str, Any]
+    if sys.platform == "win32":
+        group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        group = {"start_new_session": True}
+    proc = subprocess.Popen(
+        [*argv, str(profile)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
-        check=False,
-        env=env,
+        env={k: v for k, v in env.items() if k != "VIRTUAL_ENV"},
+        **group,
     )
     try:
-        envelope = json.loads(result.stdout)
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc.pid)
+        proc.communicate()
+        raise
+    try:
+        envelope = json.loads(stdout)
     except json.JSONDecodeError:
         envelope = None
-    return KitRun(result.returncode, envelope, result.stderr)
+    return KitRun(proc.returncode, envelope, stderr)
+
+
+def _kill_group(pid: int) -> None:
+    """Kill ``pid`` and every process it started"""
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, check=False)
+    else:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # the group ended on its own meanwhile

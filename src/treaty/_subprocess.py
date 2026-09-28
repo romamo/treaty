@@ -28,7 +28,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import IO, Any
 
-from ._atomic import write_atomic
+from ._atomic import exclusive, write_atomic
 from ._errors import CliExit, RegistrationError
 from ._session import BACKGROUND_DIR, Session, SessionRoot, private_dir
 from ._signals import Cancelled, CancelSignal
@@ -323,6 +323,17 @@ class Processes:
             if self._closed:
                 raise self._refusal(parts)
         slot.make()
+        # One spawn at a time rewrites the pid file: two at once would each drop the other's
+        with exclusive(slot.pid_file.with_name(f".{slot.pid_file.name}.lock")):
+            return self._background(parts, slot, cwd, env)
+
+    def _background(
+        self,
+        parts: tuple[str, ...],
+        slot: BackgroundSlot,
+        cwd: Path | None,
+        env: Mapping[str, str] | None,
+    ) -> Spawned:
         kept = reap(slot.pid_file)
         log_path = slot.directory / f"{slot.command}.{time.time_ns()}.log"
         detach: dict[str, Any]
@@ -351,7 +362,7 @@ class Processes:
                 ) from None
         _DETACHED.append(proc)
         deadline = time.time() + slot.lifetime_seconds
-        entries = [*kept, f"{proc.pid} {deadline:.0f}"]
+        entries = [*kept, f"{proc.pid} {deadline:.0f} {started(proc.pid) or UNKNOWN_START}"]
         write_atomic(slot.pid_file, "".join(f"{e}\n" for e in entries))
         return Spawned(proc.pid, log_path, slot.pid_file)
 
@@ -469,9 +480,18 @@ class Processes:
             proc.wait()
 
 
+UNKNOWN_START = "-"
+"""A pid file entry's start time when the platform could not tell it"""
+STOPPING = "stopping"
+"""Marks an entry sent SIGTERM at its deadline: the next spawn sends SIGKILL"""
+
+
 def reap(pid_file: Path) -> list[str]:
     """Stop every background process in ``pid_file`` past its deadline; the entries of
-    those still running, which the caller writes back"""
+    those still running, which the caller writes back. An entry is ``<pid> <deadline>
+    <start time> [stopping]``: the start time tells the child from a later process that
+    reused its pid, which is left alone. SIGTERM comes at the deadline, and SIGKILL at
+    the first spawn at least ``GRACE_SECONDS`` later if it still runs."""
     try:
         lines = pid_file.read_text().splitlines()
     except FileNotFoundError:
@@ -479,29 +499,30 @@ def reap(pid_file: Path) -> list[str]:
     kept: list[str] = []
     now = time.time()
     for line in lines:
-        pid_text, _, deadline_text = line.partition(" ")
-        if not (pid_text.isdigit() and deadline_text.isdigit()):
+        fields = line.split()
+        if len(fields) < 2 or not (fields[0].isdigit() and fields[1].isdigit()):
             continue  # not an entry treaty wrote
-        pid = int(pid_text)
-        if int(deadline_text) <= now:
-            _stop_background(pid)
-        elif _running(pid):
+        pid, deadline = int(fields[0]), int(fields[1])
+        start = fields[2] if len(fields) > 2 else UNKNOWN_START  # written before 1.0.0
+        stopping = fields[3:] == [STOPPING]
+        if not _same(pid, start):
+            continue  # gone, and its pid free for anyone
+        if deadline > now:
             kept.append(line)
+        elif not stopping:
+            _stop_background(pid, signal.SIGTERM)
+            if _same(pid, start):
+                kept.append(f"{pid} {now + GRACE_SECONDS:.0f} {start} {STOPPING}")
+        else:
+            _stop_background(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     return kept
 
 
-def _stop_background(pid: int) -> None:
-    """SIGTERM the process group ``spawn`` started, if that pid still leads it"""
-    try:
-        if sys.platform == "win32":
-            os.kill(pid, signal.SIGTERM)
-        elif os.getpgid(pid) == pid:
-            os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError, PermissionError:
-        pass  # gone already, or the pid now belongs to someone else
-
-
-def _running(pid: int) -> bool:
+def _same(pid: int, start: str) -> bool:
+    """Whether ``pid`` still names the process that started at ``start``; without a start
+    time, whether any process has the pid"""
+    if start != UNKNOWN_START:
+        return started(pid) == start
     if sys.platform == "win32":
         return True  # kept until its deadline; os.kill(pid, 0) would terminate it there
     try:
@@ -511,6 +532,85 @@ def _running(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _stop_background(pid: int, sig: signal.Signals) -> None:
+    """Signal the process group ``spawn`` started, if that pid still leads it"""
+    try:
+        if sys.platform == "win32":
+            os.kill(pid, sig)
+        elif os.getpgid(pid) == pid:
+            os.killpg(pid, sig)
+    except ProcessLookupError, PermissionError:
+        pass  # gone already, or the pid now belongs to someone else
+
+
+def started(pid: int) -> str | None:
+    """When the process ``pid`` started, as an opaque token; None when it is gone, a
+    zombie, or the platform cannot tell"""
+    if sys.platform == "win32":
+        return _started_windows(pid)
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except FileNotFoundError:
+        if Path("/proc/self/stat").exists():
+            return None  # Linux, and the process is gone
+        return _started_ps(pid)
+    # comm, in parentheses, may hold spaces; state and start time are fields 3 and 22
+    fields = stat.rpartition(")")[2].split()
+    return None if fields[0] == "Z" else fields[19]
+
+
+def _started_ps(pid: int) -> str | None:
+    """macOS and the BSDs, which have no /proc: ps, to the second"""
+    try:
+        found = subprocess.run(
+            ["ps", "-o", "stat=,lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            env={"LC_ALL": "C", "PATH": os.defpath},
+            timeout=5,
+            check=False,
+        )
+    except FileNotFoundError, subprocess.TimeoutExpired:
+        return None
+    state, _, start = found.stdout.strip().partition(" ")
+    if found.returncode != 0 or not start or state.startswith("Z"):
+        return None
+    return "-".join(start.split())
+
+
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    _STILL_ACTIVE = 259
+    _QUERY_LIMITED_INFORMATION = 0x1000
+
+    def _started_windows(pid: int) -> str | None:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return None
+        try:
+            created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+            code = wintypes.DWORD()
+            if not (
+                kernel32.GetProcessTimes(
+                    handle,
+                    ctypes.byref(created),
+                    ctypes.byref(exited),
+                    ctypes.byref(kernel),
+                    ctypes.byref(user),
+                )
+                and kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            ):
+                return None
+            if code.value != _STILL_ACTIVE:
+                return None
+            return f"{created.dwHighDateTime}.{created.dwLowDateTime}"
+        finally:
+            kernel32.CloseHandle(handle)
 
 
 def _signal(proc: subprocess.Popen[bytes], *, kill: bool) -> None:

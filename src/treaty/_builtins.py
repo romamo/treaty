@@ -228,11 +228,14 @@ def register_cleanup(app: App) -> CommandPath:
         kinds = SCOPES[args.scope]
         found = {p: kind for p, kind in inventory(app, ctx) if kind in kinds}
         now = time.time()
-        sizes = {p: _measure(Path(p)) for p in sorted(found)}
+        measured = {p: _measure(Path(p)) for p in sorted(found)}
+        # A path gone since the inventory, removed by its own run meanwhile, is not listed
+        sizes = {p: size for p, size in measured.items() if size is not None}
         skipped = [p for p, (_, newest) in sizes.items() if now - newest < args.min_age]
         paths = [p for p in sizes if p not in skipped]
         if args.dry_run:
-            summary = f"Removes {len(paths)} {args.scope} paths"
+            what = {"all": "", "temp": "temp ", "cache": "cache ", "logs": "log "}[args.scope]
+            summary = f"Removes {len(paths)} {what}paths"
             affects = Affects(summary, tuple(paths), len(paths))
             return Cleaned("would_delete", 0, skipped, [], [], affects)
         failed = [p for p in paths if not _removed(Path(p))]
@@ -316,10 +319,19 @@ def _linked(match: str, pattern: str) -> bool:
     return any(Path(*parts[: i + 1]).is_symlink() for i in range(first, len(parts) - 1))
 
 
-def _measure(path: Path) -> tuple[int, float]:
+def _bytes(path: Path) -> int:
+    """The bytes under ``path``; 0 once it is gone"""
+    measured = _measure(path)
+    return 0 if measured is None else measured[0]
+
+
+def _measure(path: Path) -> tuple[int, float] | None:
     """The bytes of the files under ``path`` and its newest modification time, symlinks
-    not followed"""
-    top = path.lstat()
+    not followed; None when ``path`` is gone"""
+    try:
+        top = path.lstat()
+    except FileNotFoundError:
+        return None
     if not stat.S_ISDIR(top.st_mode):
         return top.st_size, top.st_mtime
     size, newest = 0, top.st_mtime
@@ -386,7 +398,7 @@ def _side_effects(app: App, ctx: Ctx) -> list[dict[str, object]]:
     """``status --show-side-effects`` (REQ-C-011, REQ-O-028)"""
     entries: list[dict[str, object]] = []
     for command_path, effect, pattern, matches in declared(app, ctx.env.get("HOME")):
-        paths = [{"path": str(Path(m).resolve()), "bytes": _measure(Path(m))[0]} for m in matches]
+        paths = [{"path": str(Path(m).resolve()), "bytes": _bytes(Path(m))} for m in matches]
         entry: dict[str, object] = {
             "command": command_path.value,
             "type": effect.type,
@@ -423,7 +435,7 @@ def _state_files(app: App, ctx: Ctx) -> list[dict[str, object]]:
                 "path": str(where.resolve()),
                 "purpose": purpose,
                 "exists": exists,
-                "bytes": _measure(where)[0] if exists else 0,
+                "bytes": _bytes(where) if exists else 0,
             }
         )
     return files
@@ -503,8 +515,8 @@ def register_generate_skills(app: App) -> CommandPath:
         examples=[
             ("Write ./skills", f"{app.name} generate-skills"),
             (
-                "Write them where Claude Code finds them",
-                f"{app.name} generate-skills --output-dir .claude/skills/{app.name}",
+                "Write them beside the project's agent docs",
+                f"{app.name} generate-skills --output-dir docs/agent-skills",
             ),
         ],
     )

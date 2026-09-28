@@ -166,6 +166,7 @@ from ._parse import (
     GlobalOptions,
     Invocation,
     Route,
+    bind_values,
     build_from_mapping,
     format_hint,
     misplaced_flag_target,
@@ -1559,7 +1560,8 @@ class App:
     ) -> int:
         out = run.out
         try:
-            globals_, rest = split_globals(strict_argv(argv, self._commands))
+            bound = bind_values(strict_argv(argv, self._commands), self._commands)
+            globals_, rest = split_globals(bound)
             run.err.verbosity = resolve_verbosity(globals_.verbosity, environ, run.tty)
             run.warnings_as_errors = globals_.warnings_as_errors
             mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
@@ -1888,6 +1890,14 @@ def _text(exc: BaseException) -> str:
         return str(exc)
     except Exception:  # noqa: BLE001 - __str__ is user code
         return f"<{type(exc).__name__} whose str() failed>"
+
+
+def _rendered(render: Renderer, data: object) -> str:
+    """A renderer's text; any other return value is the renderer's bug"""
+    text = render(data)
+    if not isinstance(text, str):
+        raise TypeError(f"the renderer returned {type(text).__name__}, not str")
+    return text
 
 
 def _traceback(exc: BaseException) -> str:
@@ -4342,9 +4352,9 @@ class _Run:
             text = _json_text(data)
         else:
             try:
-                text = render(data) if render is not None else render_plain(data)
+                text = _rendered(render, data) if render is not None else render_plain(data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
-                self.err.write(_traceback(exc))
+                self.err.write(self._redact_now(_traceback(exc)))
                 return self._file_error(
                     envelope, "RENDER_FAILED", f"the {mode} renderer failed", path
                 )
@@ -4434,9 +4444,9 @@ class _Run:
             self.err.write(f"next: --cursor {pagination['next_cursor']}\n", Level.WARN)
         if envelope.data is not None and render is not None:
             try:
-                text = render(envelope.data)
+                text = _rendered(render, envelope.data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
-                self.err.write("".join(traceback.format_exception(exc)))
+                self.err.write(self._redact_now("".join(traceback.format_exception(exc))))
                 self.err.write(f"{self.app.name}: HANDLER_CRASHED: the {mode} renderer failed\n")
                 code = FrameworkCode.GENERAL_ERROR.value
             else:

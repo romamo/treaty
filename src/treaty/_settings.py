@@ -168,7 +168,15 @@ def options(
     no_config: bool = False,
     instance_id: str | None = None,
 ) -> ConfigOptions:
-    """The flags, each falling back to its ``<APP>_`` variable (REQ-O-024, REQ-O-036)"""
+    """The flags, each falling back to its ``<APP>_`` variable (REQ-O-024, REQ-O-036); an
+    empty variable is unset, but an empty flag, such as ``--config=``, is an error"""
+    for flag, value in (("config", config), ("context", context), ("instance-id", instance_id)):
+        if value == "":
+            raise ParseError(
+                f"--{flag} is empty",
+                context={"flag": flag},
+                suggestion=f"pass a value to --{flag}, or leave the flag out",
+            )
     config_var, context_var, instance_var = (
         app_var(app_name, v.key) for v in (CONFIG, CONTEXT, INSTANCE_ID)
     )

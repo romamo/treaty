@@ -336,10 +336,18 @@ def _takes_value(command: Command, tok: str) -> bool:
     return found is not None and found.flag_type is not FlagType.BOOLEAN
 
 
-def strict_argv(argv: list[str], known: Mapping[CommandPath, Command]) -> list[str]:
-    """REQ-C-027: for a ``strict`` command, a ``--`` before its first positional, so
-    every later token reaches its positionals verbatim, a global's name included; any
-    other argv comes back unchanged"""
+def _global(tok: str) -> bool:
+    """Whether ``split_globals`` takes ``tok`` as a global option"""
+    if tok in ("-h", "--help", "--schema", "--print-schema"):
+        return True
+    name = tok[2:].partition("=")[0] if tok.startswith("--") else ""
+    return name in SWITCH_GLOBALS or name in VALUED_GLOBALS
+
+
+def _command_at(
+    argv: list[str], known: Mapping[CommandPath, Command]
+) -> tuple[Command | None, int]:
+    """The command argv names, globals skipped, and the index after its path"""
     prefixes = {p.parts[:n] for p in known for n in range(1, len(p.parts) + 1)}
     consumed: tuple[str, ...] = ()
     i = 0
@@ -358,7 +366,34 @@ def strict_argv(argv: list[str], known: Mapping[CommandPath, Command]) -> list[s
             break
         consumed = (*consumed, tok)
         i += 1
-    command = known.get(CommandPath(".".join(consumed))) if consumed else None
+    return (known.get(CommandPath(".".join(consumed))) if consumed else None), i
+
+
+def bind_values(argv: list[str], known: Mapping[CommandPath, Command]) -> list[str]:
+    """``--flag -h`` as ``--flag=-h`` when the command's own ``--flag`` takes a value, so
+    ``split_globals`` reads the value as the flag's, not as ``--help`` (REQ-F-079)"""
+    command, i = _command_at(argv, known)
+    if command is None:
+        return argv
+    bound = list(argv)
+    while i < len(bound) and bound[i] != "--":
+        tok = bound[i]
+        if not tok.startswith("--") or _global(tok) or not _takes_value(command, tok):
+            i += 1
+            continue
+        if i + 1 < len(bound) and _global(bound[i + 1]):
+            bound[i : i + 2] = [f"{tok}={bound[i + 1]}"]
+            i += 1
+        else:
+            i += 2
+    return bound
+
+
+def strict_argv(argv: list[str], known: Mapping[CommandPath, Command]) -> list[str]:
+    """REQ-C-027: for a ``strict`` command, a ``--`` before its first positional, so
+    every later token reaches its positionals verbatim, a global's name included; any
+    other argv comes back unchanged"""
+    command, i = _command_at(argv, known)
     if command is None or command.option_placement is not OptionPlacement.STRICT:
         return argv
     while i < len(argv):

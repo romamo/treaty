@@ -8,7 +8,9 @@ The session directory is ``<root>/<request id>/``, made on first use by ``ctx.tm
 ``ctx.temp_file()``, or a child of ``ctx.run``, and removed when the run ends. Files from
 ``ctx.output_file()`` outlive the run under ``<root>/out/<expiry>-<request id>-<n>/``; no
 daemon removes them: each run prunes what expired, and session directories a killed run
-left behind for a day.
+left behind for a day. A run holds a lock on its session directory's ``.live`` file until
+it ends, so a long one is never pruned from under it; the kernel drops the lock of a run
+that was killed.
 """
 
 from __future__ import annotations
@@ -26,7 +28,9 @@ import uuid
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
+from ._atomic import try_lock
 from ._errors import CliExit
 from ._values import ExitCodeName, InstanceId
 
@@ -35,6 +39,8 @@ INSTANCES_DIR = "instances"
 BACKGROUND_DIR = "background"
 """``ctx.spawn``'s pid files when the app has no state directory; never pruned"""
 PID_FILE = "children.pids"
+LIVE_FILE = ".live"
+"""Locked by the run for as long as it lasts"""
 STALE_SESSION_SECONDS = 86_400
 """A session directory this old belongs to a run that was killed; the next run removes it"""
 DEFAULT_KEEP_SECONDS = 300
@@ -137,7 +143,8 @@ def prune(root: SessionRoot, now: float) -> None:
         kept = (OUT_DIR, INSTANCES_DIR, BACKGROUND_DIR)
         if entry.name in kept or not entry.is_dir(follow_symlinks=False):
             continue
-        if now - entry.stat(follow_symlinks=False).st_mtime > STALE_SESSION_SECONDS:
+        stale = now - entry.stat(follow_symlinks=False).st_mtime > STALE_SESSION_SECONDS
+        if stale and not _live(Path(entry.path)):
             due.append(entry.path)
     out = root.path / OUT_DIR
     if _owned_dir(out):
@@ -150,6 +157,16 @@ def prune(root: SessionRoot, now: float) -> None:
             _removed(Path(path))
         except OSError:
             continue
+
+
+def _live(session: Path) -> bool:
+    """Whether a run still holds the session directory's ``.live`` lock"""
+    try:
+        fd = os.open(session / LIVE_FILE, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return False  # a directory from before 1.0.0: its age decides
+    with os.fdopen(fd, "w") as handle:
+        return not try_lock(handle)  # closing the handle releases a lock it took
 
 
 def outputs(root: SessionRoot) -> list[Path]:
@@ -180,6 +197,7 @@ class Session:
         self._out_id = uuid.uuid4().hex[:8]
         """Tells apart the output files of ``exec`` lines, which share a request id"""
         self._lock = threading.Lock()
+        self._live: IO[str] | None = None
 
     @property
     def made(self) -> Path | None:
@@ -192,7 +210,12 @@ class Session:
             if self._removed:
                 raise RuntimeError("the run ended, and its temp directory with it")
             if self._dir is None:
-                self._dir = private_dir(self.root.make() / self.request_id)
+                made = private_dir(self.root.make() / self.request_id)
+                live = os.fdopen(os.open(made / LIVE_FILE, os.O_WRONLY | os.O_CREAT, 0o600), "w")
+                if not try_lock(live):
+                    live.close()
+                    raise RuntimeError(f"another run holds {made / LIVE_FILE}")
+                self._dir, self._live = made, live
             return self._dir
 
     def temp_file(self, suffix: str = "") -> Path:
@@ -246,7 +269,9 @@ class Session:
         """The run ended: its session directory goes, output files stay until expiry"""
         with self._lock:
             self._removed = True
-            made = self._dir
+            made, live, self._live = self._dir, self._live, None
+        if live is not None:
+            live.close()  # before the removal: Windows keeps an open file
         if made is not None:
             _removed(made)
 

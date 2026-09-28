@@ -231,27 +231,37 @@ class Command:
         return next(c for c in self.compat if c.version == version)
 
     def pin(self, raw: object) -> SchemaVersion | None:
-        """``--schema-version MAJOR``: the older version it selects, None for the current;
-        a major the command does not serve is ``SCHEMA_VERSION_UNSUPPORTED`` (exit 2)"""
+        """``--schema-version MAJOR``, or the ``MAJOR.MINOR`` the command serves: the
+        older version it selects, None for the current; a version the command does not
+        serve is ``SCHEMA_VERSION_UNSUPPORTED`` (exit 2)"""
         text = str(raw) if isinstance(raw, int) and not isinstance(raw, bool) else raw
-        major_text = text.partition(".")[0] if isinstance(text, str) else ""
+        parts = text.split(".") if isinstance(text, str) else []
         context: dict[str, object] = {
             "flag": "schema-version",
             "schema_version": self.schema_version.value,
             "min_schema_version": self.min_schema_version.value,
         }
-        if not (major_text.isascii() and major_text.isdigit() and len(major_text) <= 6):
-            raise ParseError("--schema-version takes a major version, such as 1", context=context)
-        major = int(major_text)
-        if major == self.schema_version.major:
+        if not (
+            1 <= len(parts) <= 2 and all(p.isascii() and p.isdigit() and len(p) <= 6 for p in parts)
+        ):
+            raise ParseError(
+                "--schema-version takes a major version, such as 1, or a MAJOR.MINOR one",
+                context=context,
+            )
+        requested = ".".join(parts)
+        major = int(parts[0])
+        versions = [self.schema_version, *(c.version for c in self.compat)]
+        served = next((v for v in versions if v.major == major), None)
+        if served is not None and len(parts) == 2 and int(parts[1]) != served.minor:
+            served = None  # the major is served, at another minor
+        if served == self.schema_version:
             return None
-        served = next((c.version for c in self.compat if c.version.major == major), None)
         if served is None:
             majors = [str(c.version.major) for c in self.compat] + [str(self.schema_version.major)]
             raise ParseError(
-                f"Command {self.path} does not serve schema version {major}",
+                f"Command {self.path} does not serve schema version {requested}",
                 code="SCHEMA_VERSION_UNSUPPORTED",
-                context={**context, "requested_version": text},
+                context={**context, "requested_version": requested},
                 suggestion=f"pass --schema-version {' or '.join(majors)}, or drop it for "
                 f"the current {self.schema_version}",
             )

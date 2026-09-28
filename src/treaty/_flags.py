@@ -512,6 +512,24 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
     return default
 
 
+def _check_default_constraints(info: FieldInfo, where: str) -> None:
+    """A text default passes the field's own ``pattern``, ``pattern_type``, and
+    ``max_bytes``, as a passed value must: the manifest never publishes a default the
+    field would refuse; a secret's default stands for no value, not a value"""
+    if info.secret:
+        return
+    default = info.default
+    values = default if isinstance(default, tuple) else (default,)
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        try:
+            info.check_size(value)
+            info.check_pattern(value)
+        except ParseError as exc:
+            raise RegistrationError(f"{where}: default {value!r}: {exc.message}") from None
+
+
 def _check_flag_names(cls: type, infos: list[FieldInfo]) -> None:
     """Flags the parser derives must not collide with another field's flag"""
     flags = {i.flag: i for i in infos}
@@ -629,6 +647,7 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
                 f"{cls.__qualname__}.{f.name}: max_bytes is for str fields that are not "
                 "secrets or paths"
             )
+        _check_default_constraints(info, f"{cls.__qualname__}.{f.name}")
         if spec.from_stdin and (info.flag_type is FlagType.BOOLEAN or info.secret):
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: from_stdin=True is for value fields; a boolean "

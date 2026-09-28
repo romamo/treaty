@@ -847,8 +847,11 @@ def test_a_later_spawn_stops_processes_past_their_max_lifetime(tmp_path: Path) -
     new = second["data"]["background_pid"]  # type: ignore[index]
     try:
         assert detached(old).wait(timeout=10) != 0
-        pids = (tmp_path / "background" / "start-watcher.pids").read_text().split()
-        assert pids[0] == str(new) and len(pids) == 2
+        lines = (tmp_path / "background" / "start-watcher.pids").read_text().splitlines()
+        entries = {int(line.split()[0]): line.split()[2:] for line in lines}
+        assert len(entries[new]) == 1  # its start time, nothing to stop yet
+        # SIGTERMed at its deadline, the old one waits for the next spawn's SIGKILL
+        assert old not in entries or entries[old][1:] == ["stopping"]
     finally:
         stop(new)
 
