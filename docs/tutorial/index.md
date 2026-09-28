@@ -58,6 +58,22 @@ rule, the finding's suggested fix is the guide:
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |
 
+### Advice you can leave
+
+Findings come in three severities. An `error` or a `warning` fails `--strict`; `advice` does
+not. Advice comes from heuristics that guess from names, so read each one and decide: apply
+the fix, or leave it when the guess does not fit your command. `todo` keeps two, and says why:
+
+- **`multiline-flag` on `add`**: the rule sees a field named `text` and suggests allowing
+  line breaks. `todo` keeps each item on one line on purpose, since `list` prints one item
+  per line, so refusing a newline is the behaviour it wants
+- **`already-exists` on `add`**: the rule sees a create command and suggests answering a
+  repeated create with the item that is already there. That fits a create where the caller
+  names the resource, such as `create widget`. `todo add` assigns the id itself and allows
+  two items with the same text, so there is no existing item to answer with; a retried
+  `add` is made safe with `--idempotency-key`, as
+  [Choose each command's danger level](core/danger-level.md#step-3-what-mutating-adds) shows
+
 You are done with the core when `treaty audit module:app --strict` exits 0. Shipping comes
 after that: [Run the conformance kit](ship/conformance.md) puts the CLI through the spec's
 runtime checks and gates CI on them, [Serve commands over MCP](ship/mcp.md) gives agents

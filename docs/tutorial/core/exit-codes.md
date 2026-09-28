@@ -301,7 +301,9 @@ Run the audit:
 uv run treaty audit examples.tutorial.todo_exit_codes:app --strict
 ```
 
-For `todo` it exits 0. The audit's next rule is `typed-output`, which checks that every
+For `todo` it exits 0. The audit still lists two pieces of advice for `add`, which `todo`
+leaves on purpose; [the index](../index.md#advice-you-can-leave) says why. The audit's next
+rule is `typed-output`, which checks that every
 command's result has a schema an agent can read: [Type every command's output](typed-output.md),
 followed by the chapters for `network-io`, `path-typed`, `raw-payload`, and `cleanup`.
 
