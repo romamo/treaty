@@ -1,5 +1,6 @@
 """The tutorial's code matches its example files, and the finished examples behave as told"""
 
+import ast
 import asyncio
 import functools
 import http.server
@@ -22,7 +23,7 @@ import jsonschema
 import pytest
 from conftest import SPEC_DIR, needs_posix_permissions, needs_sh_launcher
 
-from examples.tutorial import todo_exit_codes, todo_network
+from examples.tutorial import todo_exit_codes, todo_network, todo_payload
 from examples.tutorial.todo_treaty import app
 from treaty import App, Ctx, Envelope, Exit, NoArgs, RegistrationError
 from treaty._cli import cli
@@ -214,15 +215,63 @@ def app_examples(app: App) -> list[str]:
     ]
 
 
-@pytest.mark.parametrize("example", app_examples(todo_exit_codes.app))
-def test_an_example_parses(example: str) -> None:
+EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app]
+"""todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its two branches"""
+
+
+@pytest.mark.parametrize(
+    ("cli_app", "example"), [(a, e) for a in EXAMPLE_APPS for e in app_examples(a)]
+)
+def test_an_example_parses(cli_app: App, example: str) -> None:
     """Registration checks only the quoting: a renamed flag or a <placeholder> fails here"""
     argv = shlex.split(example)[1:]  # without the program name
     out = io.StringIO()
-    code = todo_exit_codes.app.run(
-        [*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={}
-    )
+    code = cli_app.run([*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={})
     assert code == 0, out.getvalue()
+
+
+# The branches of todo_exit_codes.py
+
+BASE = ROOT / "examples" / "tutorial" / "todo_exit_codes.py"
+
+
+def _statements(path: Path) -> list[str]:
+    """Each top-level statement, decorators included and formatting ignored, without the
+    module docstring and the imports"""
+    tree = ast.parse(path.read_text())
+    return [
+        ast.unparse(node)
+        for node in tree.body
+        if not isinstance(node, (ast.Import, ast.ImportFrom))
+        and not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant))
+    ]
+
+
+def _imported(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text())
+    return {
+        f"{getattr(node, 'module', None)}.{alias.name}"
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+
+
+@pytest.mark.parametrize("name", ["todo_network.py", "todo_payload.py"])
+def test_a_branch_keeps_every_statement_of_todo_exit_codes(name: str) -> None:
+    """A fix to todo_exit_codes.py has to reach the files that copied it: each of its
+    statements is in the branch unchanged and in the same order, among the branch's own"""
+    branch = BASE.with_name(name)
+    theirs = _statements(branch)
+    missing: list[str] = []
+    at = 0
+    for statement in _statements(BASE):
+        if statement in theirs[at:]:
+            at = theirs.index(statement, at) + 1
+        else:
+            missing.append(statement)
+    assert missing == [], f"{name} lost or changed statements of todo_exit_codes.py"
+    assert _imported(BASE) <= _imported(branch)
 
 
 # Type every command's output

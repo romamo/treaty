@@ -173,18 +173,23 @@ def app_examples(app: App) -> list[str]:
     ]
 
 
-@pytest.mark.parametrize("example", app_examples(todo_exit_codes.app))
-def test_an_example_parses(example: str) -> None:
+EXAMPLE_APPS = [app, todo_exit_codes.app, todo_network.app, todo_payload.app]
+"""todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its two branches"""
+
+
+@pytest.mark.parametrize(
+    ("cli_app", "example"), [(a, e) for a in EXAMPLE_APPS for e in app_examples(a)]
+)
+def test_an_example_parses(cli_app: App, example: str) -> None:
     """Registration checks only the quoting: a renamed flag or a <placeholder> fails here"""
     argv = shlex.split(example)[1:]  # without the program name
     out = io.StringIO()
-    code = todo_exit_codes.app.run(
-        [*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={}
-    )
+    code = cli_app.run([*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={})
     assert code == 0, out.getvalue()
 ```
 
-In your project, import your app instead of `todo_exit_codes.app`. The test calls
+The tutorial checks every version of `todo` it ships; in your project, `EXAMPLE_APPS` is
+just `[app]`. The test calls
 `app.run` with the parsed words, so no shell ever runs an example; an example that uses a
 pipe or a redirect belongs in prose, not in `examples=`.
 
