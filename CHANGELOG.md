@@ -10,13 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc2] - 2026-09-28
+
+The second 1.0 release candidate: native `async def` handlers, cooperative deadlines, and
+PEP 440 pre-release versions for apps. Additive over rc1; no breaking changes.
+
 ### Added
 
 - `async def` handlers, and `async def` resource `acquire` and `release` (REQ-F-049): one
   event loop per run on a thread of its own, cancellation at the timeout, and an
   `UNAWAITED_TASKS` warning for tasks the handler left running. An async resource needs an
   async handler; streaming handlers and other hooks stay plain `def`
-
 - `App(version=)` accepts a PEP 440 release with an `a`, `b`, or `rc` pre-release, such
   as `importlib.metadata.version` returns (`1.0.0rc1`); `--version`, `meta.tool_version`,
   and `app.version` give its semver spelling (`1.0.0-rc.1`). `introduced_in=`,
@@ -228,7 +232,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc1...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc2...HEAD
+[1.0.0rc2]: https://github.com/romamo/treaty/compare/v1.0.0rc1...v1.0.0rc2
 [1.0.0rc1]: https://github.com/romamo/treaty/compare/v0.1.0...v1.0.0rc1
 [0.1.0]: https://github.com/romamo/treaty/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/romamo/treaty/compare/v0.0.5...v0.0.6
