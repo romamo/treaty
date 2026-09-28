@@ -1,6 +1,6 @@
 """Built-ins every app gets that yield to an app command of the same name (13-D1):
 ``doctor`` (REQ-O-026, REQ-O-031, REQ-C-018), ``cleanup`` (REQ-C-011, REQ-O-027),
-``status`` (REQ-O-028), and ``audit-log`` (REQ-O-030)."""
+``status`` (REQ-O-028), ``audit-log`` (REQ-O-030), and ``completion``."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from ._atomic import write_atomic
 from ._auth import Expired
 from ._cache import cache_dir
 from ._changelog import ChangelogEntry, version_key
+from ._completion import COMPLETION_PATH, Shell, script, tree
 from ._config import local_config, user_config
 from ._context import Ctx
 from ._declare import SideEffect, SideEffectType
@@ -37,9 +38,10 @@ from ._deps import (
 )
 from ._effect import Affects
 from ._errors import CliExit, ParseError
-from ._flags import Flag
+from ._flags import Arg, Flag
 from ._idempotency import state_dir
 from ._journal import AuditLog, entry_time, log_path, parse_since, read_entries
+from ._mode import Format
 from ._out import Out
 from ._redact import scrub
 from ._session import outputs
@@ -747,3 +749,40 @@ def register_audit_log(app: App, settings: AuditLog) -> CommandPath:
         yield from kept
 
     return AUDIT_LOG_PATH
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionArgs:
+    shell: Literal["bash", "zsh"] = Arg(description="The shell to complete in")
+
+
+@dataclass(frozen=True, slots=True)
+class Completion:
+    shell: str
+    script: str
+    """Source it, or save it where the shell loads completions"""
+
+
+def register_completion(app: App) -> CommandPath:
+    source = f"source <({app.name} completion bash --format plain)"
+    saved = f"{app.name} completion zsh --format plain > ~/.zfunc/_{app.name}"
+
+    @app.command(
+        COMPLETION_PATH.value,
+        description="Print a shell completion script generated from the manifest: commands, "
+        "flags, and the values of enum and path arguments; --format plain prints the script "
+        "alone",
+        danger_level="safe",
+        exit_codes=(),
+        renderers={Format.PLAIN: lambda data: data["script"]},
+        examples=[
+            ("Complete in this bash session", source),
+            ("Install for zsh, with ~/.zfunc on fpath", saved),
+        ],
+    )
+    def completion(args: CompletionArgs, ctx: Ctx) -> Completion:
+        shell = Shell(args.shell)
+        built = tree(app.manifest(), app._groups)
+        return Completion(shell.value, script(app.name, app.version, built, shell))
+
+    return COMPLETION_PATH

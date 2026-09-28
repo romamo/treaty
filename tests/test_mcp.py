@@ -155,6 +155,7 @@ def test_call_reports_validation_errors_and_unknown_commands() -> None:
     assert unknown.error.context["available"] == [
         "audit-log",
         "cleanup",
+        "completion",
         "doctor",
         "generate-skills",
         "log.tail",

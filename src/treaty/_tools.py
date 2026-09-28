@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ._command import Command, DangerLevel
+from ._completion import COMPLETION_PATH
 from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._manifest import payload_schema
 from ._schema import JsonSchema
@@ -107,10 +108,11 @@ def output_schema(command: Command) -> JsonSchema:
 
 
 def tool_entries(app: App) -> list[ToolEntry]:
-    """Every command except ``exec``, in path order"""
+    """Every command except ``exec`` and the ``completion`` built-in, a script for a shell
+    rather than a tool, in path order"""
     entries: list[ToolEntry] = []
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
-        if path == EXEC_PATH:
+        if path == EXEC_PATH or (path == COMPLETION_PATH and path in app.builtins):
             continue
         entries.append(
             ToolEntry(

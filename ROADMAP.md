@@ -219,6 +219,9 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `framework_version` is treaty's version. `1.0.0rc1` and `1.0.0rc2` tagged 2026-09-28. Open: the consumer ports,
   the rc soak, and the `1.0.0` tag, which need real consumers
 
+- Shell completion: the `completion` built-in prints a static bash or zsh script
+  generated from the manifest. Open: fish, and PowerShell for Windows
+
 ## 0.1.x: after the first minor release
 
 0.1.0 shipped Level 1 and Level 2 of the spec (see `COMPLIANCE.md`). Still open:
@@ -269,7 +272,6 @@ matching audit rule so adoption never requires reading the spec.
   `_schema.py` so a `BaseModel` can serve as args or output type. First adapter to build
   when the extras are revisited
 - **rich adapter** (`treaty[rich]`): terminal rendering only, never a `--format` value. Low value
-- Shell completion generated from the manifest
 - Windows CI: signals are POSIX-only in the tests; the daemon-thread timeout already works
   there
 - Benchmark: `benchmark/README.md` compares argparse, click, and treaty builds of the same

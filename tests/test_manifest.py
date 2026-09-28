@@ -21,6 +21,7 @@ def test_manifest_validates_against_spec(app: App) -> None:
     assert set(manifest["commands"]) == {
         "audit-log",
         "cleanup",
+        "completion",
         "doctor",
         "generate-skills",
         "manifest",

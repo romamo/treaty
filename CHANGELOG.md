@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `completion` built-in: `<app> completion bash` or `zsh` prints a completion script
+  generated from the manifest, covering commands, nested groups, flags, and the values of
+  enum and path flags and positionals, `--flag=value` included. The script is static, so a
+  tab press runs no Python. It yields to an app command named `completion`, and MCP serves
+  no tool for it. Every app lists one more command, so every manifest etag changes once
+
 ## [1.0.0rc2] - 2026-09-28
 
 The second 1.0 release candidate: native `async def` handlers, cooperative deadlines, and

@@ -38,6 +38,7 @@ which serves any treaty app's commands as MCP tools over stdio.
 - `treaty changelog-add`: Record the manifest changes since the last snapshot in the app's schema changelog, then update the snapshot
 - `treaty check-docs`: Check agent docs against the app: the declared version, AGENTS.md's sections, and every command, flag, and variable they name against --help
 - `treaty cleanup`: Remove the temp, cache, and log paths the tool's commands declare in filesystem_side_effects, its caches, and the output files commands handed out
+- `treaty completion`: Print a shell completion script generated from the manifest: commands, flags, and the values of enum and path arguments; --format plain prints the script alone
 - `treaty conformance`: Write a conformance profile from the registry and optionally run the spec kit
 - `treaty doctor`: Check the tool's dependencies, the programs its commands run, its state and config directories, and the app's own checks; exit 4 with DOCTOR_CHECKS_FAILED lists a fix for each failure
 - `treaty exec`: Dispatch JSONL DispatchRequest lines from stdin in-process

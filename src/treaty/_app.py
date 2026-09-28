@@ -55,6 +55,7 @@ from ._builtins import (
     register_audit_log,
     register_changelog,
     register_cleanup,
+    register_completion,
     register_doctor,
     register_generate_skills,
     register_mcp_validate,
@@ -367,9 +368,9 @@ class App:
         built-in (REQ-O-029).
 
         ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
-        ``mcp-validate``, and ``audit-log`` are built-ins that yield: an app command or
-        group of the same name replaces it (13-D1). ``manifest``, ``version``, and ``exec``
-        are reserved."""
+        ``mcp-validate``, ``audit-log``, and ``completion`` are built-ins that yield: an app
+        command or group of the same name replaces it (13-D1). ``manifest``, ``version``, and
+        ``exec`` are reserved."""
         if not name or not version:
             raise RegistrationError("App needs a name and a version")
         try:
@@ -1067,6 +1068,7 @@ class App:
         self._yielding.add(register_status(self))
         self._yielding.add(register_generate_skills(self))
         self._yielding.add(register_mcp_validate(self))
+        self._yielding.add(register_completion(self))
         if self.schema_changelog is not None:
             self._yielding.add(register_changelog(self, self.changelog))
         if self.audit_log is not None:

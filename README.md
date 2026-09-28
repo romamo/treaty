@@ -159,13 +159,25 @@ uv add --editable /path/to/treaty
 
 Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`),
 plus `doctor`, `cleanup`, `status` (see Declarations), `generate-skills`, `mcp-validate`
-(see MCP), and `audit-log` (see Audit log), which yield: an app command or group of the
-same name replaces them, and the `builtin-shadowed` audit rule says so.
+(see MCP), `audit-log` (see Audit log), and `completion`, which yield: an app command or
+group of the same name replaces them, and the `builtin-shadowed` audit rule says so.
 `App(schema_changelog=...)` adds `changelog` (see Schemas).
 
 - `manifest --etag sha256:...` answers exit 0, `data: null`, and `meta.not_modified: true`
   while the manifest is unchanged, on the CLI, in `exec`, and through `App.call`
   (REQ-O-041)
+- `completion bash` or `completion zsh` prints a completion script generated from the
+  manifest: every command and group, every flag, and the values of enum and path flags and
+  positionals. The script is static, so a tab press runs no Python and writes no audit log
+  entry; regenerate it after an upgrade. `--format plain` prints the script alone (off a
+  terminal the answer is the envelope, with the script in `data.script`). MCP serves no
+  `completion` tool:
+
+  ```bash
+  source <(myapp completion bash --format plain)         # this bash session
+  myapp completion zsh --format plain > ~/.zfunc/_myapp  # zsh, ~/.zfunc on fpath
+  ```
+
 - `generate-skills --output-dir skills` writes `CONTEXT.md` and one `SKILL-<command>.md`
   per app command: frontmatter with `name`, `description`, `version`, `command`, and the
   `args` schema (every value JSON, so valid YAML), then at least three examples,
