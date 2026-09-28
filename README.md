@@ -216,10 +216,12 @@ In `exec` and MCP, where stdin is taken, such a command needs `input_file`.
 `--format`, `--help`, `--schema` (alias `--print-schema`), `--output-schema`,
 `--schema-version`, `--stable-output`, `--unmask`, `--no-injection-protection`, and `--max-output` are global: they are accepted anywhere before `--`,
 so a command cannot declare a flag with those names or the short `-h`. The manifest lists
-them once, in its root `flags` map (ManifestResponse 3.0). Names treaty keeps for features
-still to come (`--config`, `--quiet`, `--verbose`, `--fields`, and others, listed in
-`RESERVED_GLOBAL` in `_framework.py`) cannot be field names either, and passing one exits
-`2` with `RESERVED_FLAG`. Every other flag,
+them once, in its root `flags` map (ManifestResponse 3.0). The framework's other
+command flags (`--config`, `--quiet`, `--verbose`, `--debug`, `--fields`, `--cwd`, and the
+rest of `RESERVED_GLOBAL` in `_framework.py`) cannot be field names either: registration
+refuses a field that would never reach the handler. A name reserved before its feature
+lands exits `2` with `RESERVED_FLAG` when passed; every reserved name is implemented today.
+Every other flag,
 including `--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`,
 belongs to a command and goes after the full command path:
 
