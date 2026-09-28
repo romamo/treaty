@@ -216,8 +216,8 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `docs/api.md` with a decision per public item, the `tests/test_public_api.py` snapshot,
   `CHANGELOG.md`, `docs/guide.md`, "Stability" and "Platforms" in the README. Breaking:
   `ExecArgs` unexported, `Ctx` run plumbing and seven `App` helpers private, and
-  `framework_version` is treaty's version. Open: the consumer ports, `1.0.0rc1` and its
-  soak, and the tag, which need real consumers
+  `framework_version` is treaty's version. `1.0.0rc1` tagged 2026-09-28. Open: the consumer ports,
+  the rc soak, and the `1.0.0` tag, which need real consumers
 
 ## 0.1.x: after the first minor release
 

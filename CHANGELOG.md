@@ -10,8 +10,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
-The 1.0 branch: every Level 3 requirement that changes the public API, the additive
-Level 3 work, and the API review. See `plans/1.0/` and `docs/api.md`.
+## [1.0.0rc1] - 2026-09-28
+
+The first 1.0 release candidate: every Level 3 requirement that changes the public API,
+the additive Level 3 work, and the API review. See `plans/1.0/` and `docs/api.md`. The
+package version is PEP 440 (`1.0.0rc1`); `treaty --version` and `meta.tool_version` give its
+semver spelling (`1.0.0-rc.1`), which `App(version=)` requires.
 
 ### Breaking
 
@@ -197,7 +201,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc1...HEAD
+[1.0.0rc1]: https://github.com/romamo/treaty/compare/v0.1.0...v1.0.0rc1
 [0.1.0]: https://github.com/romamo/treaty/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/romamo/treaty/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/romamo/treaty/compare/v0.0.4...v0.0.5

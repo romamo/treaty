@@ -1,6 +1,6 @@
 [project]
 name = "treaty"
-version = "0.1.0"
+version = "1.0.0rc1"
 description = "Zero-dependency Python CLI framework implementing the CLI Agent Spec: manifests, envelopes, typed exit codes"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -8,7 +8,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["cli", "agent", "ai", "manifest", "json", "exit-codes"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
