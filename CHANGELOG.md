@@ -117,6 +117,9 @@ semver spelling (`1.0.0-rc.1`), which `App(version=)` requires.
 - On Windows: `cleanup` and `status` report matched side-effect paths in native form
   instead of mixing `/` and `\`, and a `THIRD_PARTY_STDOUT` warning's `text` ends lines
   with `\n` (its `bytes` still counts what was written)
+- On Windows, the audit log no longer loses an entry or fails `audit-log` when a run
+  rotates it while another reads or appends: a file in use defers the rotation to the
+  next append, and an open that meets a rename retries for up to a second
 - `treaty conformance` refreshes a profile's `command` without a conflict: it is derived
   from the machine (the console script on Windows), not written by hand
 

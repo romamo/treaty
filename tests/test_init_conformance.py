@@ -120,10 +120,11 @@ def test_conformance_refreshes_a_profile_that_differs_only_in_command(
     monkeypatch.chdir(tmp_path)
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     run_cli(["conformance", "examples.deployctl:app"])
-    code, env = run_cli(["conformance", "examples.deployctl:app", "--command", "/opt/dctl"])
+    launcher = str(tmp_path / "dctl")  # absolute on every OS, so kept as given
+    code, env = run_cli(["conformance", "examples.deployctl:app", "--command", launcher])
     assert code == 0 and env["data"]["effect"] == "updated"
     profile = json.loads((tmp_path / "conformance" / "deployctl.json").read_text())
-    assert profile["command"] == ["/opt/dctl"]
+    assert profile["command"] == [launcher]
 
 
 def test_conformance_refuses_to_overwrite_a_differing_profile(tmp_path: Path, monkeypatch) -> None:

@@ -15,11 +15,14 @@ import datetime as dt
 import json
 import os
 import re
+import sys
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from typing import IO
 
 from ._atomic import exclusive
 from ._env import AUDIT_LOG, app_var
@@ -31,6 +34,24 @@ OFF = "off"
 MAX_STRING = 1024
 """Longer strings in an entry are cut, so every line stays short and is written whole"""
 _DAY = 86_400
+_SHARING_VIOLATION = 32
+"""Windows ``ERROR_SHARING_VIOLATION``: another run has the file open, so it cannot move"""
+_IN_USE_SECONDS = 1.0
+"""How long an open on Windows is retried while another run renames the file"""
+
+
+def _while_renamed[T](open_it: Callable[[], T]) -> T:
+    """``open_it()``, retried on Windows for a moment while it is refused with
+    ``PermissionError``: an open that meets a rotation's rename in progress is refused
+    until the rename finishes. A refusal that outlasts the rename is raised."""
+    deadline = time.monotonic() + _IN_USE_SECONDS
+    while True:
+        try:
+            return open_it()
+        except PermissionError:
+            if sys.platform != "win32" or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +165,8 @@ class Journal:
         self._prune_once()
         if self._size() + len(line) > self.settings.max_bytes:
             self._rotate(len(line))
-        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        fd = _while_renamed(lambda: os.open(self.path, flags, 0o600))
         try:
             os.write(fd, line)  # one write: a concurrent run never splits the line
         finally:
@@ -159,20 +181,26 @@ class Journal:
     def _rotate(self, incoming: int) -> None:
         """Shift ``audit.jsonl`` to ``audit.1.jsonl`` and each older file up by one, the
         one past ``keep`` dropped; under a lock, after a re-stat, since another run may
-        have rotated already"""
+        have rotated already. On Windows a file another run has open cannot move: the
+        rotation then waits for the next append, and the shifts done so far stand, oldest
+        first, so no entry is lost."""
         with exclusive(self.path.with_name(self.path.name + ".lock")):
             size = self._size()
             if size == 0 or size + incoming <= self.settings.max_bytes:
                 return
             keep = self.settings.keep
-            for index, stale in _numbered(self.path):
-                if index >= keep:
-                    stale.unlink(missing_ok=True)
-            for index in range(keep - 1, 0, -1):
-                older = rotated(self.path, index)
-                if older.exists():
-                    os.replace(older, rotated(self.path, index + 1))
-            os.replace(self.path, rotated(self.path, 1))
+            try:
+                for index, stale in _numbered(self.path):
+                    if index >= keep:
+                        stale.unlink(missing_ok=True)
+                for index in range(keep - 1, 0, -1):
+                    older = rotated(self.path, index)
+                    if older.exists():
+                        os.replace(older, rotated(self.path, index + 1))
+                os.replace(self.path, rotated(self.path, 1))
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) != _SHARING_VIOLATION:
+                    raise
 
     def _prune_once(self) -> None:
         """REQ-F-042: on the process's first append, delete log files not written for
@@ -233,7 +261,9 @@ def read_entries(path: Path) -> Iterator[dict[str, object] | None]:
     full disk cut short"""
     for file in log_files(path):
         try:
-            handle = open(file, encoding="utf-8", errors="replace")  # noqa: SIM115 - closed below
+            handle: IO[str] = _while_renamed(
+                partial(open, file, encoding="utf-8", errors="replace")
+            )
         except FileNotFoundError:
             continue  # another run rotated it away since the listing
         with handle:
