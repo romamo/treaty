@@ -96,9 +96,32 @@ names the flag and the pattern. The `id-pattern` audit rule warns about `str` fi
 value from stdin, as in `tool get --format id | tool delete --id -`; an array takes one
 item per line, and empty stdin exits `2` with `EMPTY_STDIN`.
 
-Handlers, `cleanup=`, `cursor_check=`, and resource `acquire` are plain `def`: treaty
-runs no event loop, so `async def` is a `RegistrationError` instead of a body that never
-runs.
+A handler may be `async def`, and so may a resource's `acquire` and `release`:
+
+```python
+class Db:
+    @classmethod
+    async def acquire(cls, args: object, ctx: Ctx) -> Db:
+        return cls(await asyncpg.create_pool(DSN))
+
+    async def release(self) -> None:
+        await self.pool.close()
+
+
+@app.command("sync", description="Sync the catalog", danger_level="mutating", exit_codes=())
+async def sync(args: SyncArgs, ctx: Ctx, db: Db) -> Synced:
+    ...
+```
+
+Each run gets one event loop, on a thread of its own, shared by the handler and its
+async resources, so a pool opened in `acquire` works in the handler and closes in
+`release`. At the command's timeout the handler is cancelled, so its `finally` blocks
+run, and the run answers `TIMEOUT`. Tasks the handler started but did not await are
+cancelled and reported in an `UNAWAITED_TASKS` warning. An async resource needs an async
+handler, and a sync resource cannot depend on one. `ctx.http`, `ctx.run`, and `ctx.lock`
+block, so an async handler calls its own async clients instead. Streaming handlers,
+`cleanup=`, `cursor_check=`, and other hooks stay plain `def`: `async def` there is a
+`RegistrationError` instead of a body that never runs.
 
 A `ParseError` or `Exit.ARG_ERROR` raised by a handler or a resource's `acquire` comes
 after user code ran, so it exits `1` with `VALIDATION_AFTER_START` and `phase: execution`,

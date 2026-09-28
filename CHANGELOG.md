@@ -12,6 +12,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Added
 
+- `async def` handlers, and `async def` resource `acquire` and `release` (REQ-F-049): one
+  event loop per run on a thread of its own, cancellation at the timeout, and an
+  `UNAWAITED_TASKS` warning for tasks the handler left running. An async resource needs an
+  async handler; streaming handlers and other hooks stay plain `def`
+
 - `App(version=)` accepts a PEP 440 release with an `a`, `b`, or `rc` pre-release, such
   as `importlib.metadata.version` returns (`1.0.0rc1`); `--version`, `meta.tool_version`,
   and `app.version` give its semver spelling (`1.0.0-rc.1`). `introduced_in=`,

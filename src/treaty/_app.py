@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn, TextIO, cast
 
+from ._aio import Loop, within
 from ._atomic import write_atomic
 from ._auth import (
     OVER_PRIVILEGED,
@@ -1754,6 +1755,8 @@ def _call(
         app._gate(command, ctx)
     if app.init is not None and command.path not in app.builtins and not app.init.initialized(ctx):
         raise init_required(app.name)
+    if command.is_async:
+        return _call_async(command, args, ctx, provided)
     resolver = Resolver(command.resource_graph, args, ctx, provided)
     result = command.handler(args, ctx, *resolver.all(command.resources))
     if inspect.isawaitable(result):
@@ -1768,6 +1771,31 @@ def _call(
     return result
 
 
+def _call_async(
+    command: Command, args: object, ctx: Ctx, provided: Mapping[type, object]
+) -> object:
+    """Run an ``async def`` handler and its resources on a loop of the run's own; the
+    teardown releases async resources on it, then closes it (REQ-F-049)"""
+    loop = Loop()
+    teardown = ctx._teardown
+    if teardown is not None:
+        teardown.add(EVENT_LOOP_HOOK, loop.close, last=True)
+    resolver = Resolver(command.resource_graph, args, ctx, provided, loop)
+    try:
+        return loop.run(
+            within(
+                ctx.remaining,
+                ctx.timeout,
+                lambda: resolver.aall(command.resources),
+                lambda resources: command.handler(args, ctx, *resources),
+                lambda code, message, context: ctx.warn(code, message, **context),
+            )
+        )
+    finally:
+        if teardown is None:
+            loop.close()
+
+
 CLEANUP_FAILED = "CLEANUP_FAILED"
 STATUS_CHARS = 200
 """Longest ``ctx.progress`` status a ``--heartbeat-interval`` line repeats"""
@@ -1776,6 +1804,7 @@ AUDIT_DATA_BYTES = 4096
 """Larger ``data`` is left out of the audit entry, which keeps its size instead"""
 CWD_CHANGED = "CWD_CHANGED"
 SESSION_HOOK = "session temp dir"
+EVENT_LOOP_HOOK = "event loop"
 
 
 def _process_cwd() -> str | None:

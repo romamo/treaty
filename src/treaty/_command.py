@@ -219,6 +219,8 @@ class Command:
     and ``results``, and a failed item exits 3 (REQ-C-009)"""
     id_field: str | None = None
     """The output's primary identifier, which ``--format id`` writes (REQ-O-005)"""
+    is_async: bool = False
+    """The handler is ``async def``: it runs on the run's event loop (REQ-F-049)"""
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -545,6 +547,14 @@ def build_command(
         output_schema = with_replay_effect(output_schema)
     if step_names:
         output_schema = _with_step_fields(output_schema, step_names)
+    graph = resource_graph(resources, str(path), args_type, provided)
+    is_async = inspect.iscoroutinefunction(fn)
+    needs_loop = sorted(s.cls.__qualname__ for s in graph.values() if s.is_async)
+    if needs_loop and not is_async:
+        raise RegistrationError(
+            f"{path}: {', '.join(needs_loop)} acquire or release on an event loop, which "
+            "only an async def handler runs; make the handler async def (REQ-F-049)"
+        )
     return Command(
         path=path,
         handler=fn,
@@ -566,7 +576,7 @@ def build_command(
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
         streaming=streaming,
         resources=resources,
-        resource_graph=resource_graph(resources, str(path), args_type, provided),
+        resource_graph=graph,
         safe_default=safe_default,
         gui_operations=tuple(gui_operations),
         headless_behavior=headless_behavior,
@@ -611,6 +621,7 @@ def build_command(
         recursive_traversal=recursive_traversal,
         batch=batch,
         id_field=id_field,
+        is_async=is_async,
     )
 
 
@@ -991,7 +1002,12 @@ def _check_ctx_calls(
 def _inspect_handler(
     fn: Handler, path: CommandPath, streaming: bool, paginated: bool | None
 ) -> tuple[type, object, tuple[type, ...], bool]:
-    resources = dependency_params(fn, f"{path}: handler")
+    resources = dependency_params(fn, f"{path}: handler", allow_async=True)
+    if streaming and inspect.iscoroutinefunction(fn):
+        raise RegistrationError(
+            f"{path}: a streaming handler is a plain generator; an async def cannot yield "
+            "events to treaty (REQ-F-049)"
+        )
     params = list(inspect.signature(fn).parameters.values())
     hints = typing.get_type_hints(fn)
     args_type = hints.get(params[0].name)

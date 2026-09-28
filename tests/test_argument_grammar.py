@@ -135,16 +135,12 @@ def test_pattern_type_is_refused_where_it_cannot_apply() -> None:
             return {}
 
 
-# REQ-F-049: treaty's handlers are sync by design (04-D4), so async is what it refuses
+# REQ-F-049: handlers and resources may be async def (tests/test_async_handlers.py);
+# every other callable treaty invokes must be plain, or its body would never run
 
 
-def test_an_async_handler_produces_a_framework_registration_error() -> None:
+def test_an_async_callable_treaty_never_awaits_produces_a_registration_error() -> None:
     app = App("aio", version="1.0.0")
-    with pytest.raises(RegistrationError, match="async def"):
-
-        @app.command("go", description="Go", danger_level="safe", exit_codes=())
-        async def go(args: NoArgs, ctx: Ctx) -> dict[str, str]:
-            return {}
 
     async def later() -> None:
         return None
@@ -160,7 +156,7 @@ def test_an_async_handler_produces_a_framework_registration_error() -> None:
         async def acquire(cls, args: object, ctx: Ctx) -> Conn:
             return cls()
 
-    with pytest.raises(RegistrationError, match="acquire: is async def"):
+    with pytest.raises(RegistrationError, match="make the handler async def"):
 
         @app.command("r", description="R", danger_level="safe", exit_codes=())
         def r(args: NoArgs, ctx: Ctx, conn: Conn) -> dict[str, str]:
