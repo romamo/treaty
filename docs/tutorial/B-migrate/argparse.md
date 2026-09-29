@@ -15,6 +15,9 @@ uv run treaty audit examples.tutorial.todo_treaty:app \
   | jq -e '[.data.rules[].findings[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
 ```
 
+In your project the audit reads `uv run treaty audit todo.cli:app`, with your app's import
+path.
+
 The chapter migrates one small CLI, `todo`, from start to finish. The starting point is
 [`examples/tutorial/todo_argparse.py`](../../../examples/tutorial/todo_argparse.py), the
 result is [`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py).
@@ -436,8 +439,8 @@ command.
 | `help=` | `description=` (required on every field) |
 | `set_defaults(func=f)` | the decorated function is the handler |
 | root-parser options | a `kw_only` base dataclass, read by a resource |
-| mutually exclusive group | check in the handler, `raise ParseError(...)`: exit 2 |
-| `parser.error(msg)` | `raise ParseError(msg, context=...)`: exit 2 |
+| mutually exclusive group | `requires=[Excludes("x", prohibited=("y",))]` on the command: exit 2 |
+| `parser.error(msg)` | `raise ParseError(msg, context=...)` in the arguments' `__post_init__`: exit 2; from a handler it exits 1 |
 | `sys.exit(n)` | `raise Exit.NAME(msg, ...)`, declared in `exit_codes=` |
 | `print(...)` | return a dataclass; add a renderer for custom text |
 | `input("Sure?")`, `--yes` | `danger_level="destructive"`, `dry_run`, `--confirm-destructive` |

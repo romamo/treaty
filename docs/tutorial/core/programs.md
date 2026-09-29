@@ -165,8 +165,9 @@ comes from `treaty`, beside `App` and the rest:
   reports `(advice) required-tools [save]: runs 'git' (line 10 of the handler), which
   required_tools does not list, so doctor cannot check it is installed`
 - **`subprocess=`** names the binary, the fields whose values become its arguments, and the
-  fixed arguments its calls pass, here the git subcommands and switches `save` uses across
-  its five calls. A declared field is checked before the handler runs: a value
+  fixed arguments its calls pass, here the git subcommands and the main switches `save`
+  uses. The manifest publishes that list for a reader; treaty checks the fields' values,
+  not the list. A declared field is checked before the handler runs: a value
   with a shell metacharacter, a line break, or a leading `-` exits 2 with
   `SHELL_METACHARACTER`. `--db` is declared because the file name git receives comes from
   it; `--message` is not, since it never becomes an argument

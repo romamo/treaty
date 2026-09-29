@@ -242,7 +242,9 @@ todo list --db tmp/tutorial/todo.json \
   [Choose each command's danger level](core/danger-level.md)
 - **Effect**: the field of a mutating or destructive result that says what changed
 - **Exit code**: 0 is success, 2 an argument error, 1 an unexpected failure, and the other
-  framework codes up to 13 have fixed meanings; an app declares its own from 79 to 125. See
+  framework codes up to 13 have fixed meanings; an app declares its own from 79 to 125.
+  A run ended by a signal exits 130 or 143, and one whose reader closed stdout exits 141,
+  so every command's `--schema` lists those three too. See
   [Declare exit codes](core/exit-codes.md)
 - **Retryable**: an exit code's promise that the identical call may be sent again; only
   codes that changed nothing can make it
@@ -256,3 +258,7 @@ todo list --db tmp/tutorial/todo.json \
   `ctx.timeout`, `ctx.cwd`, and the rest of what treaty offers a handler
 - **Audit findings**: `treaty audit` reports `error`, `warning`, and `advice`; the first two
   fail `--strict`. See [the index](index.md#advice-you-can-leave)
+
+## Next
+
+Back to [Pick a track](index.md#pick-a-track) to start on your CLI.

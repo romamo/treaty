@@ -128,6 +128,11 @@ Redaction works on names and declared secrets. A secret you put in a message str
 `ctx.log(f"using {token}")`, is text like any other: pass values as fields, and name them
 for what they are.
 
+The tests call `import` against the local `feed` server from [Declare network
+commands](network-io.md#step-4-handle-what-the-server-answered); copy them from the "Log
+without touching stdout" part of [`tests/test_tutorial.py`](../../../tests/test_tutorial.py)
+the same way.
+
 **Check:** the logging tests pass: `import` logs only under `--verbose`, a stray `print`
 never reaches stdout, and the `--debug` trace redacts the token
 

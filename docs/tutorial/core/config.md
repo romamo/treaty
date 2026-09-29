@@ -21,6 +21,12 @@ The chapter starts from
 at [`examples/tutorial/todo_config.py`](../../../examples/tutorial/todo_config.py): `import`
 gains a default feed URL from the settings, and a token for feeds that require one.
 
+[Run long work an agent can follow](long-running.md) branches from the same file, so its
+`import-all` is not in this chapter's `todo`. If your `todo` has both, `import_all` calls
+`import_items` directly: give it a `settings: Settings` parameter too, and pass `settings`
+on, or `import-all` crashes with a missing argument while the audit and the tests still
+pass.
+
 ## Running the checks
 
 Run the **Check** commands from the root of a treaty checkout, in order. `todo` runs this
@@ -142,6 +148,17 @@ todo import --cwd tmp/tutorial/project --no-config --show-config \
 
 ## Step 3: Read settings in the handler
 
+`--url` is no longer required, since a setting can stand in for it:
+
+<!-- file: examples/tutorial/todo_config.py -->
+```python
+    url: str | None = Flag(
+        default=None,
+        description="URL of a JSON list of items to add; default feed_url",
+        pattern_type="url",
+    )
+```
+
 A handler asks for the settings by annotating a parameter with the class, as it does for a
 resource:
 
@@ -156,9 +173,10 @@ def import_items(args: Import, ctx: Ctx, store: Store, settings: Settings) -> Im
         )
 ```
 
-A flag the caller passed wins over a setting, so `--url` still picks another feed for one
-call. When neither gives a value, the run exits 4 with `PRECONDITION`, and `fix_required`
-names all three ways to supply one.
+The rest of the handler uses `url` wherever it used `args.url`. A flag the caller passed
+wins over a setting, so `--url` still picks another feed for one call. When neither gives a
+value, the run exits 4 with `PRECONDITION`, and `fix_required` names all three ways to
+supply one.
 
 Use a setting for a value with a sensible default, or one that is missing only by mistake,
 as here, where a clear message says how to supply it. Make a value every call needs a
@@ -210,10 +228,27 @@ log. The caller passes it one of three ways instead:
 | `--token-from-env FEED_TOKEN` | the variable the caller names |
 | `--token-from-file /run/secrets/feed` | the file, without its trailing newline |
 
-The value reaches the handler as the field, like any other. It never comes back out: an
-error about a secret shows it as `[REDACTED]`, `--debug` redacts request headers, and
-`--show-config` redacts a setting whose name marks it as secret. The manifest lists the
-default variable in `secret_env_vars`, so an agent knows which variable to set.
+The value reaches the handler as the field, like any other, and `import` sends it as a
+bearer token:
+
+<!-- file: examples/tutorial/todo_config.py -->
+```python
+    headers = {"Authorization": f"Bearer {args.token}"} if args.token is not None else None
+    response = ctx.http.get(url, headers=headers)
+```
+
+A feed that refuses the token answers 401, which `ctx.http` maps to exit 8, `AUTH_REQUIRED`.
+Declare it on `import`, since that failure is now one it can have:
+
+<!-- file: examples/tutorial/todo_config.py -->
+```python
+    exit_codes=["AUTH_REQUIRED", "FEED_INVALID", "STORE_CORRUPT", "STORE_UNWRITABLE"],
+```
+
+The token never comes back out: an error about a secret shows it as `[REDACTED]`, `--debug`
+redacts request headers, and `--show-config` redacts a setting whose name marks it as
+secret. The manifest lists the default variable in `secret_env_vars`, so an agent knows
+which variable to set.
 
 **Check:** a token on the command line is refused with the two alternatives; a variable that
 is not set is an argument error; a token from a file validates; the schema names
@@ -233,13 +268,14 @@ todo import --schema | jq -e '.data.secret_env_vars == ["TODO_TOKEN"]'
 
 ## Step 6: Test it against a feed that needs the token
 
-`tests/test_tutorial.py` serves a feed that answers only a request carrying the right bearer
-token, and checks the setting and the secret end to end: with `TODO_FEED_URL` and
-`TODO_TOKEN` set, `import` adds the list, and the token appears nowhere in the envelope; with
-the wrong token, the run exits 8, because `import` declares `AUTH_REQUIRED` and `ctx.http`
-maps a 401 to it; with no feed at all, it exits 4. The wrong-token envelope's `error.code` is
-`UNAUTHENTICATED`, not `AUTH_REQUIRED`: an exit code has one name, but the `error.code` under
-it can be more specific, and an agent reads both.
+`tests/test_tutorial.py` serves a feed, like the one in [Declare network
+commands](network-io.md#step-4-handle-what-the-server-answered), that answers only a request
+carrying the right bearer token, and checks the setting and the secret end to end: with
+`TODO_FEED_URL` and `TODO_TOKEN` set, `import` adds the list, and the token appears nowhere
+in the envelope; with the wrong token, the run exits 8, because `import` declares
+`AUTH_REQUIRED` and `ctx.http` maps a 401 to it; with no feed at all, it exits 4. The
+wrong-token envelope's `error.code` is `UNAUTHENTICATED`, not `AUTH_REQUIRED`: an exit code
+has one name, but the `error.code` under it can be more specific, and an agent reads both.
 
 **Check:** the three tests pass
 

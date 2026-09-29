@@ -22,6 +22,10 @@ a hook run on every kind of exit, the checks use
 [`examples/slowctl.py`](../../../examples/slowctl.py), the repository's demo of timeouts and
 cancellation, whose `fetch` command registers one.
 
+`todo` holds nothing past its handler, so in your `todo` project the **Done when** audit is the
+whole chapter. Come back to the steps after it when a command of yours opens a client,
+starts a process, or creates a file that must go away however the run ends.
+
 ## Running the checks
 
 Run the **Check** commands from the root of a treaty checkout, in order. `SLOWCTL_AUDIT_LOG=off`

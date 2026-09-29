@@ -140,6 +140,7 @@ The CI job runs the suite and the gates that need more than a test run:
           uv run treaty agents-md todo.cli:app
           rm -rf skills && uv run todo generate-skills --output-dir skills
           uv run treaty-mcp todo.cli:app --list-tools > mcp-tools.json
+          git add --intent-to-add AGENTS.md skills mcp-tools.json
           git diff --exit-code AGENTS.md skills mcp-tools.json
           uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json
 
@@ -156,7 +157,7 @@ These are the job's steps; the [whole file](../../../examples/tutorial/new_cli/a
 adds the checkout and setup around them. Save it as `.github/workflows/agent-contract.yml`.
 
 - **`git diff --exit-code`** fails the job when a regenerated agent doc differs from the
-  committed one, and the kit step fails with `CONFLICT` when the conformance profile no
+  committed one, or, after `git add --intent-to-add`, when one was never committed, and the kit step fails with `CONFLICT` when the conformance profile no
   longer matches the commands, so the pull request that changed a command also shows what
   changed for agents
 - **The baseline step** is skipped until `todo-1.0.0.json` exists. At each release, save the

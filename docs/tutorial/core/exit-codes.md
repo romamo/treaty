@@ -181,7 +181,9 @@ Registration checks the rules:
 
 - **Numbers are 79 to 125.** `0` to `13` belong to the framework, and `126` and up mean
   something to the shell (`127` is "command not found", `128 + n` is "killed by signal n");
-  any other number is refused when the app is built
+  any other number is refused when the app is built. treaty uses three of those itself, for
+  a run that ends by signal: 130 (`SIGINT`), 143 (`SIGTERM`), and 141 when the reader
+  closed stdout
 - **The description is 1 to 120 characters with no trailing period.** It is what an agent
   reads in the manifest, so say what happened and what state it left
 - **A retryable code must have `side_effects="none"`.** See [Retryable codes](#retryable-codes)
@@ -311,11 +313,13 @@ returns the first result instead of running again.
 Run the audit:
 
 ```bash
-uv run treaty audit examples.tutorial.todo_exit_codes:app --strict
+uv run treaty audit todo.cli:app --strict
 ```
 
-For `todo` it exits 0. The audit still lists two pieces of advice for `add`, which `todo`
-leaves on purpose; [the index](../index.md#advice-you-can-leave) says why.
+For `todo` it exits 0, as it does for this chapter's file,
+`examples.tutorial.todo_exit_codes:app`, in a treaty checkout. The audit still lists two
+pieces of advice for `add`, which `todo` leaves on purpose; [the
+index](../index.md#advice-you-can-leave) says why.
 
 The audit's next rule is `typed-output`, which checks that every command's result has a
 schema an agent can read: [Type every command's output](typed-output.md). Each core chapter

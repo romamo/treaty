@@ -176,9 +176,9 @@ where the command has them. An agent that retries a payload call puts the key in
 
 <!-- check -->
 ```bash
-todo edit --raw-payload '{"id": 1, "priority": "normal", "idempotency_key": "k1", "db": "tmp/tutorial/todo.json"}' \
+todo edit --raw-payload '{"id": 1, "priority": "normal", "idempotency_key": "edit-1", "db": "tmp/tutorial/todo.json"}' \
   | jq -e '.data.effect == "updated"'
-todo edit --raw-payload '{"id": 1, "priority": "normal", "idempotency_key": "k1", "db": "tmp/tutorial/todo.json"}' \
+todo edit --raw-payload '{"id": 1, "priority": "normal", "idempotency_key": "edit-1", "db": "tmp/tutorial/todo.json"}' \
   | jq -e '.data.effect == "noop" and .meta.idempotency_hit'
 ```
 

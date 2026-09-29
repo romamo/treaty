@@ -155,7 +155,7 @@ command's declaration is `list`'s from before, plus one line, `cursor_check=afte
 ```
 
 `after_id` is a function that refuses a cursor the handler could not have issued, before
-the handler runs:
+the handler runs. Define it above the `@app.command` that names it:
 
 <!-- file: examples/tutorial/todo_pages.py -->
 ```python

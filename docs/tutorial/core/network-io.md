@@ -198,6 +198,40 @@ example file, does that check: it parses the body and returns `None` unless it i
 objects with a `text` and a valid `priority`. Parse everything that came over the network
 before acting on any of it.
 
+Test it against a local server, never the real feed. The tutorial's tests start one with
+the standard library and call `import` in-process:
+
+<!-- file: tests/test_tutorial.py -->
+```python
+@pytest.fixture
+def feed(tmp_path: Path) -> Iterator[str]:
+    """A local server for tmp_path/feed: todo.json holds two items, bad.json is not a list"""
+    root = tmp_path / "feed"
+    root.mkdir()
+    items = [{"text": "Buy milk", "priority": "high"}, {"text": "Walk dog", "priority": "normal"}]
+    (root / "todo.json").write_text(json.dumps(items))
+    (root / "bad.json").write_text('{"oops": 1}')
+    handler = functools.partial(_Quiet, directory=str(root))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_import_adds_the_items_at_a_url_marked_untrusted(feed: str, tmp_path: Path) -> None:
+    db = str(tmp_path / "todo.json")
+    env = todo_network.app.call("import", {"url": f"{feed}/todo.json", "db": db}, env={})
+```
+
+In your project, copy the fixture, `_Quiet` above it (a handler that keeps the server's
+request log off the test output), and the tests under "Declare network commands" in
+[`tests/test_tutorial.py`](../../../tests/test_tutorial.py) into `tests/`, and call your
+own `app` where they call `todo_network.app`. The chapters that follow test against the
+same kind of server.
+
 **Check:** against a local server, a list of two items is added, and a 404 or a body that
 is not a list exits 81 and writes no item file
 

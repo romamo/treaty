@@ -29,6 +29,7 @@ jobs:
           uv run treaty agents-md todo.cli:app
           rm -rf skills && uv run todo generate-skills --output-dir skills
           uv run treaty-mcp todo.cli:app --list-tools > mcp-tools.json
+          git add --intent-to-add AGENTS.md skills mcp-tools.json
           git diff --exit-code AGENTS.md skills mcp-tools.json
           uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json
 

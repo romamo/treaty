@@ -15,6 +15,9 @@ uv run treaty audit examples.tutorial.todo_treaty:app \
   | jq -e '[.data.rules[].findings[] | select(.severity == "warning") | .rule] | unique == ["exit-codes"]'
 ```
 
+In your project the audit reads `uv run treaty audit todo.cli:app`, with your app's import
+path.
+
 The chapter migrates one small CLI, `todo`, written both ways:
 [`examples/tutorial/todo_click.py`](../../../examples/tutorial/todo_click.py) and
 [`examples/tutorial/todo_typer.py`](../../../examples/tutorial/todo_typer.py). Both end at

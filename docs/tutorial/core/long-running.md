@@ -203,6 +203,11 @@ needs no marking of its own: each result is an `Imported`, whose `added` field i
 carries `"_trusted": false` and the run adds an `UNTRUSTED_CONTENT` warning, also when some
 feeds failed and the run exits 3, since the ones that worked are still in `data`.
 
+To test your own `import-all`, copy the `feeds` fixture and the `import_all` tests from
+[`tests/test_tutorial.py`](../../../tests/test_tutorial.py): a server like the one in
+[Declare network commands](network-io.md#step-4-handle-what-the-server-answered), with
+feeds that answer slowly or not at all.
+
 **Check:** the tests for this chapter pass: a good and a broken feed, tagged as external
 though one failed; three slow feeds under a short limit; and the tags on a full success
 

@@ -155,6 +155,9 @@ uv tool install --reinstall /path/to/treaty
 uv add --editable /path/to/treaty
 ```
 
+The [tutorial](docs/tutorial/index.md) takes a CLI, new or migrated from argparse, click, or
+typer, through every audit rule to a tested, documented release.
+
 ## Built-ins
 
 Every app gets `manifest`, `version`, and `exec` (disable with `App(..., enable_exec=False)`),

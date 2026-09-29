@@ -116,7 +116,9 @@ grep -qx '## Data' tmp/tutorial/AGENTS.md
 
 `check-docs` reads the whole file, your sections included, and checks every command, flag,
 and environment variable it names against the app's `--help`, and the version line against
-`--version`:
+`--version`. It also renders the sections between the markers as `agents-md` would now and
+compares them with the file's, so a command or variable added since the file was written
+fails too:
 
 ```bash
 uv run treaty check-docs myapp.cli:app AGENTS.md
@@ -138,9 +140,8 @@ never reads (`TODO_DB`), and a version line left behind by a release. The hint s
 do: regenerate for the sections treaty writes, and edit your own sections by hand, since
 treaty never rewrites text outside the markers.
 
-What `check-docs` does not judge is prose: a description that says the wrong thing in the
-right words passes. Regenerating and reviewing the diff, in [Step 6](#step-6-gate-ci-on-all-three),
-covers that for the generated sections.
+In your own sections, `check-docs` judges names, not prose: a tip that says the wrong thing
+in the right words passes. Read those sections when a command's behaviour changes.
 
 **Check:** the file passes as written, and a copy with a stale flag fails with exactly that
 flag
@@ -154,6 +155,19 @@ echo 'Skip the preview with `todo purge --yes`.' >> tmp/tutorial/drifted.md
 uv run treaty check-docs examples.tutorial.todo_exit_codes:app tmp/tutorial/drifted.md \
   | jq -e '.meta.exit_code == 81 and .error.code == "DOCS_OUT_OF_DATE"
     and [.data.mismatches[] | [.kind, .name]] == [["flag", "--yes"]]'
+```
+
+**Check:** an AGENTS.md written before `import` existed fails once the app has it, though
+every name in the file is still valid
+
+<!-- check -->
+```bash
+mkdir -p tmp/tutorial/grown
+cp examples/tutorial/todo_exit_codes.py tmp/tutorial/grown/todo.py
+uv run treaty agents-md todo:app --cwd tmp/tutorial/grown > /dev/null
+cp examples/tutorial/todo_network.py tmp/tutorial/grown/todo.py
+uv run treaty check-docs todo:app AGENTS.md --cwd tmp/tutorial/grown \
+  | jq -e '[.data.mismatches[] | [.kind, .name]] == [["section", "Canonical Invocation"]]'
 ```
 
 ## Step 4: Generate the skill files
@@ -237,9 +251,10 @@ todo mcp-validate --mcp-schema-file tmp/tutorial/mcp-tools-old.json | jq -e '.me
 
 ## Step 6: Gate CI on all three
 
-Two kinds of check cover the docs. `check-docs` and `mcp-validate` fail when a name the
-docs use no longer exists; regenerating and diffing fails when anything treaty writes has
-changed at all, descriptions included, and shows the change in the pull request. Below,
+Two kinds of check cover the docs. `check-docs` fails when a name the docs use no longer
+exists or AGENTS.md's generated sections are out of date, and `mcp-validate` when a tool
+changed; regenerating and diffing fails when anything treaty writes has changed at all, in
+the skill files and the tool list too, and shows the change in the pull request. Below,
 `myapp` is your CLI's command and `myapp.cli:app` the import path of its `App`:
 
 ```bash
@@ -249,12 +264,14 @@ uv run myapp mcp-validate --mcp-schema-file mcp-tools.json
 uv run treaty agents-md myapp.cli:app
 rm -rf skills && uv run myapp generate-skills --output-dir skills
 uv run treaty-mcp myapp.cli:app --list-tools > mcp-tools.json
+git add --intent-to-add AGENTS.md skills mcp-tools.json
 git diff --exit-code AGENTS.md skills mcp-tools.json
 ```
 
 `generate-skills` writes a file per command and never deletes one, so the `rm -rf skills`
 first: after a rename, the old command's skill file would stay behind and still pass the
-diff.
+diff. `git diff` ignores files git does not track, so `git add --intent-to-add` first: a new
+command's skill file, never committed, then shows up in the diff and fails it.
 
 A project made with `treaty init` already has the first of these as a test,
 `tests/test_agents_md.py`, so `uv run pytest` fails as soon as AGENTS.md drifts; the
