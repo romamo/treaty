@@ -230,6 +230,22 @@ def _item_type(tp: object) -> object:
     return base
 
 
+def declares_external(tp: object, seen: frozenset[type] = frozenset()) -> bool:
+    """Some dataclass in the output type has an ``Out(external=True)`` field, so ``data``
+    may carry the trust tags and its schema must list them"""
+    base, _ = strip_optional(resolve_alias(tp))
+    if any(declares_external(arg, seen) for arg in typing.get_args(base) if arg is not Ellipsis):
+        return True
+    if not is_dataclass_type(base) or base in seen:
+        return False
+    assert isinstance(base, type)
+    hints = typing.get_type_hints(base)
+    return any(
+        out_spec(f).external or declares_external(hints[f.name], seen | {base})
+        for f in dataclasses.fields(base)
+    )
+
+
 def check_trust(tp: object, where: str, *, external: bool) -> None:
     """Trust tags need an object to go on, and a name no output field takes"""
     item = _item_type(tp)

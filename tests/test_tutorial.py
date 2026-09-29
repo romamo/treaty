@@ -787,3 +787,18 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
     assert body("purged")["data"]["effect"] == "deleted"
     # A relative path resolves against the server's working directory, not the caller's
     assert body("relative")["ok"] is True and (tmp_path / "rel.json").is_file()
+
+
+def test_external_results_match_their_output_schema(feed: str, feeds: str, tmp_path: Path) -> None:
+    """Out(external=True) tags data; the schema lists the tags, or an MCP client that
+    validates structured content refuses the result"""
+    db = str(tmp_path / "todo.json")
+    for tool, name, args in (
+        (todo_network.app, "import", {"url": f"{feed}/todo.json", "db": db}),
+        (todo_batch.app, "import-all", {"urls": [f"{feeds}/a", f"{feeds}/bad"], "db": db}),
+    ):
+        env = tool.call(name, args, env={})
+        assert isinstance(env.data, dict) and env.data["_trusted"] is False
+        commands = tool.manifest()["commands"]
+        assert isinstance(commands, dict)
+        jsonschema.validate(env.data, commands[name]["output_schema"])

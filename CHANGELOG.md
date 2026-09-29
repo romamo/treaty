@@ -69,6 +69,19 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- A command whose output had an `Out(external=True)` field tagged `data` with `_source` and
+  `_trusted`, but its output schema did not list them, so an MCP client that validates
+  structured content refused every result. The schema now lists the tags wherever the
+  runtime puts them: on `data` as served, after a batch or job wrapper, and in compat
+  shims' schemas
+- The `network-io` rule scanned only the handler; it now scans the resources the handler
+  takes too, where a migrated CLI's HTTP client usually sits
+- An enum or `Literal` field named like a secret, such as a positional `key`, was inferred
+  a secret and refused; an enum's values are public, so it no longer is, and the
+  positional-secret error offers `secret=False`
+- The `paginated-list` rule warns when a paged list command keeps its own `--page`,
+  `--offset`, or `--per-page`: `meta.pagination` then says `has_more: false` while the
+  source has more
 - `delete-not-found` fired on every destructive command with `NOT_FOUND`, such as a
   restore from a missing snapshot; it now applies to commands whose output admits
   `deleted`, or, without an effect enum, whose name is a delete verb (`delete`, `remove`,

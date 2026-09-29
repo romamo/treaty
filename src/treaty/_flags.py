@@ -172,10 +172,11 @@ class FieldInfo:
 
     @property
     def secret(self) -> bool:
-        """Declared or name-inferred; a boolean can never be a secret"""
+        """Declared or name-inferred; a boolean can never be a secret, and an enum's values
+        are public, so neither is inferred one"""
         if self.spec.secret is not None:
             return self.spec.secret
-        if self.flag_type is FlagType.BOOLEAN:
+        if self.flag_type in (FlagType.BOOLEAN, FlagType.ENUM):
             return False
         return secret_name(self.name)
 
@@ -468,7 +469,8 @@ def _check_secret_field(cls: type, info: FieldInfo) -> None:
     if info.positional:
         raise RegistrationError(
             f"{where}: {how}; secrets cannot be positional, declare it with "
-            f"Flag(...) to get --{info.env_flag} and --{info.file_flag} (REQ-C-016)"
+            f"Flag(...) to get --{info.env_flag} and --{info.file_flag}, or pass "
+            "secret=False when it holds no secret (REQ-C-016)"
         )
     if info.flag_type in (FlagType.BOOLEAN, FlagType.ARRAY):
         raise RegistrationError(

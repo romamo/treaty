@@ -272,3 +272,21 @@ def test_a_multiline_positional_is_suggested_as_an_arg_and_accepts_newlines() ->
     assert not any(
         r.findings for r in audit(fixed, "y:app", limit=3).rules if r.id == "multiline-flag"
     )
+
+
+def test_an_enum_named_like_a_secret_stays_a_plain_argument() -> None:
+    """The values of a Literal are public, so a positional `key` of them is not a secret"""
+    from typing import Literal
+
+    @dataclass(frozen=True, slots=True)
+    class Set:
+        key: Literal["url", "token"] = Arg(description="Setting to change")
+
+    app = App("x", version="1.0.0")
+
+    @app.command("set", description="Set", exit_codes=(), danger_level="safe")
+    def set_(args: Set, ctx: Ctx) -> dict[str, str]:
+        return {"key": args.key}
+
+    env = app.call("set", {"key": "token"}, env={})
+    assert env.ok and env.data == {"key": "token"}

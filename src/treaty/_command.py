@@ -35,7 +35,7 @@ from ._jobs import Job, descriptor_schema
 from ._mode import Format
 from ._out import NO_ORDER, OutSpec, check_order
 from ._page import DEFAULT_LIMIT, Limit, Page
-from ._protect import check_trust, with_trust_tags
+from ._protect import check_trust, declares_external, with_trust_tags
 from ._resources import ResourceSpec, dependency_params, refuse_async, resource_graph
 from ._retry import Retry
 from ._rules import BoundRule, bind_rules
@@ -536,9 +536,11 @@ def build_command(
     if external is not None and not isinstance(external, bool):
         raise RegistrationError(f"{path}: external is True, False, or None (undeclared)")
     check_trust(output_type, str(path), external=bool(external))
-    if external:
-        output_schema = with_trust_tags(output_schema)
-    shims = _compat(path, compat or {}, schema_version, output_type, scalars)
+    # A field's Out(external=True) tags data too, and the tags go on data as served, after
+    # any batch or job wrapper: a schema without them fails a client that validates
+    # structured content, as MCP clients do
+    trust_tags = bool(external) or declares_external(output_type)
+    shims = _compat(path, compat or {}, schema_version, output_type, scalars, trust_tags)
     for shim in shims:
         # An older shape still answers the same contracts, or every pinned call fails
         # after the handler has run
@@ -561,6 +563,8 @@ def build_command(
         output_schema = with_replay_effect(output_schema)
     if step_names:
         output_schema = _with_step_fields(output_schema, step_names)
+    if trust_tags:
+        output_schema = with_trust_tags(output_schema)
     graph = resource_graph(resources, str(path), args_type, provided)
     is_async = inspect.iscoroutinefunction(fn)
     needs_loop = sorted(s.cls.__qualname__ for s in graph.values() if s.is_async)
@@ -822,6 +826,7 @@ def _compat(
     current: SchemaVersion,
     output_type: object,
     scalars: ScalarRegistry,
+    trust_tags: bool,
 ) -> tuple[Compat, ...]:
     """``compat={"1.4": to_v1}``: each shim takes the command's output and returns the
     older shape, whose schema ``--output-schema`` shows when that major is pinned"""
@@ -852,7 +857,10 @@ def _compat(
                 "object, array, or null, for its output schema"
             )
         check_order(returned, f"{path}: compat[{key!r}]")
-        out.append(Compat(version, shim, returned, schema_for(returned, scalars, output=True)))
+        schema = schema_for(returned, scalars, output=True)
+        if trust_tags or declares_external(returned):
+            schema = with_trust_tags(schema)
+        out.append(Compat(version, shim, returned, schema))
     return tuple(sorted(out, key=lambda c: c.version.key))
 
 

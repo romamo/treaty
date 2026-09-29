@@ -217,6 +217,9 @@ def _typed_output(app: App) -> Iterator[Finding]:
             )
 
 
+_OWN_PAGING = frozenset({"page", "offset", "per_page", "page_size", "page_number", "skip"})
+
+
 def _paginated_list(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.output_schema.get("type") == "array" and not (c.paginated or c.streaming):
@@ -228,25 +231,46 @@ def _paginated_list(app: App) -> Iterator[Finding]:
                 "--limit, --cursor, or meta.pagination (REQ-F-018, REQ-F-019)",
                 "drop paginated=False unless the list is small and bounded by design",
             )
+        own = sorted(f.flag for f in c.fields if f.name in _OWN_PAGING)
+        if c.paginated and own:
+            # The framework's --limit and --cursor page what the handler returns; a page flag
+            # of its own picks a page before that, which meta.pagination knows nothing of
+            yield Finding(
+                "paginated-list",
+                Severity.WARNING,
+                c.path.value,
+                f"--{own[0]} pages the list itself, beside the framework's --limit and "
+                "--cursor, so meta.pagination describes only the page it was given and says "
+                "has_more: false while more remain (REQ-F-019)",
+                f"drop --{own[0]}: return a Page with next_cursor from the source's own "
+                "continuation, or paginated=False to keep your paging and lose meta.pagination",
+            )
 
 
 def _network_io(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.has_network_io:
             continue
-        try:
-            source = inspect.getsource(c.handler)
-        except OSError, TypeError:
-            continue  # no source to scan (REPL, exec, C extension); the heuristic cannot apply
-        if _NETWORK_HINTS.search(source):
-            yield Finding(
-                "network-io",
-                Severity.WARNING,
-                c.path.value,
-                "handler source mentions a network library "
-                "but has_network_io is not declared (heuristic)",
-                "has_network_io=True, then pass ctx.timeout.seconds to every network call",
-            )
+        # A migrated CLI often keeps its HTTP client in a resource, as ctx.obj was
+        where: list[tuple[str, Callable[..., object] | type]] = [
+            ("handler", c.handler),
+            *((f"resource {r.__name__}", r) for r in c.resources),
+        ]
+        for label, code in where:
+            try:
+                source = inspect.getsource(code)
+            except OSError, TypeError:
+                continue  # no source to scan (REPL, exec, C extension); the heuristic cannot apply
+            if _NETWORK_HINTS.search(source):
+                yield Finding(
+                    "network-io",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"{label} source mentions a network library "
+                    "but has_network_io is not declared (heuristic)",
+                    "has_network_io=True, then pass ctx.timeout.seconds to every network call",
+                )
+                break
 
 
 # Calls that open a connection and take timeout=: by name, and the request verbs of

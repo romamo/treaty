@@ -316,3 +316,56 @@ def test_external_false_acknowledges_a_network_command_that_returns_computed_val
             return Count(1)
 
     assert _findings(app, "external-data") == ["count"]
+
+
+def test_network_io_scans_the_resources_a_handler_uses() -> None:
+    """A migrated CLI keeps its HTTP client in a resource, where ctx.obj used to be"""
+    import urllib.request
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Client:
+        base: str
+
+        @classmethod
+        def acquire(cls, args: NoArgs, ctx: Ctx) -> Client:
+            return cls("https://example.com")
+
+        def get(self, path: str) -> bytes:
+            with urllib.request.urlopen(self.base + path, timeout=5) as response:
+                return bytes(response.read())
+
+    app = App("x", version="1.0.0")
+
+    @app.command("show", description="Show it", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx, client: Client) -> dict[str, int]:
+        return {"size": len(client.get("/"))}
+
+    report = audit(app, "x:app", limit=3)
+    [finding] = [f for r in report.rules if r.id == "network-io" for f in r.findings]
+    assert finding.command == "show" and "resource Client" in finding.message
+
+
+def test_a_list_that_keeps_its_own_page_flag_is_warned() -> None:
+    """meta.pagination would say has_more: false while the API has more pages"""
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, Flag, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Paged:
+        page: int = Flag(default=1, description="API page")
+
+    app = App("x", version="1.0.0")
+
+    @app.command("issues", description="List issues", danger_level="safe", exit_codes=())
+    def issues(args: Paged, ctx: Ctx) -> list[dict[str, int]]:
+        return [{"id": args.page}]
+
+    @app.command("tags", description="List tags", danger_level="safe", exit_codes=())
+    def tags(args: NoArgs, ctx: Ctx) -> list[dict[str, int]]:
+        return [{"id": 1}]
+
+    assert _findings(app, "paginated-list") == ["issues"]
