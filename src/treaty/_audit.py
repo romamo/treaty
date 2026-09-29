@@ -181,33 +181,43 @@ def _describe(app: App) -> Iterator[Finding]:
 # field's --<name>-from-env and --<name>-from-file, which name a variable or a file
 _WORLD_FLAGS = ("--cwd", "--input-file", "--config")
 _WRAPPERS = (("uv", "run"), ("uvx",), ("sudo",))
+_PLACEHOLDER = re.compile(r"<[A-Za-z][\w-]*>")
 
 
 def _example_problem(app: App, command: Command, example: str) -> str | None:
     """Why an example fails ``--validate-only``, or None when it parses or cannot be judged
     here. Phase 1 only: no handler, no idempotency store, the audit log off, and an empty
-    stdin. What depends on the caller's world (a variable, a file, a directory, piped
-    input, a shell pipeline or redirect) is left out: only the spelling is checked"""
+    stdin. What depends on the caller's world is stood in for or left out: a secret's
+    variable or file reads a dummy value, ``--cwd``, ``--input-file``, and ``--config`` are
+    dropped, and a pipeline or redirect is not judged. Only the spelling is checked"""
+    placeholder = _PLACEHOLDER.search(example)
+    if placeholder is not None:
+        # <id> would read as a redirect below; it is a value the agent cannot use as is
+        return f"{placeholder.group()} is a placeholder; write a real value"
     lexer = shlex.shlex(example, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    lexer.commenters = ""  # a # inside a word, as in owner/repo#12, is part of it
     words = list(lexer)
-    if any(set(w) <= set("|&;<>()") for w in words):
+    comment = next((n for n, w in enumerate(words) if w.startswith("#")), len(words))
+    words = words[:comment]
+    if any(w and set(w) <= set("|&;<>()") for w in words):
         return None  # a pipeline, a redirect, or a list of commands: the shell's, not ours
+    env = {app_var(app.name, AUDIT_LOG.key): "off"}
     while words and "=" in words[0] and not words[0].startswith("-"):
-        words = words[1:]  # VAR=value before the command
+        key, _, value = words[0].partition("=")
+        env[key] = value  # VAR=value before the command sets it for the call
+        words = words[1:]
     for wrapper in _WRAPPERS:
         if tuple(words[: len(wrapper)]) == wrapper:
             words = words[len(wrapper) :]
     if not words or words[0].rsplit("/", 1)[-1] != app.name or "-" in words:
         return None
-    if {"--help", "-h", "--version"} & set(words):
-        return None
-    sources = {
-        f"--{f.flag}{suffix}"
-        for f in command.fields
-        if f.secret
-        for suffix in ("-from-env", "-from-file")
+    own = {f"--{f.flag}" for f in command.fields} | {
+        f"-{f.spec.short}" for f in command.fields if f.spec.short
     }
+    if ({"--help", "-h", "--version"} - own) & set(words):
+        return None
+    secret = {f"--{f.flag}" for f in command.fields if f.secret}
     argv: list[str] = []
     rest = iter(words[1:])
     for word in rest:
@@ -215,16 +225,25 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
             argv.append(word)
             argv.extend(rest)
             break
-        name = word.split("=", 1)[0]
-        if name in _WORLD_FLAGS or name in sources:
-            if "=" not in word:
+        name, eq, given = word.partition("=")
+        inline = given if eq else None
+        if name in _WORLD_FLAGS:
+            if inline is None:
                 next(rest, None)
+            continue
+        base = name.removesuffix("-from-env").removesuffix("-from-file")
+        if base != name and base in secret:
+            # The variable or file is the caller's: a dummy variable stands in for either
+            if inline is None:
+                next(rest, None)
+            dummy = f"TREATY_EXAMPLE_{base.lstrip('-').replace('-', '_').upper()}"
+            env[dummy] = "example"
+            argv += [f"{base}-from-env", dummy]
             continue
         argv.append(word)
     at = argv.index("--") if "--" in argv else len(argv)
     argv[at:at] = ["--validate-only"]
     out, err = io.StringIO(), io.StringIO()
-    env = {app_var(app.name, AUDIT_LOG.key): "off"}
     code = app.run(argv, stdout=out, stderr=err, stdin=io.StringIO(""), env=env)
     if code == 0:
         return None
@@ -233,8 +252,12 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
     except ValueError:
         text = err.getvalue().strip()
         return text.splitlines()[0] if text else f"exit {code}"
-    each = [str(e.get("message")) for e in error.get("errors") or [] if isinstance(e, dict)]
-    return "; ".join(each) if each else str(error.get("message", f"exit {code}"))
+    each = [
+        str(e["message"]).rstrip(".")
+        for e in error.get("errors") or []
+        if isinstance(e, dict) and e.get("message")
+    ]
+    return "; ".join(each) if each else str(error.get("message") or f"exit {code}")
 
 
 def _danger_level(app: App) -> Iterator[Finding]:
@@ -436,7 +459,10 @@ def _absolute(code: Callable[..., object] | type, node: ast.ImportFrom) -> str |
     package = getattr(sys.modules.get(getattr(code, "__module__", "") or ""), "__package__", None)
     if not package:
         return None
-    return importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+    try:
+        return importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+    except ImportError:
+        return None  # beyond the top-level package: an import that never runs
 
 
 def _calls_network(code: Callable[..., object] | type) -> bool:
@@ -1804,9 +1830,20 @@ def retries_by_hand(handler: Callable[..., object]) -> bool:
         if not any(_sleeps(handler, n) for n in inner):
             continue
         for attempt in (n for n in inner if isinstance(n, ast.Try)):
-            leaves = [m for part in (*attempt.body, *attempt.orelse) for m in ast.walk(part)]
-            if any(isinstance(m, (ast.Return, ast.Break)) for m in leaves):
+            if _exits_on_success([*attempt.body, *attempt.orelse]):
                 return True
+    return False
+
+
+def _exits_on_success(statements: list[ast.stmt]) -> bool:
+    """A ``return`` or ``break`` that runs whenever these statements do: directly among
+    them, or inside a ``with``. One behind an ``if``, in a nested loop, or in a nested
+    function is a poller's or a search's, not an attempt's"""
+    for statement in statements:
+        if isinstance(statement, (ast.Return, ast.Break)):
+            return True
+        if isinstance(statement, (ast.With, ast.AsyncWith)) and _exits_on_success(statement.body):
+            return True
     return False
 
 

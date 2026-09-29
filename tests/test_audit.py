@@ -746,7 +746,7 @@ def test_every_suggested_example_passes_the_example_check() -> None:
     @dataclass(frozen=True, slots=True)
     class Wide:
         id: int = Arg(description="Id")
-        version: str = Flag(description="Version", pattern_type="semver")
+        release: str = Flag(description="Release", pattern_type="semver")
         home: str = Flag(description="Home", pattern_type="url")
         uid: str = Flag(description="Uid", pattern_type="uuid")
         slug: str = Flag(description="Slug", pattern_type="alphanumeric_id")
@@ -768,8 +768,10 @@ def test_every_suggested_example_passes_the_example_check() -> None:
     suggested = regex.search(r'"(adv [^"]+)"', finding.fix)
     assert suggested is not None
     from treaty._audit import _example_problem
+    from treaty._values import CommandPath
 
-    command = next(iter(c for c in app.commands.values()))
+    command = app.commands[CommandPath("w")]
+    assert "--api-token-from-env" in suggested.group(1)
     assert _example_problem(app, command, suggested.group(1)) is None, suggested.group(1)
 
 
@@ -831,3 +833,150 @@ def test_retry_needs_an_exit_on_success_from_inside_the_try() -> None:
             time.sleep(0)
 
     assert _findings(app, "retry-declared") == ["backoff", "forever"]
+
+
+def test_a_placeholder_in_an_example_is_an_error_not_a_redirect() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Arg, Ctx
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        id: int = Arg(description="Id")
+
+    @dataclass(frozen=True, slots=True)
+    class Add:
+        text: str = Arg(description="Text")
+
+    app = App("todo", version="1.0.0")
+
+    @app.command(
+        "done",
+        description="Done",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[("x", "todo done <id>")],
+    )
+    def done(args: Done, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    @app.command(
+        "add",
+        description="Add",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[("x", 'todo add "<text>"')],
+    )
+    def add(args: Add, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    report = audit(app, "x:app", limit=3)
+    errors = [f for r in report.rules if r.id == "describe" for f in r.findings]
+    assert sorted(f.command for f in errors) == ["add", "done"]
+    assert all("placeholder" in f.message for f in errors)
+
+
+def test_the_example_check_keeps_hash_words_and_judges_secrets_and_own_version_flags() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Arg, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class View:
+        ref: str = Arg(description="Issue", pattern=r"[\w-]+/[\w-]+#\d+")
+
+    @dataclass(frozen=True, slots=True)
+    class Login:
+        api_token: str = Flag(description="Token")
+
+    @dataclass(frozen=True, slots=True)
+    class Release:
+        version: str = Flag(description="Version", pattern_type="semver")
+
+    app = App("adv", version="1.0.0")
+
+    @app.command(
+        "view",
+        description="View",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[("x", "adv view octo/repo#12")],
+    )
+    def view(args: View, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    @app.command(
+        "login",
+        description="Login",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("x", "adv login --api-token-from-env MY_TOKEN"),
+            ("y", "adv login --api-token-from-file /run/t"),
+        ],
+    )
+    def login(args: Login, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    @app.command(
+        "release",
+        description="Release",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("x", "adv release --version 1.2.3"),
+            ("bad", "adv release --version nope --bogus"),
+        ],
+    )
+    def release(args: Release, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    errors = [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "describe" for f in r.findings
+    ]
+    assert [f.command for f in errors] == ["release"]
+    assert "nope" in errors[0].message or "--bogus" in errors[0].message
+
+
+def test_pollers_consumers_and_searches_are_not_retries() -> None:
+    import time
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    state = {"n": 0}
+
+    def get() -> str:
+        return "done"
+
+    app = App("x", version="1.0.0")
+
+    @app.command("poll", description="Poll", danger_level="mutating", exit_codes=())
+    def poll(args: NoArgs, ctx: Ctx) -> Done:
+        while True:
+            try:
+                status = get()
+                if status == "done":
+                    return Done("updated")
+            except KeyError:
+                pass
+            time.sleep(0)
+
+    @app.command("find", description="Find", danger_level="mutating", exit_codes=())
+    def find(args: NoArgs, ctx: Ctx) -> Done:
+        for item in ["a", "b"]:
+            try:
+                for other in ["b"]:
+                    if other == item:
+                        break
+            except ValueError:
+                pass
+            time.sleep(0)
+        state["n"] += 1
+        return Done("updated")
+
+    assert _findings(app, "retry-declared") == []

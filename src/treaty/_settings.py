@@ -91,7 +91,7 @@ class SettingsSpec:
                 )
             if f.default is dataclasses.MISSING:
                 how = (
-                    "default=, not default_factory="
+                    "default=, not default_factory=; a collection is a tuple with default=()"
                     if f.default_factory is not dataclasses.MISSING
                     else "a default"
                 )
