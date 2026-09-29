@@ -367,10 +367,10 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         "idempotency_key",
         lambda c: c.danger_level is not DangerLevel.SAFE,
         "string",
-        (
+        lambda c: (
             "Repeat calls with the same key return the original result with effect noop "
             "instead of running again; without a key, repeats are deduplicated only within "
-            "an agent session ($<APP>_SESSION)"
+            f"an agent session (${c.session_env_var})"
         ),
         parse=lambda v, c: IdempotencyKey(str(v)),
         from_json=_text(IdempotencyKey, "idempotency_key"),

@@ -89,6 +89,8 @@ class Rerun:
 
     argv: tuple[str, ...] | None
     """The invocation as typed, app name first; None where it cannot be rerun (exec, MCP)"""
+    app_name: str
+    """Names the ``<APP>_MAX_OUTPUT_BYTES`` variable a hint without argv points at"""
     page: tuple[CommandPath, Position] | None = None
     """Where a list page started, so a cut page gets a cursor to its first dropped item"""
 
@@ -251,7 +253,7 @@ def _truncated(
         # An exec line or an MCP call has no argv of its own to repeat
         meta["truncation_hint"] = (
             f"ask for less data (a filter or a smaller page); the full response is {total} "
-            "bytes, over the cap that --max-output or <APP>_MAX_OUTPUT_BYTES sets"
+            f"bytes, over the cap that --max-output or {env_var(rerun.app_name)} sets"
         )
     return dataclasses.replace(
         envelope,

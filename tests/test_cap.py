@@ -179,3 +179,10 @@ def test_in_process_call_is_capped_like_stdout() -> None:
     envelope = big_app().call("items", {}, env={})
     assert envelope.extra_meta.get("truncated") is True
     assert {w.code for w in envelope.warnings} == {"FIELD_TRUNCATED"}
+
+
+def test_a_call_without_argv_names_the_apps_own_cap_variable() -> None:
+    """An exec line or MCP call cannot be rerun with --max-output: the hint names BIGCTL_..."""
+    _, out = run(big_app(), ["exec"], stdin='{"_cmd": "items"}\n')
+    hint = json.loads(out.splitlines()[0])["meta"]["truncation_hint"]
+    assert "BIGCTL_MAX_OUTPUT_BYTES" in hint and "<APP>" not in hint

@@ -63,6 +63,9 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `--idempotency-key`'s help printed `($<APP>_SESSION)`, and a truncation hint on an
+  `exec` line or MCP call `<APP>_MAX_OUTPUT_BYTES`, instead of the app's own variable, such
+  as `$TODO_SESSION`
 - The `exit-codes` audit fix suggested code 79 for every command, and a `description="..."`
   that registration refuses, so applying the fixes as written failed. Each finding now names
   the next free code from 79 up and a placeholder description that registers

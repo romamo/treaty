@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from conftest import needs_posix_permissions, spec_validator
 
-from treaty import App, Arg, Ctx, Exit, Flag, RegistrationError
+from treaty import App, Arg, Ctx, Exit, Flag, NoArgs, RegistrationError
 from treaty._idempotency import TTL_SECONDS, IdempotencyKey, Record, claim, state_dir
 
 
@@ -320,3 +320,19 @@ def test_unwritable_state_dir_is_a_precondition_error(tmp_path: Path) -> None:
     finally:
         locked.chmod(0o700)
     assert code == 4 and env["error"]["code"] == "STATE_DIR_UNWRITABLE" and calls == []
+
+
+def test_idempotency_key_help_names_the_apps_session_variable() -> None:
+    app = App("todoctl", version="1.0.0")
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    @app.command("touch", description="Touch it", danger_level="mutating", exit_codes=())
+    def touch(args: NoArgs, ctx: Ctx) -> Done:
+        return Done("updated")
+
+    err = io.StringIO()
+    app.run(["touch", "--help"], stdout=io.StringIO(), stderr=err, env={})
+    assert "($TODOCTL_SESSION)" in err.getvalue() and "<APP>" not in err.getvalue()

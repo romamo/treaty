@@ -28,6 +28,7 @@ from ._declare import (
 from ._deprecation import Deprecated
 from ._deps import Version, check_required_tools
 from ._effect import can_carry, with_replay_effect
+from ._env import SESSION, app_var
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, inspect_fields
 from ._jobs import Job, descriptor_schema
@@ -123,6 +124,8 @@ class Command:
     """Per-format overrides of the app's renderers"""
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
+    session_env_var: str
+    """``<APP>_SESSION``, whose value deduplicates repeated mutating calls"""
     streaming: bool
     """The handler is a generator; every yield is one envelope line (REQ-O-004)"""
     resources: tuple[type, ...]
@@ -584,6 +587,7 @@ def build_command(
         cleanup=cleanup,
         renderers=dict(renderers),
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
+        session_env_var=app_var(app_name, SESSION.key),
         streaming=streaming,
         resources=resources,
         resource_graph=graph,

@@ -1464,7 +1464,7 @@ class App:
         if deferred is not None and path not in {p.value for p in PURE_PATHS}:
             return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
         envelope = run.settle(self._call(run, path, arguments, environ))
-        return cap_envelope(envelope, cap, Rerun(argv=None, page=run.page))
+        return cap_envelope(envelope, cap, Rerun(argv=None, app_name=self.name, page=run.page))
 
     def _call(
         self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
@@ -2298,7 +2298,7 @@ class _Run:
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         if self.budget is not None:
             envelope = self._budgeted(self.budget, envelope)
-        rerun = Rerun(self.argv, self.page)
+        rerun = Rerun(self.argv, self.app.name, self.page)
         envelope = cap_envelope(envelope, self.cap, rerun)
         if settle:
             # After the budget and the cap: their truncation warnings count (REQ-O-025)
