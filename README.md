@@ -1300,6 +1300,8 @@ class Report:
   the item type tags the batch's `data`, and a batch keeps its tags when some items failed
   (exit `3`), since the items that worked are still in `data`. `--no-injection-protection` drops the tags, sets
   `meta.injection_protection: false`, and reports its use on stderr. Rule `external-data`
+  warns when a network or child-process command declares neither; `external=False` on the
+  command says it returns only values it computed
 
 ```python
 @dataclass(frozen=True, slots=True)

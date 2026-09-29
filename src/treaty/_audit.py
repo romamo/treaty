@@ -25,7 +25,7 @@ from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
 from ._redact import secret_field
-from ._scan import ctx_calls, source_tree
+from ._scan import ctx_calls, direct_subprocess_calls, source_tree
 from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import InvalidValue, SchemaVersion
 
@@ -309,6 +309,20 @@ def _network_timeout(app: App) -> Iterator[Finding]:
 
 def _subprocess_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
+        direct = direct_subprocess_calls(c.handler)
+        if direct:
+            # Outside ctx.run no declaration can describe the child, so this comes first
+            yield Finding(
+                "subprocess-declared",
+                Severity.WARNING,
+                c.path.value,
+                f"{direct[0].name}() on line {direct[0].line} of the handler runs a program "
+                "outside ctx.run, so it has no time limit, locale, or argv the manifest can "
+                "show, and doctor cannot check the program is installed (REQ-C-019)",
+                "ctx.run([...]) with the same argument list, then "
+                'subprocess=treaty.Subprocess("<binary>", ...) and required_tools=',
+            )
+            continue
         if c.subprocess is not None:
             continue
         runs = [call for call in ctx_calls(c.handler) if call.method in ("run", "pipeline")]
@@ -1078,7 +1092,9 @@ def _stable_order(app: App) -> Iterator[Finding]:
 
 def _external_data(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        if c.external or any(out_spec(f).external for _, f, _ in output_fields(c.output_type)):
+        if c.external is not None or any(
+            out_spec(f).external for _, f, _ in output_fields(c.output_type)
+        ):
             continue
         # A file read is too often the tool's own state to flag; a child's output and a
         # network response come from outside by definition
@@ -1095,7 +1111,7 @@ def _external_data(app: App) -> Iterator[Finding]:
             f"{source} but declares no external content, so what it returns reaches the "
             "agent without _trusted: false (REQ-F-035)",
             "external=True on the command, or treaty.Out(external=True) on the field that "
-            "holds the content; neither when it returns only values it computed",
+            "holds the content; external=False when it returns only values it computed",
         )
 
 
@@ -1726,6 +1742,18 @@ def creates(command: Command) -> bool:
     return command.path.parts[-1].split("-")[0] in ("create", "add", "new", "register")
 
 
+_DELETE_VERBS = ("delete", "remove", "rm", "drop", "destroy", "purge", "erase", "unregister")
+
+
+def deletes(command: Command) -> bool:
+    """The output admits ``effect: "deleted"``, or, when it does not say, the name is a
+    delete verb: a restore or an overwrite is destructive without deleting what it names"""
+    effects = _effects(command.output_schema)
+    if effects is not None:
+        return "deleted" in effects
+    return command.path.parts[-1].split("-")[0] in _DELETE_VERBS
+
+
 def _already_exists(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.danger_level is DangerLevel.SAFE or not creates(c):
@@ -1745,7 +1773,7 @@ def _already_exists(app: App) -> Iterator[Finding]:
 
 def _delete_not_found(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        if c.danger_level is not DangerLevel.DESTRUCTIVE:
+        if c.danger_level is not DangerLevel.DESTRUCTIVE or not deletes(c):
             continue
         if "NOT_FOUND" in {n.value for n in c.exit_codes}:
             yield Finding(

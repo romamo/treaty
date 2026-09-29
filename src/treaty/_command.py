@@ -195,8 +195,9 @@ class Command:
     """``--resume-from STEP`` starts at a step (REQ-O-010)"""
     rollback: Rollback | None = None
     """Undoes completed steps under ``--rollback-on-failure`` (REQ-O-011)"""
-    external: bool = False
-    """``data`` is content from outside the tool: trust-tagged (REQ-F-035)"""
+    external: bool | None = None
+    """``data`` is content from outside the tool: trust-tagged (REQ-F-035); False says it
+    is not, though the command calls out, and None leaves it undeclared"""
     subprocess: Subprocess | None = None
     """The child binary and its arguments: ``subprocess=``, else derived from the
     handler's ``ctx.run([...])`` calls (REQ-C-019)"""
@@ -347,7 +348,7 @@ def build_command(
     steps: Sequence[str] = (),
     resumable: bool = False,
     rollback: Rollback | None = None,
-    external: bool = False,
+    external: bool | None = None,
     subprocess: Subprocess | None = None,
     platform: Sequence[str] = (),
     required_tools: Mapping[str, str] | None = None,
@@ -532,9 +533,9 @@ def build_command(
     check_order(output_type, str(path), order)
     if ordered:
         output_schema = {**output_schema, "x-ordered": True}
-    if not isinstance(external, bool):
-        raise RegistrationError(f"{path}: external is True or False")
-    check_trust(output_type, str(path), external=external)
+    if external is not None and not isinstance(external, bool):
+        raise RegistrationError(f"{path}: external is True, False, or None (undeclared)")
+    check_trust(output_type, str(path), external=bool(external))
     if external:
         output_schema = with_trust_tags(output_schema)
     shims = _compat(path, compat or {}, schema_version, output_type, scalars)

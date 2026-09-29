@@ -161,6 +161,31 @@ def shell_calls(fn: Callable[..., object]) -> list[ShellCall]:
     return sorted(found, key=lambda c: c.line)
 
 
+_DIRECT = frozenset({"run", "call", "check_call", "check_output", "Popen"})
+
+
+def direct_subprocess_calls(fn: Callable[..., object]) -> list[ShellCall]:
+    """Calls in the handler's source that start a program without ``ctx.run``:
+    ``subprocess.run`` and its siblings, and ``os.exec*`` and ``os.spawn*``. A shell one is
+    refused at registration already; this finds the argv lists"""
+    tree = source_tree(fn)
+    if tree is None:
+        return []
+    found: list[ShellCall] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = dotted(node.func)
+        if name is None:
+            continue
+        module, _, last = name.rpartition(".")
+        if (module == "subprocess" and last in _DIRECT) or (
+            module == "os" and last.startswith(("exec", "spawn"))
+        ):
+            found.append(ShellCall(name, node.lineno))
+    return sorted(found, key=lambda c: c.line)
+
+
 def dotted(node: ast.expr) -> str | None:
     """``a.b.c`` for a name or attribute chain, else None"""
     if isinstance(node, ast.Name):

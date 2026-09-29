@@ -294,3 +294,22 @@ def test_plain_output_asks_for_run_only_when_it_was_not_passed() -> None:
     data = {"profile": "p.json", "probes": 6, "ran": False, "levels": {}, "checks": []}
     assert "add --run" in render_conformance({**data, "run_requested": False})
     assert "add --run" not in render_conformance({**data, "run_requested": True})
+
+
+def test_an_app_whose_output_type_has_no_schema_fails_to_import_not_crash(tmp_path: Path) -> None:
+    """A SchemaError raised while the app module imports is the app's mistake"""
+    (tmp_path / "badschema.py").write_text(
+        "import datetime\n"
+        "from dataclasses import dataclass\n"
+        "from treaty import App, Ctx, Flag\n"
+        "app = App('b', version='1.0.0')\n"
+        "@dataclass(frozen=True, slots=True)\n"
+        "class A:\n"
+        "    since: datetime.date | None = Flag(default=None, description='Since')\n"
+        "@app.command('go', description='Go', danger_level='safe', exit_codes=())\n"
+        "def go(args: A, ctx: Ctx) -> dict[str, str]:\n"
+        "    return {}\n"
+    )
+    code, env = run_cli(cwd=tmp_path, argv=["audit", "badschema:app"])
+    assert isinstance(env, dict)
+    assert code == 4 and env["error"]["code"] == "APP_IMPORT_FAILED", env

@@ -203,3 +203,81 @@ def test_every_exit_codes_fix_registers_when_applied_as_written() -> None:
 
 
 FIX = r'app\.exit_code\("(\w+)", (\d+), description="([^"]+)"'
+
+
+def _findings(app: object, rule: str) -> list[str]:
+    report = audit(app, "x:app", limit=3)  # type: ignore[arg-type]
+    return [f.command for r in report.rules if r.id == rule for f in r.findings]
+
+
+def test_a_raw_subprocess_call_in_a_handler_is_reported() -> None:
+    """Outside ctx.run nothing declares the child, so the audit asks for ctx.run first"""
+    import subprocess
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("pack", description="Pack it", danger_level="mutating", exit_codes=())
+    def pack(args: NoArgs, ctx: Ctx) -> Done:
+        subprocess.run(["tar", "-cf", "x.tar", "."], check=True)
+        return Done("created")
+
+    assert _findings(app, "subprocess-declared") == ["pack"]
+
+
+def test_delete_not_found_is_only_for_commands_that_delete() -> None:
+    """A restore from a missing snapshot is a real failure, not a delete of something gone"""
+    from dataclasses import dataclass
+
+    from treaty import Affects, App, Arg, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class ById:
+        id: int = Arg(description="Id")
+        dry_run: bool = Flag(default=False, description="Preview")
+
+    @dataclass(frozen=True, slots=True)
+    class Result:
+        effect: str
+        would_affect: Affects | None = None
+
+    app = App("x", version="1.0.0")
+    for name in ("restore", "delete"):
+
+        @app.command(name, description=name, danger_level="destructive", exit_codes=["NOT_FOUND"])
+        def handler(args: ById, ctx: Ctx) -> Result:
+            return Result("noop")
+
+    assert _findings(app, "delete-not-found") == ["delete"]
+
+
+def test_external_false_acknowledges_a_network_command_that_returns_computed_values() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Count:
+        pages: int
+
+    app = App("x", version="1.0.0")
+    for name, external in (("count", None), ("tally", False)):
+
+        @app.command(
+            name,
+            description=name,
+            danger_level="safe",
+            exit_codes=(),
+            has_network_io=True,
+            external=external,
+        )
+        def handler(args: NoArgs, ctx: Ctx) -> Count:
+            return Count(1)
+
+    assert _findings(app, "external-data") == ["count"]

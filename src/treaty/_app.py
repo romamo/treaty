@@ -638,7 +638,7 @@ class App:
         steps: Sequence[str] = (),
         resumable: bool = False,
         rollback: Rollback | None = None,
-        external: bool = False,
+        external: bool | None = None,
         subprocess: Subprocess | None = None,
         platform: Sequence[str] = (),
         required_tools: Mapping[str, str] | None = None,
@@ -702,7 +702,8 @@ class App:
         fails (REQ-O-011). ``external=True`` marks ``data`` as content from outside the
         tool (a file, an API response): it is tagged ``_source: external`` and
         ``_trusted: false`` with an ``UNTRUSTED_CONTENT`` warning (REQ-F-035);
-        ``treaty.Out(external=True)`` marks one field instead. Every command's ``data`` has
+        ``treaty.Out(external=True)`` marks one field instead, and ``external=False`` says a
+        command that calls out returns only values it computed. Every command's ``data`` has
         tokens and base64 blobs masked unless ``--unmask`` (REQ-F-058).
         ``subprocess=Subprocess("git", user_controlled_args=("ref",), hardcoded_args=("log",))``
         declares the child a command runs and which fields become its arguments; each

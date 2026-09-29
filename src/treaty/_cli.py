@@ -29,7 +29,7 @@ from ._audit import (
 )
 from ._changelog import ChangelogEntry, diff, dump_changelog, load_changelog, record
 from ._context import Ctx
-from ._errors import Exit, ParseError, RegistrationError
+from ._errors import Exit, ParseError, RegistrationError, SchemaError
 from ._flags import Arg, Flag
 from ._mode import Format
 from ._out import Out
@@ -164,7 +164,7 @@ def load_app(target: str, cwd: Path) -> App:
             context={"module": module_name, "missing": exc.name},
             suggestion="run from the project root inside its environment: uv run treaty audit ...",
         ) from None
-    except (RegistrationError, SyntaxError) as exc:
+    except (RegistrationError, SchemaError, SyntaxError) as exc:
         # The app's own mistake, found as it imports: not a crash of the treaty command
         raise Exit.PRECONDITION(
             f"Module {module_name} failed to import: {type(exc).__name__}: {exc}",
