@@ -24,7 +24,9 @@ cancellation, whose `fetch` command registers one.
 
 ## Running the checks
 
-Run the **Check** commands from the root of a treaty checkout, in order:
+Run the **Check** commands from the root of a treaty checkout, in order. `SLOWCTL_AUDIT_LOG=off`
+keeps these runs out of slowctl's audit log, the record of every run that
+[Log without touching stdout](logging.md#step-4-read-the-audit-log) describes:
 
 <!-- check -->
 ```bash

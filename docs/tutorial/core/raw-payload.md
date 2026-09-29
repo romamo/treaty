@@ -22,8 +22,10 @@ and ends at [`examples/tutorial/todo_payload.py`](../../../examples/tutorial/tod
 ## Running the checks
 
 Run the **Check** commands from the root of a treaty checkout, in order. `todo` runs this
-chapter's example; the item file and idempotency records go to a scratch directory, and the
-first item is added with flags:
+chapter's example, and the first item is added with flags. The item file goes to a scratch
+directory, and so do the idempotency records: when a call carries an `--idempotency-key`,
+treaty stores its result under the key so a repeat can return it, and `TODO_STATE_DIR`
+says where:
 
 <!-- check -->
 ```bash
@@ -90,8 +92,9 @@ The second example shows the payload form, since agents copy examples before the
 schema.
 
 `--schema` now includes `raw_payload_schema`, the JSON Schema of the object: one key per
-field, spelled with underscores as in `exec` lines and MCP calls, plus the framework keys
-the command takes, such as `idempotency_key`. `id` is required because it has no default:
+field, spelled with underscores as in `exec` lines (the JSON form of a call that `todo exec`
+reads, one per line) and MCP calls, plus the framework keys the command takes, such as
+`idempotency_key`. `id` is required because it has no default:
 
 **Check:** the payload schema requires `id` and lists the fields and the idempotency key
 

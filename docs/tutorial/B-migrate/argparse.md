@@ -107,8 +107,9 @@ class Common:
 The argparse default was `Path.home() / ".todo.json"`, computed at import. A default in the
 manifest should be a fixed value, so the flag defaults to `None` and the fallback moves to
 the code that opens the store. That code was `load()` and `save()`, called by every
-handler; it becomes a resource, which treaty builds once per run from the arguments and
-hands to any handler that asks for it:
+handler; it becomes a resource: a class with an `acquire` classmethod, which treaty calls
+once per run with the parsed arguments, and hands the object to every handler that
+annotates a parameter with the class, as `add` does with `store: Store` below:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
