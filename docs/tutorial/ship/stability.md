@@ -99,8 +99,7 @@ In your project, 1.1.0 is one set of edits, which this step and the next explain
   `changelog` if you take Step 5
 - AGENTS.md, the skills, and the MCP tool list regenerated, as [Ship the agent
   docs](agent-docs.md) shows
-- the conformance profile replaced with `treaty conformance todo.cli:app --force`, since
-  `list`'s new example changes its probe; commit it with the rest
+- the conformance profile replaced with `treaty conformance todo.cli:app --force`, since the profile records the version, and `list`'s new example changes its probe; commit it with the rest
 
 1.1.0 calls the command `complete`. The old name keeps answering, with one line at module
 level, after the renamed command's definition (the redirect refuses a target that is not

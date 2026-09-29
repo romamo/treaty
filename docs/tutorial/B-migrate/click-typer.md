@@ -102,13 +102,16 @@ with one of those names is refused when the app is built. A `-v` counter, a `--c
 option, or a `--format` choice has to be renamed or dropped in favour of the framework's.
 Every global flag is reserved the same way, including `--schema`, `--output-schema`,
 `--schema-version`, `--stable-output`, `--unmask`, and `--max-output`: a command's `--help`
-lists them under Global flags, so a `--schema FILE` option becomes `--schema-file`. Some
-framework flags come with a feature: a command with `has_network_io=True` gets `--timeout`,
-`--proxy`, and `--no-proxy`, and a list command `--limit` and `--cursor`. A field of your
-own with one of those names is refused too, and the error says to drop it, since the
-framework's flag does the same job. The handler reads the time limit as
-`ctx.timeout.seconds`, and `timeout=5` on `@app.command` keeps an old default of 5 seconds,
-where treaty's is 60; a list handler reads its page as [Page long
+lists them under Global flags, so a `--schema FILE` option becomes `--schema-file`. Commands
+have the same rule: `manifest`, `version`, `exec`, `status`, `doctor`, `cleanup`,
+`completion`, `audit-log`, `generate-skills`, and `mcp-validate` are built in, and a command
+of yours with one of those names replaces the built-in, which the audit reports as
+`builtin-shadowed` advice. Some framework flags come with a feature: a command with
+`has_network_io=True` gets `--timeout`, `--proxy`, and `--no-proxy`, and a list command
+`--limit` and `--cursor`. A field of your own with one of those names is refused too, and
+the error says to drop it, since the framework's flag does the same job. The handler reads
+the time limit as `ctx.timeout.seconds`, and `timeout=5` on `@app.command` keeps an old
+default of 5 seconds, where treaty's is 60; a list handler reads its page as [Page long
 lists](../core/pagination.md) shows, or `paginated=False` keeps your own flags.
 
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
@@ -658,7 +661,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
 - Group options go after the command: `todo --db x list` becomes `todo list --db x`
 - `--yes` is gone; destructive commands take `--confirm-destructive`, and without it they
   show what they would do and exit 2
-- `list` returns 20 items at a time; `--limit 0` returns all of them, and `--cursor` the next
+- A command that returns a list, such as `list`, returns 20 items at a time; `--limit 0`
+  returns all of them, and `--cursor` the next
   page ([Page long lists](../core/pagination.md))
 - A text flag refuses a line break unless the field declares `multiline=True`; give
   every field that takes free text, such as a body or a message, `multiline=True`

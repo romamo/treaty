@@ -269,6 +269,17 @@ todo import --url https://example.com/todo.json --token-from-file tmp/tutorial/t
 todo import --schema | jq -e '.data.secret_env_vars == ["TODO_TOKEN"]'
 ```
 
+A setting can hold a secret too, such as a connection string with a password in it, whose
+name marks nothing secret. Declare it with `Flag` on the settings field:
+
+```python
+    database: str = Flag(default="", description="Connection string", secret=True)
+```
+
+`--show-config` then shows it as `[REDACTED]`, and the config hash leaves it out. A
+setting typed `Path` that holds a relative path means the run's directory, `--cwd`
+included, as a `Path` flag does.
+
 ## A command that writes the config file
 
 A CLI with its own `config set` writes the file treaty reads. It declares which one with
