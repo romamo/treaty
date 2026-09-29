@@ -911,3 +911,29 @@ def test_an_audit_reports_a_settings_field_of_an_unregistered_class(tmp_path: Pa
     assert error["code"] == "APP_IMPORT_FAILED"
     assert error["context"]["exception"] == "RegistrationError"
     assert "query_id" in error["message"]
+
+
+@dataclass(frozen=True, slots=True)
+class TokenSettings:
+    api_token: QueryId | None = None
+
+    def __post_init__(self) -> None:
+        if self.api_token is not None and self.api_token.value.startswith("7"):
+            raise ValueError(f"token {self.api_token.value} is revoked")
+
+
+def test_a_secret_scalar_setting_is_redacted_from_a_refusal_quoting_its_text() -> None:
+    # The instance's str() is not the text it was parsed from: its serialized form is
+    app = App("tokctl", version="1.0.0", settings=TokenSettings)
+    app.scalar(QueryId, parse=QueryId, pattern=r"\d+")
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx, settings: TokenSettings) -> dict[str, object]:
+        return {}
+
+    out = io.StringIO()
+    env = {"TOKCTL_AUDIT_LOG": "off", "TOKCTL_API_TOKEN": "7654321"}
+    code = app.run(["show", "--no-config"], stdout=out, stderr=io.StringIO(), env=env)
+    assert code == 2
+    assert "7654321" not in out.getvalue()
+    assert "[REDACTED] is revoked" in json.loads(out.getvalue())["error"]["message"]

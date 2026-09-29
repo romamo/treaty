@@ -337,15 +337,18 @@ def resolve(
         files = tuple(p for p, _ in loaded)
         return Resolved(value, effective, sources, files, candidates, context, opts, secrets)
     for name in secrets:
-        why = _without(why, values[name])
+        why = _without(why, values[name], scalars)
     raise ParseError(f"settings are invalid: {why}", code=INVALID, context={"sources": sources})
 
 
-def _without(text: str, value: object) -> str:
-    """``text`` with a secret setting's value, or each item of a tuple, redacted"""
+def _without(text: str, value: object, scalars: ScalarRegistry) -> str:
+    """``text`` with a secret setting's value, or each item of a tuple, redacted; a
+    registered scalar by its serialized form too, the text its instance was parsed from"""
     for item in value if isinstance(value, tuple) else (value,):
-        if item is not None and str(item):
-            text = text.replace(str(item), REDACTED)
+        spec = scalars.for_value(item)
+        for form in (item,) if spec is None else (spec.serialize(item), item):
+            if form is not None and str(form):
+                text = text.replace(str(form), REDACTED)
     return text
 
 

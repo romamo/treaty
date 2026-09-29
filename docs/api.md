@@ -94,7 +94,7 @@ Keywords: `name`, `version` (semver, or a PEP 440 release with optional `a`, `b`
 Public methods (keep): `command`, `group`, `redirect`, `exit_code`, `scalar`, `format`,
 `tokenizer`, `suppress_update_notifier`, `run`, `main`, `call`, `manifest`,
 `environment`, and the read-only properties `commands`, `builtins`, `formats`,
-`redirected_paths`, `shadowed_builtins`. The `Command` objects `commands` maps to are opaque: their
+`redirected_paths`, `settings`, `shadowed_builtins`. The `Command` objects `commands` maps to are opaque: their
 attributes are not covered.
 
 Made private in the review: `renderer`, `moved`, `check_fixes`, `fix_problem`,
