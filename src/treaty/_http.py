@@ -387,19 +387,27 @@ class Http:
             exc.close()
             failed = True
         except urllib.error.URLError as exc:
-            raise self._reason(url, exc.reason) from exc
+            failure = self._reason(url, exc.reason)
+            self._trace(request, started, error=failure.code)
+            raise failure from exc
         except (TimeoutError, http.client.HTTPException, OSError) as exc:
-            raise self._reason(url, exc) from exc
-        # REQ-O-008: --debug shows each request; the writer redacts Authorization
+            failure = self._reason(url, exc)
+            self._trace(request, started, error=failure.code)
+            raise failure from exc
+        self._trace(request, started, status=response.status)
+        return self._status(url, response) if failed else response
+
+    def _trace(self, request: urllib.request.Request, started: float, **outcome: object) -> None:
+        """REQ-O-008: --debug shows each request, answered (``status``) or not (``error``);
+        the writer redacts Authorization"""
         trace(
             "http request",
             method=request.get_method(),
-            url=without_userinfo(url),
+            url=without_userinfo(request.full_url),
             headers=dict(request.header_items()),
-            status=response.status,
+            **outcome,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
-        return self._status(url, response) if failed else response
 
     def opener(self) -> urllib.request.OpenerDirector:
         if self._opener is None:

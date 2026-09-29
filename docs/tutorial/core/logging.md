@@ -96,7 +96,8 @@ The three flags exclude each other. So an agent gets a quiet stderr by default, 
 `--verbose` to watch a long run, and `--debug` to find out why something failed.
 
 **Check:** off a terminal, a failed `import` writes nothing on stderr; `--debug` traces the
-run; `--quiet` writes nothing; two levels at once is an argument error
+run, the refused request included; `--quiet` writes nothing; two levels at once is an
+argument error
 
 <!-- check -->
 ```bash
@@ -104,15 +105,16 @@ todo import --url "$feed" --db tmp/tutorial/todo.json > /dev/null 2> tmp/tutoria
 test ! -s tmp/tutorial/default.err
 todo import --url "$feed" --db tmp/tutorial/todo.json --debug > /dev/null 2> tmp/tutorial/debug.err || true
 grep -q '"message":"command started"' tmp/tutorial/debug.err
+grep '"message":"http request"' tmp/tutorial/debug.err | jq -e '.fields.error == "CONNECTION_FAILED"'
 todo import --url "$feed" --db tmp/tutorial/todo.json --quiet > /dev/null 2> tmp/tutorial/quiet.err || true
 test ! -s tmp/tutorial/quiet.err
 todo import --url "$feed" --db tmp/tutorial/todo.json --verbose --debug \
   | jq -e '.meta.exit_code == 2 and .error.message == "--debug and --verbose are exclusive; pass one."'
 ```
 
-The `--debug` trace has one line per `ctx.http` request that got an answer, with its
-method, URL, status, and headers. A request that never got one, such as this refused
-connection, has no trace line; its details are in the envelope's `error.network_context`.
+The `--debug` trace has one line per `ctx.http` request, with its method, URL, headers, and
+either the `status` it was answered with or, for a request that never got an answer such as
+this refused connection, the `error` it failed with.
 
 ## Step 3: Keep secrets out of the logs
 

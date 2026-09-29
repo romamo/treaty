@@ -257,6 +257,16 @@ def test_debug_produces_full_diagnostic_trace_including_http_requests_and_config
     assert trace["audit entry written"]["path"] == str(log_file(tmp_path))
 
 
+def test_debug_traces_a_request_that_never_got_an_answer(tmp_path: Path) -> None:
+    """A refused connection has no status: the trace names the failure instead"""
+    url = "http://127.0.0.1:9/items"
+    code, _, err = run(make_app(), ["fetch", "--url", url, "--debug"], data_env(tmp_path))
+    assert code == 12
+    request = next(r["fields"] for r in debug_lines(err) if r["message"] == "http request")
+    assert request["url"] == url and request["error"] == "CONNECTION_FAILED"
+    assert "status" not in request and request["headers"]["Authorization"] == "[REDACTED]"
+
+
 def test_debug_traces_each_child_process() -> None:
     _, _, err = run(make_app(), ["child", "--debug", "--format", "json"])
     exited = next(r["fields"] for r in debug_lines(err) if r["message"] == "child exited")

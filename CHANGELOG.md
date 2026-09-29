@@ -127,6 +127,9 @@ Apps built on treaty keep their own, structured schema changelog with
 - `treaty audit`'s next steps were the first findings in rule order, so an error from a late
   rule, such as `additive` under `--baseline`, could sit behind advice and past `--limit`;
   they now come errors first, then warnings, then advice, with `--all` in the same order
+- `--debug` traced a `ctx.http` request only once it was answered, so a refused
+  connection, an unknown host, or a timeout left no line; each now has its `http request`
+  line with the failure's code in `error` instead of a `status`
 
 ## [1.0.0rc2] - 2026-09-28
 
