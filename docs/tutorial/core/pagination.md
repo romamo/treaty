@@ -3,8 +3,9 @@
 **Goal:** a command that returns a list answers one page at a time, in a stable order, with a
 cursor that finds the next page even when the list changes in between
 
-**You need:** a treaty app with a list command, such as `todo` at the end of any earlier
-chapter; this chapter covers the audit rules `paginated-list` and `stable-order`
+**You need:** a treaty app with a list command, such as `todo` at the end of
+[Declare exit codes](exit-codes.md), whose example this chapter uses; this chapter covers
+the audit rules `paginated-list` and `stable-order`
 
 **Done when:** the audit has no `paginated-list` or `stable-order` finding, and the list's
 cursor survives a change to the list between pages:
@@ -126,7 +127,7 @@ before list --db tmp/tutorial/todo.json --cursor "$cursor" | jq -e '[.data[].id]
 
 A cursor keyed on the data does not move: "after item 20" means the same thing whatever
 happened before item 20. A handler provides one by returning `Page[T]` instead of `list[T]`,
-reading the request from `ctx.page`:
+reading the request from `ctx.page`; `Page` and `ParseError` come from `treaty`:
 
 <!-- file: examples/tutorial/todo_pages.py -->
 ```python
@@ -144,8 +145,17 @@ def list_items(args: ListArgs, ctx: Ctx, store: Store) -> Page[Item]:
 `ctx.page.limit` is `None` under `--limit 0`, and `ctx.page.cursor` is `None` on the first
 page. The handler's `next_cursor`, here the last id on the page, travels inside treaty's own
 cursor, so the caller still gets opaque text and the same `INVALID_CURSOR` checks. The
-command also declares `cursor_check=after_id`, a function that refuses a cursor the handler
-could not have issued before the handler runs:
+command's declaration is `list`'s from before, plus one line, `cursor_check=after_id`:
+
+<!-- file: examples/tutorial/todo_pages.py -->
+```python
+    examples=[("List every item, completed ones too", "todo list --all")],
+    cursor_check=after_id,
+)
+```
+
+`after_id` is a function that refuses a cursor the handler could not have issued, before
+the handler runs:
 
 <!-- file: examples/tutorial/todo_pages.py -->
 ```python

@@ -3,8 +3,8 @@
 **Goal:** every command returns a typed value, so its `output_schema` tells an agent the
 shape of `data` before the first call, and a test holds each handler to that shape
 
-**You need:** a treaty app, such as `todo` at the end of any earlier chapter; this chapter
-clears the audit rule `typed-output`
+**You need:** a treaty app, such as `todo` at the end of [Declare exit codes](exit-codes.md),
+whose example this chapter uses; this chapter clears the audit rule `typed-output`
 
 **Done when:** the audit has no `typed-output` finding:
 

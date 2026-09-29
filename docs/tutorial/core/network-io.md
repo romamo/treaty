@@ -77,6 +77,24 @@ build, naming the handler line and the flag to add.
 )
 ```
 
+`STORE_CORRUPT` and `STORE_UNWRITABLE` are the codes [Declare exit codes](exit-codes.md)
+registered; a command may only declare codes the app has registered, so do that chapter
+first, or declare only `FEED_INVALID`, below. The arguments are one flag, a URL, checked
+before the handler runs by `pattern_type="url"`, and the result carries what was added:
+
+<!-- file: examples/tutorial/todo_network.py -->
+```python
+class Import(Common):
+    url: str = Flag(description="URL of a JSON list of items to add", pattern_type="url")
+```
+
+<!-- file: examples/tutorial/todo_network.py -->
+```python
+class Imported:
+    effect: str
+    added: list[Item] = Out(sort_key="id", external=True)
+```
+
 The declaration adds to the command, and only to it:
 
 - **`--timeout`**, since a network call can take any time; the other `todo` commands keep
@@ -161,10 +179,24 @@ failure to the caller, so it gets one exit code:
         )
 ```
 
-`FEED_INVALID` is registered like the store codes in [Declare exit codes](exit-codes.md),
-as exit 81 with `side_effects="none"`: the handler checks the whole answer before it loads
-or saves the item file, so a bad answer changes nothing. Parse everything that came over
-the network before acting on any of it.
+`FEED_INVALID` is registered like the store codes in [Declare exit codes](exit-codes.md):
+
+<!-- file: examples/tutorial/todo_network.py -->
+```python
+app.exit_code(
+    "FEED_INVALID",
+    81,
+    description="The URL did not answer with a list of items; nothing was changed",
+    retryable=False,
+    side_effects="none",
+)
+```
+
+It declares `side_effects="none"` because the handler checks the whole answer before it
+loads or saves the item file, so a bad answer changes nothing. `feed_entries()`, in the
+example file, does that check: it parses the body and returns `None` unless it is a list of
+objects with a `text` and a valid `priority`. Parse everything that came over the network
+before acting on any of it.
 
 **Check:** against a local server, a list of two items is added, and a 404 or a body that
 is not a list exits 81 and writes no item file

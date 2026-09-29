@@ -50,7 +50,9 @@ Each chapter serves two ways of reading it:
 - **Re-running the tutorial.** The **Check** blocks run from the root of a treaty checkout,
   where the example files live. Each chapter's first block defines `todo` as a shell function
   that runs that chapter's example file, and `tests/test_tutorial.py` runs every block in
-  order, so the tutorial fails its own tests when it stops being true
+  order, so the tutorial fails its own tests when it stops being true. The blocks are bash;
+  zsh, the default shell on macOS, sends a redirect such as `2>&1 >/dev/null` to both
+  streams, so run them with `bash`
 
 ## How a chapter is laid out
 

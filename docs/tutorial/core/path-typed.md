@@ -4,8 +4,8 @@
 framework refuses the paths agents get wrong, resolves relative ones where the caller
 asked, and writes every path it returns in full
 
-**You need:** a treaty app, such as `todo` at the end of any earlier chapter; this chapter
-clears the audit rule `path-typed`
+**You need:** a treaty app, such as `todo` at the end of [Declare exit codes](exit-codes.md),
+whose example this chapter uses; this chapter clears the audit rule `path-typed`
 
 **Done when:** the audit has no `path-typed` finding:
 

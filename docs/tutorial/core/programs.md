@@ -24,7 +24,8 @@ ends at [`examples/tutorial/todo_git.py`](../../../examples/tutorial/todo_git.py
 ## Running the checks
 
 Run the **Check** commands from the root of a treaty checkout, in order, with git installed.
-`todo` runs this chapter's example. The checks give git an identity to commit with, and set
+`todo` runs this chapter's example. The checks give git an identity to commit with, which
+your own machine usually has already (`git config user.name`), and set
 `GIT_CEILING_DIRECTORIES` so git never looks above the scratch directory and finds the
 treaty checkout instead:
 
@@ -97,6 +98,26 @@ Every program `ctx.run` starts gets an environment that keeps it from waiting fo
 
 ## Step 3: Keep free text out of the arguments
 
+`save` takes one flag of its own, the commit message, and returns the commit it made:
+
+<!-- file: examples/tutorial/todo_git.py -->
+```python
+class Save(Common):
+    message: str = Flag(default="Update todo items", description="Commit message", multiline=True)
+```
+
+<!-- file: examples/tutorial/todo_git.py -->
+```python
+class Saved:
+    effect: str
+    commit: str | None = Out(external=True)
+    """The new commit's hash, as git printed it; null when the item file had no changes"""
+```
+
+`multiline=True` lets a message span lines; without it treaty refuses a line break in a
+text flag, and the audit's `multiline-flag` rule suggests it for a field like this one.
+`Out(external=True)` is explained in Step 6.
+
 The commit message is free text: the caller may write anything, including `;`, `(`, or a
 leading `-`. `save` never puts it in the argument list. git reads the message from stdin
 with `--file -`, and `ctx.run` sends it there with `input=`:
@@ -126,7 +147,8 @@ should.
 
 ## Step 4: Declare the program
 
-Two declarations on the command tell an agent, and `doctor`, what it runs:
+Two declarations on the command tell an agent, and `doctor`, what it runs; `Subprocess`
+comes from `treaty`, beside `App` and the rest:
 
 <!-- file: examples/tutorial/todo_git.py -->
 ```python
@@ -171,7 +193,19 @@ todo save --db "tmp/tutorial/repo/a;b.json" | jq -e '.meta.exit_code == 2
 `argv`, `returncode`, and the last 4 KiB of its stderr in `error.context`, secrets redacted.
 That is the right answer for a failure nobody can act on. For one the caller can act on,
 run with `check=False`, read the return code, and raise a named exit code, as `save` does
-when the item file is not in a repository:
+when the item file is not in a repository. The code is registered like the ones in
+[Declare exit codes](exit-codes.md), and `save` declares it with `exit_codes=["NOT_A_REPOSITORY"]`:
+
+<!-- file: examples/tutorial/todo_git.py -->
+```python
+app.exit_code(
+    "NOT_A_REPOSITORY",
+    82,
+    description="The item file is not in a git repository; nothing was committed",
+    retryable=False,
+    side_effects="none",
+)
+```
 
 <!-- file: examples/tutorial/todo_git.py -->
 ```python
@@ -186,7 +220,27 @@ when the item file is not in a repository:
 
 `check=False` is also how a program that answers with its exit code is read:
 `git diff --cached --quiet` exits 1 when something is staged, which `save` uses to decide
-between `created` and `noop`.
+between `created` and `noop`. After the commit, `git rev-parse HEAD` prints the new commit's
+hash, which `save` returns:
+
+<!-- file: examples/tutorial/todo_git.py -->
+```python
+    staged = ctx.run(["git", "diff", "--cached", "--quiet"], cwd=here, check=False)
+    if staged.returncode == 0:
+        return Saved(effect="noop", commit=None)
+```
+
+<!-- file: examples/tutorial/todo_git.py -->
+```python
+    head = ctx.run(["git", "rev-parse", "HEAD"], cwd=here)
+    return Saved(effect="created", commit=head.stdout.strip())
+```
+
+In your own project, try the missing-repository case with an item file outside every git
+repository, such as one under a new directory in `/tmp`. Inside your project's own
+repository, git finds that repository instead; and git refuses to add a file your
+`.gitignore` excludes, which ends as `SUBPROCESS_FAILED` rather than exit 82. The checks set
+`GIT_CEILING_DIRECTORIES` for the same reason: it stops git from looking above a directory.
 
 A failure `save` does not name ends as `SUBPROCESS_FAILED`. The check below makes one with a
 new item file the repository's `.gitignore` excludes: git refuses to add it. A file git

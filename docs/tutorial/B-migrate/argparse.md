@@ -6,8 +6,8 @@ manifest an agent can read
 **You need:** a working argparse CLI, and treaty installed ([Before you
 start](../index.md#before-you-start))
 
-**Done when:** your tests pass, and `treaty audit` reports only `exit-codes` warnings, which
-the next chapter clears:
+**Done when:** your tests pass, if the CLI has any, and `treaty audit` reports only
+`exit-codes` warnings, which the next chapter clears:
 
 <!-- check -->
 ```bash
@@ -391,6 +391,9 @@ assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 ```
 
 `app.run(argv, stdout=..., stderr=...)` covers the argv path and the plain renderers.
+A whole test file for `todo` in this style, with its imports and a fixture for a scratch
+item file, is [`new_cli/test_cli.py`](../../../examples/tutorial/new_cli/test_cli.py): copy it
+into your project's `tests/` and change `from todo.cli import app` to your app. Treaty's own
 [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) tests the finished example both
 ways.
 
