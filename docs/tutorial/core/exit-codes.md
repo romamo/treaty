@@ -39,13 +39,14 @@ the call, the code picks the next move:
 | `0` | uses `data` |
 | `2` (`ARG_ERROR`) | fixes the arguments listed in `error.errors` and reissues |
 | a code with `retryable: true` | waits `error.retry_after_ms`, or backs off, and reissues the same call |
-| a code with `retryable: false` | meets `error.fix_required`, running `error.fix_command` if there is one, then reissues once |
+| a code with `retryable: false` | meets `error.fix_required` if there is one, running `error.fix_command` when given, or follows `error.suggestion`, then reissues once |
 | `1` (`GENERAL_ERROR`) | assumes state is partly changed, inspects it, and does not retry blindly |
 
 `side_effects` says what the failed call left behind: `none` (nothing changed), `partial`
 (some of the work happened), or `complete` (the work happened, but the call still failed,
 for example on the way out). An agent can safely reissue a call only if it failed with
-`none`.
+`none`, and, for a command that changes state, only if the call is safe to repeat: see
+[Retryable codes](#retryable-codes) below.
 
 ## Where todo stands
 
@@ -198,7 +199,8 @@ no safe one-command fix, so it gets `fix_required` alone.
 
 treaty checks every `fix_command` before it reaches the agent: one command, no `<`, `>`,
 `$`, pipes, or `;`, and never a destructive command of the tool. The program must be the
-tool itself or a companion the app declares, so the todo app names `mkdir`:
+tool itself or a companion, another program the app declares it may tell an agent to run.
+The todo app names `mkdir`:
 
 <!-- file: examples/tutorial/todo_exit_codes.py -->
 ```python
@@ -206,8 +208,9 @@ app = App("todo", version="1.0.0", description="Track todo items", companions=("
 ```
 
 A fix that fails the check ends the run as `INVALID_EXIT` instead. A fix that is the same
-for every failure of a code can be declared once, where treaty checks it at startup:
-`@app.command(..., fix_commands={"STORE_MISSING": "todo init"})`.
+for every failure of a code can be declared once on the command, where treaty checks it at
+startup. `todo` has none, since its fixes depend on the path; a tool whose data has to be
+set up first might declare `fix_commands={"NOT_INITIALIZED": "mytool init"}`.
 
 Loading follows the same pattern. Catch the exceptions that mean "damaged file", and
 nothing wider:

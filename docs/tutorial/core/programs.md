@@ -132,7 +132,9 @@ Two declarations on the command tell an agent, and `doctor`, what it runs:
 ```python
     required_tools={"git": "2.30.0"},
     subprocess=Subprocess(
-        "git", user_controlled_args=("db",), hardcoded_args=("add", "commit", "--file", "-")
+        "git",
+        user_controlled_args=("db",),
+        hardcoded_args=("rev-parse", "add", "diff", "--cached", "commit", "--file", "-"),
     ),
 ```
 
@@ -141,15 +143,16 @@ Two declarations on the command tell an agent, and `doctor`, what it runs:
   reports `(advice) required-tools [save]: runs 'git' (line 10 of the handler), which
   required_tools does not list, so doctor cannot check it is installed`
 - **`subprocess=`** names the binary, the fields whose values become its arguments, and the
-  arguments it always passes. A declared field is checked before the handler runs: a value
+  fixed arguments its calls pass, here the git subcommands and switches `save` uses across
+  its five calls. A declared field is checked before the handler runs: a value
   with a shell metacharacter, a line break, or a leading `-` exits 2 with
   `SHELL_METACHARACTER`. `--db` is declared because the file name git receives comes from
   it; `--message` is not, since it never becomes an argument
 
-treaty reads the argument lists written as list literals in the handler, as `save`'s are,
-and derives a declaration from them when there is none. The `subprocess-declared` rule warns
-when it cannot: when the list is built at run time, such as `ctx.run(["git", *extra])`, the
-manifest cannot say which binary gets which argument unless you declare it.
+When every argument list in the handler is written out as a list, as `save`'s are, treaty
+works out a declaration by itself if there is none. The `subprocess-declared` rule warns when
+a list is built at run time, such as `ctx.run(["git", *extra])`: then declare it by hand, so
+the manifest can say which binary gets which argument.
 
 **Check:** the schema names git and its version; `doctor` finds it; a `;` in `--db` is
 refused before git runs
@@ -185,9 +188,14 @@ when the item file is not in a repository:
 `git diff --cached --quiet` exits 1 when something is staged, which `save` uses to decide
 between `created` and `noop`.
 
-**Check:** outside a repository, `save` exits 82 with git's own message in `context`; an item
-file the repository ignores (a new one; a tracked file is committed whatever `.gitignore`
-says) fails `git add`, and the envelope carries git's argv, exit code, and stderr
+A failure `save` does not name ends as `SUBPROCESS_FAILED`. The check below makes one with a
+new item file the repository's `.gitignore` excludes: git refuses to add it. A file git
+already tracks would be committed whatever `.gitignore` says, which is why the check uses a
+new one.
+
+**Check:** outside a repository, `save` exits 82 with git's own message in `context`; an
+ignored item file fails `git add`, and the envelope carries git's argv, exit code, and
+stderr
 
 <!-- check -->
 ```bash

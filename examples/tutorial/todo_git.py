@@ -228,7 +228,9 @@ class Saved:
     exit_codes=["NOT_A_REPOSITORY"],
     required_tools={"git": "2.30.0"},
     subprocess=Subprocess(
-        "git", user_controlled_args=("db",), hardcoded_args=("add", "commit", "--file", "-")
+        "git",
+        user_controlled_args=("db",),
+        hardcoded_args=("rev-parse", "add", "diff", "--cached", "commit", "--file", "-"),
     ),
     examples=[("Commit the items with a message", 'todo save --message "Plan the week"')],
 )

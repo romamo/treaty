@@ -17,8 +17,10 @@ jobs:
       # Behaviour, the contract tests, and AGENTS.md against the binary
       - run: uv run pytest -q
 
-      # Nothing the last release promised is gone; bump the file at each release
-      - run: uv run treaty audit todo.cli:app --baseline todo-1.0.0.json --strict
+      # Nothing the last release promised is gone. Runs once there is a release to compare
+      # with: save its manifest as todo-1.0.0.json, and move to the next at each release
+      - if: hashFiles('todo-1.0.0.json') != ''
+        run: uv run treaty audit todo.cli:app --baseline todo-1.0.0.json --strict
 
       # The agent docs and the MCP tool list are regenerated and committed; treaty-mcp
       # needs the mcp extra in the project: uv add "treaty[mcp]"
@@ -30,7 +32,8 @@ jobs:
           git diff --exit-code AGENTS.md skills mcp-tools.json
           uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json
 
-      # The runtime checks the audit cannot make
+      # The runtime checks the audit cannot make; ../cli-agent-ergonomics is where treaty
+      # looks for the kit when TREATY_SPEC_DIR is not set
       - name: Conformance kit
         run: |
           git clone --depth 1 https://github.com/cli-agent-spec/cli-agent-spec ../cli-agent-ergonomics
