@@ -112,7 +112,7 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie` (so `author` and `keyword` count), or has a `pass` segment, takes no value on the command line; booleans and enums never are secrets, and `secret=False` opts out
+  `credential`, `auth`, or `cookie` (so `author` and `keyword` count), or has a `pass` segment, takes no value on the command line; booleans and enums are never secrets, and `secret=False` opts out
 
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
 `click.confirm`, and `click.prompt` in the old code shows up in the "Fails when" or "Writes?"
@@ -453,7 +453,7 @@ now an agent gets it too, as data. `--confirm-destructive` replaces `--yes`.
 A question that is not about destroying something, such as `click.prompt` for a missing
 name, becomes a required flag. When a person at a terminal should still be asked, declare
 `interactive=True` and ask through `ctx.prompt` or `ctx.confirm`: off a terminal they exit 4
-with the flag that answers them, instead of waiting.
+instead of waiting, and `ctx.prompt(text, flag=...)` names the flag that answers it.
 
 **Check:** without confirmation, `purge` exits 2 and lists item 1, the one completed item,
 without deleting it; with confirmation it deletes item 1 and keeps item 2

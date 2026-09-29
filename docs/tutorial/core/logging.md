@@ -49,12 +49,12 @@ $ uv run treaty audit myapp.cli:app --format plain
      fix: ctx.log(...) for info, ctx.progress(...) for progress, ctx.log_error(...) for errors, ctx.debug(...) for --debug
 ```
 
-treaty protects stdout even from code it does not own. While a handler runs, `sys.stdout`
-points at stderr, so a `print()` from the handler or a library cannot land in front of the
+treaty protects stdout even from code it does not own. While a handler runs, treaty captures
+`sys.stdout`, so a `print()` from the handler or a library cannot land in front of the
 envelope; the text is reported in a `THIRD_PARTY_STDOUT` warning instead, and off a terminal
-it is not written anywhere else. A library that prints when it is imported, before the
-handler runs, is caught by an entry module that calls `treaty.intercept_stdout()` before
-importing the app, as the `entry.py` of `treaty init` does.
+it is written nowhere else. A library that prints when it is imported, before the handler
+runs, is caught by an entry module that calls `treaty.intercept_stdout()` before importing
+the app, as the `entry.py` of `treaty init` does.
 
 ## Step 1: Log through `ctx`
 
