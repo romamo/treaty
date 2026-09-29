@@ -396,3 +396,17 @@ def test_a_redirect_over_mcp_names_the_tool_to_call() -> None:
         error.redirect.command == "labels_list" and error.suggestion == "call labels_list instead"
     )
     assert error.context == {"from": "tags_list", "to": "labels_list"}
+
+
+def test_a_redirect_message_over_mcp_names_tools() -> None:
+    app = App("x", version="1.0.0")
+    db = app.group("db", description="Database")
+
+    @db.command("up", description="Migrate up", danger_level="safe", exit_codes=())
+    def up(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        return {"ok": True}
+
+    app.redirect("db.upgrade", to="db.up")
+    entries = {e.name: e for e in tool_entries(app)}
+    error = call_tool(app, entries, "db_upgrade", {}).error
+    assert error is not None and error.message == "db_upgrade is now db_up."

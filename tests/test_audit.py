@@ -500,3 +500,49 @@ def test_helper_following_survives_lambdas_and_ignores_network_words() -> None:
         return {"n": len(cached_fetch("https://example.com"))}
 
     assert _findings(app, "network-io") == ["pull"]
+
+
+class _Lazy:
+    """Answers every attribute, as sh, plumbum, a lazy loader, or a mock does"""
+
+    def __getattr__(self, name: str) -> object:
+        return _Lazy()
+
+    def __call__(self, *args: object) -> str:
+        return ""
+
+
+_run = _Lazy()
+
+
+def test_helper_following_survives_proxies_unhashable_checks_and_local_aliases() -> None:
+    from dataclasses import dataclass
+    from pathlib import Path
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass
+    class DirCheck:
+        """An ordinary, unhashable doctor check"""
+
+        path: Path
+
+        def __call__(self, ctx: Ctx) -> str | None:
+            return None
+
+    def fetch(url: str) -> bytes:
+        import requests as r
+
+        return bytes(r.get(url, timeout=5).content)
+
+    app = App("x", version="1.0.0", checks=[DirCheck(Path("."))])
+
+    @app.command("proxy", description="Proxy", danger_level="safe", exit_codes=())
+    def proxy(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"out": _run("x")}
+
+    @app.command("pull", description="Pull", danger_level="safe", exit_codes=())
+    def pull(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(fetch("https://example.com"))}
+
+    assert _findings(app, "network-io") == ["pull"]

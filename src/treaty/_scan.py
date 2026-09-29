@@ -45,13 +45,25 @@ class CtxCall:
     """``ctx.run``'s argument list, when it is a list or tuple literal"""
 
 
-@functools.cache
 def source_tree(fn: Callable[..., object]) -> ast.Module | None:
     """The syntax tree of ``fn``'s source, lines numbered from its first; None without
     source (a REPL, ``exec``, a C extension), or when the source is not a whole statement,
     as for a lambda written inside a call. A nested function holding a multi-line string at
-    column 0 cannot be dedented, so it is parsed inside an ``if`` block. Cached: the audit
-    reads the same functions for several rules"""
+    column 0 cannot be dedented, so it is parsed inside an ``if`` block. Cached per
+    function, since the audit reads the same ones for several rules; an unhashable
+    callable, such as a doctor check instance, is parsed each time"""
+    try:
+        return _cached_tree(fn)
+    except TypeError:
+        return _tree(fn)
+
+
+@functools.lru_cache(maxsize=4096)
+def _cached_tree(fn: Callable[..., object]) -> ast.Module | None:
+    return _tree(fn)
+
+
+def _tree(fn: Callable[..., object]) -> ast.Module | None:
     try:
         source = inspect.getsource(fn)
     except OSError, TypeError:
@@ -233,7 +245,24 @@ def _resolve(fn: Callable[..., object] | type, name: str) -> object:
     return target
 
 
-@functools.cache
+def clear_caches() -> None:
+    """Forget parsed sources and followed helpers, so a new audit sees the code as it is"""
+    _cached_tree.cache_clear()
+    reached_functions.cache_clear()
+
+
+def _unwrapped(target: object) -> object:
+    """A decorated helper's function, through each ``__wrapped__`` that decorator set on it;
+    an object that answers any attribute, such as a lazy proxy or a mock, is kept as is"""
+    for _ in range(32):
+        found = getattr(target, "__dict__", None)
+        if not isinstance(found, dict) or "__wrapped__" not in found:
+            return target
+        target = found["__wrapped__"]
+    return target
+
+
+@functools.lru_cache(maxsize=4096)
 def reached_functions(fn: Callable[..., object]) -> tuple[Callable[..., object], ...]:
     """The handler and every function of its own module it calls by a bare name,
     transitively: a fetch() helper beside the handler runs as part of it, while a function
@@ -252,7 +281,7 @@ def reached_functions(fn: Callable[..., object]) -> tuple[Callable[..., object],
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
                 continue
             found_name = _resolve(current, node.func.id)
-            target = inspect.unwrap(found_name) if callable(found_name) else found_name
+            target = _unwrapped(found_name)
             if (
                 isinstance(target, types.FunctionType)
                 and target.__name__ != "<lambda>"

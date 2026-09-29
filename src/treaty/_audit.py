@@ -27,6 +27,7 @@ from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
 from ._redact import secret_field
 from ._scan import (
+    clear_caches,
     ctx_calls,
     direct_subprocess_calls,
     reached_functions,
@@ -314,10 +315,20 @@ def _calls_network(code: Callable[..., object] | type) -> bool:
     tree = source_tree(code)
     if tree is None:
         return False
+    # A module imported inside the function, as `import requests as r`, by its local name
+    local = {
+        alias.asname or alias.name.partition(".")[0]: alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
     for node in ast.walk(tree):
         name = _dotted(node.func) if isinstance(node, ast.Call) else None
         if name is None:
             continue
+        root, _, rest = name.partition(".")
+        if root in local:
+            name = f"{local[root]}.{rest}" if rest else local[root]
         target = resolve_name(code, name)
         if target is None and any(name.startswith(f"{p}.") for p in _NETWORK_PACKAGES):
             return True  # a call spelled through a network package imported out of sight
@@ -2270,6 +2281,7 @@ def audit(
 ) -> AuditReport:
     """Every rule against ``app``; the schema lock and the conformance profile are looked
     for under ``root``, the run's ``--cwd`` for ``treaty audit``"""
+    clear_caches()
     results: list[RuleResult] = []
     rooted: dict[object, Callable[[App], Iterator[Finding]]] = {
         _schema_version: lambda a: _schema_version(a, root),

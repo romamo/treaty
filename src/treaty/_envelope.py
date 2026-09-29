@@ -44,6 +44,9 @@ def json_safe(value: object, depth: int = 0) -> object:
 
 # REQ-F-007: CSI (colors, cursor movement), OSC (titles, links), other two-byte escapes,
 # and a stray ESC
+# A plain first word, capitalized: letters, joined by ' or -, and a trailing , : or ;. A dot,
+# a slash, an underscore, or a digit marks a path or an identifier, which keeps its case
+_WORD = re.compile(r"[^\W\d_]+(?:['-][^\W\d_]+)*[,:;]?")
 _ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?")
 # REQ-F-016: a null byte or a lone surrogate is not valid UTF-8 text
 _INVALID = re.compile(r"[\x00\ud800-\udfff]")
@@ -70,7 +73,7 @@ def sentence(text: str) -> str:
     judged by its text."""
     text = _ESCAPES.sub("", text).strip()
     first = text.split(maxsplit=1)[0] if text else ""
-    if text[:1].islower() and first.replace("'", "").isalpha():
+    if text[:1].islower() and _WORD.fullmatch(first):
         text = text[0].upper() + text[1:]
     if text and text[-1] not in ".!?":
         text += "."

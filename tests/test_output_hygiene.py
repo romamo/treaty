@@ -408,3 +408,21 @@ def test_a_message_that_starts_with_a_path_keeps_its_case() -> None:
     assert sentence("out.json exists") == "out.json exists."
     assert sentence("tmp/todo.json is not a todo file") == "tmp/todo.json is not a todo file."
     assert sentence("sort_key names no field") == "sort_key names no field."
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("instance-id: an instance id is letters", "Instance-id: an instance id is letters."),
+        ("however, it failed", "However, it failed."),
+        ("read-only file system", "Read-only file system."),
+        ("db-migrate is now db-up", "Db-migrate is now db-up."),
+        ("x.json is gone", "x.json is gone."),
+    ],
+)
+def test_a_plain_first_word_is_capitalized_even_with_a_hyphen_or_comma(
+    text: str, expected: str
+) -> None:
+    from treaty._envelope import sentence
+
+    assert sentence(text) == expected

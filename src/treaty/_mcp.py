@@ -102,8 +102,13 @@ def _as_tools(envelope: Envelope) -> Envelope:
     context = {**error.context, "to": to}
     if isinstance(was, str):
         context["from"] = tool_name(CommandPath(was))
+    message = f"{context.get('from', 'This tool')} is now {to}."
     detail = dataclasses.replace(
-        error, context=context, suggestion=f"call {to} instead", redirect=redirect
+        error,
+        message=message,
+        context=context,
+        suggestion=f"call {to} instead",
+        redirect=redirect,
     )
     return dataclasses.replace(envelope, error=detail)
 

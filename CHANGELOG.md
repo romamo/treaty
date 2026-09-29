@@ -70,9 +70,18 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- Following helpers, the audit looped forever on a lazy proxy or mock a handler calls, and
+  failed on an unhashable doctor check; it unwraps only what a decorator set, and parses an
+  unhashable callable without the cache, which is bounded and cleared per audit. An import
+  alias made inside a helper (`import requests as r`) is resolved
+- `sentence()` left a hyphenated or comma-ended first word lowercase, such as
+  `instance-id:`; only a word with a dot, slash, underscore, or digit keeps its case. An MCP
+  redirect's message names tools too
 - The conformance profile probed a `safe_default` command as destructive with `--live`,
   which alone applies it: the kit applied the change against the sandbox and failed L2
-  when nothing refused. Such a command is now probed as the read its default is
+  when nothing refused. Such a command is now probed as the read its default is; since
+  `--live` alone confirms it (REQ-O-048), an app whose only destructive commands are
+  `safe_default` scores `incomplete` in the kit rather than failing
 - An error message that began with a path or file name was capitalized into another
   name, such as `Out.json exists.`; a first word that is not a plain word keeps its case
 - A compat shape's schema lacked the `noop` a replayed idempotency key answers, so a
