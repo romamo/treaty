@@ -83,7 +83,10 @@ Apps built on treaty keep their own, structured schema changelog with
 - `CLEANUP_KEPT` warning: `cleanup` names the paths it left because they are, or hold, a
   declared credential or config path
 - `APP_IMPORT_FAILED` (exit 4) from the `treaty` tooling commands when the app's module
-  raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash
+  raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash. Its
+  context carries `target`, `exception`, and the registration `message`, with no
+  traceback, on `audit`, `schema-lock`, `changelog-add`, `agents-md`, `check-docs`, and
+  `conformance` (#4)
 - `App(version=)` accepts PEP 440 development and post releases and their combinations
   (`0.3.0.dev0`, `0.3.0.post1`, `1.0.0rc1.post2.dev3`), as `introduced_in=`,
   `Deprecated(...)`, and an update check do (#5). Their semver spelling puts `.devN` in
@@ -99,10 +102,6 @@ Apps built on treaty keep their own, structured schema changelog with
   on a returned value it holds for, and ends with the `exhausted` code when it still
   holds. The defaults keep the fixed delay, and the command's timeout still bounds every
   wait
-  raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash. Its
-  context carries `target`, `exception`, and the registration `message`, with no
-  traceback, on `audit`, `schema-lock`, `changelog-add`, `agents-md`, `check-docs`, and
-  `conformance` (#4)
 - `treaty audit` reports its `scope` in JSON and on a `Scope:` line in plain output: what
   the source rules read, so a clean audit is not taken for a runtime check
 - `-v` is short for `--verbose`, and `-vv` or `-v -v` for `--debug`, before or after the
