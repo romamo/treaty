@@ -29,7 +29,7 @@ rm -rf tmp/tutorial && mkdir -p tmp/tutorial
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## Why generate the docs
 
@@ -267,5 +267,5 @@ uv run treaty check-docs examples.tutorial.todo_exit_codes:app \
 
 `todo` passes the strict audit and the conformance kit, serves the same contract over MCP,
 and ships docs that CI keeps honest. The last step is the next release: changing that
-contract without breaking the agents that learned it:
-[Change the contract safely](stability.md).
+contract without breaking the agents that learned it: [Change the contract
+safely](stability.md).

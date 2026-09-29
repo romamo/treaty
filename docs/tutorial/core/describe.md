@@ -28,7 +28,7 @@ todo() { uv run examples/tutorial/todo_treaty.py "$@"; }
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## What an agent reads
 
@@ -198,9 +198,8 @@ def test_an_example_parses(cli_app: App, example: str) -> None:
 ```
 
 The tutorial checks every version of `todo` it ships; in your project, `EXAMPLE_APPS` is
-just `[app]`. The test calls
-`app.run` with the parsed words, so no shell ever runs an example; an example that uses a
-pipe or a redirect belongs in prose, not in `examples=`.
+just `[app]`. The test calls `app.run` with the parsed words, so no shell ever runs an
+example; an example that uses a pipe or a redirect belongs in prose, not in `examples=`.
 
 **Check:** a renamed flag and a leftover placeholder both fail validation, and `todo`'s own
 examples pass the test

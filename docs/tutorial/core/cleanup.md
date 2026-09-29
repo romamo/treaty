@@ -17,8 +17,8 @@ uv run treaty audit examples.tutorial.todo_network:app \
 ```
 
 The chapter looks at `todo`'s `import` in
-[`examples/tutorial/todo_network.py`](../../../examples/tutorial/todo_network.py). To watch a
-hook run on every kind of exit, the checks use
+[`examples/tutorial/todo_network.py`](../../../examples/tutorial/todo_network.py). To watch
+a hook run on every kind of exit, the checks use
 [`examples/slowctl.py`](../../../examples/slowctl.py), the repository's demo of timeouts and
 cancellation, whose `fetch` command registers one.
 
@@ -34,7 +34,7 @@ export SLOWCTL_AUDIT_LOG=off
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## What "by any exit" means
 
@@ -182,10 +182,11 @@ test "$(grep -c 'cleanup: releasing resources' tmp/tutorial/sig.err)" -eq 1
 ```
 
 `--verbose` makes the handler's `ctx.log` line reach stderr off a terminal, which is how the
-check knows the handler started. The command is started directly, not through the
-`slowctl` shell function: a function run in the background is a subshell, and `kill` would
-stop the subshell while the command it started keeps running. In a Python test, `app.run` in a thread and a signal sent to
-the process do the same; `tests/test_lifecycle.py` covers each exit path that way.
+check knows the handler started. The command is started directly, not through the `slowctl`
+shell function: a function run in the background is a subshell, and `kill` would stop the
+subshell while the command it started keeps running. In a Python test, `app.run` in a thread
+and a signal sent to the process do the same; `tests/test_lifecycle.py` covers each exit
+path that way.
 
 ## Next
 

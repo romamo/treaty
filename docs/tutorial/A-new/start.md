@@ -34,11 +34,12 @@ examples="$PWD/examples/tutorial"
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## Step 1: Scaffold the project
 
-In your own work, one command creates the project and a second installs it:
+In your own project, these are the commands to run: one creates the project and the second
+installs it:
 
 ```bash
 uvx treaty init todo
@@ -46,9 +47,9 @@ cd todo && uv sync
 ```
 
 `--dry-run` lists the files without writing them, and `--directory` puts the project
-somewhere other than `./todo`. The project depends on `treaty` from PyPI; inside a treaty
-checkout, the check below passes `--treaty-source` so the project uses the checkout
-instead.
+somewhere other than `./todo`. The project depends on `treaty` from PyPI. The check below
+does the same inside a treaty checkout, so it adds `--directory` to keep the project in the
+scratch directory and `--treaty-source` to use the checkout's treaty.
 
 **Check:** the scaffold runs, its tests pass, and the strict audit exits 0 before you change
 anything
@@ -116,7 +117,10 @@ the "Fails when" column
 
 ## Step 4: Replace the app and add shared state
 
-Replace `cli.py` from the top. The app keeps the name `todo`:
+Open `src/todo/cli.py` and replace the scaffold's code with `todo`'s, a piece at a time,
+starting with the app. The whole file you are building is
+[`todo_treaty.py`](../../../examples/tutorial/todo_treaty.py); the steps show its parts in
+order. The app keeps the name `todo`:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
@@ -139,9 +143,11 @@ class Common:
 
 The default is `None` rather than `Path.home() / ".todo.json"`: a default in the manifest
 should be a fixed value, not one computed on the machine that imported the module. The
-fallback lives in the code that opens the store, a resource. treaty builds a resource once
-per run, after the arguments are checked, and hands it to every handler that annotates a
-parameter with its class:
+fallback moves into the code that opens the item file.
+
+That code is a resource: a class with an `acquire` classmethod, which treaty calls once per
+run, after the arguments are checked, to build the object. Any handler that annotates a
+parameter with the class gets that object, the way it gets `args` and `ctx`:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
@@ -158,6 +164,19 @@ class Store:
 in the [finished module](../../../examples/tutorial/todo_treaty.py). Typing `db` as `Path`
 gets it checked before any handler runs: `..` segments, percent-encoded bytes, and null
 bytes exit 2.
+
+The excerpts below use a few more definitions from that file, plain dataclasses and one
+type alias:
+
+- **`Priority`** is `Literal["low", "normal", "high"]`
+- **`Item`** is one todo item: `id`, `text`, `priority`, and `done`
+- **`Changed`** is what `add` and `done` return: an `effect` and the `item`
+- **`ListArgs`**, **`Done`**, and **`Purge`** are the arguments of `list`, `done`, and `purge`
+- **`Purged`** is what `purge` returns: an `effect`, the `deleted` items, and `would_affect`
+- **`render_items`** prints items the way the argparse version did, one per line
+
+The imports come from `treaty`: `Affects`, `App`, `Arg`, `Ctx`, `Exit`, `Flag`, `Format`,
+and `Out`.
 
 **Check:** in this repository the finished module is the tutorial's example, so the check
 copies it over the scaffold's `cli.py` instead of you typing each step. The app loads, and
@@ -295,6 +314,10 @@ def purge(args: Purge, ctx: Ctx, store: Store) -> Purged:
     return Purged(effect="deleted", deleted=completed)
 ```
 
+`Affects` describes what a dry run would do, in three parts: a one-line summary for a
+person, the identifiers of what it would touch, and how many there are. treaty requires it
+on every destructive dry run, and returns it as `data.would_affect`.
+
 Without `--confirm-destructive`, treaty runs the handler as a dry run and exits 2 with
 `CONFIRMATION_REQUIRED`, and the dry-run result is in `data`: the caller sees what would
 have been deleted, where a prompt would have asked a person.
@@ -403,8 +426,9 @@ uv run treaty conformance todo.cli:app --force | jq -e '.data.effect == "updated
 
 Do not add `--run` yet. The kit runs the real CLI through `conformance/todo`, and one probe
 is `todo purge`: against your real `~/.todo.json`, a bug in the dry run would delete your
-completed items. [Run the conformance kit](../ship/conformance.md#step-2-keep-the-probes-away-from-real-data)
-shows how to point the launcher at a sandbox first.
+completed items. [Run the conformance
+kit](../ship/conformance.md#step-2-keep-the-probes-away-from-real-data) shows how to point
+the launcher at a sandbox first.
 
 ## Step 10: Read the audit
 
@@ -434,9 +458,8 @@ uv run treaty audit todo.cli:app \
 
 ## Next
 
-Follow the audit's rules in order, one chapter each, starting with the first:
-[Describe every command](../core/describe.md), then
-[Choose each command's danger level](../core/danger-level.md). `todo` already passes both,
-since this chapter gave every command an example and a danger level; they say how to do
-it well for your own CLI. The rule `todo` still fails, `exit-codes`, comes third:
-[Declare exit codes](../core/exit-codes.md).
+Follow the audit's rules in order, one chapter each, starting with the first: [Describe
+every command](../core/describe.md), then [Choose each command's danger
+level](../core/danger-level.md). `todo` already passes both, since this chapter gave every
+command an example and a danger level; they say how to do it well for your own CLI. The rule
+`todo` still fails, `exit-codes`, comes third: [Declare exit codes](../core/exit-codes.md).

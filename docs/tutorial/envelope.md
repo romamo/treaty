@@ -11,8 +11,8 @@ Off a terminal the envelope is JSON; at a terminal the same run prints readable 
 ## Running the checks
 
 The checks on this page run `todo` from
-[`examples/tutorial/todo_exit_codes.py`](../../examples/tutorial/todo_exit_codes.py). Run them
-from the root of a treaty checkout, in order:
+[`examples/tutorial/todo_exit_codes.py`](../../examples/tutorial/todo_exit_codes.py). Run
+them from the root of a treaty checkout, in order:
 
 <!-- check -->
 ```bash

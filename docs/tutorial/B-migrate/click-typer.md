@@ -3,7 +3,8 @@
 **Goal:** every command of a click or typer CLI runs on treaty, with the same features and a
 manifest an agent can read
 
-**You need:** a working click or typer CLI, and treaty installed ([Before you start](../index.md#before-you-start))
+**You need:** a working click or typer CLI, and treaty installed ([Before you
+start](../index.md#before-you-start))
 
 **Done when:** your tests pass, and `treaty audit` reports only `exit-codes` warnings, which
 the next chapter clears:
@@ -17,9 +18,10 @@ uv run treaty audit examples.tutorial.todo_treaty:app \
 The chapter migrates one small CLI, `todo`, written both ways:
 [`examples/tutorial/todo_click.py`](../../../examples/tutorial/todo_click.py) and
 [`examples/tutorial/todo_typer.py`](../../../examples/tutorial/todo_typer.py). Both end at
-the same treaty app, [`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py),
-which is also where the [argparse chapter](argparse.md) ends. Each step shows the click code
-first and the typer code where it differs; typer runs on click, so the two behave the same.
+the same treaty app,
+[`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py), which is
+also where the [argparse chapter](argparse.md) ends. Each step shows the click code first
+and the typer code where it differs; typer runs on click, so the two behave the same.
 
 The two starting points carry inline script metadata, so `uv run` fetches click or typer
 for them without adding either to your project.
@@ -38,7 +40,7 @@ rm -rf tmp/tutorial && mkdir -p tmp/tutorial
 
 In your own project, `todo` is your CLI's command. Piped output is a JSON
 [envelope](../envelope.md), and each check pipes it into `jq -e`, which exits 1 when the
-condition is false: a check passes when every line in it exits 0. `tests/test_tutorial.py` runs the checks the same way.
+condition is false: a check passes when every line in it exits 0.
 
 ## What is wrong with the click version
 
@@ -605,9 +607,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
 
 ## Next
 
-Follow the audit's rules in order, one chapter each, starting with the first:
-[Describe every command](../core/describe.md), then
-[Choose each command's danger level](../core/danger-level.md). `todo` already passes both,
-since this chapter gave every command an example and a danger level; they say how to do
-it well for your own CLI. The rule `todo` still fails, `exit-codes`, comes third:
-[Declare exit codes](../core/exit-codes.md).
+Follow the audit's rules in order, one chapter each, starting with the first: [Describe
+every command](../core/describe.md), then [Choose each command's danger
+level](../core/danger-level.md). `todo` already passes both, since this chapter gave every
+command an example and a danger level; they say how to do it well for your own CLI. The rule
+`todo` still fails, `exit-codes`, comes third: [Declare exit codes](../core/exit-codes.md).

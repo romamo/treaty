@@ -30,7 +30,7 @@ export TODO_STATE_DIR="$PWD/tmp/tutorial/state"
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## What the danger level decides
 
@@ -50,10 +50,10 @@ enforces it on every call:
 | MCP tool hints | read-only, idempotent | none | destructive |
 | Conformance kit probes it | yes, from its first example | never | yes, as a preview and a refusal |
 
-Two more follow from the level: only a `safe` command may stream its output, and a
-command that writes the app's config cannot be `safe`. Registration enforces the requirements in the table: a `mutating` command
-whose result has no `effect` field, or a `destructive` one without a boolean `dry_run`,
-fails when the app is built.
+Two more follow from the level: only a `safe` command may stream its output, and a command
+that writes the app's config cannot be `safe`. Registration enforces the requirements in the
+table: a `mutating` command whose result has no `effect` field, or a `destructive` one
+without a boolean `dry_run`, fails when the app is built.
 
 ## Step 1: Decide by the worst thing a call can do
 

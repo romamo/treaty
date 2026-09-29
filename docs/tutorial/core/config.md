@@ -4,9 +4,9 @@
 came from, and takes its secrets from the environment or a file, never from the command line
 or into any output
 
-**You need:** a treaty app, such as `todo` at the end of
-[Declare network commands](network-io.md); this chapter clears the audit rules
-`settings-declared` and `env-prefix`
+**You need:** a treaty app, such as `todo` at the end of [Declare network
+commands](network-io.md); this chapter clears the audit rules `settings-declared` and
+`env-prefix`
 
 **Done when:** the strict audit exits 0 for a `todo` whose `import` reads a default feed from
 its settings and sends a token:
@@ -17,8 +17,8 @@ uv run treaty audit examples.tutorial.todo_config:app --strict > /dev/null
 ```
 
 The chapter starts from
-[`examples/tutorial/todo_network.py`](../../../examples/tutorial/todo_network.py) and ends at
-[`examples/tutorial/todo_config.py`](../../../examples/tutorial/todo_config.py): `import`
+[`examples/tutorial/todo_network.py`](../../../examples/tutorial/todo_network.py) and ends
+at [`examples/tutorial/todo_config.py`](../../../examples/tutorial/todo_config.py): `import`
 gains a default feed URL from the settings, and a token for feeds that require one.
 
 ## Running the checks
@@ -35,9 +35,9 @@ export XDG_CONFIG_HOME="$PWD/tmp/tutorial/xdg"
 unset TODO_FEED_URL TODO_TOKEN
 ```
 
-Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way; the calls
-that need a feed run there too, against a local one that requires a token.
+Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1
+when the condition is false. Calls that need a feed are tests in `tests/test_tutorial.py`,
+against a local one that requires a token.
 
 ## Why treaty reads the settings
 

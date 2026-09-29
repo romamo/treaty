@@ -38,8 +38,7 @@ uv sync -q
 uv run treaty agents-md todo.cli:app > /dev/null
 ```
 
-Each check exits non-zero when it fails. `tests/test_tutorial.py` runs the checks the same
-way.
+Each check exits non-zero when it fails.
 
 ## What to test
 
@@ -70,7 +69,9 @@ itself, renderers, and what reaches stderr. `todo`'s behaviour tests are the fou
 
 Some tests hold for any treaty app, whatever its commands do.
 [`test_contract.py`](../../../examples/tutorial/new_cli/test_contract.py) holds them; copy
-it into `tests/`, and change `APP` and the import to your app. It runs the strict audit:
+it into `tests/`, and change `APP`, your app's import path, and the `from todo.cli import app`
+line to your app. It runs the strict audit through `treaty(...)`, a helper at the top of the
+file that runs the `treaty` command of the test's own environment:
 
 <!-- file: examples/tutorial/new_cli/test_contract.py -->
 ```python
@@ -148,8 +149,8 @@ The CI job runs the suite and the gates that need more than a test run:
 Save the whole file as `.github/workflows/agent-contract.yml`. Each `git diff --exit-code`
 fails the job when a regenerated file differs from the committed one, so the pull request
 that changed a command also has to show what changed for agents. At each release, save the
-new manifest as the next baseline, as [Change the contract safely](stability.md#step-1-keep-the-last-releases-manifest)
-describes.
+new manifest as the next baseline, as [Change the contract
+safely](stability.md#step-1-keep-the-last-releases-manifest) describes.
 
 Give the conformance kit's launcher a sandbox before the job runs it on anything that holds
 real data, as [Run the conformance kit](conformance.md#step-2-keep-the-probes-away-from-real-data)

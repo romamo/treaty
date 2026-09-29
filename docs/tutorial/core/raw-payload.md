@@ -34,7 +34,7 @@ todo add "Buy milk" --db tmp/tutorial/todo.json > /dev/null
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## Why a payload
 

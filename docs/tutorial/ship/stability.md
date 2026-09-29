@@ -32,7 +32,7 @@ before add "Buy milk" --db tmp/tutorial/todo.json > /dev/null
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## What an agent keeps from the last release
 
@@ -198,8 +198,8 @@ uv run treaty audit myapp.cli:app --baseline myapp-1.0.0.json --strict     # not
 
 With `treaty-schema.lock` committed, the first line also runs `schema-version` against it.
 At each release, save the new manifest as the next baseline, run `treaty schema-lock` if an
-output changed, and regenerate the agent docs from
-[Ship the agent docs](agent-docs.md), so every file an agent reads names the new commands.
+output changed, and regenerate the agent docs from [Ship the agent docs](agent-docs.md), so
+every file an agent reads names the new commands.
 
 ## Next
 

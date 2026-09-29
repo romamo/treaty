@@ -29,9 +29,9 @@ todo() { uv run examples/tutorial/todo_network.py "$@"; }
 rm -rf tmp/tutorial && mkdir -p tmp/tutorial
 ```
 
-Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way; the calls
-that need a server run there too, against a local one.
+Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1
+when the condition is false. Calls that need a server are tests in `tests/test_tutorial.py`,
+against a local one.
 
 ## Why the declaration matters
 

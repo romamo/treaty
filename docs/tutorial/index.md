@@ -5,8 +5,10 @@ reading its source: one call to `manifest` lists every command, flag, and exit c
 run ends with a JSON envelope, and every failure has a typed exit code that says whether a
 retry is safe.
 
-It is written for two readers. A developer reads the prose; a coding agent follows the
-**Check** commands, which pass or fail without a person looking at the output.
+Every chapter works on one small example CLI, `todo`, and shows each change twice: in prose,
+with the commands to run in your own project, and in **Check** blocks that re-run the change
+against the tutorial's own copy of `todo` and pass or fail without a person reading the
+output.
 
 ## Pick a track
 
@@ -22,10 +24,22 @@ the core chapters take you through the audit's rules one at a time.
 ## Before you start
 
 - Python 3.14 and [uv](https://docs.astral.sh/uv/)
-- `uv add treaty` inside your project, and `uv tool install treaty` for the `treaty` command
-- Verify with `treaty --version`: it prints a JSON envelope and exits 0
+- For a new CLI, nothing else: `uvx treaty init` makes a project that depends on treaty. To
+  migrate a CLI, run `uv add treaty` in its project
 - Read [The response envelope](envelope.md) once: every chapter reads its keys, and it
   defines the terms the chapters use
+
+## Your project, or the tutorial's checks
+
+Each chapter serves two ways of reading it:
+
+- **Building your own CLI.** Work in your project and run the commands the prose shows, with
+  your app's import path, such as `myapp.cli:app`, and your own command in place of `todo`.
+  Each **Check** shows what the same step prints for `todo`, so you know what to expect
+- **Re-running the tutorial.** The **Check** blocks run from the root of a treaty checkout,
+  where the example files live. Each chapter's first block defines `todo` as a shell function
+  that runs that chapter's example file, and `tests/test_tutorial.py` runs every block in
+  order, so the tutorial fails its own tests when it stops being true
 
 ## How a chapter is laid out
 
@@ -35,9 +49,10 @@ Every chapter opens with the same three lines:
 - **You need:** the chapter or state it builds on
 - **Done when:** the command that proves it, and what it prints
 
-Inside, each step ends with a **Check**. Code in the chapters is taken from the runnable
-files under `examples/tutorial/`, and `tests/test_tutorial.py` fails when the two drift
-apart, so what you copy is what the tests run.
+Inside, each step ends with a **Check**. The code shown is an excerpt of a runnable file
+under `examples/tutorial/`, named at the top of the chapter: open it for the imports and the
+definitions around an excerpt. `tests/test_tutorial.py` fails when an excerpt and its file
+drift apart, so what you copy is what the tests run.
 
 ## The example files
 
@@ -65,9 +80,10 @@ on `todo_network.py` in turn.
 | [`new_cli/test_contract.py`](../../examples/tutorial/new_cli/test_contract.py), [`new_cli/agent-contract.yml`](../../examples/tutorial/new_cli/agent-contract.yml) | contract tests for any treaty app, and a CI job with every gate | [testing](ship/testing.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
-[Release what a run holds](core/cleanup.md) also uses [`examples/slowctl.py`](../../examples/slowctl.py),
-the repository's demo of timeouts and cancellation, since `todo` holds nothing to release.
-A chapter that changes `todo` names the file it starts from and the one it ends at.
+[Release what a run holds](core/cleanup.md) also uses
+[`examples/slowctl.py`](../../examples/slowctl.py), the repository's demo of timeouts and
+cancellation, since `todo` holds nothing to release. A chapter that changes `todo` names the
+file it starts from and the one it ends at.
 
 ## After the first chapter: follow the audit
 

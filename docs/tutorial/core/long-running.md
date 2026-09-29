@@ -30,9 +30,9 @@ todo() { uv run examples/tutorial/todo_batch.py "$@"; }
 rm -rf tmp/tutorial && mkdir -p tmp/tutorial
 ```
 
-Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way; the calls
-that need feeds run there too, against a local server with fast, slow, and broken ones.
+Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1
+when the condition is false. Calls that need feeds are tests in `tests/test_tutorial.py`,
+against a local server with fast, slow, and broken ones.
 
 ## What goes wrong with a long command
 

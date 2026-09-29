@@ -16,8 +16,8 @@ uv run treaty audit examples.tutorial.todo_pages:app \
 ```
 
 The chapter starts from
-[`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py), whose
-`list` is already paginated, and ends at
+[`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py),
+whose `list` is already paginated, and ends at
 [`examples/tutorial/todo_pages.py`](../../../examples/tutorial/todo_pages.py), whose `list`
 pages by item id.
 
@@ -37,7 +37,7 @@ jq -n '[range(1; 26) | {id: ., text: "Item \(.)", priority: "normal", done: fals
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## Why a list is paged
 

@@ -40,7 +40,7 @@ todo add "Buy milk" --db tmp/tutorial/repo/todo.json > /dev/null
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way.
+the condition is false.
 
 ## What goes wrong when a CLI runs a program
 
@@ -64,7 +64,8 @@ A handler runs other programs through `ctx.run`, with the arguments as a list:
     ctx.run(["git", "add", "--", store.path.name], cwd=here)
 ```
 
-No shell ever sees the list: each item reaches git as one argument, so spaces, `*`, `;`, and
+`here` is the directory the item file is in, `store.path.parent`, and `cwd=here` runs git
+there. No shell ever sees the list: each item reaches git as one argument, so spaces, `*`, `;`, and
 `$(...)` are text, not syntax. treaty enforces it. A string where the list belongs, such as
 `ctx.run(f"git add {name}")`, fails registration with `SHELL_STRING_PROHIBITED` when the
 source shows it, and a handler that calls `os.system`, `os.popen`, or anything with

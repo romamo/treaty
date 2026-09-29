@@ -32,9 +32,9 @@ unset TODO_TOKEN
 feed=http://127.0.0.1:9/todo.json
 ```
 
-Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
-the condition is false. `tests/test_tutorial.py` runs the checks the same way; the calls
-that need a feed run there too.
+Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1
+when the condition is false. Calls that need a feed are tests in `tests/test_tutorial.py`,
+against a local one.
 
 ## Why not print
 
