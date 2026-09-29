@@ -1734,6 +1734,7 @@ def test_timeout_budget_flags_retry_waits_over_the_timeout() -> None:
     [(command, message, fix)] = _timeout_app(retry=retry)["timeout-budget"]
     assert command == "restart"
     assert "may wait 2340 s in all, over the app's default 60 s timeout" in message
+    assert "gives up before the last retries with UNAVAILABLE" in message
     assert fix.startswith("timeout=2820 on restart")
 
 
@@ -1744,6 +1745,13 @@ def test_timeout_budget_counts_jitter_and_an_explicit_timeout() -> None:
     [(_, message, fix)] = _timeout_app(retry=retry, timeout=30)["timeout-budget"]
     assert "may wait 45 s in all, over its 30 s timeout" in message
     assert fix.startswith("timeout=60 on restart")
+
+
+def test_timeout_budget_rounds_the_scaled_waits() -> None:
+    from treaty._audit import _headroom
+
+    # 59 s and 60 s of waits scale to 70.8 s and 72 s: both round to a whole minute
+    assert (_headroom(45), _headroom(59), _headroom(60)) == (60, 120, 120)
 
 
 def test_timeout_budget_passes_a_retry_that_fits() -> None:

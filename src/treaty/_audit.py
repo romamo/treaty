@@ -2044,7 +2044,7 @@ def _retry_declared(app: App) -> Iterator[Finding]:
 def _headroom(seconds: float) -> int:
     """A ``timeout=`` for waits of ``seconds``: a fifth more for the attempts themselves,
     up to a whole minute past a minute, else to 10 s"""
-    step = 60 if seconds >= 60 else 10
+    step = 60 if seconds * 1.2 >= 60 else 10
     return math.ceil(seconds * 1.2 / step) * step
 
 
@@ -2062,8 +2062,9 @@ def _timeout_budget(app: App) -> Iterator[Finding]:
                     Severity.WARNING,
                     c.path.value,
                     f"retry=Retry(...) may wait {waits:g} s in all, over {whose} "
-                    f"{timeout.seconds:g} s timeout, so a slow upstream ends the run in "
-                    "TIMEOUT before the last retries",
+                    f"{timeout.seconds:g} s timeout, so the run gives up before the last "
+                    f"retries with {c.retry.exhausted}, or ends in TIMEOUT if an attempt "
+                    "itself overruns",
                     f"timeout={_headroom(waits)} on {c.path.value}, the retry waits and a "
                     "fifth more for the attempts, or a smaller Retry(...)",
                 )
