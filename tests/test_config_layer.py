@@ -243,6 +243,18 @@ def test_an_invalid_config_file_exits_2_with_config_invalid(
     assert error["context"]["path"] == str(path) and error["context"].get("key") == key
 
 
+def test_an_invalid_setting_in_plain_mode_names_the_setting() -> None:
+    """key is the setting's name, not a credential: stderr shows it"""
+    err = io.StringIO()
+    code = fixture_config_app.app.run(
+        ["show", "--format", "plain"],
+        stdout=io.StringIO(),
+        stderr=err,
+        env={"CONFIGCTL_RETRIES": "many"},
+    )
+    assert code == 2 and "  key: retries" in err.getvalue()
+
+
 def test_an_invalid_env_setting_exits_2_naming_the_variable() -> None:
     code, envelope = configctl(["show"], {"CONFIGCTL_RETRIES": "many"})
     error = envelope["error"]

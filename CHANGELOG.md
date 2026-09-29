@@ -61,6 +61,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- Plain-mode stderr printed `[REDACTED]` for three context fields treaty fills with names,
+  not values: a conformance `CONFLICT`'s `changed_keys`, `TOKEN_REQUIRED`'s
+  `token_env_vars`, and `CONFIG_INVALID`'s `key`. They print as they are; any other
+  context field named like a credential is still masked
 - `cleanup` followed an `out/` directory that was a symlink and deleted what it pointed
   at; it now lists output files only under a temp root and `out/` the user owns
 - `cleanup` deleted a declared credential or config path when a cache, temp, or log glob

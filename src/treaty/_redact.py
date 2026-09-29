@@ -54,6 +54,18 @@ def secret_field(name: str) -> bool:
     return words[-1] in _SECRET_WORDS or (words[-1] == "key" and len(words) > 1)
 
 
+# Context fields treaty's own errors fill with names, never values: a profile's differing
+# keys, the variables a token can come from, and the setting a bad value was given for.
+# Their names match SECRET_NAME, but masking them on stderr hides the fix, not a secret
+NAME_CONTEXT = frozenset(
+    {
+        ("CONFLICT", "changed_keys"),
+        ("TOKEN_REQUIRED", "token_env_vars"),
+        ("CONFIG_INVALID", "key"),
+    }
+)
+
+
 def redacted(value: object, redact: Callable[[str], str]) -> object:
     """Every string of a JSON value with the run's secret values replaced"""
     if isinstance(value, str):

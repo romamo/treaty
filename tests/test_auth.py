@@ -242,6 +242,13 @@ def test_browser_login_off_a_terminal_without_a_token_exits_4_listing_the_variab
     ]
 
 
+def test_browser_login_in_plain_mode_names_the_token_variables() -> None:
+    """token_env_vars holds variable names, not tokens: stderr shows them"""
+    err = io.StringIO()
+    code = authctl.run(["login", "--format", "plain"], stdout=io.StringIO(), stderr=err, env={})
+    assert code == 4 and "token_env_vars: ['AUTHCTL_TOKEN']" in err.getvalue()
+
+
 def test_browser_login_off_a_terminal_with_a_token_succeeds_and_never_prints_it() -> None:
     app = login_app()
     code, env, err = run(app, ["login", "--verbose"], {"AUTHCTL_TOKEN": TOKEN})

@@ -121,6 +121,17 @@ def test_conformance_refreshes_a_profile_that_differs_only_in_command(
     assert profile["command"] == [launcher]
 
 
+def test_a_conflict_in_plain_mode_names_the_changed_keys(tmp_path: Path) -> None:
+    """changed_keys holds profile key names: stderr shows them, not [REDACTED]"""
+    run_cli(cwd=tmp_path, argv=["conformance", "examples.deployctl:app"])
+    path = tmp_path / "conformance" / "deployctl.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "timeout_seconds": 5}))
+    err = io.StringIO()
+    argv = ["conformance", "examples.deployctl:app", "--format", "plain", "--cwd", str(tmp_path)]
+    code = cli.run(argv, stdout=io.StringIO(), stderr=err, env={})
+    assert code == 6 and "changed_keys: ['timeout_seconds']" in err.getvalue()
+
+
 def test_conformance_refuses_to_overwrite_a_differing_profile(tmp_path: Path) -> None:
     run_cli(cwd=tmp_path, argv=["conformance", "examples.deployctl:app"])
     path = tmp_path / "conformance" / "deployctl.json"

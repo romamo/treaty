@@ -188,7 +188,7 @@ from ._protect import (
     protect_batch,
     tagged,
 )
-from ._redact import REDACTED, redacted, scrub
+from ._redact import NAME_CONTEXT, REDACTED, redacted, scrub
 from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
@@ -4528,9 +4528,13 @@ class _Run:
                     where = f"{item['field']}: " if "field" in item else ""
                     self.err.write(f"  - {where}{item['message']}\n")
             else:
-                # REQ-F-034: a context key named like a credential prints [REDACTED]
+                # REQ-F-034: a context key named like a credential prints [REDACTED],
+                # except treaty's own fields that hold names
                 for key, value in envelope.error.context.items():
-                    self.err.write(f"  {key}: {scrub(key, value)}\n")
+                    printed: object = (
+                        value if (error.code, key) in NAME_CONTEXT else scrub(key, value)
+                    )
+                    self.err.write(f"  {key}: {printed}\n")
             if envelope.error.suggestion is not None:
                 self.err.write(f"hint: {envelope.error.suggestion}\n")
         self.out.flush()
