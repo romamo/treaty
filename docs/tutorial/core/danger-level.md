@@ -156,6 +156,18 @@ command previews and exits 0 by default, and `--live` applies it. Use it for com
 as a cleanup an agent runs often to see what it would remove; keep the default gate when
 applying is the usual intent.
 
+A destructive command that takes an id has one more case: the id is already gone. A
+retried delete should succeed rather than fail, so it answers `noop` when confirmed, and
+on a dry run `would_delete` with an empty preview; the audit's `delete-not-found` rule asks
+for this when such a command declares `NOT_FOUND`:
+
+```python
+if found is None:
+    if args.dry_run:
+        return Removed("would_delete", Affects(f"Deletes nothing: no #{args.id}", (), 0))
+    return Removed("noop")
+```
+
 A `destructive` command is also never offered as a fix: a `fix_command` that runs one is
 refused, since a fix must be safe to run twice, so an agent following a suggestion never
 deletes anything by accident.

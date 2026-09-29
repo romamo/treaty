@@ -6,8 +6,10 @@ manifest an agent can read
 **You need:** a working argparse CLI, and treaty installed ([Before you
 start](../index.md#before-you-start))
 
-**Done when:** your tests pass, if the CLI has any, and `treaty audit` reports only
-`exit-codes` warnings, which [Declare exit codes](../core/exit-codes.md) clears:
+**Done when:** your tests pass, if the CLI has any, and, for `todo`, `treaty audit` reports
+only `exit-codes` warnings, which [Declare exit codes](../core/exit-codes.md) clears.
+Another CLI may get other rules too; [the
+index](../index.md#after-the-first-chapter-follow-the-audit) maps each to its chapter:
 
 <!-- check -->
 ```bash
@@ -76,10 +78,17 @@ column matters:
 | `purge` | `--yes` / `-y` | deletes items | never on purpose | `destructive` |
 | all | `--db PATH` | | | |
 
-Danger level is the column argparse never asked for. `safe` commands only read,
-`mutating` commands change state, and `destructive` commands remove something that cannot
-be restored. It decides which framework flags a command gets and whether it can run without
-confirmation.
+Danger level is the column argparse never asked for. `safe` commands only read, `mutating`
+commands change state, and `destructive` commands remove something that cannot be restored.
+It decides which framework flags a command gets and whether it can run without confirmation.
+
+Look for names treaty keeps for itself. `--verbose`, `--quiet`, `--debug`, `--config`,
+`--format`, `--fields`, `--cwd`, and `-h` are framework flags on every command, so a field
+with one of those names is refused when the app is built. Some framework flags come with a
+feature: a command with `has_network_io=True` gets `--timeout`, `--proxy`, and `--no-proxy`,
+and a list command `--limit` and `--cursor`. A field of your own with one of those names is
+refused too, and the error says to drop it: the framework's flag does the same job, and the
+handler reads a timeout as `ctx.timeout`.
 
 **Check:** every subparser has a row, and every `sys.exit`, `parser.error`, and `input()`
 call in the old code shows up in the "Fails when" or "Writes?" column
@@ -415,6 +424,10 @@ the envelope back. No subprocess, no parsing of printed text:
 env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")})
 assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 ```
+
+A command in a group is called by its dotted path, as the manifest keys it:
+`app.call("remote.add", {...})` for `todo remote add`.
+
 
 `app.run(argv, stdout=..., stderr=...)` covers the argv path and the plain renderers. A
 whole test file for `todo` in this style, with its imports and a fixture for a scratch item
