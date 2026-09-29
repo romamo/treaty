@@ -153,8 +153,9 @@ they run in the caller's shell:
 - **The environment is the client's, not your shell's.** A client may start the server with
   a reduced environment; the MCP Python SDK's client passes only a few variables, such as
   `HOME` and `PATH`. Secret variables read through `<name>_from_env`, and settings such as
-  `TODO_STATE_DIR` or `TODO_MAX_OUTPUT_BYTES` (the app name, uppercased, is the prefix), have to be set in the client config:
-  `claude mcp add -e NAME=value`, or an `"env"` object in the JSON
+  `TODO_STATE_DIR` or `TODO_MAX_OUTPUT_BYTES` (the app name, uppercased, is the prefix), have
+  to be set in the client config: `claude mcp add -e NAME=value`, or an `"env"` object in the
+  JSON
 - **Never print from a handler.** Over stdio, stdout carries the protocol. The envelope
   goes back through MCP, but a stray `print()` puts a line that is not JSON into the
   stream. The SDK's own client logs a parse error and skips it; a stricter client can drop

@@ -403,7 +403,13 @@ uv run pytest -q
 
 ## Step 9: Rewrite the conformance profile
 
-The profile in `conformance/todo.json` lists probes for `show` and `delete`. `treaty
+The conformance kit is the CLI Agent Spec's own test suite: it runs the CLI the way an agent
+does, with a set of calls called probes, and checks every answer. The profile,
+`conformance/todo.json`, lists the probes, and the launcher, `conformance/todo`, is the
+script the kit runs to start the CLI. [Run the conformance kit](../ship/conformance.md)
+covers the kit; here the profile only has to follow the commands.
+
+The scaffold's profile lists probes for `show` and `delete`. `treaty
 conformance` writes a new one from the current commands, but it will not replace a profile
 that differs from what it generates, since that may hold probes written by hand:
 

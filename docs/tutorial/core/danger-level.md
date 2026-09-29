@@ -20,7 +20,9 @@ The chapter uses `todo` as the starting chapters leave it,
 ## Running the checks
 
 Run the **Check** commands from the root of a treaty checkout, in order. `todo` runs the
-example, and the item file and idempotency records go to a scratch directory:
+example, and the item file goes to a scratch directory. So do the idempotency records of Step
+3, through `TODO_STATE_DIR`: every environment variable treaty reads for an app starts with
+the app's name in capitals, and this one says where the records are kept.
 
 <!-- check -->
 ```bash
@@ -50,8 +52,10 @@ enforces it on every call:
 | MCP tool hints | read-only, idempotent | none | destructive |
 | Conformance kit probes it | yes, from its first example | never | yes, as a preview and a refusal |
 
-Two more follow from the level: only a `safe` command may stream its output, and a command
-that writes the app's config cannot be `safe`. Registration enforces the requirements in the
+The MCP row is what a client such as a desktop assistant is told about each tool: whether
+it only reads, may be repeated, or destroys data. Two more rules follow from the level: only
+a `safe` command may stream its output, one JSON line per event as it goes, and a command
+that writes the app's config file cannot be `safe`. Registration enforces the requirements in the
 table: a `mutating` command whose result has no `effect` field, or a `destructive` one
 without a boolean `dry_run`, fails when the app is built.
 

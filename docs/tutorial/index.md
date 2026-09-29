@@ -21,6 +21,17 @@ output.
 Both tracks end in the same place: a treaty app that `treaty audit` can inspect. From there
 the core chapters take you through the audit's rules one at a time.
 
+### The shortest path
+
+The whole tutorial is long; these four steps are the ones every CLI needs, and the rest can
+wait until the audit names them:
+
+1. Your starting chapter from the table above
+2. [Declare exit codes](core/exit-codes.md), so an agent can tell failures apart
+3. [Run the conformance kit](ship/conformance.md), which checks the binary as agents call it
+4. [Ship the agent docs](ship/agent-docs.md), so agents learn the CLI from files that stay
+   true
+
 ## Before you start
 
 - Python 3.14 and [uv](https://docs.astral.sh/uv/)
@@ -56,12 +67,9 @@ drift apart, so what you copy is what the tests run.
 
 ## The example files
 
-Every chapter works on one small CLI, `todo`, and each file under `examples/tutorial/` is
-`todo` at one point in the tutorial. The files do not form a single line: after
-`todo_exit_codes.py`, chapters change their own copy. `todo_network.py` adds `import`,
-`todo_payload.py` adds `edit`, `todo_git.py` adds `save`, and `todo_pages.py` changes how
-`list` pages, but none has the others' changes. `todo_config.py` and `todo_batch.py` build
-on `todo_network.py` in turn.
+Each file under `examples/tutorial/` is `todo` at one point in the tutorial. After
+`todo_exit_codes.py`, each chapter changes its own copy, so the later files do not have each
+other's commands:
 
 | File | What it is | Chapters |
 | --- | --- | --- |
@@ -87,11 +95,11 @@ file it starts from and the one it ends at.
 
 ## After the first chapter: follow the audit
 
-`treaty audit module:app` checks your commands against every rule `treaty rules` lists, in
-that order, and prints the first things to fix, with a suggested fix that uses your own
-names. The core chapters follow the rules below, a subset in the same order, so when the
-audit's first finding names one of them, its chapter is the one to read next. For any other
-rule, the finding's suggested fix is the guide:
+`treaty audit module:app` checks your commands against every rule `treaty rules` lists, and
+prints the first things to fix, each with a suggested fix that uses your own names.
+
+The chapters follow the audit's rules in the audit's order. When the audit names one of the
+rules below, open its chapter. For any other rule, follow the finding's suggested fix:
 
 | Audit rule | What it asks for | Chapter |
 | --- | --- | --- |
@@ -110,6 +118,7 @@ rule, the finding's suggested fix is the guide:
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |
 | `async-job` | a job descriptor from commands that start work | [Run long work an agent can follow](core/long-running.md) |
 | `stable-order` | a declared order for arrays of objects | [Page long lists](core/pagination.md) |
+| `external-data` | content from outside the tool marked untrusted | [Declare network commands](core/network-io.md#step-5-mark-what-came-from-outside) |
 | `schema-version` | an output change that bumps the command's `schema_version` | [Change the contract safely](ship/stability.md) |
 | `log-not-print` | handlers log through `ctx`, never `print()` | [Log without touching stdout](core/logging.md) |
 | `settings-declared` | config read through `App(settings=)`, not parsed by a handler | [Read settings and secrets](core/config.md) |
@@ -133,14 +142,19 @@ the fix, or leave it when the guess does not fit your command. `todo` keeps two,
   `add` is made safe with `--idempotency-key`, as
   [Choose each command's danger level](core/danger-level.md#step-3-what-mutating-adds) shows
 
-You are done with the core when `treaty audit module:app --strict` exits 0. Shipping comes
-after that: [Run the conformance kit](ship/conformance.md) puts the CLI through the spec's
-runtime checks and gates CI on them, [Serve commands over MCP](ship/mcp.md) gives agents
-without a shell the same commands as tools, [Ship the agent docs](ship/agent-docs.md)
-generates the AGENTS.md, skill files, and MCP tool list agents read, and checks them in CI,
-[Change the contract safely](ship/stability.md) takes a release to the next without
-breaking the agents that learned it, and [Test the contract and gate CI](ship/testing.md)
-puts every check into one test suite and one CI job.
+You are done with the core when `treaty audit module:app --strict` exits 0. The shipping
+chapters come after that:
+
+- [Run the conformance kit](ship/conformance.md) runs the spec's runtime checks on the
+  binary and gates CI on them
+- [Serve commands over MCP](ship/mcp.md) gives agents without a shell the same commands as
+  tools
+- [Ship the agent docs](ship/agent-docs.md) generates the AGENTS.md, skill files, and MCP tool
+  list agents read, and checks them in CI
+- [Change the contract safely](ship/stability.md) takes a release to the next without
+  breaking the agents that learned it
+- [Test the contract and gate CI](ship/testing.md) puts every check into one test suite and
+  one CI job
 
 ## For agents
 

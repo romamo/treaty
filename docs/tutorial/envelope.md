@@ -169,8 +169,10 @@ todo add "x" --priority urgent --db tmp/tutorial/todo.json \
 ## A warning
 
 A warning is something the caller should know that did not stop the run. It has a `code`, a
-`message`, and sometimes a `context`. Passing `--no-injection-protection` produces one,
-since it turns off a protection the caller might rely on:
+`message`, and sometimes a `context`. Passing `--no-injection-protection` produces one. That
+flag turns off the trust markers: content a command got from outside the tool, such as a
+web page or an API response, normally carries `"_trusted": false`, so an agent reads it as
+data and never as instructions. A run without that protection says so:
 
 ```json
 "warnings": [
