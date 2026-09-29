@@ -901,6 +901,11 @@ class App:
                 self._shadowed.append(builtin)
 
     @property
+    def redirected_paths(self) -> tuple[CommandPath, ...]:
+        """The old command paths ``redirect`` keeps answering with ``REDIRECTED``"""
+        return tuple(self._redirects)
+
+    @property
     def shadowed_builtins(self) -> tuple[CommandPath, ...]:
         """Built-ins an app command or group took the name of"""
         return tuple(self._shadowed)

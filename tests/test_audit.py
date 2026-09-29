@@ -403,3 +403,51 @@ def test_a_list_that_keeps_its_own_page_flag_is_warned() -> None:
         return [{"id": 1}]
 
     assert _findings(app, "paginated-list") == ["issues"]
+
+
+def test_the_network_and_subprocess_rules_follow_helpers_in_the_same_module() -> None:
+    """A fetch() beside the handler runs as part of it"""
+    import subprocess
+    import urllib.request
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    def fetch(url: str) -> bytes:
+        with urllib.request.urlopen(url) as response:
+            return bytes(response.read())
+
+    def pack() -> None:
+        subprocess.run(["tar", "-cf", "x.tar", "."], check=True)
+
+    def refresh_all() -> int:
+        return len(fetch("https://example.com"))
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("subscribe", description="Subscribe", danger_level="safe", exit_codes=())
+    def subscribe(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": refresh_all()}
+
+    @app.command(
+        "refresh", description="Refresh", danger_level="safe", exit_codes=(), has_network_io=True
+    )
+    def refresh(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(fetch("https://example.com"))}
+
+    @app.command("backup", description="Back up", danger_level="mutating", exit_codes=())
+    def backup(args: NoArgs, ctx: Ctx) -> Done:
+        pack()
+        return Done("created")
+
+    [network] = [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "network-io" for f in r.findings
+    ]
+    assert network.command == "subscribe" and "function" in network.message
+    assert _findings(app, "network-timeout") == ["refresh"]
+    assert _findings(app, "http-client") == ["refresh"]
+    assert _findings(app, "subprocess-declared") == ["backup"]

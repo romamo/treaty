@@ -42,6 +42,7 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Added
 
+- `App.redirected_paths`: the old command paths `redirect` keeps answering
 - `external=False` on a command that calls out says it returns only values it computed,
   which clears the `external-data` warning; unset, `external` is `None`, undeclared
 - The `subprocess-declared` rule reports `subprocess.run` and its siblings, `os.exec*`,
@@ -69,6 +70,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- An MCP call to a redirected command's old tool name answered `UNKNOWN_TOOL`; it answers
+  `REDIRECTED` with the new path, as the command line and `exec` do
+- The `network-io`, `network-timeout`, `http-client`, and `subprocess-declared` rules read
+  only the handler's source; they now follow the functions of the handler's module it
+  calls, so a `fetch()` helper beside it is checked too. The `network-io` fix says to call
+  out through `ctx.http`
 - A command whose output had an `Out(external=True)` field tagged `data` with `_source` and
   `_trusted`, but its output schema did not list them, so an MCP client that validates
   structured content refused every result. The schema now lists the tags wherever the

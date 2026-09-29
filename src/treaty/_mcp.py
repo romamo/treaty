@@ -73,6 +73,10 @@ def call_tool(
 ) -> Envelope:
     """Dispatch one tool call; an unknown tool name is an ``UNKNOWN_TOOL`` envelope"""
     entry = entries.get(name)
+    moved = next((p for p in app.redirected_paths if tool_name(p) == name), None)
+    if entry is None and moved is not None:
+        # An old name answers REDIRECTED with the new path, as on the command line and exec
+        return app.call(moved.value, arguments, env=env)
     if entry is None:
         run = _Run(app, io.StringIO(), io.StringIO(), env if env is not None else {})
         return run.arg_error(

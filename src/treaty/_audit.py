@@ -25,7 +25,7 @@ from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
 from ._redact import secret_field
-from ._scan import ctx_calls, direct_subprocess_calls, source_tree
+from ._scan import ctx_calls, direct_subprocess_calls, reached_functions, source_tree
 from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import InvalidValue, SchemaVersion
 
@@ -249,6 +249,11 @@ def _paginated_list(app: App) -> Iterator[Finding]:
             )
 
 
+def _called(c: Command, fn: Callable[..., object]) -> str:
+    """How a finding names where it looked: the handler, or a function it calls"""
+    return "handler" if fn is c.handler else f"function {getattr(fn, '__name__', fn)}"
+
+
 def _network_io(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.has_network_io:
@@ -256,9 +261,9 @@ def _network_io(app: App) -> Iterator[Finding]:
         # A migrated CLI often keeps its HTTP client in a resource, as ctx.obj was
         # Every resource the handler reaches, including one a resource acquires
         where: list[tuple[str, Callable[..., object] | type]] = [
-            ("handler", c.handler),
-            *((f"resource {r.__name__}", r) for r in c.resource_graph),
+            (_called(c, f), f) for f in reached_functions(c.handler)
         ]
+        where += [(f"resource {r.__name__}", r) for r in c.resource_graph]
         for label, code in where:
             try:
                 source = inspect.getsource(code)
@@ -271,7 +276,8 @@ def _network_io(app: App) -> Iterator[Finding]:
                     c.path.value,
                     f"{label} source mentions a network library "
                     "but has_network_io is not declared (heuristic)",
-                    "has_network_io=True, then pass ctx.timeout.seconds to every network call",
+                    "has_network_io=True, then call out through ctx.http, which keeps to "
+                    "the command's --timeout",
                 )
                 break
 
@@ -324,7 +330,7 @@ def _network_timeout(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.has_network_io:
             continue
-        for name in untimed_network_calls(c.handler):
+        for name in (n for f in reached_functions(c.handler) for n in untimed_network_calls(f)):
             yield Finding(
                 "network-timeout",
                 Severity.WARNING,
@@ -336,14 +342,17 @@ def _network_timeout(app: App) -> Iterator[Finding]:
 
 def _subprocess_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        direct = direct_subprocess_calls(c.handler)
+        direct = [
+            (f, call) for f in reached_functions(c.handler) for call in direct_subprocess_calls(f)
+        ]
         if direct:
+            fn, call = direct[0]
             # Outside ctx.run no declaration can describe the child, so this comes first
             yield Finding(
                 "subprocess-declared",
                 Severity.WARNING,
                 c.path.value,
-                f"{direct[0].name}() on line {direct[0].line} of the handler runs a program "
+                f"{call.name}() on line {call.line} of the {_called(c, fn)} runs a program "
                 "outside ctx.run, so it has no time limit, locale, or argv the manifest can "
                 "show, and doctor cannot check the program is installed (REQ-C-019)",
                 "ctx.run([...]) with the same argument list, check=False where the code reads "
@@ -509,7 +518,7 @@ def _http_client(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.has_network_io:
             continue
-        calls = direct_http_calls(c.handler)
+        calls = [call for f in reached_functions(c.handler) for call in direct_http_calls(f)]
         if calls:
             yield Finding(
                 "http-client",

@@ -361,3 +361,20 @@ def test_replayed_noop_matches_a_closed_effect_enum() -> None:
     validator = validator_for(entry.output_schema)(entry.output_schema)
     replay = {"ok": True, "data": {"effect": "noop", "name": "x"}, "error": None}
     validator.validate({**replay, "warnings": [], "meta": {}})
+
+
+def test_an_old_tool_name_answers_redirected_as_on_the_command_line() -> None:
+    """A client that learned the old name gets the new path, not UNKNOWN_TOOL"""
+    app = App("x", version="1.0.0")
+
+    @app.command("mark-read", description="Mark it read", danger_level="safe", exit_codes=())
+    def mark_read(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        return {"read": True}
+
+    app.redirect("read", to="mark-read")
+    entries = {e.name: e for e in tool_entries(app)}
+    assert "read" not in entries
+    envelope = call_tool(app, entries, "read", {})
+    assert envelope.exit_code == 13 and envelope.error is not None
+    assert envelope.error.code == "REDIRECTED"
+    assert call_tool(app, entries, "nosuch", {}).error.code == "UNKNOWN_TOOL"  # type: ignore[union-attr]

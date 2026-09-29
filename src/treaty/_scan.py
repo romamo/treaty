@@ -209,6 +209,32 @@ def _resolve(fn: Callable[..., object], name: str) -> object:
     return target
 
 
+def reached_functions(fn: Callable[..., object]) -> list[Callable[..., object]]:
+    """The handler and every function of its own module it calls by name, transitively:
+    a fetch() helper beside the handler runs as part of it, while a function from another
+    module is that module's to declare. Each appears once, the handler first"""
+    module = getattr(fn, "__module__", None)
+    found: list[Callable[..., object]] = [fn]
+    queue = [fn]
+    while queue:
+        current = queue.pop()
+        tree = source_tree(current)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            target = _resolve(current, node.func.id)
+            if (
+                isinstance(target, types.FunctionType)
+                and target.__module__ == module
+                and all(target is not seen for seen in found)
+            ):
+                found.append(target)
+                queue.append(target)
+    return found
+
+
 def direct_subprocess_calls(fn: Callable[..., object]) -> list[ShellCall]:
     """Calls in the handler's source that start a program without ``ctx.run``:
     ``subprocess.run`` and its siblings, ``os.exec*``, ``os.spawn*``, and

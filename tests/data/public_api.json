@@ -139,6 +139,7 @@
         "main",
         "manifest",
         "redirect",
+        "redirected_paths",
         "run",
         "scalar",
         "shadowed_builtins",
