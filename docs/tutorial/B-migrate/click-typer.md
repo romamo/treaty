@@ -112,7 +112,7 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie`, such as `author` or `keyword`, or has a `pass` segment, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
+  `credential`, `auth`, or `cookie` (so `author` and `keyword` count), or has a `pass` segment, takes no value on the command line; booleans and enums never are secrets, and `secret=False` opts out
 
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
 `click.confirm`, and `click.prompt` in the old code shows up in the "Fails when" or "Writes?"
@@ -572,7 +572,7 @@ treaty tests call the command in-process with `app.call()`, the same path `exec`
 use, and get the envelope back. No runner, no parsing of printed text:
 
 ```python
-env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")})
+env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")}, env={"TODO_AUDIT_LOG": "off"})
 assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 ```
 
@@ -674,7 +674,9 @@ Migration is a breaking change for callers. Put this list in your release notes:
   `todo manifest`
 - Secret options (`--token`, `--password`) no longer take a value on the command line; use
   `--token-from-env VAR` or `--token-from-file PATH`
-- `-v` is gone, so a caller passes `--verbose`; your own `--config` or `--format` option gives way to the framework's flag of the same name; and completion scripts have to be generated again with `todo completion`
+- `-v` is gone; pass `--verbose`
+- `--config` and `--format` now mean treaty's flags; the old options have new names
+- Completion scripts have to be generated again with `todo completion`
 
 ## Next
 

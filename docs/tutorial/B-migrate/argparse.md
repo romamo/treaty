@@ -99,7 +99,7 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie`, such as `author` or `keyword`, or has a `pass` segment, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
+  `credential`, `auth`, or `cookie` (so `author` and `keyword` count), or has a `pass` segment, takes no value on the command line; booleans and enums never are secrets, and `secret=False` opts out
 
 **Check:** every subparser has a row, and every `sys.exit`, `parser.error`, and `input()`
 call in the old code shows up in the "Fails when" or "Writes?" column
@@ -432,7 +432,7 @@ Tests call commands in-process with `app.call()`, the same path `exec` and MCP u
 the envelope back. No subprocess, no parsing of printed text:
 
 ```python
-env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")})
+env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")}, env={"TODO_AUDIT_LOG": "off"})
 assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 ```
 
@@ -512,6 +512,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
   page ([Page long lists](../core/pagination.md))
 - A text flag refuses a line break unless the field declares `multiline=True`; give
   every field that takes free text, such as a body or a message, `multiline=True`
+- `-v` is gone; pass `--verbose`
+- Completion scripts come from `todo completion`, generated from the manifest
 - A command that read a file or `-` for stdin takes the file as `--input-file PATH` and
   otherwise reads its stdin
 - A config file of the CLI's own moves to the one treaty reads

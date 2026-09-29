@@ -192,8 +192,8 @@ the server the way a client does and make calls:
 
 It starts the `treaty-mcp` command of the test's own environment, as a client would. The
 environment keeps the idempotency records in the test's own directory and turns the audit
-log off, like the conformance launcher's sandbox, and `PYTHONPATH` lets the server import
-the example app from this repository; in your project, where the app is installed, it is not
+log off, so neither lands in your real ones, and `PYTHONPATH` lets the server import the
+example app from this repository; in your project, where the app is installed, it is not
 needed. The rest of [`test_todo_over_mcp`](../../../tests/test_tutorial.py) lists the tools,
 replays an idempotency key, previews and confirms `purge`, and checks where a relative path
 lands.

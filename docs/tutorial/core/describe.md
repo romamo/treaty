@@ -197,7 +197,7 @@ EXAMPLE_APPS = [
     ("cli_app", "example"), [(a, e) for a in EXAMPLE_APPS for e in app_examples(a)]
 )
 def test_an_example_parses(cli_app: App, example: str) -> None:
-    """Registration checks only the quoting: a renamed flag or a <placeholder> fails here"""
+    """Registration checks only the quoting: a renamed flag or a typed <placeholder> fails here"""
     argv = shlex.split(example)[1:]  # without the program name
     out = io.StringIO()
     code = cli_app.run([*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={})

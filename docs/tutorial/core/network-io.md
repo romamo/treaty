@@ -125,14 +125,15 @@ todo add --schema | jq -e '(.data.flags | has("proxy") or has("timeout")) | not'
 
 ## Step 3: Call out through `ctx.http`
 
-With the command declared, the `urllib` version gets two more warnings:
+With the command declared, the `urllib` version gets two more warnings, and `external-data`,
+which [Step 5](#step-5-mark-what-came-from-outside) clears:
 
 ```bash
   1. (warning) network-timeout [import]: urllib.request.urlopen(...) has no timeout=, so it can outlive --timeout
   2. (warning) http-client [import]: urllib.request.urlopen() skips ctx.http, so --proxy, --no-proxy, and the CA bundle variables do not reach it and a failure has no error.network_context (REQ-F-036, REQ-F-037)
 ```
 
-Both have one fix. `ctx.http` is a small client built on the standard library that knows
+`ctx.http` fixes both. It is a small client built on the standard library that knows
 the run it belongs to:
 
 <!-- file: examples/tutorial/todo_network.py -->

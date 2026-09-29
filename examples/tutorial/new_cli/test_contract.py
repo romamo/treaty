@@ -47,7 +47,7 @@ def app_examples() -> list[str]:
 
 @pytest.mark.parametrize("example", app_examples())
 def test_an_example_parses(example: str) -> None:
-    """A renamed flag or a leftover <placeholder> in an example fails here, not in an agent"""
+    """A renamed flag or a <placeholder> in a typed field fails here, not in an agent"""
     argv = shlex.split(example)[1:]
     out = io.StringIO()
     code = app.run([*argv, "--validate-only"], stdout=out, stderr=io.StringIO(), env={})
