@@ -722,3 +722,40 @@ def test_a_secret_setting_is_redacted_from_logs_errors_and_tracebacks() -> None:
     for secret in ("sk-live-abcdef", "kx-two-5678"):
         assert secret not in out and secret not in err
     assert "[REDACTED]" in err
+
+
+def test_a_setting_declared_secret_is_redacted_and_a_path_setting_follows_cwd(
+    tmp_path: Path,
+) -> None:
+    """Flag(secret=True) on a settings field marks a DSN that no secret word names"""
+    from dataclasses import dataclass
+
+    from treaty import App, Flag
+
+    @dataclass(frozen=True)
+    class Settings:
+        database: str = Flag(default="", description="DSN", secret=True)
+        migrations: Path = Path("migrations")
+
+    app = App("dbx", version="1.0.0", settings=Settings)
+
+    @app.command("where", description="Where", danger_level="safe", exit_codes=())
+    def where(args: NoArgs, ctx: Ctx, settings: Settings) -> dict[str, str]:
+        return {"migrations": str(settings.migrations)}
+
+    env = {"DBX_DATABASE": "sqlite://admin:s3cret@db", "DBX_AUDIT_LOG": "off"}
+    out = io.StringIO()
+    app.run(
+        ["where", "--show-config", "--format", "json"], stdout=out, stderr=io.StringIO(), env=env
+    )
+    assert "s3cret" not in out.getvalue()
+    project = tmp_path / "proj"
+    project.mkdir()
+    out = io.StringIO()
+    app.run(
+        ["where", "--cwd", str(project), "--format", "json"],
+        stdout=out,
+        stderr=io.StringIO(),
+        env=env,
+    )
+    assert json.loads(out.getvalue())["data"] == {"migrations": str(project / "migrations")}

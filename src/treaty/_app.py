@@ -4172,7 +4172,9 @@ class _Run:
             )
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         try:
-            data = self._payload(exc.data)
+            # A dataclass carries its own field order, such as Out(ordered=True)
+            shape = type(exc.data) if dataclasses.is_dataclass(exc.data) else object
+            data = self._payload(exc.data, shape)
             context = redacted(to_jsonable(exc.context, self.app.scalars, base=self.cwd), redact)
         except SchemaError as err:
             message = f"Command {command.path} raised {exc.name} with {err}"

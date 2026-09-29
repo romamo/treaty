@@ -29,7 +29,7 @@ from pathlib import Path
 from ._config import local_config, user_config
 from ._env import CONFIG, CONTEXT, INSTANCE_ID, KNOWN, app_var
 from ._errors import ParseError, RegistrationError, SchemaError, UserCodeError, user_code
-from ._flags import coerce_text
+from ._flags import FLAG_META, coerce_text
 from ._parse import check_json_base
 from ._paths import check_path
 from ._redact import REDACTED, secret_name
@@ -48,11 +48,21 @@ class Setting:
     name: str
     classified: Classified
     default: object
+    declared_secret: bool | None = None
+    """``Flag(..., secret=...)`` on the field; None infers it from the name"""
 
     @property
     def secret(self) -> bool:
-        """Inferred from the name, as for args: shown as ``[REDACTED]`` by --show-config"""
-        return self.classified.flag_type is not FlagType.BOOLEAN and secret_name(self.name)
+        """Declared, or inferred from the name as for args: shown as ``[REDACTED]`` by
+        --show-config and kept out of the config hash. A boolean or an enum is never
+        inferred one"""
+        if self.declared_secret is not None:
+            return self.declared_secret
+        item = self.classified.item
+        plain = (FlagType.BOOLEAN, FlagType.ENUM)
+        if self.classified.flag_type in plain or (item is not None and item.flag_type in plain):
+            return False
+        return secret_name(self.name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +102,9 @@ class SettingsSpec:
                     f"{where}: field {f.name!r}: settings take str, int, float, bool, Path, "
                     "enums, Literal, and tuples of them"
                 )
-            fields.append(Setting(f.name, classified, f.default))
+            declared = f.metadata.get(FLAG_META)
+            secret = None if declared is None else declared.secret
+            fields.append(Setting(f.name, classified, f.default, secret))
         return cls(settings, tuple(fields))
 
 
@@ -262,6 +274,11 @@ def resolve(
         path, raw = found
         values[s.name] = _from_file(s, raw, path)
         sources[s.name] = f"file:{path}"
+    for s in spec.fields:
+        # A relative Path setting means the run's directory, --cwd included, as a flag does
+        value = values[s.name]
+        if s.classified.path and isinstance(value, Path) and not value.is_absolute():
+            values[s.name] = cwd / value
     secrets = frozenset(s.name for s in spec.fields if s.secret)
     try:
         value = user_code(lambda: spec.cls(**values))

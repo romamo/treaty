@@ -29,6 +29,8 @@ from ._secrets import source_flags
 from ._types import Classified, FlagType, classify
 
 _META = "treaty"
+FLAG_META = _META
+"""The field metadata key a Flag or Arg declaration is stored under"""
 # REQ-F-044: characters refused in text values, by their rejected_pattern name
 _CONTROL_CHARS = {"\n": "newline", "\r": "carriage_return", "\x00": "null_byte"}
 

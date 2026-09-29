@@ -9,8 +9,10 @@ from __future__ import annotations
 import ast
 import dataclasses
 import inspect
+import io
 import json
 import re
+import shlex
 import types
 import typing
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -21,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._command import Command, DangerLevel, OptionPlacement
 from ._deps import Endpoint
-from ._env import UNPREFIXED, app_var
+from ._env import AUDIT_LOG, UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
@@ -117,6 +119,31 @@ def _describe(app: App) -> Iterator[Finding]:
                 "no example invocation; agents copy examples verbatim as starting points",
                 f'examples=[("What it does", "{example}")]',
             )
+        for given in c.examples:
+            problem = _example_problem(app, given.command)
+            if problem is not None:
+                yield Finding(
+                    "describe",
+                    Severity.ERROR,
+                    c.path.value,
+                    f"the example {given.command!r} does not parse: {problem}",
+                    "fix the example, which agents copy verbatim, so it passes --validate-only",
+                )
+
+
+def _example_problem(app: App, example: str) -> str | None:
+    """Why an example fails ``--validate-only``, or None when it parses. Phase 1 only: no
+    handler, no idempotency store, and the audit log off"""
+    argv = shlex.split(example)[1:]
+    out = io.StringIO()
+    env = {app_var(app.name, AUDIT_LOG.key): "off"}
+    code = app.run(
+        [*argv, "--validate-only", "--format", "json"], stdout=out, stderr=io.StringIO(), env=env
+    )
+    if code == 0:
+        return None
+    error = json.loads(out.getvalue()).get("error") or {}
+    return str(error.get("message", f"exit {code}"))
 
 
 def _danger_level(app: App) -> Iterator[Finding]:
@@ -1659,7 +1686,9 @@ _SLEEPS = frozenset({"time.sleep", "sleep"})
 
 
 def retries_by_hand(handler: Callable[..., object]) -> bool:
-    """A loop holding a ``try`` and a ``time.sleep``: a retry the framework cannot count"""
+    """A loop that sleeps and whose ``except`` goes round again, by sleeping or with
+    ``continue``: a retry the framework cannot count. A loop that sleeps between items to
+    throttle, and handles a failure some other way, is not one"""
     tree = source_tree(handler)
     if tree is None:
         return False
@@ -1667,11 +1696,19 @@ def retries_by_hand(handler: Callable[..., object]) -> bool:
         if not isinstance(loop, (ast.For, ast.While)):
             continue
         inner = list(ast.walk(loop))
-        tried = any(isinstance(n, ast.Try) for n in inner)
-        slept = any(isinstance(n, ast.Call) and _dotted(n.func) in _SLEEPS for n in inner)
-        if tried and slept:
+        slept = any(_sleeps(n) for n in inner)
+        again = any(
+            isinstance(n, ast.ExceptHandler)
+            and any(_sleeps(m) or isinstance(m, ast.Continue) for m in ast.walk(n))
+            for n in inner
+        )
+        if slept and again:
             return True
     return False
+
+
+def _sleeps(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and _dotted(node.func) in _SLEEPS
 
 
 def _retry_declared(app: App) -> Iterator[Finding]:

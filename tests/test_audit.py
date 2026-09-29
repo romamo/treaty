@@ -546,3 +546,74 @@ def test_helper_following_survives_proxies_unhashable_checks_and_local_aliases()
         return {"n": len(fetch("https://example.com"))}
 
     assert _findings(app, "network-io") == ["pull"]
+
+
+def test_strict_keeps_next_steps_in_severity_order(tmp_path) -> None:
+    """Exit data keeps its dataclass's declared order, as a result does"""
+    where = ["--cwd", str(tmp_path)]
+    _, ordered = run_cli(["audit", "fixture_audit_app:app", *where], isatty=False)
+    code, strict = run_cli(["audit", "fixture_audit_app:app", "--strict", *where], isatty=False)
+    steps = [[s["severity"], s["rule"]] for s in json.loads(ordered)["data"]["next_steps"]]
+    assert code != 0 and steps
+    assert [[s["severity"], s["rule"]] for s in json.loads(strict)["data"]["next_steps"]] == steps
+
+
+def test_an_example_that_does_not_parse_is_an_error() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Show:
+        verbose_level: int = Flag(default=0, description="How much")
+
+    app = App("x", version="1.0.0")
+
+    @app.command(
+        "show",
+        description="Show it",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[("Show more", "x show --level 2"), ("Show", "x show --verbose-level 1")],
+    )
+    def show(args: Show, ctx: Ctx) -> dict[str, int]:
+        return {"n": args.verbose_level}
+
+    report = audit(app, "x:app", limit=3)
+    errors = [f for r in report.rules if r.id == "describe" for f in r.findings]
+    assert [f.severity.value for f in errors] == ["error"]
+    assert "x show --level 2" in errors[0].message
+
+
+def test_a_loop_that_sleeps_to_throttle_is_not_a_retry() -> None:
+    import time
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("apply", description="Apply", danger_level="mutating", exit_codes=())
+    def apply(args: NoArgs, ctx: Ctx) -> Done:
+        for step in range(3):
+            try:
+                int(str(step))
+            except ValueError:
+                break
+            time.sleep(0)
+        return Done("updated")
+
+    @app.command("fetch", description="Fetch", danger_level="mutating", exit_codes=())
+    def fetch(args: NoArgs, ctx: Ctx) -> Done:
+        for _ in range(3):
+            try:
+                return Done("updated")
+            except ConnectionError:
+                time.sleep(1)
+        return Done("noop")
+
+    assert _findings(app, "retry-declared") == ["fetch"]

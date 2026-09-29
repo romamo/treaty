@@ -42,6 +42,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Added
 
+- A settings field declared `Flag(default=..., description=..., secret=True)` is a secret
+  setting whatever its name: redacted by `--show-config` and left out of the config hash.
+  An enum setting, like an enum flag, is not inferred secret
+- The `describe` rule runs each example through `--validate-only`, and one that does not
+  parse is an error: agents copy examples verbatim
 - `App.redirected_paths`: the old command paths `redirect` keeps answering
 - `external=False` on a command that calls out says it returns only values it computed,
   which clears the `external-data` warning; unset, `external` is `None`, undeclared
@@ -70,6 +75,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `treaty audit --strict` listed `next_steps` sorted instead of in severity order: data
+  carried by `Exit(data=...)` lost its dataclass's `Out(ordered=True)`
+- A relative `Path` setting was used against the process's directory; it is resolved
+  against the run's, `--cwd` included, as a `Path` flag is
+- `retry-declared` fired on a loop that sleeps to throttle; it now needs the loop's
+  `except` to go round again, by sleeping or with `continue`
 - Following helpers, the audit looped forever on a lazy proxy or mock a handler calls, and
   failed on an unhashable doctor check; it unwraps only what a decorator set, and parses an
   unhashable callable without the cache, which is bounded and cleared per audit. An import
