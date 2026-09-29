@@ -101,10 +101,8 @@ mkdir -p "$here/.sandbox"
 HOME="$here/.sandbox" exec "$here/../../../.venv/bin/python" "$here/../todo_exit_codes.py" "$@"
 ```
 
-That one runs the example file from this repository. Your project's launcher runs your
-installed command instead, as the next one does. Save it next to the profile, named after the
-app (`conformance/todo`), and make it executable (`chmod +x`). `treaty conformance` finds it
-there and writes `"command": ["./todo"]` into the profile. Add `.sandbox/` to `.gitignore`.
+That one runs the example file from this repository, so do not copy it; your project's
+launcher, below, runs your installed command instead.
 
 Point the sandbox at whatever your CLI touches: an environment variable for a config file,
 a test account's credentials, a mock server's URL. A project made with `treaty init` already
@@ -118,6 +116,11 @@ here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$here/.sandbox"
 HOME="$here/.sandbox" exec "$here/../.venv/bin/todo" "$@"
 ```
+
+Save it next to the profile, named after the app (`conformance/todo`), and make it
+executable (`chmod +x`). `treaty conformance` finds it there and writes
+`"command": ["./todo"]` into the profile. Add `.sandbox/` to `.gitignore`, creating the file
+if the project has none.
 
 Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`: the
 kit then runs your real command against your real data, with no sandbox. On Windows, where
@@ -140,11 +143,14 @@ $ uv run treaty conformance examples.tutorial.todo_exit_codes:app \
 Profile: examples/tutorial/conformance/todo.json (6 probes)
 Levels: level_1 pass, level_2 pass, level_3 pass
 
-  pass  L1 no_hang_stdin_closed
-  pass  L1 no_hang_stdin_open
-  ...
   pass  L3 argument_order
+  pass  L2 destructive_refuses_unconfirmed
+  pass  L1 dry_run_preview
+  ...
+  pass  L1 stdout_no_ansi
 ```
+
+The kit lists any failures first, then the passing checks by id.
 
 The probe count is `todo`'s; yours follows your commands and examples.
 
@@ -183,29 +189,30 @@ launcher, `todo-argparse`, uses the same sandbox):
 ```bash
 $ uv run treaty conformance examples.tutorial.todo_exit_codes:app --out tmp/argparse/todo.json \
     --command examples/tutorial/conformance/todo-argparse --run --format plain
-treaty: CONFORMANCE_FAILED: 7 conformance checks failed
-  summary: {'passed': 5, 'failed': 7, 'skipped': 0}
 Profile: tmp/argparse/todo.json (6 probes)
 Levels: level_1 fail, level_2 fail, level_3 fail
 
-  pass  L1 no_hang_stdin_closed
-  fail  L1 no_hang_stdin_open
-        purge: no exit within 10s; killed
-  fail  L1 json_envelope
-        purge: stdout is not a single JSON document (Expecting value at char 0)
-        ...
-  pass  L1 exit_code_contract
-  ...
   fail  L1 help_off_stdout
         --help: --help wrote prose to stdout in a non-TTY; route it to stderr
+  fail  L3 argument_order
+        argument_order --format json before the command path: --format json before the command path exited 2, expected 0
+  fail  L1 json_envelope
+        list: stdout is empty
+        ...
+        purge: stdout is not a single JSON document (Expecting value at char 0)
+        ...
+  fail  L3 manifest_valid
+        manifest: stdout is empty
   fail  L1 dry_run_preview
         purge --dry-run: dry-run exited 2, expected 0
   fail  L2 destructive_refuses_unconfirmed
         purge: expected exit 2 (refused before side effects) without confirmation, got 1
-  fail  L3 manifest_valid
-        manifest: stdout is empty
-  fail  L3 argument_order
-        argument_order --format json before the command path: --format json before the command path exited 2, expected 0
+  fail  L1 no_hang_stdin_open
+        purge: no exit within 10s; killed
+  pass  L1 exit_code_contract
+  ...
+treaty: CONFORMANCE_FAILED: 7 conformance checks failed.
+  summary: {'passed': 5, 'failed': 7, 'skipped': 0}
 ```
 
 Every failure names the probe that caused it, and each one is something a migration to

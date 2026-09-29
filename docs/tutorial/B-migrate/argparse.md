@@ -293,10 +293,29 @@ def purge(args: Purge, ctx: Ctx, store: Store) -> Purged:
     return Purged(effect="deleted", deleted=completed)
 ```
 
-`Purged` is `purge`'s result dataclass: the `effect`, the `deleted` items, and
-`would_affect`. A dry run fills `would_affect` with a `treaty.Affects`: a one-line summary, the
-resources it would touch, and their count; the result type declares it as
-`would_affect: Affects | None = None`, and treaty refuses a destructive dry run without it.
+`Purged` is `purge`'s result dataclass:
+
+<!-- file: examples/tutorial/todo_treaty.py -->
+```python
+class Purged:
+    effect: str
+    deleted: list[Item] = Out(sort_key="id")
+    would_affect: Affects | None = None
+```
+
+A dry run fills `would_affect` with a `treaty.Affects`: a one-line summary, the resources it
+would touch, and their count, and treaty refuses a destructive dry run without it.
+`Out(sort_key="id")` says the `deleted` items come in id order, which the audit's
+`stable-order` rule asks of every list of objects; [Page long
+lists](../core/pagination.md#step-1-keep-it-paginated-and-give-it-an-order) explains why.
+
+`list` keeps its `-a` through `short=` on the flag:
+
+<!-- file: examples/tutorial/todo_treaty.py -->
+```python
+class ListArgs(Common):
+    all: bool = Flag(default=False, short="a", description="Include completed items")
+```
 
 Without `--confirm-destructive`, treaty runs the handler as a dry run and exits 2 with
 `CONFIRMATION_REQUIRED`. The dry-run result is in `data`, so the refusal also tells the

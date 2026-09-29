@@ -218,9 +218,11 @@ todo list --config tmp/tutorial/bad.toml | jq -e '.meta.exit_code == 2
 ```
 
 A field named with `token`, `secret`, `password`, `key`, `credential`, or `auth` in it is a
-secret, and `secret=True` makes any other field one. A secret is never taken as a value on
-the command line, where it would land in shell history, process listings, and the audit
-log. The caller passes it one of three ways instead:
+secret, and `secret=True` makes any other field one. The match is on any part of the name,
+so `author`, `sort_key`, and `keyword` count too; `secret=False` keeps such a field a plain
+flag. A secret is never taken as a value on the command line, where it would land in shell
+history, process listings, and the audit log. The caller passes it one of three ways
+instead:
 
 | The caller passes | treaty reads |
 | --- | --- |

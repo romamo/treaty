@@ -193,8 +193,20 @@ repository; in your project, where the app is installed, it is not needed. The r
 [`test_todo_over_mcp`](../../../tests/test_tutorial.py) lists the tools, replays an
 idempotency key, previews and confirms `purge`, and checks where a relative path lands.
 
-In your project, copy `test_todo_over_mcp` into `tests/`, with its imports from the top of
-`test_tutorial.py`. Change the app path to `todo.cli:app` and drop `PYTHONPATH`. Every call
+In your project, copy `test_todo_over_mcp` into `tests/`. It needs only these imports
+(the others at the top of `test_tutorial.py` are for this repository):
+
+```python
+import asyncio
+import shutil
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+```
+
+Change the app path to `todo.cli:app` and drop `PYTHONPATH`. Every call
 already passes `db` under the test's `tmp_path`, so the test never touches your real item
 file; keep it that way for your own commands. The test needs the `mcp` extra, which Step 1
 added.

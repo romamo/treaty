@@ -89,8 +89,9 @@ class:
 | the file cannot be read for some other reason | nothing specific | none: let it crash |
 
 Check the framework codes first. `NOT_FOUND`, `CONFLICT`, `PRECONDITION`, `PERMISSION_DENIED`,
-`RATE_LIMITED`, `UNAVAILABLE`, and the rest of `0` to `13` are described in every
-manifest, and agents already know them. Use one when its description fits. Declare your
+`RATE_LIMITED`, `UNAVAILABLE`, and the rest of `0` to `13` have fixed meanings, listed in
+[Exit codes](../../api.md#exit-codes), and agents already know them. A manifest describes
+the ones its commands declare, so declare one when its description fits. Declare your
 own code when you need a name the caller can recognise on sight, as `STORE_CORRUPT` is
 here.
 
@@ -319,7 +320,8 @@ uv run treaty audit todo.cli:app --strict
 For `todo` it exits 0, as it does for this chapter's file,
 `examples.tutorial.todo_exit_codes:app`, in a treaty checkout. The audit still lists two
 pieces of advice for `add`, which `todo` leaves on purpose; [the
-index](../index.md#advice-you-can-leave) says why.
+index](../index.md#advice-you-can-leave) says why. A project of your own also sees `profile`
+advice until [Run the conformance kit](../ship/conformance.md) writes its profile.
 
 The audit's next rule is `typed-output`, which checks that every command's result has a
 schema an agent can read: [Type every command's output](typed-output.md). Each core chapter

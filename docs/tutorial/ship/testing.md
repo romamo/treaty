@@ -3,8 +3,8 @@
 **Goal:** one test suite and one CI job hold a CLI to everything the tutorial built, so a
 change that would break an agent fails a pull request instead
 
-**You need:** a project made with `treaty init`, such as the one from
-[Start a new CLI](../A-new/start.md)
+**You need:** a treaty app in a project with pytest, such as the one from [Start a new
+CLI](../A-new/start.md) or a migrated CLI; Step 2 adds the one test a migrated project lacks
 
 **Done when:** the project's tests pass with the contract tests in them, and fail when an
 example goes stale:
@@ -88,6 +88,15 @@ passes every example of the app's own commands through `--validate-only`, as
 checks that every command declares its output and that the manifest is JSON. With the
 `test_agents_md.py` that `treaty init` writes, which fails when AGENTS.md no longer matches
 the app, `uv run pytest` covers every layer that needs no network.
+
+A migrated project has no `test_agents_md.py`. Add the same check to `test_contract.py`,
+with the `treaty(...)` helper already at its top:
+
+```python
+def test_agents_md_matches_the_cli() -> None:
+    done = treaty("check-docs", APP, "AGENTS.md", "--format", "plain")
+    assert done.returncode == 0, done.stdout + done.stderr
+```
 
 Behaviour that depends on your commands stays in your own tests: validating each result
 against its `output_schema` needs a call per command with real arguments, as in

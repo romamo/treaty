@@ -274,8 +274,10 @@ diff. `git diff` ignores files git does not track, so `git add --intent-to-add` 
 command's skill file, never committed, then shows up in the diff and fails it.
 
 A project made with `treaty init` already has the first of these as a test,
-`tests/test_agents_md.py`, so `uv run pytest` fails as soon as AGENTS.md drifts; the
-[new CLI chapter](../A-new/start.md#step-8-regenerate-agentsmd) shows it failing and the fix.
+`tests/test_agents_md.py` (a migrated project adds it, as [Test the contract and gate
+CI](testing.md#step-2-test-the-contract-in-every-project) shows), so `uv run pytest` fails
+as soon as AGENTS.md drifts; the [new CLI
+chapter](../A-new/start.md#step-8-regenerate-agentsmd) shows it failing and the fix.
 
 When a check fails, regenerate, read the diff, and commit it with the change that caused
 it. The diff is the part of your release notes that agents read.
