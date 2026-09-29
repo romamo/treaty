@@ -149,7 +149,7 @@ every response, and the `audit-log` built-in reads it back, filtered by `--since
 `--command`, or `--trace-id`, one envelope per entry.
 
 **Check:** an `add` run is in the audit log under its request id; the refused `import` runs
-are there too, exit 12 among them; the log names no token
+are there too, exit 12 among them; an `import` with a token is logged, and the token is not
 
 <!-- check -->
 ```bash
@@ -157,6 +157,9 @@ request=$(todo add "Buy milk" --db tmp/tutorial/todo.json | jq -r .meta.request_
 todo audit-log --since 1h | jq -se --arg r "$request" '[.[] | .data | select(. != null)]
   | (map(select(.request_id == $r)) | .[0].command == "add")
   and (map(select(.command == "import")) | any(.exit_code == 12))'
+logged=$(grep -c '"command":"import"' tmp/tutorial/audit.jsonl)
+TODO_TOKEN=s3cret todo import --url "$feed" --db tmp/tutorial/todo.json > /dev/null || true
+test "$(grep -c '"command":"import"' tmp/tutorial/audit.jsonl)" -eq $((logged + 1))
 test "$(grep -c s3cret tmp/tutorial/audit.jsonl)" -eq 0
 ```
 

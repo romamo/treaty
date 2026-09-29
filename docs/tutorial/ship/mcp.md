@@ -156,10 +156,12 @@ they run in the caller's shell:
   `TODO_STATE_DIR` or `TODO_MAX_OUTPUT_BYTES` (the app name, uppercased, is the prefix), have
   to be set in the client config: `claude mcp add -e NAME=value`, or an `"env"` object in the
   JSON
-- **Never print from a handler.** Over stdio, stdout carries the protocol. The envelope
-  goes back through MCP, but a stray `print()` puts a line that is not JSON into the
-  stream. The SDK's own client logs a parse error and skips it; a stricter client can drop
-  the connection. Write diagnostics to stderr or through `logging`
+- **A `print()` goes nowhere useful.** Over stdio, stdout carries the protocol, so treaty
+  points `sys.stdout` at stderr for the whole server process: a stray `print()` from a
+  handler or a library cannot corrupt the protocol, but it lands on the server's stderr and
+  never reaches the model. Log through `ctx.log`, as
+  [Log without touching stdout](../core/logging.md) describes, and put what the caller needs
+  in the result
 - **Messages name CLI commands.** `todo`'s `NOT_FOUND` suggestion says `todo list --all`;
   over MCP the model has to turn that into a `list` call with `all: true`. treaty's own
   `fix_required` texts name both forms, as the `CONFIRMATION_REQUIRED` example shows; do the

@@ -239,7 +239,8 @@ What each part is for:
 The handler never prints. It returns data, and treaty writes the
 [envelope](../envelope.md): JSON when stdout is not a terminal, `key: value` lines when it
 is. Mutating commands also get `--idempotency-key` without any code: a second call with the
-same key returns the first result instead of adding a second item.
+same key returns the first call's data with `effect: "noop"` and `meta.idempotency_hit:
+true`, instead of adding a second item.
 
 **Check:** the first item is created, and a value outside the `Literal` exits 2 before the
 handler runs

@@ -197,7 +197,8 @@ Four things are new:
 
 Mutating commands also get `--idempotency-key` for free. `add` is not safe to repeat (a
 retry adds a second item), and the key is how a caller makes it safe: the second call with
-the same key returns the first result without running the handler.
+the same key returns the first call's data with `effect: "noop"` and
+`meta.idempotency_hit: true`, without running the handler.
 
 **Check:** the first item is created, and a value outside the `Literal` exits 2 before the
 handler runs
