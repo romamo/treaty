@@ -302,11 +302,10 @@ uv run treaty audit examples.tutorial.todo_exit_codes:app --strict
 ```
 
 For `todo` it exits 0. The audit still lists two pieces of advice for `add`, which `todo`
-leaves on purpose; [the index](../index.md#advice-you-can-leave) says why. The audit's next
-rule is `typed-output`, which checks that every
-command's result has a schema an agent can read: [Type every command's output](typed-output.md),
-followed by the chapters for `network-io`, `path-typed`, `raw-payload`, and `cleanup`.
+leaves on purpose; [the index](../index.md#advice-you-can-leave) says why.
 
-`todo` already passes all of them, so if your CLI does too, go on to the conformance kit.
-Rules cannot see runtime behaviour; the kit runs the commands and checks the envelopes
-against the spec: [Run the conformance kit](../ship/conformance.md).
+The audit's next rule is `typed-output`, which checks that every command's result has a
+schema an agent can read: [Type every command's output](typed-output.md). Each core chapter
+links the next one; when the strict audit of your own CLI exits 0 and you want to skip the
+rules it already passes, go on to the conformance kit, which runs the commands and checks
+their envelopes against the spec: [Run the conformance kit](../ship/conformance.md).
