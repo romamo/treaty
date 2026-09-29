@@ -225,9 +225,8 @@ substitute the file: `todo edit --raw-payload "$(cat edit.json)"`. For many call
 too large for a command line, write one `exec` line per call instead: each line is the same
 object with `"_cmd": "edit"` added, and `todo exec --input-file plan.jsonl` runs them all.
 
-In your project, this chapter changed the commands, so regenerate what is derived from them:
-`uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and
-`uv run treaty conformance todo.cli:app --force` before the next run of the kit.
+In your project, this chapter added a command, so regenerate AGENTS.md: `uv run treaty
+agents-md todo.cli:app`, or the AGENTS.md test fails.
 
 ## Next
 

@@ -65,9 +65,10 @@ uv run pytest -q
 uv run treaty audit todo.cli:app --strict > /dev/null
 ```
 
-Keep that state as the bar. Steps 4 to 7 replace the scaffold's commands, so its tests fail
-until Step 7 replaces them too, and the AGENTS.md test until Step 8; from Step 8 on, after
-each step, the tests pass and the audit has nothing new to say.
+Keep that state as the bar. Step 4 replaces the scaffold's commands, so its tests fail until
+Step 7 replaces them too, and the AGENTS.md test until Step 8. From Step 8 on the tests
+pass; the strict audit fails on `exit-codes` until [Declare exit
+codes](../core/exit-codes.md), and then passes after every chapter.
 
 ## Step 2: Read what you got
 

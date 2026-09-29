@@ -81,6 +81,7 @@ Probes run the real CLI. treaty derives them from your commands:
   confirmation removed: `todo purge`. The kit runs it with `--dry-run`, and again with no
   flags to check that it is refused
 - `version`, and `status`, a built-in that always exits 0
+- for each network command, an `invalid` probe with a malformed `--proxy`
 - two `invalid` probes: `manifest --etag x`, a malformed etag, and the first probe with
   `--no-such-flag` added
 
@@ -123,10 +124,12 @@ executable (`chmod +x`). `treaty conformance` finds it there and writes
 if the project has none.
 
 Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`: the
-kit then runs your real command against your real data, with no sandbox, and when `todo` is
-not on `PATH` the run exits 4, with the kit's `INVALID_PROFILE` in `context.kit_error`. On
-Windows, where the `/bin/sh` launcher cannot run, treaty uses the app's console script in
-the current environment instead. Either way, `--command` names an executable of your own.
+kit then runs your real command against your real data, with no sandbox, Under `uv run`,
+`PATH` starts with the project's own environment, so the kit finds your `todo` there and
+runs it unsandboxed; only a command found nowhere exits 4, with the kit's `INVALID_PROFILE`
+in `context.kit_error`. On Windows, where the `/bin/sh` launcher cannot run, treaty uses the
+app's console script in the current environment instead. Either way, `--command` names an
+executable of your own.
 
 **Check:** the launcher runs the CLI against the sandbox, which holds no items: probes never
 run a mutating command, and the destructive probe is only ever previewed or refused
@@ -158,8 +161,8 @@ The probe count is `todo`'s; yours follows your commands and examples.
 The run stops with exit 6, `CONFLICT`, whenever the commands changed since the profile was
 written: in a project made with `treaty init`, whose profile is for the scaffold's commands
 until [Start a new CLI](../A-new/start.md#step-9-rewrite-the-conformance-profile) Step 9
-replaces it, and after any chapter that added a command or changed an example. Replace it,
-then run the kit:
+replaces it, and after any chapter that added a network command or changed the commands or
+first examples the probes come from. Replace it, then run the kit:
 
 ```bash
 uv run treaty conformance todo.cli:app --force

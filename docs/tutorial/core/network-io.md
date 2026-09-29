@@ -14,12 +14,13 @@ the `external-data` warning that follows them
 uv run treaty audit examples.tutorial.todo_network:app --strict > /dev/null
 ```
 
-The chapter gives `todo` an `import` command that adds the items listed at a URL. It
-starts from [`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py)
-and ends at [`examples/tutorial/todo_network.py`](../../../examples/tutorial/todo_network.py).
-The steps show the parts that matter for agents; in your project, copy `Import`,
-`Imported`, `feed_entries` (with `from typing import get_args`), and `import_items` from
-that file.
+The chapter gives `todo` an `import` command that adds the items listed at a URL. It starts
+from [`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py)
+and ends at
+[`examples/tutorial/todo_network.py`](../../../examples/tutorial/todo_network.py). The steps
+show the parts that matter for agents; in your project, copy the `FEED_INVALID` registration
+(Step 4), `Import`, `Imported`, `feed_entries` (with `from typing import get_args`), and
+`import_items` from that file.
 
 ## Running the checks
 
@@ -249,7 +250,7 @@ import pytest
 Copy the tests under "Declare network commands" in
 [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) into a test file of your own,
 and call your `app` where they call `todo_network.app`. Each test file needs its own
-imports: `pytest`, `Path`, your `app`, and whatever else the copied code names; `uv run ruff
+imports: `pytest`, `Path`, your `app`, and whatever else the copied code names; `uvx ruff
 check --select F821 tests` lists any you missed. The chapters that follow add their own
 servers to `conftest.py` the same way.
 

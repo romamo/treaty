@@ -154,7 +154,7 @@ and ships exactly what it returned: the envelope is written from the value, not 
 annotation. The agent that trusted the schema is the one that breaks.
 
 Two checks keep the promise. `mypy --strict` (`uv add --dev mypy`, then
-`uv run mypy --strict src`) catches most of it before anything runs: a
+`uv run mypy --strict src tests`) catches most of it before anything runs: a
 dict where a `Changed` belongs, or `str` passed where `Item.id` is `int`. A test catches the
 rest by running each command and validating `data` against the schema the manifest
 publishes:

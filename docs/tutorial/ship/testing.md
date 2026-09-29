@@ -114,10 +114,7 @@ grep -q ' passed' ../pytest.out
 
 The contract tests are there for the change nobody thinks to check. Rename a flag in an
 example, as a refactoring does when it renames the flag and misses the example, and the
-suite fails before any agent copies it:
-
-In a project where another example also uses `--priority high`, such as one with `edit`,
-the sed renames it there too, and two tests fail.
+suite fails before any agent copies it.
 
 **Check:** with `--priority` misspelled in `add`'s example, the example test fails; with the
 file restored, it passes again
@@ -130,6 +127,9 @@ grep -q '1 failed' ../stale.out
 mv src/todo/cli.py.bak src/todo/cli.py
 uv run pytest -q -k test_an_example_parses > ../fixed.out
 ```
+
+In a project where another example also uses `--priority high`, such as one with `edit`,
+the sed renames it there too, and two tests fail.
 
 ## Step 4: Gate every pull request
 

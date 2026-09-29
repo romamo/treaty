@@ -102,7 +102,7 @@ todo add "Buy milk" --db tmp/tutorial/todo.json | jq -e '.meta.timeout_ms == 600
 `TIMEOUT` is the framework's last resort: the handler is still running, the result is lost,
 and the state may be partly changed. A handler that knows it is working through a list can
 do better, by checking `ctx.remaining`, the seconds left, before it starts each item, and
-times each one with `time.monotonic()` (add `import time`). The code uses four names from
+timing each one with `time.monotonic()` (add `import time`). The code uses four names from
 treaty that Step 3 explains: `Batch` and `Outcome`, the result and one item of it,
 `ItemError`, one item's error, and `CliExit`, the class of treaty's errors:
 
