@@ -46,7 +46,10 @@ Apps built on treaty keep their own, structured schema changelog with
   setting whatever its name: redacted by `--show-config` and left out of the config hash.
   An enum setting, like an enum flag, is not inferred secret
 - The `describe` rule runs each example through `--validate-only`, and one that does not
-  parse is an error: agents copy examples verbatim
+  parse is an error: agents copy examples verbatim. Only the spelling is judged: flags
+  whose value depends on the caller's world (`--cwd`, `--input-file`, `--config`,
+  `--*-from-env`, `--*-from-file`), leading `VAR=` words, pipelines, and stdin examples are
+  left out, and the no-example fix suggests values of each field's type
 - `App.redirected_paths`: the old command paths `redirect` keeps answering
 - `external=False` on a command that calls out says it returns only values it computed,
   which clears the `external-data` warning; unset, `external` is `None`, undeclared
@@ -77,14 +80,20 @@ Apps built on treaty keep their own, structured schema changelog with
 
 - `treaty audit --strict` listed `next_steps` sorted instead of in severity order: data
   carried by `Exit(data=...)` lost its dataclass's `Out(ordered=True)`
-- A relative `Path` setting was used against the process's directory; it is resolved
-  against the run's, `--cwd` included, as a `Path` flag is
-- `retry-declared` fired on a loop that sleeps to throttle; it now needs the loop's
-  `except` to go round again, by sleeping or with `continue`
+- A relative `Path` setting, or each path of a `tuple[Path, ...]` one, was used against the
+  process's directory; it is resolved against the run's, `--cwd` included, as a `Path` flag
+  is. A settings field refuses `Flag` options settings do not enforce, such as `pattern=` or
+  `max_bytes=`, and `secret=True` on a boolean
+- A redirect's message starts "Command", or "Tool" over MCP, so a lowercase command name
+  keeps its case
+- `retry-declared` fired on a loop that sleeps to throttle between items; it now counts
+  only a loop of attempts, a `while` or a `for` over `range(...)`, that holds a `try` and a
+  sleep
 - Following helpers, the audit looped forever on a lazy proxy or mock a handler calls, and
   failed on an unhashable doctor check; it unwraps only what a decorator set, and parses an
   unhashable callable without the cache, which is bounded and cleared per audit. An import
-  alias made inside a helper (`import requests as r`) is resolved
+  made inside a helper (`import requests as r`, `from requests import get as g`) is
+  resolved to the name it stands for
 - `sentence()` left a hyphenated or comma-ended first word lowercase, such as
   `instance-id:`; only a word with a dot, slash, underscore, or digit keeps its case. An MCP
   redirect's message names tools too

@@ -50,7 +50,7 @@ audit's `describe` rule reports every command of yours without one:
 $ uv run treaty audit myapp.cli:app --format plain
 ...
   1. (advice) describe [done]: no example invocation; agents copy examples verbatim as starting points
-     fix: examples=[("What it does", "todo done <id>")]
+     fix: examples=[("What it does", "todo done 1")]
 ```
 
 The finding is `advice`, the lowest severity, so it never fails `--strict`. Fix it anyway:
@@ -118,8 +118,7 @@ Each example is a pair: what the call does, and the call. `add`'s:
 
 An agent copies the command and edits the values, so write it the way it should be called:
 
-- **Real values, never placeholders.** The audit's suggested fix writes `todo done <id>`;
-  replace `<id>` with `3`. A placeholder copied as is fails, and so does the test in Step 4
+- **Real values, never placeholders.** The audit's suggested fix writes `todo done 1`, a value of the right type; replace it with one that reads as a real use, such as `3`. A placeholder such as `<id>` fails the audit's example check, and so does the test in Step 4
 - **The whole call.** Start with the program name, then the command path, then the
   arguments, with flags after the path, as the parser wants them
 - **One example per way of using the command.** `purge` could show the preview as well as

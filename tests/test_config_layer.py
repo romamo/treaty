@@ -759,3 +759,40 @@ def test_a_setting_declared_secret_is_redacted_and_a_path_setting_follows_cwd(
         env=env,
     )
     assert json.loads(out.getvalue())["data"] == {"migrations": str(project / "migrations")}
+
+
+def test_settings_resolve_path_tuples_and_refuse_flag_options_they_ignore(tmp_path: Path) -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Flag, RegistrationError
+
+    @dataclass(frozen=True)
+    class Paths:
+        extra: tuple[Path, ...] = ()
+
+    app = App("tpx", version="1.0.0", settings=Paths)
+
+    @app.command("where", description="Where", danger_level="safe", exit_codes=())
+    def where(args: NoArgs, ctx: Ctx, settings: Paths) -> dict[str, list[str]]:
+        return {"extra": [str(p) for p in settings.extra]}
+
+    out = io.StringIO()
+    env = {"TPX_EXTRA": "e1,e2", "TPX_AUDIT_LOG": "off"}
+    app.run(["where", "--cwd", str(tmp_path)], stdout=out, stderr=io.StringIO(), env=env)
+    assert json.loads(out.getvalue())["data"] == {
+        "extra": [str(tmp_path / "e1"), str(tmp_path / "e2")]
+    }
+
+    @dataclass(frozen=True)
+    class Checked:
+        region: str = Flag(default="eu", description="Region", pattern=r"[a-z]{2}")
+
+    with pytest.raises(RegistrationError, match="not pattern"):
+        App("chk", version="1.0.0", settings=Checked)
+
+    @dataclass(frozen=True)
+    class Flagged:
+        verbose: bool = Flag(default=False, description="Verbose", secret=True)
+
+    with pytest.raises(RegistrationError, match="boolean cannot hold a secret"):
+        App("flg", version="1.0.0", settings=Flagged)

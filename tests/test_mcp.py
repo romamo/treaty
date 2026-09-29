@@ -409,4 +409,4 @@ def test_a_redirect_message_over_mcp_names_tools() -> None:
     app.redirect("db.upgrade", to="db.up")
     entries = {e.name: e for e in tool_entries(app)}
     error = call_tool(app, entries, "db_upgrade", {}).error
-    assert error is not None and error.message == "db_upgrade is now db_up."
+    assert error is not None and error.message == "Tool db_upgrade is now db_up."

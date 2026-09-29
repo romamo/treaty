@@ -106,12 +106,31 @@ def user_commands(app: App) -> list[Command]:
     ]
 
 
+def _samples(c: Command) -> list[str]:
+    """Each required field as the example the describe fix suggests: a value of its type
+    where one is safe to guess, so the suggestion passes the example check as written"""
+    out: list[str] = []
+    for f in c.fields:
+        if not f.required:
+            continue
+        kind = f.flag_type
+        value = (
+            "1"
+            if kind is FlagType.INTEGER
+            else "1.5"
+            if kind is FlagType.NUMBER
+            else f.classified.enum_values[0]
+            if kind is FlagType.ENUM and f.classified.enum_values
+            else f.name.replace("_", "-")
+        )
+        out.append(value if f.positional else f"--{f.flag} {value}")
+    return out
+
+
 def _describe(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.examples:
-            example = " ".join(
-                [app.name, *c.path.parts, *(f"<{f.flag}>" for f in c.fields if f.required)]
-            )
+            example = " ".join([app.name, *c.path.parts, *_samples(c)])
             yield Finding(
                 "describe",
                 Severity.ADVICE,
@@ -131,18 +150,43 @@ def _describe(app: App) -> Iterator[Finding]:
                 )
 
 
+_SHELL_OPERATORS = frozenset({"|", "||", "&&", ";", ">", ">>", "<", "&", "2>", "2>&1"})
+# Framework flags whose value is checked against the world the example runs in, not its
+# spelling: a variable, a file, a directory. They are dropped, with their value, first
+_WORLD_FLAGS = ("--cwd", "--input-file", "--config")
+_WORLD_SUFFIXES = ("-from-env", "-from-file")
+
+
 def _example_problem(app: App, example: str) -> str | None:
-    """Why an example fails ``--validate-only``, or None when it parses. Phase 1 only: no
-    handler, no idempotency store, and the audit log off"""
-    argv = shlex.split(example)[1:]
-    out = io.StringIO()
+    """Why an example fails ``--validate-only``, or None when it parses or cannot be judged
+    here. Phase 1 only: no handler, no idempotency store, the audit log off, and an empty
+    stdin. What depends on the caller's world (a variable, a file, a directory, piped
+    input, a shell pipeline) is left out: only the spelling of the call is checked"""
+    words = shlex.split(example)
+    while words and "=" in words[0] and not words[0].startswith("-"):
+        words = words[1:]  # VAR=value before the command
+    if not words or words[0] != app.name or _SHELL_OPERATORS & set(words) or "-" in words:
+        return None
+    argv: list[str] = []
+    rest = iter(words[1:])
+    for word in rest:
+        name = word.split("=", 1)[0]
+        if name in _WORLD_FLAGS or name.endswith(_WORLD_SUFFIXES):
+            if "=" not in word:
+                next(rest, None)
+            continue
+        argv.append(word)
+    at = argv.index("--") if "--" in argv else len(argv)
+    argv[at:at] = ["--validate-only"]
+    out, err = io.StringIO(), io.StringIO()
     env = {app_var(app.name, AUDIT_LOG.key): "off"}
-    code = app.run(
-        [*argv, "--validate-only", "--format", "json"], stdout=out, stderr=io.StringIO(), env=env
-    )
+    code = app.run(argv, stdout=out, stderr=err, stdin=io.StringIO(""), env=env)
     if code == 0:
         return None
-    error = json.loads(out.getvalue()).get("error") or {}
+    try:
+        error = json.loads(out.getvalue()).get("error") or {}
+    except ValueError:
+        return err.getvalue().strip().splitlines()[0] if err.getvalue().strip() else f"exit {code}"
     return str(error.get("message", f"exit {code}"))
 
 
@@ -343,12 +387,13 @@ def _calls_network(code: Callable[..., object] | type) -> bool:
     if tree is None:
         return False
     # A module imported inside the function, as `import requests as r`, by its local name
-    local = {
-        alias.asname or alias.name.partition(".")[0]: alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    }
+    # and `from requests import get as g` by the full name it stands for
+    local: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            local.update({a.asname: a.name for a in node.names if a.asname})
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            local.update({a.asname or a.name: f"{node.module}.{a.name}" for a in node.names})
     for node in ast.walk(tree):
         name = _dotted(node.func) if isinstance(node, ast.Call) else None
         if name is None:
@@ -1686,23 +1731,22 @@ _SLEEPS = frozenset({"time.sleep", "sleep"})
 
 
 def retries_by_hand(handler: Callable[..., object]) -> bool:
-    """A loop that sleeps and whose ``except`` goes round again, by sleeping or with
-    ``continue``: a retry the framework cannot count. A loop that sleeps between items to
-    throttle, and handles a failure some other way, is not one"""
+    """A loop of attempts that holds a ``try`` and a ``time.sleep``: a retry the framework
+    cannot count. Attempts are a ``while`` or a ``for`` over ``range(...)``; a ``for`` over
+    items that sleeps between them to throttle, skipping a failed one, is not a retry"""
     tree = source_tree(handler)
     if tree is None:
         return False
     for loop in ast.walk(tree):
-        if not isinstance(loop, (ast.For, ast.While)):
+        attempts = isinstance(loop, ast.While) or (
+            isinstance(loop, ast.For)
+            and isinstance(loop.iter, ast.Call)
+            and _dotted(loop.iter.func) == "range"
+        )
+        if not attempts:
             continue
         inner = list(ast.walk(loop))
-        slept = any(_sleeps(n) for n in inner)
-        again = any(
-            isinstance(n, ast.ExceptHandler)
-            and any(_sleeps(m) or isinstance(m, ast.Continue) for m in ast.walk(n))
-            for n in inner
-        )
-        if slept and again:
+        if any(isinstance(n, ast.Try) for n in inner) and any(_sleeps(n) for n in inner):
             return True
     return False
 

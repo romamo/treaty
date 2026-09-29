@@ -599,11 +599,11 @@ def test_a_loop_that_sleeps_to_throttle_is_not_a_retry() -> None:
 
     @app.command("apply", description="Apply", danger_level="mutating", exit_codes=())
     def apply(args: NoArgs, ctx: Ctx) -> Done:
-        for step in range(3):
+        for item in ["1", "x", "2"]:
             try:
-                int(str(step))
+                int(item)
             except ValueError:
-                break
+                continue
             time.sleep(0)
         return Done("updated")
 
@@ -616,4 +616,83 @@ def test_a_loop_that_sleeps_to_throttle_is_not_a_retry() -> None:
                 time.sleep(1)
         return Done("noop")
 
-    assert _findings(app, "retry-declared") == ["fetch"]
+    @app.command("push", description="Push", danger_level="mutating", exit_codes=())
+    def push(args: NoArgs, ctx: Ctx) -> Done:
+        for attempt in range(3):
+            try:
+                return Done("updated")
+            except ConnectionError:
+                if attempt == 2:
+                    raise
+            time.sleep(2**attempt)
+        return Done("noop")
+
+    assert _findings(app, "retry-declared") == ["fetch", "push"]
+
+
+def test_the_example_check_judges_spelling_not_the_callers_world() -> None:
+    """A variable, a directory, a pipeline, or plain output is the caller's, not a typo"""
+    from dataclasses import dataclass
+
+    from treaty import App, Arg, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class T:
+        title: str = Arg(description="Title")
+        api_token: str = Flag(default="", description="Token")
+
+    app = App("adv", version="1.0.0")
+
+    @app.command(
+        "t",
+        description="T",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("Plain", "adv t x --format plain"),
+            ("Dash title", "adv t -- -title"),
+            ("From a variable", "adv t x --api-token-from-env ADV_TOKEN_NOT_SET"),
+            ("Elsewhere", "adv t x --cwd ./nowhere"),
+            ("With a variable", "ADV_X=1 adv t x"),
+            ("Piped", "echo y | adv t x"),
+        ],
+    )
+    def t(args: T, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    assert [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "describe" for f in r.findings
+    ] == []
+
+
+def test_network_io_follows_from_imports_and_keeps_package_names() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    def fetch(url: str) -> bytes:
+        from requests import get as g
+
+        return bytes(g(url, timeout=5).content)
+
+    def cookies() -> int:
+        import http.cookies  # noqa: F401
+
+        connection = http.client.HTTPSConnection("example.com", timeout=5)
+        return len(str(connection))
+
+    app = App("x", version="1.0.0")
+
+    @app.command("pull", description="Pull", danger_level="safe", exit_codes=())
+    def pull(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(fetch("https://example.com"))}
+
+    @app.command("jar", description="Jar", danger_level="safe", exit_codes=())
+    def jar(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": cookies()}
+
+    @dataclass(frozen=True, slots=True)
+    class Unused:
+        effect: str
+
+    assert _findings(app, "network-io") == ["jar", "pull"]

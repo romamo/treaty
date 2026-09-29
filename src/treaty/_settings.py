@@ -104,6 +104,31 @@ class SettingsSpec:
                 )
             declared = f.metadata.get(FLAG_META)
             secret = None if declared is None else declared.secret
+            if declared is not None:
+                # Only what settings enforce: a pattern or a size would pass unchecked
+                ignored = [
+                    name
+                    for name, value in (
+                        ("positional", declared.positional),
+                        ("short", declared.short),
+                        ("pattern", declared.pattern),
+                        ("pattern_type", declared.pattern_type),
+                        ("max_bytes", declared.max_bytes),
+                        ("multiline", declared.multiline),
+                        ("from_stdin", declared.from_stdin),
+                        ("deprecated", declared.deprecated),
+                    )
+                    if value not in (None, False)
+                ]
+                if ignored:
+                    raise RegistrationError(
+                        f"{where}: field {f.name!r}: a setting takes default, description, and "
+                        f"secret from Flag(...), not {', '.join(ignored)}"
+                    )
+                if secret and classified.flag_type is FlagType.BOOLEAN:
+                    raise RegistrationError(
+                        f"{where}: field {f.name!r}: a boolean cannot hold a secret"
+                    )
             fields.append(Setting(f.name, classified, f.default, secret))
         return cls(settings, tuple(fields))
 
@@ -279,6 +304,11 @@ def resolve(
         value = values[s.name]
         if s.classified.path and isinstance(value, Path) and not value.is_absolute():
             values[s.name] = cwd / value
+        item = s.classified.item
+        if item is not None and item.path and isinstance(value, tuple):
+            values[s.name] = tuple(
+                cwd / v if isinstance(v, Path) and not v.is_absolute() else v for v in value
+            )
     secrets = frozenset(s.name for s in spec.fields if s.secret)
     try:
         value = user_code(lambda: spec.cls(**values))

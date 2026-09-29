@@ -2877,7 +2877,7 @@ class _Run:
             entry.code.value,
             error=ErrorDetail(
                 code="REDIRECTED",
-                message=f"{source} is now {moved.to}",
+                message=f"Command {source} is now {moved.to}",
                 retryable=False,
                 context={"from": source.value, "to": moved.to.value},
                 suggestion=f"run {replacement} instead",
