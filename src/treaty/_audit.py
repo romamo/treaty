@@ -9,14 +9,12 @@ from __future__ import annotations
 import ast
 import asyncio
 import dataclasses
-import importlib.util
 import inspect
 import io
 import itertools
 import json
 import re
 import shlex
-import sys
 import time
 import types
 import typing
@@ -34,6 +32,9 @@ from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
 from ._redact import secret_field
 from ._scan import (
+    FOLLOW_DEPTH,
+    Reached,
+    absolute_module,
     clear_caches,
     ctx_calls,
     direct_subprocess_calls,
@@ -93,6 +94,13 @@ class AuditReport:
     target: str
     rules: tuple[RuleResult, ...]
     next_steps: tuple[Finding, ...]
+    scope: str = (
+        "source rules read each handler, the functions of its module it calls, and those "
+        f"of its other first-party modules {FOLLOW_DEPTH} calls deep; calls on objects, "
+        "callbacks, and other packages are not followed, so a pass here is not a runtime "
+        "check"
+    )
+    """What the source-reading rules saw, so a clean report is not over-read"""
 
     @property
     def passed(self) -> int:
@@ -450,6 +458,17 @@ def _called(c: Command, fn: Callable[..., object]) -> str:
     return "handler" if fn is c.handler else f"function {getattr(fn, '__name__', fn)}"
 
 
+def _first[T](
+    units: Iterable[Reached], detect: Callable[[Callable[..., object]], T]
+) -> tuple[Reached, T] | None:
+    """The first unit, the handler before its helpers, where ``detect`` finds something"""
+    for unit in units:
+        found = detect(unit.fn)
+        if found:
+            return unit, found
+    return None
+
+
 def _network_io(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.has_network_io:
@@ -457,23 +476,23 @@ def _network_io(app: App) -> Iterator[Finding]:
         # The handler's source is searched as text; a helper or a resource (where a migrated
         # CLI keeps its HTTP client, as ctx.obj was) only for calls into a network module, so
         # a docstring that says "requests" or a urllib.parse.quote does not count
-        label = "handler" if _mentions_network(c.handler) else ""
-        places: list[tuple[str, Callable[..., object] | type]] = [
-            (_called(c, f), f) for f in reached_functions(c.handler)[1:]
+        found = ("handler", "") if _mentions_network(c.handler) else None
+        places: list[tuple[str, str, Callable[..., object] | type]] = [
+            (_called(c, u.fn), u.where, u.fn) for u in reached_functions(c.handler)[1:]
         ]
-        places += [(f"resource {r.__name__}", r) for r in c.resource_graph]
-        for where, code in places:
-            if label:
+        places += [(f"resource {r.__name__}", "", r) for r in c.resource_graph]
+        for label, where, code in places:
+            if found is not None:
                 break
             if _calls_network(code):
-                label = where
-        if label:
+                found = (label, where)
+        if found is not None:
             yield Finding(
                 "network-io",
                 Severity.WARNING,
                 c.path.value,
-                f"{label} source mentions a network library "
-                "but has_network_io is not declared (heuristic)",
+                f"{found[0]} source mentions a network library "
+                f"but has_network_io is not declared (heuristic){found[1]}",
                 "has_network_io=True, then call out through ctx.http, which keeps to "
                 "the command's --timeout",
             )
@@ -498,20 +517,6 @@ _NETWORK_PACKAGES = (
 )
 
 
-def _absolute(code: Callable[..., object] | type, node: ast.ImportFrom) -> str | None:
-    """The module an ``from ... import`` names, a relative one resolved against the
-    package ``code`` belongs to"""
-    if not node.level:
-        return node.module
-    package = getattr(sys.modules.get(getattr(code, "__module__", "") or ""), "__package__", None)
-    if not package:
-        return None
-    try:
-        return importlib.util.resolve_name("." * node.level + (node.module or ""), package)
-    except ImportError:
-        return None  # beyond the top-level package: an import that never runs
-
-
 def _calls_network(code: Callable[..., object] | type) -> bool:
     """A call in ``code``'s source to something a network module defines"""
     tree = source_tree(code)
@@ -524,7 +529,7 @@ def _calls_network(code: Callable[..., object] | type) -> bool:
         if isinstance(node, ast.Import):
             local.update({a.asname: a.name for a in node.names if a.asname})
         elif isinstance(node, ast.ImportFrom):
-            module = _absolute(code, node)
+            module = absolute_module(code, node)
             if module is not None:
                 local.update({a.asname or a.name: f"{module}.{a.name}" for a in node.names})
     for node in ast.walk(tree):
@@ -597,31 +602,31 @@ def _network_timeout(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.has_network_io:
             continue
-        for name in (n for f in reached_functions(c.handler) for n in untimed_network_calls(f)):
-            yield Finding(
-                "network-timeout",
-                Severity.WARNING,
-                c.path.value,
-                f"{name}(...) has no timeout=, so it can outlive --timeout",
-                f"{name}(..., timeout=ctx.timeout.seconds)",
-            )
+        for unit in reached_functions(c.handler):
+            for name in untimed_network_calls(unit.fn):
+                yield Finding(
+                    "network-timeout",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"{name}(...) has no timeout=, so it can outlive --timeout{unit.where}",
+                    f"{name}(..., timeout=ctx.timeout.seconds)",
+                )
 
 
 def _subprocess_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        direct = [
-            (f, call) for f in reached_functions(c.handler) for call in direct_subprocess_calls(f)
-        ]
-        if direct:
-            fn, call = direct[0]
+        direct = _first(reached_functions(c.handler), direct_subprocess_calls)
+        if direct is not None:
+            unit, [call, *_] = direct
             # Outside ctx.run no declaration can describe the child, so this comes first
             yield Finding(
                 "subprocess-declared",
                 Severity.WARNING,
                 c.path.value,
-                f"{call.name}() on line {call.line} of the {_called(c, fn)} runs a program "
-                "outside ctx.run, so it has no time limit, locale, or argv the manifest can "
-                "show, and doctor cannot check the program is installed (REQ-C-019)",
+                f"{call.name}() on line {call.line} of the {_called(c, unit.fn)} runs a "
+                "program outside ctx.run, so it has no time limit, locale, or argv the "
+                "manifest can show, and doctor cannot check the program is installed "
+                f"(REQ-C-019){unit.where}",
                 "ctx.run([...]) with the same argument list, check=False where the code reads "
                 "returncode itself, and no capture_output= or text= (ctx.run captures text); "
                 'then subprocess=treaty.Subprocess("<binary>", ...) and required_tools=',
@@ -676,15 +681,16 @@ def _fs_side_effects(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.danger_level is not DangerLevel.SAFE or c.filesystem_side_effects or c.output_file:
             continue
-        writes = disk_writes(c.handler)
-        if writes:
+        found = _first(reached_functions(c.handler), disk_writes)
+        if found is not None:
+            unit, writes = found
             yield Finding(
                 "fs-side-effects",
                 Severity.ADVICE,
                 c.path.value,
                 f"{writes[0]}(...) writes to disk, and the safe command declares no "
                 "filesystem_side_effects, so agents cannot find or clean up what it leaves "
-                "(REQ-C-011, heuristic)",
+                f"(REQ-C-011, heuristic){unit.where}",
                 'filesystem_side_effects=[treaty.SideEffect("~/.cache/<tool>/", "cache")]',
             )
 
@@ -707,13 +713,15 @@ def writes_cache(handler: Callable[..., object]) -> bool:
 
 def _cache_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        if c.cache is None and writes_cache(c.handler):
+        found = None if c.cache is not None else _first(reached_functions(c.handler), writes_cache)
+        if found is not None:
             yield Finding(
                 "cache-declared",
                 Severity.WARNING,
                 c.path.value,
                 "the handler writes a cache by hand, so --no-cache and --cache-ttl cannot "
-                "reach it and agents get stale data they cannot refuse (REQ-O-018, heuristic)",
+                "reach it and agents get stale data they cannot refuse "
+                f"(REQ-O-018, heuristic){found[0].where}",
                 "cache=treaty.CachePolicy(ttl_seconds=3600), then ctx.cache.get(key) and "
                 "ctx.cache.put(key, data)",
             )
@@ -727,11 +735,14 @@ _TREE_CALLS = frozenset(
 def traversal_calls(handler: Callable[..., object]) -> list[str]:
     """Recursive walks in the handler's source that ``ctx.walk`` would protect from a
     circular symlink and a runaway depth (REQ-F-061, heuristic)"""
-    tree = source_tree(handler)
+    params = list(inspect.signature(handler).parameters)
+    return _traversals(handler, params[1] if len(params) > 1 else None)
+
+
+def _traversals(fn: Callable[..., object], ctx_name: str | None) -> list[str]:
+    tree = source_tree(fn)
     if tree is None:
         return []
-    params = list(inspect.signature(handler).parameters)
-    ctx_name = params[1] if len(params) > 1 else None
     found: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -752,15 +763,20 @@ def traversal_calls(handler: Callable[..., object]) -> list[str]:
 
 def _recursive_traversal(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        calls = traversal_calls(c.handler)
-        if calls:
+        # A helper's ctx is not the handler's second parameter; it is taken by name
+        units = reached_functions(c.handler)
+        found = _first(units[:1], traversal_calls) or _first(
+            units[1:], lambda fn: _traversals(fn, "ctx")
+        )
+        if found is not None:
+            unit, calls = found
             declare = "" if c.recursive_traversal else "recursive_traversal=True, then "
             yield Finding(
                 "recursive-traversal",
                 Severity.WARNING,
                 c.path.value,
                 f"{calls[0]}() walks a directory tree that a circular symlink can loop and "
-                "no --max-depth bounds (REQ-F-061, REQ-O-040, heuristic)",
+                f"no --max-depth bounds (REQ-F-061, REQ-O-040, heuristic){unit.where}",
                 f"{declare}for entry in ctx.walk(root): ...",
             )
 
@@ -785,15 +801,16 @@ def _http_client(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.has_network_io:
             continue
-        calls = [call for f in reached_functions(c.handler) for call in direct_http_calls(f)]
-        if calls:
+        found = _first(reached_functions(c.handler), direct_http_calls)
+        if found is not None:
+            unit, calls = found
             yield Finding(
                 "http-client",
                 Severity.WARNING,
                 c.path.value,
                 f"{calls[0]}() skips ctx.http, so --proxy, --no-proxy, and the CA bundle "
                 "variables do not reach it and a failure has no error.network_context "
-                "(REQ-F-036, REQ-F-037)",
+                f"(REQ-F-036, REQ-F-037){unit.where}",
                 "response = ctx.http.get(url)",
             )
 
@@ -833,14 +850,15 @@ def detaches(handler: Callable[..., object]) -> str | None:
 
 def _background_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        name = None if c.background is not None else detaches(c.handler)
-        if name is not None:
+        found = None if c.background is not None else _first(reached_functions(c.handler), detaches)
+        if found is not None:
+            unit, name = found
             yield Finding(
                 "background-declared",
                 Severity.WARNING,
                 c.path.value,
                 f"{name}(...) starts a process that outlives the run, undeclared, so agents "
-                "cannot find or stop it (REQ-C-010)",
+                f"cannot find or stop it (REQ-C-010){unit.where}",
                 'ctx.spawn([...]) with background=treaty.Background("<tool> <stop command>", '
                 "max_lifetime_seconds=3600)",
             )
@@ -1452,21 +1470,24 @@ _BASE64_CALLS = frozenset(
 
 def _binary_output(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        tree = source_tree(c.handler)
-        if tree is None:
-            continue
-        if any(
-            isinstance(n, ast.Call) and _dotted(n.func) in _BASE64_CALLS for n in ast.walk(tree)
-        ):
+        found = _first(reached_functions(c.handler), _encodes_base64)
+        if found is not None:
             yield Finding(
                 "binary-output",
                 Severity.ADVICE,
                 c.path.value,
                 "handler base64-encodes a value itself, so callers get a bare string with "
-                "no size or content type (REQ-F-017)",
+                f"no size or content type (REQ-F-017){found[0].where}",
                 "return the bytes, or treaty.Binary(data, content_type=...); treaty writes "
                 "the base64 wrapper with size_bytes",
             )
+
+
+def _encodes_base64(fn: Callable[..., object]) -> bool:
+    tree = source_tree(fn)
+    return tree is not None and any(
+        isinstance(n, ast.Call) and _dotted(n.func) in _BASE64_CALLS for n in ast.walk(tree)
+    )
 
 
 def _len_limits(tree: ast.AST) -> Iterator[str]:
@@ -1692,14 +1713,16 @@ def _no_chdir(app: App) -> Iterator[Finding]:
             (f"{cls.__qualname__}.acquire", spec.acquire) for cls, spec in c.resource_graph.items()
         ]
         for label, fn in where:
-            name = changes_cwd(fn)
-            if name is not None:
+            found = _first(reached_functions(fn), changes_cwd)
+            if found is not None:
+                unit, name = found
                 yield Finding(
                     "no-chdir",
                     Severity.WARNING,
                     c.path.value,
                     f"{label} calls {name}(), which changes the working directory of the whole "
-                    "process; treaty changes it back with a CWD_CHANGED warning (REQ-F-041)",
+                    "process; treaty changes it back with a CWD_CHANGED warning "
+                    f"(REQ-F-041){unit.where}",
                     "build paths from ctx.cwd, or pass cwd= to ctx.run",
                 )
                 break
@@ -1721,14 +1744,16 @@ def prints(fn: Callable[..., object]) -> str | None:
 
 def _log_not_print(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        name = prints(c.handler)
-        if name is not None:
+        found = _first(reached_functions(c.handler), prints)
+        if found is not None:
+            unit, name = found
             yield Finding(
                 "log-not-print",
                 Severity.WARNING,
                 c.path.value,
                 f"handler calls {name}(), which --quiet cannot silence and an agent pays "
-                "tokens to read; ctx.log is silent off a terminal unless --verbose (REQ-F-038)",
+                "tokens to read; ctx.log is silent off a terminal unless --verbose "
+                f"(REQ-F-038){unit.where}",
                 "ctx.log(...) for info, ctx.progress(...) for progress, ctx.log_error(...) "
                 "for errors, ctx.debug(...) for --debug",
             )
@@ -1738,14 +1763,15 @@ def _project_root(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.project_root:
             continue
-        marker = walks_up_from_cwd(c.handler)
-        if marker is not None:
+        found = _first(reached_functions(c.handler), walks_up_from_cwd)
+        if found is not None:
+            unit, marker = found
             yield Finding(
                 "project-root",
                 Severity.WARNING,
                 c.path.value,
                 "handler walks up from the working directory itself, so meta.project_root "
-                "does not say which root it found (REQ-F-027, heuristic)",
+                f"does not say which root it found (REQ-F-027, heuristic){unit.where}",
                 f'project_root=("{marker}",), then read ctx.project_root',
             )
 
@@ -1775,8 +1801,11 @@ def _env_prefix(app: App) -> Iterator[Finding]:
     prefix = app_var(app.name, "") + "_"
     for c in user_commands(app):
         code = [c.handler, *(spec.acquire for spec in c.resource_graph.values())]
-        seen = {n for fn in code for n in env_reads(fn)}
-        for name in sorted(seen):
+        seen: dict[str, Reached] = {}
+        for fn in code:
+            for unit in reached_functions(fn):
+                seen.update((n, unit) for n in env_reads(unit.fn) if n not in seen)
+        for name, unit in sorted(seen.items()):
             if name.startswith(prefix) or name in UNPREFIXED or name in c.token_env_vars:
                 continue
             yield Finding(
@@ -1784,7 +1813,7 @@ def _env_prefix(app: App) -> Iterator[Finding]:
                 Severity.WARNING,
                 c.path.value,
                 f"reads the unprefixed variable {name}, which an agent may set for another "
-                "tool in the same session (REQ-F-073)",
+                f"tool in the same session (REQ-F-073){unit.where}",
                 f"read {app_var(app.name, name)} instead of {name}",
             )
 
@@ -1805,14 +1834,16 @@ def reads_config_by_hand(fn: Callable[..., object]) -> str | None:
 
 def _settings_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        call = reads_config_by_hand(c.handler)
-        if call is not None:
+        found = _first(reached_functions(c.handler), reads_config_by_hand)
+        if found is not None:
+            unit, call = found
             yield Finding(
                 "settings-declared",
                 Severity.WARNING,
                 c.path.value,
                 f"handler parses a config file with {call}, so meta.config_sources, "
-                "--show-config, --no-config, and --config cannot see it (REQ-F-028)",
+                "--show-config, --no-config, and --config cannot see it "
+                f"(REQ-F-028){unit.where}",
                 "declare the keys as a frozen dataclass with defaults, pass "
                 "App(settings=Settings), and take settings: Settings in the handler",
             )
@@ -1847,14 +1878,15 @@ def first_run_setup(fn: Callable[..., object]) -> str | None:
 
 def _init_isolated(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        call = first_run_setup(c.handler)
-        if call is not None:
+        found = _first(reached_functions(c.handler), first_run_setup)
+        if found is not None:
+            unit, call = found
             yield Finding(
                 "init-isolated",
                 Severity.WARNING,
                 c.path.value,
                 f"handler calls {call} the first time it runs, so a first-run failure looks "
-                "like a failure of this command (REQ-F-076, heuristic)",
+                f"like a failure of this command (REQ-F-076, heuristic){unit.where}",
                 "move the setup into App(init=Setup()), whose initialized() checks and run() "
                 "creates; the init built-in runs it and other commands exit INIT_REQUIRED",
             )
@@ -1942,13 +1974,16 @@ def _sleeps(handler: Callable[..., object], node: ast.AST) -> bool:
 
 def _retry_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        if c.retry is None and retries_by_hand(c.handler):
+        found = (
+            None if c.retry is not None else _first(reached_functions(c.handler), retries_by_hand)
+        )
+        if found is not None:
             yield Finding(
                 "retry-declared",
                 Severity.WARNING,
                 c.path.value,
                 "handler retries in a loop with time.sleep, so meta.retries cannot report it "
-                "and --retries cannot turn it off (REQ-F-078, heuristic)",
+                f"and --retries cannot turn it off (REQ-F-078, heuristic){found[0].where}",
                 "retry=treaty.Retry(on=(ConnectionError,)), then ctx.retry(lambda: call(...)) "
                 "in place of the loop",
             )
@@ -2007,13 +2042,17 @@ def raises_without(handler: Callable[..., object], exit_name: str, keyword: str)
 
 def _retry_hint(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        if raises_without(c.handler, "RATE_LIMITED", "retry_after_ms"):
+        found = _first(
+            reached_functions(c.handler),
+            lambda fn: raises_without(fn, "RATE_LIMITED", "retry_after_ms"),
+        )
+        if found is not None:
             yield Finding(
                 "retry-hint",
                 Severity.WARNING,
                 c.path.value,
                 "raises RATE_LIMITED without retry_after_ms, which ends the run as "
-                "INVALID_EXIT (REQ-C-014)",
+                f"INVALID_EXIT (REQ-C-014){found[0].where}",
                 "Exit.RATE_LIMITED(..., retry_after_ms=<the Retry-After header in ms>)",
             )
 
@@ -2072,14 +2111,15 @@ def locks_by_hand(handler: Callable[..., object]) -> str | None:
 
 def _lock_declared(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
-        call = locks_by_hand(c.handler)
-        if call is not None:
+        found = _first(reached_functions(c.handler), locks_by_hand)
+        if found is not None:
+            unit, call = found
             yield Finding(
                 "lock-declared",
                 Severity.WARNING,
                 c.path.value,
                 f"handler locks a file with {call}(...), so a waiting run blocks with no "
-                "LOCK_HELD error or retry_after_ms (REQ-F-033, heuristic)",
+                f"LOCK_HELD error or retry_after_ms (REQ-F-033, heuristic){unit.where}",
                 'with ctx.lock("<name>", retry_after_ms=1000): in place of the file lock',
             )
 

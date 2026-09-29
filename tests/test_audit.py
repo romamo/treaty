@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import re
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 
 from treaty._audit import ADDITIVE, RULES, audit
 from treaty._cli import cli
+from treaty._scan import reached_functions
 
 
 def test_rules_are_ordered_and_unique() -> None:
@@ -1507,3 +1509,143 @@ def test_a_target_that_fails_to_register_is_app_import_failed_without_a_tracebac
     assert error["context"]["exception"] == "RegistrationError"
     assert said in error["message"] and said in error["context"]["message"]
     assert "Traceback" not in out.getvalue() + err.getvalue()
+
+
+def _messages(app: object, target: str, rule: str) -> dict[str, str]:
+    report = audit(app, target, limit=3)  # type: ignore[arg-type]
+    return {f.command: f.message for r in report.rules if r.id == rule for f in r.findings}
+
+
+def _via(fn: object) -> str:
+    code = fn.__code__  # type: ignore[attr-defined]
+    name = f"{fn.__module__}.{fn.__qualname__}"  # type: ignore[attr-defined]
+    return f"{name} ({os.path.basename(code.co_filename)}:{code.co_firstlineno})"
+
+
+def test_rules_follow_a_handler_into_a_helper_module_and_name_where() -> None:
+    """Issue 14: a helper in another module of the app is read as part of the handler"""
+    import fixture_follow_app
+    import fixture_follow_helpers
+
+    via = f"; found via {_via(fixture_follow_helpers.enter)}"
+    for rule in ("no-chdir", "env-prefix", "network-io"):
+        messages = _messages(fixture_follow_app.app, "fixture_follow_app:app", rule)
+        assert messages["go"].endswith(via), rule
+    env = _messages(fixture_follow_app.app, "fixture_follow_app:app", "env-prefix")
+    assert list(env) == ["go"] and "OTHER_TOOL_TOKEN" in env["go"]
+    timeout = _messages(fixture_follow_app.app, "fixture_follow_app:app", "network-timeout")
+    assert timeout == {
+        "refresh": "urllib.request.urlopen(...) has no timeout=, so it can outlive --timeout"
+        f"; found via {_via(fixture_follow_helpers.untimed_fetch)}"
+    }
+    assert list(_messages(fixture_follow_app.app, "x:app", "http-client")) == ["refresh"]
+
+
+def test_helper_modules_keep_the_same_module_hardening() -> None:
+    """Across modules too: a proxy, a lazy module, and a lambda are not followed, a
+    docstring or urllib.parse is no network call, and a decorated or aliased one is"""
+    import fixture_follow_app
+    import fixture_follow_helpers
+
+    network = _messages(fixture_follow_app.app, "fixture_follow_app:app", "network-io")
+    assert sorted(network) == ["alias", "go", "pull"]
+    assert network["pull"].endswith(
+        f"; found via {_via(fixture_follow_helpers.cached_fetch.__wrapped__)}"
+    )
+    assert fixture_follow_helpers.asked == []
+    assert [u.fn for u in reached_functions(fixture_follow_app.proxy)] == [fixture_follow_app.proxy]
+
+
+def test_other_modules_are_followed_three_calls_deep_and_never_into_the_stdlib() -> None:
+    import fixture_follow_app
+    import fixture_follow_helpers as h
+
+    units = reached_functions(fixture_follow_app.deep)
+    assert [u.fn for u in units] == [fixture_follow_app.deep, h.first, h.second, h.third]
+    assert units[-1].via == (_via(h.first), _via(h.second), _via(h.third))
+    assert [u.fn for u in reached_functions(fixture_follow_app.encode)] == [
+        fixture_follow_app.encode,
+        h.encode,
+    ]
+    assert _messages(fixture_follow_app.app, "x:app", "no-chdir").keys() == {"go"}
+
+
+def test_the_handlers_own_module_is_still_followed_however_deep() -> None:
+    import urllib.request
+
+    from treaty import App, Ctx, NoArgs
+
+    def five() -> bytes:
+        return bytes(urllib.request.urlopen("https://example.com").read())  # noqa: S310
+
+    def four() -> bytes:
+        return five()
+
+    def three() -> bytes:
+        return four()
+
+    def two() -> bytes:
+        return three()
+
+    def one() -> bytes:
+        return two()
+
+    app = App("x", version="1.0.0")
+
+    @app.command("far", description="Far", danger_level="safe", exit_codes=())
+    def far(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(one())}
+
+    assert _findings(app, "network-io") == ["far"]
+
+
+def test_a_package_follows_its_own_modules_only() -> None:
+    from fixture_follow_pkg import cli as pkg
+    from fixture_follow_pkg import net, ops
+
+    env = _messages(pkg.app, "fixture_follow_pkg.cli:app", "env-prefix")
+    assert env == {
+        "token": "reads the unprefixed variable OTHER_TOOL_TOKEN, which an agent may set for "
+        "another tool in the same session (REQ-F-073); found via "
+        "fixture_follow_pkg.ops.read_token (fixture_follow_pkg/ops.py:10) -> "
+        "fixture_follow_pkg.ops.Store.load (fixture_follow_pkg/ops.py:5)"
+    }
+    assert _messages(pkg.app, "x:app", "no-chdir") == {}  # another package's helper
+    # A module a helper imports itself, relative to its package, is followed; one past the
+    # top-level package is an import that never runs, and the audit keeps going
+    network = _messages(pkg.app, "x:app", "network-io")
+    assert list(network) == ["pull"]
+    assert network["pull"].endswith(
+        "; found via fixture_follow_pkg.ops.pull (fixture_follow_pkg/ops.py:14) -> "
+        "fixture_follow_pkg.net.fetch (fixture_follow_pkg/net.py:4)"
+    )
+    assert [u.fn for u in reached_functions(pkg.beyond)] == [pkg.beyond, ops.beyond]
+    assert net.fetch in [u.fn for u in reached_functions(pkg.pull)]
+
+
+def test_treaty_code_is_never_followed_out_of_its_module() -> None:
+    from treaty import _cli
+
+    assert {u.fn.__module__ for u in reached_functions(_cli.audit_command)} == {"treaty._cli"}
+
+
+def test_an_unhashable_callable_is_followed_without_the_cache() -> None:
+    from dataclasses import dataclass
+
+    @dataclass
+    class Acquire:
+        path: str
+
+        def __call__(self) -> str:
+            return self.path
+
+    acquire = Acquire(".")
+    assert [u.fn for u in reached_functions(acquire)] == [acquire]
+
+
+def test_the_report_says_what_the_source_rules_read() -> None:
+    code, out = run_cli(["audit", "fixture_follow_app:app"], isatty=False)
+    scope = json.loads(out)["data"]["scope"]
+    assert code == 0 and "first-party modules 3 calls deep" in scope
+    code, out = run_cli(["audit", "fixture_follow_app:app"], isatty=True)
+    assert out.splitlines()[1] == f"Scope: {scope}"
