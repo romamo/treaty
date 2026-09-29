@@ -170,7 +170,10 @@ if found is None:
 ```
 
 Then drop `NOT_FOUND` from its `exit_codes`: a gone id is no longer a failure. The audit's
-`delete-not-found` rule warns while a destructive command declares `NOT_FOUND`.
+`delete-not-found` rule warns while a command that deletes declares `NOT_FOUND`. A
+destructive command that does something else to what it names, such as a restore that
+overwrites files from a snapshot, keeps `NOT_FOUND`: a missing snapshot is a real failure
+there.
 
 A `destructive` command is also never offered as a fix: a `fix_command` that runs one is
 refused, since a fix must be safe to run twice, so an agent following a suggestion never

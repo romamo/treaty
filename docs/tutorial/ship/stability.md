@@ -103,7 +103,8 @@ In your project, 1.1.0 is one set of edits, which this step and the next explain
   `list`'s new example changes its probe; commit it with the rest
 
 1.1.0 calls the command `complete`. The old name keeps answering, with one line at module
-level:
+level, after the renamed command's definition (the redirect refuses a target that is not
+registered yet):
 
 <!-- file: examples/tutorial/todo_v2.py -->
 ```python

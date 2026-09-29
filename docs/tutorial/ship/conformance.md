@@ -105,11 +105,13 @@ HOME="$here/.sandbox" exec "$here/../../../.venv/bin/python" "$here/../todo_exit
 That one runs the example file from this repository, so do not copy it; your project's
 launcher, below, runs your installed command instead.
 
-Point the sandbox at whatever your CLI touches: an environment variable for a config file,
-a test account's credentials, a mock server's URL. A project made with `treaty init` already
-has a launcher, `conformance/todo`, without a sandbox; a migrated project has none, so create
-it. Give it a sandbox as soon as a command reads or writes real state; for `todo`, two lines
-give it its own `HOME`:
+Point the sandbox at whatever your CLI touches: an environment variable for a config file, a
+test account's credentials, a mock server's URL. When a probe names something that must
+exist, such as a destructive command's example `restore 3`, the launcher seeds the sandbox
+with it before running the CLI; otherwise the dry run fails with your not-found code instead
+of previewing. A project made with `treaty init` already has a launcher, `conformance/todo`,
+without a sandbox; a migrated project has none, so create it. Give it a sandbox as soon as a
+command reads or writes real state; for `todo`, two lines give it its own `HOME`:
 
 ```sh
 #!/bin/sh

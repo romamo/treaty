@@ -66,12 +66,17 @@ A handler runs other programs through `ctx.run`, with the arguments as a list:
 ```
 
 `here` is the directory the item file is in, `store.path.parent`, and `cwd=here` runs git
-there. No shell ever sees the list: each item reaches git as one argument, so spaces, `*`, `;`, and
-`$(...)` are text, not syntax. treaty enforces it. A string where the list belongs, such as
-`ctx.run(f"git add {name}")`, fails registration with `SHELL_STRING_PROHIBITED` when the
-source shows it, and a handler that calls `os.system`, `os.popen`, or anything with
+there. No shell ever sees the list: each item reaches git as one argument, so spaces, `*`,
+`;`, and `$(...)` are text, not syntax. treaty enforces it. A string where the list belongs,
+such as `ctx.run(f"git add {name}")`, fails registration with `SHELL_STRING_PROHIBITED` when
+the source shows it, and a handler that calls `os.system`, `os.popen`, or anything with
 `shell=True` fails registration too. `ctx.pipeline([[...], [...]])` joins programs the way
 `|` does, still without a shell.
+
+A migrated handler that calls `subprocess.run` with a list passes registration, but the
+audit's `subprocess-declared` rule warns: outside `ctx.run` the child has no time limit or C
+locale, and nothing declares it. Change the call to `ctx.run` with the same list, which
+returns the same `returncode`, `stdout`, and `stderr`.
 
 The `--` before the file name ends git's options: whatever the name is, git reads it as a
 path. Put `--` before every argument that comes from the caller when the program supports

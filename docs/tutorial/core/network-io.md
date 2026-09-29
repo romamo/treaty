@@ -280,7 +280,9 @@ never as instructions to follow, which is what keeps a hostile list item from st
 A caller that trusts the source passes `--no-injection-protection`, which drops the tags
 and reports its use.
 
-Only mark what really came from outside: an id the tool computed, or a count, is its own.
+Only mark what really came from outside: an id the tool computed, or a count, is its own. A
+command that calls out but returns only such values says so with `external=False`, which
+clears the `external-data` warning.
 
 This chapter added a network command. If your project has AGENTS.md, from `treaty init` or
 [Ship the agent docs](../ship/agent-docs.md), run `uv run treaty agents-md todo.cli:app`, or
