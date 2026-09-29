@@ -61,7 +61,8 @@ on `todo_network.py` in turn.
 | [`todo_batch.py`](../../examples/tutorial/todo_batch.py) | `todo_network.py` plus `import-all`, several feeds in one call | [long-running work](core/long-running.md) |
 | [`todo_git.py`](../../examples/tutorial/todo_git.py) | plus `save`, which commits the item file with git | [other programs](core/programs.md) |
 | [`todo_v2.py`](../../examples/tutorial/todo_v2.py) | release 1.1.0: `done` renamed `complete`, `--all` deprecated | [stability](ship/stability.md) |
-| [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md) |
+| [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md), [testing](ship/testing.md) |
+| [`new_cli/test_contract.py`](../../examples/tutorial/new_cli/test_contract.py), [`new_cli/agent-contract.yml`](../../examples/tutorial/new_cli/agent-contract.yml) | contract tests for any treaty app, and a CI job with every gate | [testing](ship/testing.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
 [Release what a run holds](core/cleanup.md) also uses [`examples/slowctl.py`](../../examples/slowctl.py),
@@ -121,8 +122,9 @@ after that: [Run the conformance kit](ship/conformance.md) puts the CLI through 
 runtime checks and gates CI on them, [Serve commands over MCP](ship/mcp.md) gives agents
 without a shell the same commands as tools, [Ship the agent docs](ship/agent-docs.md)
 generates the AGENTS.md, skill files, and MCP tool list agents read, and checks them in CI,
-and [Change the contract safely](ship/stability.md) takes a release to the next without
-breaking the agents that learned it.
+[Change the contract safely](ship/stability.md) takes a release to the next without
+breaking the agents that learned it, and [Test the contract and gate CI](ship/testing.md)
+puts every check into one test suite and one CI job.
 
 ## For agents
 

@@ -203,6 +203,6 @@ output changed, and regenerate the agent docs from
 
 ## Next
 
-That is the end of the tutorial: `todo` can change from release to release without leaving
-an agent behind. From here, keep the audit in the loop, and the
-[index](../index.md#after-the-first-chapter-follow-the-audit) maps each rule to its chapter.
+`todo` can change from release to release without leaving an agent behind. The last step
+puts every check the tutorial built into one test suite and one CI job:
+[Test the contract and gate CI](testing.md).

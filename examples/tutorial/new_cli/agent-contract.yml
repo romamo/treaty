@@ -1,0 +1,38 @@
+# The testing chapter's CI job for todo, a project made with treaty init: every gate the
+# tutorial builds, in one job. Save it as .github/workflows/agent-contract.yml
+name: agent-contract
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv sync --locked
+
+      # Behaviour, the contract tests, and AGENTS.md against the binary
+      - run: uv run pytest -q
+
+      # Nothing the last release promised is gone; bump the file at each release
+      - run: uv run treaty audit todo.cli:app --baseline todo-1.0.0.json --strict
+
+      # The agent docs and the MCP tool list are regenerated and committed; treaty-mcp
+      # needs the mcp extra in the project: uv add "treaty[mcp]"
+      - name: Agent docs are up to date
+        run: |
+          uv run treaty agents-md todo.cli:app
+          uv run todo generate-skills --output-dir skills
+          uv run treaty-mcp todo.cli:app --list-tools > mcp-tools.json
+          git diff --exit-code AGENTS.md skills mcp-tools.json
+          uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json
+
+      # The runtime checks the audit cannot make
+      - name: Conformance kit
+        run: |
+          git clone --depth 1 https://github.com/cli-agent-spec/cli-agent-spec ../cli-agent-ergonomics
+          uv run treaty conformance todo.cli:app --run
+          git diff --exit-code conformance/
