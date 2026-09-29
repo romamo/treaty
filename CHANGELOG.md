@@ -121,6 +121,12 @@ Apps built on treaty keep their own, structured schema changelog with
   never followed. A finding in a helper ends with where it is, such as
   `found via helpers.enter (helpers.py:6)`. Attributes are read statically, so a lazy
   module's `__getattr__` never runs during the audit
+- A handler returning `list[dict[str, object]]`, such as a list of `model_dump()` dicts,
+  had every array inside re-sorted by its JSON text with no audit finding. `typed-output`
+  now flags a list or tuple of untyped dicts, and `stable-order` says an untyped output or
+  field has its arrays re-sorted and suggests a typed output or `ordered=True`.
+  `ordered=True` and `Out(ordered=True)` keep the order of arrays inside a
+  `list[dict[str, object]]` too, as they already did inside a `dict[str, object]` (#27)
 - An argument list built from the whole arguments object, as `["git", *flags(args)]`, got
   a worked-out declaration naming no user-controlled field and no audit warning. Passing
   `args` on whole, or reading a method or property of it such as `args.argv()`, now makes

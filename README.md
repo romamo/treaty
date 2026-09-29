@@ -1264,8 +1264,9 @@ that break this, such as a `fetched_at` (rule `volatile-data`).
   declared key, else by each item's JSON text. `sort_key="id"` on a command orders its
   output list (and a list command sorts before paging, so pages follow one order);
   `treaty.Out(sort_key="id")` does the same for a field. `ordered=True` and
-  `Out(ordered=True)` keep the handler's order, for a ranking; the schema says
-  `"x-ordered": true`. Fixed tuples keep their order. Rule `stable-order`
+  `Out(ordered=True)` keep the handler's order, for a ranking, and that of every array
+  inside untyped content such as a `list[dict[str, object]]` from `model_dump()`; the
+  schema says `"x-ordered": true`. Fixed tuples keep their order. Rule `stable-order`
 - **Every key, every time**: an output dataclass writes all its fields, so the output
   schema lists each as `required`; `X | None` is nullable. An empty collection is `[]` or
   `{}`, never `null`, so `list[T] | None` in an output type fails registration; write

@@ -408,17 +408,34 @@ def _exit_code_suggestion(app: App) -> Iterator[Finding]:
             )
 
 
+def _untyped_schema(schema: Mapping[str, Any]) -> bool:
+    """A schema that says nothing of its values: ``{}`` (``object``, ``Any``) or an object
+    of those (``dict[str, object]``); ``dict[str, str]`` still types each value"""
+    if schema.get("type") == "object" and "properties" not in schema:
+        schema = schema.get("additionalProperties") or {}
+    return schema == {}
+
+
 def _typed_output(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         schema = c.output_schema
         if schema.get("type") == "object" and "properties" not in schema:
-            yield Finding(
-                "typed-output",
-                Severity.ADVICE,
-                c.path.value,
-                "return type is an untyped dict, so output_schema tells agents nothing",
-                "return a frozen dataclass; its fields become output_schema automatically",
+            message = "return type is an untyped dict, so output_schema tells agents nothing"
+        elif isinstance(items := schema.get("items"), dict) and _untyped_schema(items):
+            # A list of model_dump() dicts: the array is typed, each item says nothing
+            message = (
+                "return type is a list of untyped dicts or values, so output_schema tells "
+                "agents nothing about its items"
             )
+        else:
+            continue
+        yield Finding(
+            "typed-output",
+            Severity.ADVICE,
+            c.path.value,
+            message,
+            "return a frozen dataclass; its fields become output_schema automatically",
+        )
 
 
 _OWN_PAGING = frozenset(
@@ -1388,8 +1405,31 @@ def _id_field(app: App) -> Iterator[Finding]:
             )
 
 
+def _holds_untyped(tp: object) -> bool:
+    """Whether ``tp`` holds ``object`` or ``Any`` outside a dataclass, such as the
+    ``dict[str, object]`` of a ``model_dump()``: content whose arrays no type orders"""
+    base, _ = strip_optional(resolve_alias(tp))
+    return base in (object, Any) or any(
+        _holds_untyped(a) for a in typing.get_args(base) if a is not Ellipsis
+    )
+
+
 def _stable_order(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
+        if not c.order.ordered and _holds_untyped(c.output_type):
+            # REQ-F-020 sorts arrays it cannot see into too, so a model_dump()'s line
+            # items come back in another order than the handler built them in
+            yield Finding(
+                "stable-order",
+                Severity.ADVICE,
+                c.path.value,
+                "output is untyped (dict[str, object] or the like), so every array inside "
+                "it is re-sorted by each item's JSON text, whatever order the handler built "
+                "(REQ-F-020)",
+                "return a frozen dataclass and declare each array's order with "
+                'treaty.Out(sort_key="id") or treaty.Out(ordered=True), or ordered=True to '
+                "keep the handler's order of every array inside",
+            )
         item = _object_items(c.output_type)
         if item is not None and c.order.sort_key is None and not c.order.ordered:
             yield Finding(
@@ -1412,6 +1452,16 @@ def _stable_order(app: App) -> Iterator[Finding]:
                     "treaty sorts it by each item's JSON text (REQ-F-020)",
                     f'{f.name}: ... = treaty.Out(sort_key="{_id_like(item)}"), or '
                     "treaty.Out(ordered=True) if the order is a ranking",
+                )
+            elif not spec.ordered and _holds_untyped(hint):
+                yield Finding(
+                    "stable-order",
+                    Severity.ADVICE,
+                    c.path.value,
+                    f"output field {where} is untyped, so every array inside it is re-sorted "
+                    "by each item's JSON text, whatever order the handler built (REQ-F-020)",
+                    f"type {f.name} with a frozen dataclass, or {f.name}: ... = "
+                    "treaty.Out(ordered=True) to keep the handler's order of every array inside",
                 )
 
 

@@ -57,6 +57,10 @@ $ uv run treaty audit myapp.cli:app --format plain
 The finding is `advice`, so it does not fail `--strict`. It is still the difference between
 an agent that knows what it will get and one that has to find out.
 
+A list of such dicts, `-> list[dict[str, object]]` from `model_dump()`, is flagged too. It
+also costs order: treaty sorts every array inside untyped content by its JSON text, so the
+rule `stable-order` asks for a typed output or `ordered=True` there.
+
 ## Step 1: Return a dataclass
 
 Every `todo` command already returns one. `add` returns `Changed`, which holds an `Item`,

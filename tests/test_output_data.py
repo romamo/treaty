@@ -9,6 +9,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import spec_validator
@@ -270,6 +271,68 @@ def test_stable_order_rule_suggests_a_key_for_undeclared_object_arrays() -> None
     assert fixes[0].startswith('sort_key="id"')
     assert fixes[1].startswith('members: ... = treaty.Out(sort_key="id")')
     assert findings(tagged_app(), "stable-order") == []
+
+
+POSTINGS = [{"account": "Expenses:Food"}, {"account": "Assets:Cash"}]
+
+
+def dumped_app(**declare: object) -> App:
+    """A migrated list command returning model_dump() dicts (#27)"""
+    app = App("ledger", version="1.0.0")
+
+    @dataclass(frozen=True, slots=True)
+    class Entry:
+        id: str
+        meta: dict[str, object] = Out(**declare)  # type: ignore[arg-type]
+
+    @app.command(
+        "ls", description="ls", danger_level="safe", exit_codes=(), paginated=False, **declare
+    )
+    def ls(args: NoArgs, ctx: Ctx) -> list[dict[str, object]]:
+        return [{"postings": POSTINGS}]
+
+    @app.command("get", description="get", danger_level="safe", exit_codes=())
+    def get(args: NoArgs, ctx: Ctx) -> Entry:
+        return Entry("t1", {"postings": POSTINGS})
+
+    return app
+
+
+def test_arrays_inside_untyped_output_are_sorted_unless_ordered() -> None:
+    _, env = run(dumped_app(), ["ls"])
+    assert env["data"][0]["postings"] == sorted(POSTINGS, key=lambda p: p["account"])
+    # ordered=True keeps the handler's order of every array inside the dicts, too
+    ordered = dumped_app(ordered=True)
+    _, env = run(ordered, ["ls"])
+    assert env["data"][0]["postings"] == POSTINGS
+    _, env = run(ordered, ["get"])
+    assert env["data"]["meta"]["postings"] == POSTINGS
+
+
+def test_stable_order_rule_reports_arrays_inside_untyped_output() -> None:
+    found = findings(dumped_app(), "stable-order")
+    assert [f.command for f in found] == ["get", "ls"]
+    assert "output field meta is untyped" in found[0].message
+    assert "treaty.Out(ordered=True)" in found[0].fix
+    assert "re-sorted" in found[1].message and "ordered=True" in found[1].fix
+    assert findings(dumped_app(ordered=True), "stable-order") == []
+
+
+def test_typed_output_rule_flags_a_list_of_untyped_dicts() -> None:
+    app = dumped_app()
+
+    @app.command("names", description="names", danger_level="safe", exit_codes=())
+    def names(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
+        return []  # each item types its values, and holds no array to sort
+
+    @app.command("dumps", description="dumps", danger_level="safe", exit_codes=())
+    def dumps(args: NoArgs, ctx: Ctx) -> tuple[dict[str, Any], ...]:
+        return ()
+
+    found = findings(app, "typed-output")
+    assert [f.command for f in found] == ["dumps", "ls"]
+    assert "list of untyped dicts" in found[0].message
+    assert findings(tagged_app(), "typed-output") == []
 
 
 # REQ-F-040
