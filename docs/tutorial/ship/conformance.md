@@ -126,6 +126,10 @@ mkdir -p "$here/.sandbox"
 HOME="$here/.sandbox" exec "$here/../.venv/bin/todo" "$@"
 ```
 
+`HOME` covers `todo`'s item file. An app with settings also reads its `TODO_*` variables
+and `XDG_CONFIG_HOME`, so a launcher for one clears those too, with `env -u`, or the kit
+reads the settings of the shell that started it.
+
 Save it next to the profile, named after the app (`conformance/todo`), and make it
 executable (`chmod +x`). `treaty conformance` finds it there and writes
 `"command": ["./todo"]` into the profile. Add `.sandbox/` to `.gitignore`, creating the file

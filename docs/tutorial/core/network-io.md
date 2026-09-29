@@ -53,14 +53,14 @@ Write the first version the obvious way, with `urllib`, and the audit notices:
 $ uv run treaty audit myapp.cli:app --format plain
 ...
   1. (warning) network-io [import]: handler source mentions a network library but has_network_io is not declared (heuristic)
-     fix: has_network_io=True, then pass ctx.timeout.seconds to every network call
+     fix: has_network_io=True, then call out through ctx.http, which keeps to the command's --timeout
 ```
 
-The rule searches the handler's own source for `socket`, `http.client`, `urllib`,
-`requests`, `httpx`, `aiohttp`, and `grpc`. It cannot see further: a handler that calls
-your API client in another module, or an SDK that wraps its own HTTP, passes the rule while
-calling out on every run. List those commands yourself; the rule only catches the obvious
-ones.
+The rule searches the source of the handler, of the functions in its module it calls, and of
+the resources it takes for `socket`, `http.client`, `urllib`, `requests`, `httpx`,
+`aiohttp`, and `grpc`. It cannot see further: a handler that calls your API client in
+another module, or an SDK that wraps its own HTTP, passes the rule while calling out on
+every run. List those commands yourself; the rule only catches the obvious ones.
 
 Calling `ctx.http` without the declaration is not left to the audit: the app refuses to
 build, naming the handler line and the flag to add.

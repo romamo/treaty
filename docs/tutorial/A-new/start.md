@@ -206,9 +206,10 @@ class Add(Common):
 ```
 
 `Arg` is a positional argument and `Flag` is a `--flag`; the annotation is the type, and
-`description` is required on every field. `Priority` is `Literal["low", "normal", "high"]`,
-so a value outside it exits 2 and the manifest lists the three. A `StrEnum` works the same
-way.
+`description` is required on every field. A positional is always required and takes no
+`default`: an optional list of ids is a repeatable `Flag(default=())`. `Priority` is
+`Literal["low", "normal", "high"]`, so a value outside it exits 2 and the manifest lists the
+three. A `StrEnum` works the same way.
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
