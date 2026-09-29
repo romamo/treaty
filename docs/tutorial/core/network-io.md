@@ -282,11 +282,12 @@ and reports its use.
 
 Only mark what really came from outside: an id the tool computed, or a count, is its own.
 
-If your project already has AGENTS.md, from `treaty init` or [Ship the agent
-docs](../ship/agent-docs.md), this chapter changed the commands, so regenerate what is
-derived from them: `uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and,
-once it has a conformance profile, `uv run treaty conformance todo.cli:app --force` before
-the next run of the kit.
+This chapter added a network command. If your project has AGENTS.md, from `treaty init` or
+[Ship the agent docs](../ship/agent-docs.md), run `uv run treaty agents-md todo.cli:app`, or
+the AGENTS.md test fails; if you generated skills and an MCP tool list there, regenerate
+them too, as its [Step 6](../ship/agent-docs.md#step-6-gate-ci-on-all-three) does. If the
+project has a conformance profile, run `uv run treaty conformance todo.cli:app --force`
+before the next run of the kit.
 
 ## Next
 

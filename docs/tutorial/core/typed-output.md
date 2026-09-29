@@ -182,9 +182,10 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
 
 It needs `jsonschema` as a test dependency, and its type stubs for `mypy --strict tests`:
 `uv add --dev jsonschema types-jsonschema`. If mypy then says your package is "installed,
-but missing library stubs or py.typed marker", add an empty `src/todo/py.typed`. Cover each
-shape a command can return: `purge` returns a preview with `would_affect` on a dry run and
-the deleted items on a real one, so it is called both ways.
+but missing library stubs or py.typed marker", add an empty `py.typed` beside your package's
+`__init__.py` (`src/todo/py.typed` in a src layout). Cover each shape a command can return:
+`purge` returns a preview with `would_affect` on a dry run and the deleted items on a real
+one, so it is called both ways.
 
 In your own project the test is the same with your app in it: import it
 (`from todo.cli import app` in a project `treaty init` made), use it where the test says

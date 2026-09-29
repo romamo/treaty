@@ -225,9 +225,10 @@ substitute the file: `todo edit --raw-payload "$(cat edit.json)"`. For many call
 too large for a command line, write one `exec` line per call instead: each line is the same
 object with `"_cmd": "edit"` added, and `todo exec --input-file plan.jsonl` runs them all.
 
-If your project already has AGENTS.md, from `treaty init` or [Ship the agent
-docs](../ship/agent-docs.md), this chapter added a command, so regenerate AGENTS.md: `uv run
-treaty agents-md todo.cli:app`, or the AGENTS.md test fails.
+This chapter added a command. If your project has AGENTS.md, from `treaty init` or [Ship the
+agent docs](../ship/agent-docs.md), run `uv run treaty agents-md todo.cli:app`, or the
+AGENTS.md test fails; if you generated skills and an MCP tool list there, regenerate them
+too, as its [Step 6](../ship/agent-docs.md#step-6-gate-ci-on-all-three) does.
 
 ## Next
 

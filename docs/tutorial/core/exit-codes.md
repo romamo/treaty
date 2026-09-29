@@ -51,9 +51,9 @@ for example on the way out). An agent can safely reissue a call only if it faile
 
 ## Where todo stands
 
-Point the migrated `todo` at a damaged file and it crashes. In your own project:
-`echo '{not json' > bad.json`, then `uv run todo add x --db bad.json`. The check runs the
-same against the example file:
+Point `todo`, as the starting chapters leave it, at a damaged file and it crashes. In your
+own project: `echo '{not json' > bad.json`, then `uv run todo add x --db bad.json`. The
+check runs the same against the example file:
 
 <!-- check -->
 ```bash

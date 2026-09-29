@@ -296,9 +296,10 @@ For a hash the tag costs nothing; for a command that returns a child's text outp
 a log or a file's contents, it is what keeps that text from being read as instructions. See
 [Declare network commands](network-io.md#step-5-mark-what-came-from-outside).
 
-If your project already has AGENTS.md, from `treaty init` or [Ship the agent
-docs](../ship/agent-docs.md), this chapter added a command, so regenerate AGENTS.md: `uv run
-treaty agents-md todo.cli:app`, or the AGENTS.md test fails.
+This chapter added a command. If your project has AGENTS.md, from `treaty init` or [Ship the
+agent docs](../ship/agent-docs.md), run `uv run treaty agents-md todo.cli:app`, or the
+AGENTS.md test fails; if you generated skills and an MCP tool list there, regenerate them
+too, as its [Step 6](../ship/agent-docs.md#step-6-gate-ci-on-all-three) does.
 
 ## Next
 

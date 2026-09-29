@@ -124,7 +124,7 @@ executable (`chmod +x`). `treaty conformance` finds it there and writes
 if the project has none.
 
 Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`: the
-kit then runs your real command against your real data, with no sandbox, Under `uv run`,
+kit then runs your real command against your real data, with no sandbox. Under `uv run`,
 `PATH` starts with the project's own environment, so the kit finds your `todo` there and
 runs it unsandboxed; only a command found nowhere exits 4, with the kit's `INVALID_PROFILE`
 in `context.kit_error`. On Windows, where the `/bin/sh` launcher cannot run, treaty uses the
