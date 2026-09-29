@@ -12,7 +12,6 @@ import dataclasses
 import importlib.util
 import inspect
 import io
-import itertools
 import json
 import re
 import shlex
@@ -182,8 +181,29 @@ def _describe(app: App) -> Iterator[Finding]:
 # field's --<name>-from-env and --<name>-from-file, which name a variable or a file
 _WORLD_FLAGS = ("--cwd", "--input-file", "--config")
 _WRAPPERS = (("uv", "run"), ("uvx",), ("sudo",))
-# <id> as a word of its own or a whole value; not <p> in HTML or List<String>
-_PLACEHOLDER = re.compile(r"(?<![\w<])<([A-Za-z][\w-]*)>(?![\w<])")
+# <id> or v<version>; not List<String> or a<b>c, where a word runs on after it
+_PLACEHOLDER = re.compile(r"<([A-Za-z][\w-]*)>(?![\w<])")
+
+
+def _without_comment(example: str) -> str:
+    """``example`` up to its first comment, as a shell reads it: an unquoted ``#`` at the
+    start or after whitespace. A quoted '#general', a ``--body="Fixes #12"``, a repo#12, an
+    escaped ``\\#``, and the ``'\\''`` apostrophe idiom are all values"""
+    quote: str | None = None
+    escaped = False
+    for n, char in enumerate(example):
+        if escaped:
+            escaped = False
+        elif char == "\\" and quote != "'":
+            escaped = True
+        elif quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (n == 0 or example[n - 1].isspace()):
+            return example[:n]
+    return example
 
 
 def _example_problem(app: App, command: Command, example: str) -> str | None:
@@ -192,20 +212,18 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
     stdin. What depends on the caller's world is stood in for or left out: a secret's
     variable or file reads a dummy value, ``--cwd``, ``--input-file``, and ``--config`` are
     dropped, and a pipeline or redirect is not judged. Only the spelling is checked"""
-    placeholder = _PLACEHOLDER.search(example)
-    if placeholder is not None and f"</{placeholder.group(1)}>" not in example:
-        # <id> would read as a redirect below; it is a value the agent cannot use as is
-        return f"{placeholder.group()} is a placeholder; write a real value"
-    # A comment starts at an unquoted # at a word's start; a quoted '#general' or a
-    # repo#12 is a value. Raw tokens keep their quotes, so the cut is made on them
-    raw = shlex.shlex(example, posix=False, punctuation_chars=True)
-    raw.whitespace_split = True
-    raw.commenters = ""
-    kept = list(itertools.takewhile(lambda w: not w.startswith("#"), raw))
-    lexer = shlex.shlex(" ".join(kept), posix=True, punctuation_chars=True)
+    for placeholder in _PLACEHOLDER.finditer(example):
+        # <id> would read as a redirect below; it is a value the agent cannot use as is.
+        # An HTML tag, <p>...</p>, closes itself and is a value
+        if f"</{placeholder.group(1)}>" not in example:
+            return f"{placeholder.group()} is a placeholder; write a real value"
+    lexer = shlex.shlex(_without_comment(example), posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     lexer.commenters = ""
-    words = list(lexer)
+    try:
+        words = list(lexer)
+    except ValueError:
+        return "its quotes are unbalanced"
     if any(w and set(w) <= set("|&;<>()") for w in words):
         return None  # a pipeline, a redirect, or a list of commands: the shell's, not ours
     env: dict[str, str] = {}
@@ -253,8 +271,11 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
     # Right after the command path, where no flag can take it as its value: at the end, a
     # value flag missing its value would swallow it, and the handler would run
     parts = list(command.path.parts)
-    at = next((n + len(parts) for n in range(len(argv)) if argv[n : n + len(parts)] == parts), None)
-    if at is None:
+    # The path must come before any `--` and after flags only: an example that names
+    # another command, or this path as a value, is not run
+    head = argv[: argv.index("--")] if "--" in argv else argv
+    at = next((n + len(parts) for n in range(len(head)) if head[n : n + len(parts)] == parts), None)
+    if at is None or any(not w.startswith("-") for w in head[: at - len(parts)]):
         return None
     argv[at:at] = ["--validate-only"]
     out, err = io.StringIO(), io.StringIO()
@@ -1852,9 +1873,9 @@ def retries_by_hand(handler: Callable[..., object]) -> bool:
             if (
                 isinstance(statement, ast.Try)
                 and statement.handlers
-                and all(
-                    isinstance(h.body[-1], (ast.Continue, ast.Raise)) for h in statement.handlers
-                )
+                and all(isinstance(h.body[-1], ast.Continue) for h in statement.handlers)
+                # a backoff sleeps in the handler; a throttle sleeps elsewhere in the loop
+                and any(_sleeps(handler, m) for h in statement.handlers for m in ast.walk(h))
                 and isinstance(body[n + 1], (ast.Return, ast.Break))
             ):
                 return True

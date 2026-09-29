@@ -1050,3 +1050,112 @@ def test_a_retry_that_continues_and_returns_after_the_try_is_found() -> None:
         return Done("noop")
 
     assert _findings(app, "retry-declared") == ["send"]
+
+
+def test_the_example_check_reads_quotes_as_a_shell_does() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Arg, Ctx, Flag
+
+    ran: list[str] = []
+
+    @dataclass(frozen=True, slots=True)
+    class Issue:
+        title: str = Arg(description="Title")
+        body: str = Flag(default="", description="Body")
+        tag: str = Flag(default="", description="Tag")
+
+    @dataclass(frozen=True, slots=True)
+    class Echo:
+        words: tuple[str, ...] = Arg(description="Words")
+
+    app = App("issues", version="1.0.0")
+
+    @app.command(
+        "create",
+        description="Create an issue",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("Fixes", 'issues create Crash --body="Fixes #12"'),
+            ("Apostrophe", "issues create 'Don'\\''t crash'"),
+            ("Version", "issues create x --tag v<version>"),
+        ],
+    )
+    def create(args: Issue, ctx: Ctx) -> dict[str, int]:
+        ran.append(args.title)
+        return {}
+
+    @app.command(
+        "echo",
+        description="Echo words",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[("Another command's words", "issues create -- echo")],
+    )
+    def echo(args: Echo, ctx: Ctx) -> dict[str, int]:
+        ran.append(" ".join(args.words))
+        return {}
+
+    errors = [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "describe" for f in r.findings
+    ]
+    assert ran == []
+    assert [f.message.rsplit(": ", 1)[1] for f in errors] == [
+        "<version> is a placeholder; write a real value"
+    ]
+
+
+def test_a_throttled_search_is_not_a_retry() -> None:
+    import time
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("scan", description="Scan", danger_level="mutating", exit_codes=())
+    def scan(args: NoArgs, ctx: Ctx) -> Done:
+        for item in ["a", "1"]:
+            time.sleep(0)
+            try:
+                found = int(item)
+            except ValueError:
+                continue
+            return Done(str(found))
+        return Done("noop")
+
+    assert _findings(app, "retry-declared") == []
+
+
+def test_an_argument_from_a_local_variable_needs_a_declaration() -> None:
+    """The field's values reach git through `extra` without naming the field: a derived
+    declaration would leave them unchecked, so the audit asks for one by hand"""
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Log:
+        extra: tuple[str, ...] = Flag(default=(), description="More git log arguments")
+
+    @dataclass(frozen=True, slots=True)
+    class Shown:
+        text: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("direct", description="Direct", danger_level="safe", exit_codes=())
+    def direct(args: Log, ctx: Ctx) -> Shown:
+        return Shown(ctx.run(["git", "log", *args.extra]).stdout)
+
+    @app.command("local", description="Local", danger_level="safe", exit_codes=())
+    def local(args: Log, ctx: Ctx) -> Shown:
+        extra = list(args.extra)
+        return Shown(ctx.run(["git", "log", *extra]).stdout)
+
+    assert _findings(app, "subprocess-declared") == ["local"]

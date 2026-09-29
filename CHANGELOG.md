@@ -83,6 +83,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- A `ctx.run` argument taken from a local variable, as in `["git", *extra]` after
+  `extra = list(args.extra)`, still let treaty derive a subprocess declaration, one naming no
+  field, so the values were never checked for shell metacharacters. Such an argument now
+  makes the declaration underivable, and `subprocess-declared` asks for it by hand
+- The example check crashed the audit on a `#` inside a quoted `--flag="..."` value and
+  misread the `'\''` apostrophe idiom; comments are found by one quote-aware scan. An
+  example that names another command after `--` is not run, a retry's sleep must be in
+  its `except`, and every `<name>` placeholder in an example is checked
 - `treaty audit --strict` listed `next_steps` sorted instead of in severity order: data
   carried by `Exit(data=...)` lost its dataclass's `Out(ordered=True)`
 - A relative `Path` setting, or each path of a `tuple[Path, ...]` one, was used against the
