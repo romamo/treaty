@@ -129,7 +129,9 @@ Apps built on treaty keep their own, structured schema changelog with
   record's level in the line. The root's level is lowered for the run when it would hide
   a shown level, then restored. Before, at default verbosity a library WARNING had no
   handler and fell through to `logging.lastResort`, which wrote it to `sys.stderr` raw,
-  secrets included and even under `--quiet` (#31)
+  secrets included and even under `--quiet`. A record goes to the innermost run, which
+  may be another thread's `App.call`, so the secrets of every attached run are redacted
+  from it (#31)
 - Audit rules that read handler source followed only helpers of the handler's own module,
   and `no-chdir`, `env-prefix`, and the other behaviour heuristics none at all, so I/O kept
   in a helper module passed clean (#14). Every source rule now follows the handler into its

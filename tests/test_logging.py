@@ -463,6 +463,40 @@ def test_a_library_warning_never_falls_through_to_logging_last_resort(
         assert library_lines(proc.stderr) == [("warn", "auth failed for [REDACTED]")]
 
 
+def test_concurrent_calls_redact_each_others_secrets_in_library_records(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Records go to the innermost attached run, which may be another thread's
+    ``App.call``, as with the MCP adapter's concurrent tool calls: every attached run's
+    secrets are redacted from them, not only the receiving run's"""
+    both = threading.Barrier(2)
+    app = App("libctl", version="1.0.0")
+
+    @app.command("leak", description="Log a secret", danger_level="safe", exit_codes=())
+    def leak(args: Login, ctx: Ctx) -> dict[str, bool]:
+        both.wait(timeout=10)
+        LIB.warning("auth failed for %s", args.api_token)
+        both.wait(timeout=10)
+        return {"ok": True}
+
+    tokens = ["sk-live-first0000000001", "sk-live-second000000002"]
+    oks: list[bool] = []
+
+    def call(token: str) -> None:
+        env = {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"}
+        oks.append(app.call("leak", {}, env=env).ok)
+
+    threads = [threading.Thread(target=call, args=(t,)) for t in tokens]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert oks == [True, True]
+    err = capsys.readouterr().err
+    assert not [t for t in tokens if t in err], err
+    assert library_lines(err) == [("warn", "auth failed for [REDACTED]")] * 2
+
+
 # REQ-F-060: --debug attributes stray stdout
 
 

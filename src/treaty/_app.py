@@ -2086,22 +2086,29 @@ class _Records(logging.Handler):
     framework's trace and libraries' alike, goes to the innermost run's stderr at its own
     level. One handler for every run, so a nested run or ``App.call`` never writes a
     record twice, and with a handler always on the root, no record falls through to
-    ``logging.lastResort``, which would write it to ``sys.stderr`` unredacted"""
+    ``logging.lastResort``, which would write it to ``sys.stderr`` unredacted. The
+    innermost run may be another thread's, as with concurrent ``App.call``s, so every
+    attached run's secrets are redacted from a record, not only the receiving run's"""
 
     def __init__(self) -> None:
         super().__init__(logging.NOTSET)
-        self._runs: list[tuple[Callable[[logging.LogRecord], None], int]] = []
-        """Each run's writer with the root level it found, innermost last"""
+        self._runs: list[tuple[Callable[[logging.LogRecord], None], Callable[[str], str], int]] = []
+        """Each run's writer and redactor with the root level it found, innermost last"""
         self._guard = threading.Lock()
 
-    def attach(self, write: Callable[[logging.LogRecord], None], lowest: int | None) -> None:
+    def attach(
+        self,
+        write: Callable[[logging.LogRecord], None],
+        redact: Callable[[str], str],
+        lowest: int | None,
+    ) -> None:
         """Route records to ``write`` until ``detach``, the root lowered to ``lowest``, the
         least level the run shows, when it stands above it"""
         root = logging.getLogger()
         with self._guard:
             if not self._runs:
                 root.addHandler(self)
-            self._runs.append((write, root.level))
+            self._runs.append((write, redact, root.level))
             if lowest is not None and lowest < root.level:
                 root.setLevel(lowest)
 
@@ -2110,10 +2117,10 @@ class _Records(logging.Handler):
         attached, handed to it to restore"""
         root = logging.getLogger()
         with self._guard:
-            index = next(i for i, (w, _) in enumerate(self._runs) if w == write)
-            _, level = self._runs.pop(index)
+            index = next(i for i, (w, _, _) in enumerate(self._runs) if w == write)
+            *_, level = self._runs.pop(index)
             if index < len(self._runs):
-                self._runs[index] = (self._runs[index][0], level)
+                self._runs[index] = (*self._runs[index][:2], level)
             else:
                 root.setLevel(level)
             if not self._runs:
@@ -2124,6 +2131,14 @@ class _Records(logging.Handler):
             write = self._runs[-1][0] if self._runs else None
         if write is not None:
             write(record)
+
+    def redact(self, text: str) -> str:
+        """``text`` with the secrets of every attached run replaced"""
+        with self._guard:
+            redactors = [r for _, r, _ in self._runs]
+        for redact in redactors:
+            text = redact(text)
+        return text
 
 
 _RECORDS = _Records()
@@ -2900,7 +2915,7 @@ class _Run:
         if self._logging:
             return
         self._logging = True
-        _RECORDS.attach(self._log_record, _lowest_shown(self.err.verbosity))
+        _RECORDS.attach(self._log_record, self._redact_now, _lowest_shown(self.err.verbosity))
 
     def detach_logging(self) -> None:
         if not self._logging:
@@ -2926,8 +2941,11 @@ class _Run:
             # handlers report rather than raise into the call: its template, then
             message = str(record.msg)
             fields["format_error"] = type(exc).__name__
-        redact = self._redactor(self.current, self.args) if self.current else _unchanged
-        self._log_line(level, message, fields, redact, self.mode)
+        # This run's own secrets too: a record can arrive as the run detaches
+        self._log_line(level, message, fields, self._redact_everywhere, self.mode)
+
+    def _redact_everywhere(self, text: str) -> str:
+        return _RECORDS.redact(self._redact_now(text))
 
     # Envelope construction
 
