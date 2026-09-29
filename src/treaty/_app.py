@@ -317,7 +317,7 @@ class Group:
     def group(self, name: str, *, description: str) -> Group:
         return self._app.group(f"{self._prefix}.{name}", description=description)
 
-    def command(self, name: str, **meta: Any) -> Callable[[Handler], Handler]:
+    def command[H: Handler](self, name: str, **meta: Any) -> Callable[[H], H]:
         return self._app.command(f"{self._prefix}.{name}", **meta)
 
 
@@ -577,7 +577,7 @@ class App:
         self._groups[prefix] = description
         return Group(self, prefix)
 
-    def command(
+    def command[H: Handler](
         self,
         path: str,
         *,
@@ -633,7 +633,7 @@ class App:
         cache: CachePolicy | None = None,
         recursive_traversal: bool = False,
         id_field: str | None = None,
-    ) -> Callable[[Handler], Handler]:
+    ) -> Callable[[H], H]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
 
@@ -805,7 +805,7 @@ class App:
             if problem is not None:
                 raise RegistrationError(f"{cmd_path}: fix_commands[{error_code!r}]: {problem}")
 
-        def register(fn: Handler) -> Handler:
+        def register(fn: H) -> H:
             self._register(
                 build_command(
                     fn,

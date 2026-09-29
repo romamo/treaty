@@ -63,6 +63,9 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `@app.command` and `@group.command` typed the function they return as `Callable[..., Any]`,
+  so mypy passed a direct call to a handler that no longer matched its signature, such as
+  one missing a parameter added later. The decorated function now keeps its own type
 - `treaty conformance --run --format plain` printed "Kit not run; add --run to execute it"
   when `--run` was passed but the kit could not run or rejected the profile. The data gains
   `run_requested`, and the hint appears only when `--run` was not passed
