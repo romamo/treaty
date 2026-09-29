@@ -46,10 +46,12 @@ Apps built on treaty keep their own, structured schema changelog with
   setting whatever its name: redacted by `--show-config` and left out of the config hash.
   An enum setting, like an enum flag, is not inferred secret
 - The `describe` rule runs each example through `--validate-only`, and one that does not
-  parse is an error: agents copy examples verbatim. Only the spelling is judged: flags
-  whose value depends on the caller's world (`--cwd`, `--input-file`, `--config`,
-  `--*-from-env`, `--*-from-file`), leading `VAR=` words, pipelines, and stdin examples are
-  left out, and the no-example fix suggests values of each field's type
+  parse is an error: agents copy examples verbatim. Only the spelling is judged: `--cwd`,
+  `--input-file`, `--config`, and a secret field's `--<name>-from-env`/`-from-file` are
+  dropped with their values, leading `VAR=` words and `uv run` or `sudo` are skipped, and an
+  example with a pipe, a redirect, `;`, or a lone `-` for stdin is not judged. The
+  no-example fix suggests values its checks accept (a preset's sample, a secret from its
+  variable, a tuple's item type); a custom `pattern=` keeps a placeholder
 - `App.redirected_paths`: the old command paths `redirect` keeps answering
 - `external=False` on a command that calls out says it returns only values it computed,
   which clears the `external-data` warning; unset, `external` is `None`, undeclared
@@ -86,9 +88,10 @@ Apps built on treaty keep their own, structured schema changelog with
   `max_bytes=`, and `secret=True` on a boolean
 - A redirect's message starts "Command", or "Tool" over MCP, so a lowercase command name
   keeps its case
-- `retry-declared` fired on a loop that sleeps to throttle between items; it now counts
-  only a loop of attempts, a `while` or a `for` over `range(...)`, that holds a `try` and a
-  sleep
+- `retry-declared` fired on a loop that sleeps to throttle between items; it now counts a
+  loop that sleeps and is left from inside a `try` once the call succeeds (a `return` or a
+  `break` in its body), which a throttle, a poller, or an event loop is not.
+  `asyncio.sleep` and an aliased `time.sleep` count as sleeps
 - Following helpers, the audit looped forever on a lazy proxy or mock a handler calls, and
   failed on an unhashable doctor check; it unwraps only what a decorator set, and parses an
   unhashable callable without the cache, which is bounded and cleared per audit. An import

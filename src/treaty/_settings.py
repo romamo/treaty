@@ -90,7 +90,12 @@ class SettingsSpec:
                     "set framework options (02-D5), so rename it"
                 )
             if f.default is dataclasses.MISSING:
-                raise RegistrationError(f"{where}: field {f.name!r} needs a default")
+                how = (
+                    "default=, not default_factory="
+                    if f.default_factory is not dataclasses.MISSING
+                    else "a default"
+                )
+                raise RegistrationError(f"{where}: field {f.name!r} needs {how}")
             try:
                 classified = classify(hints[f.name], scalars)
             except SchemaError as exc:

@@ -7,12 +7,16 @@ stream purity) are the conformance kit's job; the last rule points there.
 from __future__ import annotations
 
 import ast
+import asyncio
 import dataclasses
+import importlib.util
 import inspect
 import io
 import json
 import re
 import shlex
+import sys
+import time
 import types
 import typing
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -106,23 +110,45 @@ def user_commands(app: App) -> list[Command]:
     ]
 
 
-def _samples(c: Command) -> list[str]:
-    """Each required field as the example the describe fix suggests: a value of its type
-    where one is safe to guess, so the suggestion passes the example check as written"""
+_PRESET_SAMPLES = {
+    "alphanumeric_id": "abc123",
+    "uuid": "00000000-0000-0000-0000-000000000000",
+    "semver": "1.0.0",
+    "url": "https://example.com",
+}
+
+
+def _sample(name: str, classified: object, spec: object) -> str:
+    """A value of the field's type that its checks accept; a custom pattern keeps a
+    placeholder, since no value can be guessed for it"""
+    kind = getattr(classified, "flag_type", None)
+    enum_values = getattr(classified, "enum_values", ())
+    pattern_type = getattr(spec, "pattern_type", None)
+    if pattern_type in _PRESET_SAMPLES:
+        return _PRESET_SAMPLES[pattern_type]
+    if getattr(spec, "pattern", None) is not None:
+        return f"<{name}>"
+    if kind is FlagType.INTEGER:
+        return "1"
+    if kind is FlagType.NUMBER:
+        return "1.5"
+    if kind is FlagType.ENUM and enum_values:
+        return str(enum_values[0])
+    return name.replace("_", "-")
+
+
+def _samples(app: App, c: Command) -> list[str]:
+    """Each required field as the example the describe fix suggests: a value its checks
+    accept where one can be guessed, and a secret from its variable"""
     out: list[str] = []
     for f in c.fields:
         if not f.required:
             continue
-        kind = f.flag_type
-        value = (
-            "1"
-            if kind is FlagType.INTEGER
-            else "1.5"
-            if kind is FlagType.NUMBER
-            else f.classified.enum_values[0]
-            if kind is FlagType.ENUM and f.classified.enum_values
-            else f.name.replace("_", "-")
-        )
+        if f.secret:
+            out.append(f"--{f.flag}-from-env {app_var(app.name, f.name)}")
+            continue
+        item = f.classified.item
+        value = _sample(f.flag, item if item is not None else f.classified, f.spec)
         out.append(value if f.positional else f"--{f.flag} {value}")
     return out
 
@@ -130,7 +156,7 @@ def _samples(c: Command) -> list[str]:
 def _describe(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.examples:
-            example = " ".join([app.name, *c.path.parts, *_samples(c)])
+            example = " ".join([app.name, *c.path.parts, *_samples(app, c)])
             yield Finding(
                 "describe",
                 Severity.ADVICE,
@@ -139,7 +165,7 @@ def _describe(app: App) -> Iterator[Finding]:
                 f'examples=[("What it does", "{example}")]',
             )
         for given in c.examples:
-            problem = _example_problem(app, given.command)
+            problem = _example_problem(app, c, given.command)
             if problem is not None:
                 yield Finding(
                     "describe",
@@ -150,28 +176,47 @@ def _describe(app: App) -> Iterator[Finding]:
                 )
 
 
-_SHELL_OPERATORS = frozenset({"|", "||", "&&", ";", ">", ">>", "<", "&", "2>", "2>&1"})
 # Framework flags whose value is checked against the world the example runs in, not its
-# spelling: a variable, a file, a directory. They are dropped, with their value, first
+# spelling: a directory or a file. They are dropped, with their value, as are a secret
+# field's --<name>-from-env and --<name>-from-file, which name a variable or a file
 _WORLD_FLAGS = ("--cwd", "--input-file", "--config")
-_WORLD_SUFFIXES = ("-from-env", "-from-file")
+_WRAPPERS = (("uv", "run"), ("uvx",), ("sudo",))
 
 
-def _example_problem(app: App, example: str) -> str | None:
+def _example_problem(app: App, command: Command, example: str) -> str | None:
     """Why an example fails ``--validate-only``, or None when it parses or cannot be judged
     here. Phase 1 only: no handler, no idempotency store, the audit log off, and an empty
     stdin. What depends on the caller's world (a variable, a file, a directory, piped
-    input, a shell pipeline) is left out: only the spelling of the call is checked"""
-    words = shlex.split(example)
+    input, a shell pipeline or redirect) is left out: only the spelling is checked"""
+    lexer = shlex.shlex(example, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    words = list(lexer)
+    if any(set(w) <= set("|&;<>()") for w in words):
+        return None  # a pipeline, a redirect, or a list of commands: the shell's, not ours
     while words and "=" in words[0] and not words[0].startswith("-"):
         words = words[1:]  # VAR=value before the command
-    if not words or words[0] != app.name or _SHELL_OPERATORS & set(words) or "-" in words:
+    for wrapper in _WRAPPERS:
+        if tuple(words[: len(wrapper)]) == wrapper:
+            words = words[len(wrapper) :]
+    if not words or words[0].rsplit("/", 1)[-1] != app.name or "-" in words:
         return None
+    if {"--help", "-h", "--version"} & set(words):
+        return None
+    sources = {
+        f"--{f.flag}{suffix}"
+        for f in command.fields
+        if f.secret
+        for suffix in ("-from-env", "-from-file")
+    }
     argv: list[str] = []
     rest = iter(words[1:])
     for word in rest:
+        if word == "--":
+            argv.append(word)
+            argv.extend(rest)
+            break
         name = word.split("=", 1)[0]
-        if name in _WORLD_FLAGS or name.endswith(_WORLD_SUFFIXES):
+        if name in _WORLD_FLAGS or name in sources:
             if "=" not in word:
                 next(rest, None)
             continue
@@ -186,8 +231,10 @@ def _example_problem(app: App, example: str) -> str | None:
     try:
         error = json.loads(out.getvalue()).get("error") or {}
     except ValueError:
-        return err.getvalue().strip().splitlines()[0] if err.getvalue().strip() else f"exit {code}"
-    return str(error.get("message", f"exit {code}"))
+        text = err.getvalue().strip()
+        return text.splitlines()[0] if text else f"exit {code}"
+    each = [str(e.get("message")) for e in error.get("errors") or [] if isinstance(e, dict)]
+    return "; ".join(each) if each else str(error.get("message", f"exit {code}"))
 
 
 def _danger_level(app: App) -> Iterator[Finding]:
@@ -381,6 +428,17 @@ _NETWORK_PACKAGES = (
 )
 
 
+def _absolute(code: Callable[..., object] | type, node: ast.ImportFrom) -> str | None:
+    """The module an ``from ... import`` names, a relative one resolved against the
+    package ``code`` belongs to"""
+    if not node.level:
+        return node.module
+    package = getattr(sys.modules.get(getattr(code, "__module__", "") or ""), "__package__", None)
+    if not package:
+        return None
+    return importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+
+
 def _calls_network(code: Callable[..., object] | type) -> bool:
     """A call in ``code``'s source to something a network module defines"""
     tree = source_tree(code)
@@ -392,8 +450,10 @@ def _calls_network(code: Callable[..., object] | type) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             local.update({a.asname: a.name for a in node.names if a.asname})
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            local.update({a.asname or a.name: f"{node.module}.{a.name}" for a in node.names})
+        elif isinstance(node, ast.ImportFrom):
+            module = _absolute(code, node)
+            if module is not None:
+                local.update({a.asname or a.name: f"{module}.{a.name}" for a in node.names})
     for node in ast.walk(tree):
         name = _dotted(node.func) if isinstance(node, ast.Call) else None
         if name is None:
@@ -1727,32 +1787,39 @@ def _init_isolated(app: App) -> Iterator[Finding]:
             )
 
 
-_SLEEPS = frozenset({"time.sleep", "sleep"})
+_SLEEPS = frozenset({"time.sleep", "sleep", "asyncio.sleep"})
 
 
 def retries_by_hand(handler: Callable[..., object]) -> bool:
-    """A loop of attempts that holds a ``try`` and a ``time.sleep``: a retry the framework
-    cannot count. Attempts are a ``while`` or a ``for`` over ``range(...)``; a ``for`` over
-    items that sleeps between them to throttle, skipping a failed one, is not a retry"""
+    """A loop that sleeps and is left from inside a ``try`` once the call succeeds, by a
+    ``return`` or a ``break`` in its body or ``else``: a retry the framework cannot count.
+    A loop that throttles between items, polls, or runs events has no such exit"""
     tree = source_tree(handler)
     if tree is None:
         return False
     for loop in ast.walk(tree):
-        attempts = isinstance(loop, ast.While) or (
-            isinstance(loop, ast.For)
-            and isinstance(loop.iter, ast.Call)
-            and _dotted(loop.iter.func) == "range"
-        )
-        if not attempts:
+        if not isinstance(loop, (ast.For, ast.AsyncFor, ast.While)):
             continue
         inner = list(ast.walk(loop))
-        if any(isinstance(n, ast.Try) for n in inner) and any(_sleeps(n) for n in inner):
-            return True
+        if not any(_sleeps(handler, n) for n in inner):
+            continue
+        for attempt in (n for n in inner if isinstance(n, ast.Try)):
+            leaves = [m for part in (*attempt.body, *attempt.orelse) for m in ast.walk(part)]
+            if any(isinstance(m, (ast.Return, ast.Break)) for m in leaves):
+                return True
     return False
 
 
-def _sleeps(node: ast.AST) -> bool:
-    return isinstance(node, ast.Call) and _dotted(node.func) in _SLEEPS
+def _sleeps(handler: Callable[..., object], node: ast.AST) -> bool:
+    """A call to time.sleep or asyncio.sleep, however it was imported"""
+    if not isinstance(node, ast.Call):
+        return False
+    name = _dotted(node.func)
+    if name is None:
+        return False
+    return name in _SLEEPS or any(
+        resolve_name(handler, name) is f for f in (time.sleep, asyncio.sleep)
+    )
 
 
 def _retry_declared(app: App) -> Iterator[Finding]:

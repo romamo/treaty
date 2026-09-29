@@ -102,7 +102,10 @@ def _as_tools(envelope: Envelope) -> Envelope:
     context = {**error.context, "to": to}
     if isinstance(was, str):
         context["from"] = tool_name(CommandPath(was))
-    message = f"Tool {context.get('from', 'this tool')} is now {to}."
+    was_tool = context.get("from")
+    message = (
+        f"Tool {was_tool} is now {to}." if isinstance(was_tool, str) else f"This tool is now {to}."
+    )
     detail = dataclasses.replace(
         error,
         message=message,

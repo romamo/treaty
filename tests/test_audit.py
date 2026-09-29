@@ -696,3 +696,138 @@ def test_network_io_follows_from_imports_and_keeps_package_names() -> None:
         effect: str
 
     assert _findings(app, "network-io") == ["jar", "pull"]
+
+
+def test_the_example_check_skips_redirects_and_keeps_words_that_look_like_sources() -> None:
+    from dataclasses import dataclass
+
+    from treaty import App, Arg, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class B:
+        name: str = Arg(description="Name")
+        load_from_file: bool = Flag(default=False, description="Load it")
+
+    app = App("adv", version="1.0.0")
+
+    @app.command(
+        "b",
+        description="B",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("Quiet", "adv b x 2>/dev/null"),
+            ("To a file", "adv b x >out.json"),
+            ("Then", "adv b x; echo done"),
+            ("Commented", "adv b x  # the name"),
+            ("A boolean named like a source", "adv b x --load-from-file"),
+            ("A value named like one", "adv b copy-from-file"),
+            ("Through uv", "uv run adv b x"),
+        ],
+    )
+    def b(args: B, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    assert _findings(app, "describe") == []
+
+
+def test_every_suggested_example_passes_the_example_check() -> None:
+    """The no-example fix is meant to be pasted: each one must parse as written"""
+    import re as regex
+    from dataclasses import dataclass
+    from enum import StrEnum
+    from pathlib import Path
+
+    from treaty import App, Arg, Ctx, Flag
+
+    class Color(StrEnum):
+        RED = "red"
+
+    @dataclass(frozen=True, slots=True)
+    class Wide:
+        id: int = Arg(description="Id")
+        version: str = Flag(description="Version", pattern_type="semver")
+        home: str = Flag(description="Home", pattern_type="url")
+        uid: str = Flag(description="Uid", pattern_type="uuid")
+        slug: str = Flag(description="Slug", pattern_type="alphanumeric_id")
+        api_token: str = Flag(description="Token")
+        colors: tuple[Color, ...] = Flag(description="Colors")
+        counts: tuple[int, ...] = Flag(description="Counts")
+        where: Path = Flag(description="Where")
+        ratio: float = Flag(description="Ratio")
+
+    app = App("adv", version="1.0.0")
+
+    @app.command("w", description="W", danger_level="safe", exit_codes=())
+    def w(args: Wide, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    [finding] = [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "describe" for f in r.findings
+    ]
+    suggested = regex.search(r'"(adv [^"]+)"', finding.fix)
+    assert suggested is not None
+    from treaty._audit import _example_problem
+
+    command = next(iter(c for c in app.commands.values()))
+    assert _example_problem(app, command, suggested.group(1)) is None, suggested.group(1)
+
+
+def test_retry_needs_an_exit_on_success_from_inside_the_try() -> None:
+    import itertools
+    import time
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    def fetch() -> Done:
+        return Done("updated")
+
+    app = App("x", version="1.0.0")
+
+    @app.command("forever", description="Forever", danger_level="mutating", exit_codes=())
+    def forever(args: NoArgs, ctx: Ctx) -> Done:
+        for _ in itertools.count():
+            try:
+                return fetch()
+            except OSError:
+                time.sleep(1)
+        return Done("noop")
+
+    @app.command("backoff", description="Backoff", danger_level="mutating", exit_codes=())
+    def backoff(args: NoArgs, ctx: Ctx) -> Done:
+        for delay in (1, 2, 4):
+            try:
+                result = fetch()
+                break
+            except OSError:
+                time.sleep(delay)
+        else:
+            return Done("noop")
+        return result
+
+    @app.command("poll", description="Poll", danger_level="mutating", exit_codes=())
+    def poll(args: NoArgs, ctx: Ctx) -> Done:
+        count = 0
+        while count < 3:
+            try:
+                count += int("1")
+            except ValueError:
+                count = 3
+            time.sleep(0)
+        return Done("updated")
+
+    @app.command("events", description="Events", danger_level="mutating", exit_codes=())
+    def events(args: NoArgs, ctx: Ctx) -> Done:
+        while True:
+            try:
+                fetch()
+            except KeyboardInterrupt:
+                return Done("updated")
+            time.sleep(0)
+
+    assert _findings(app, "retry-declared") == ["backoff", "forever"]
