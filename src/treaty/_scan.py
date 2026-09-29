@@ -86,6 +86,14 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     tree = None if len(params) < 2 else source_tree(fn)
     if tree is None:
         return []
+    carried = _carried(params[0], tree)
+
+    def reads(*nodes: ast.expr) -> tuple[str, ...]:
+        """The fields ``nodes`` read, directly or through a local that holds one"""
+        names = (n.id for node in nodes for n in ast.walk(node) if isinstance(n, ast.Name))
+        through = (f for name in names for f in carried.get(name, ()))
+        return tuple(dict.fromkeys((*_reads(params[0], *nodes), *through)))
+
     calls: list[CtxCall] = []
     for node in ast.walk(tree):
         if not (
@@ -101,12 +109,12 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
             first = node.args[0]
             stages = first.elts if method == "pipeline" and isinstance(first, ast.List) else [first]
             shell = any(_text(stage) for stage in stages)
-        fields = _reads(params[0], *node.args, *(k.value for k in node.keywords))
+        fields = reads(*node.args, *(k.value for k in node.keywords))
         first_arg = node.args[0] if node.args else None
         literal = _literal(first_arg)
         argv = None
         if method == "run" and isinstance(first_arg, (ast.List, ast.Tuple)):
-            argv = tuple(ArgvItem(_literal(e), _reads(params[0], e)) for e in first_arg.elts)
+            argv = tuple(ArgvItem(_literal(e), reads(e)) for e in first_arg.elts)
         calls.append(CtxCall(method, node.lineno, shell, fields, literal, argv))
     return calls
 
@@ -126,6 +134,36 @@ def ctx_attribute(fn: Callable[..., object], name: str) -> int | None:
         and node.value.id == params[1]
     ]
     return min(lines, default=None)
+
+
+def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
+    """Each local the handler assigns from an expression that reads a field, with the
+    fields it carries: ``extra = list(args.extra)`` carries ``extra``, and a local built
+    from such a local carries them on. A value from anywhere else carries none"""
+    assigned: list[tuple[str, ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = [n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)]
+            assigned += [(name, node.value) for name in names]
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            names = [n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)]
+            assigned += [(name, node.iter) for name in names]
+    carried: dict[str, tuple[str, ...]] = {}
+    changed = True
+    while changed:
+        changed = False
+        for name, value in assigned:
+            through = (
+                f for n in ast.walk(value) if isinstance(n, ast.Name) for f in carried.get(n.id, ())
+            )
+            fields = tuple(
+                dict.fromkeys((*carried.get(name, ()), *_reads(args_name, value), *through))
+            )
+            if fields != carried.get(name, ()):
+                carried[name] = fields
+                changed = True
+    return {k: v for k, v in carried.items() if v}
 
 
 def _reads(args_name: str, *nodes: ast.expr) -> tuple[str, ...]:

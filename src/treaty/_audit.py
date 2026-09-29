@@ -12,6 +12,7 @@ import dataclasses
 import importlib.util
 import inspect
 import io
+import itertools
 import json
 import re
 import shlex
@@ -181,8 +182,8 @@ def _describe(app: App) -> Iterator[Finding]:
 # field's --<name>-from-env and --<name>-from-file, which name a variable or a file
 _WORLD_FLAGS = ("--cwd", "--input-file", "--config")
 _WRAPPERS = (("uv", "run"), ("uvx",), ("sudo",))
-# <id> or v<version>; not List<String> or a<b>c, where a word runs on after it
-_PLACEHOLDER = re.compile(r"<([A-Za-z][\w-]*)>(?![\w<])")
+# <id> or v<version>; not List<String>, Map<K, V>, or a<b>c, which are values
+_PLACEHOLDER = re.compile(r"(?:(?<![\w<])|(?<=(?<![\w<])v))<([A-Za-z][\w-]*)>(?![\w<])")
 
 
 def _without_comment(example: str) -> str:
@@ -206,13 +207,24 @@ def _without_comment(example: str) -> str:
     return example
 
 
+def _only_flags(words: list[str]) -> bool:
+    """Flags, and the values of the ones that take a separate value, such as the
+    ``--format json`` a caller may put before the command path"""
+    for n, word in enumerate(words):
+        value = n > 0 and words[n - 1].startswith("-") and "=" not in words[n - 1]
+        if not word.startswith("-") and not value:
+            return False
+    return True
+
+
 def _example_problem(app: App, command: Command, example: str) -> str | None:
     """Why an example fails ``--validate-only``, or None when it parses or cannot be judged
     here. Phase 1 only: no handler, no idempotency store, the audit log off, and an empty
     stdin. What depends on the caller's world is stood in for or left out: a secret's
     variable or file reads a dummy value, ``--cwd``, ``--input-file``, and ``--config`` are
     dropped, and a pipeline or redirect is not judged. Only the spelling is checked"""
-    for placeholder in _PLACEHOLDER.finditer(example):
+    example = example.replace("\\\n", " ")  # a backslash-newline continues the line
+    for placeholder in _PLACEHOLDER.finditer(_without_comment(example)):
         # <id> would read as a redirect below; it is a value the agent cannot use as is.
         # An HTML tag, <p>...</p>, closes itself and is a value
         if f"</{placeholder.group(1)}>" not in example:
@@ -275,7 +287,7 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
     # another command, or this path as a value, is not run
     head = argv[: argv.index("--")] if "--" in argv else argv
     at = next((n + len(parts) for n in range(len(head)) if head[n : n + len(parts)] == parts), None)
-    if at is None or any(not w.startswith("-") for w in head[: at - len(parts)]):
+    if at is None or not _only_flags(head[: at - len(parts)]):
         return None
     argv[at:at] = ["--validate-only"]
     out, err = io.StringIO(), io.StringIO()
@@ -1873,9 +1885,16 @@ def retries_by_hand(handler: Callable[..., object]) -> bool:
             if (
                 isinstance(statement, ast.Try)
                 and statement.handlers
-                and all(isinstance(h.body[-1], ast.Continue) for h in statement.handlers)
-                # a backoff sleeps in the handler; a throttle sleeps elsewhere in the loop
-                and any(_sleeps(handler, m) for h in statement.handlers for m in ast.walk(h))
+                and all(
+                    isinstance(h.body[-1], (ast.Continue, ast.Raise)) for h in statement.handlers
+                )
+                and any(isinstance(h.body[-1], ast.Continue) for h in statement.handlers)
+                # a backoff sleeps in the handler, or anywhere in a loop of attempts; a
+                # loop over items that sleeps between them is a throttle
+                and (
+                    any(_sleeps(handler, m) for h in statement.handlers for m in ast.walk(h))
+                    or _attempts(handler, loop)
+                )
                 and isinstance(body[n + 1], (ast.Return, ast.Break))
             ):
                 return True
@@ -1892,6 +1911,21 @@ def _exits_on_success(statements: list[ast.stmt]) -> bool:
         if isinstance(statement, (ast.With, ast.AsyncWith)) and _exits_on_success(statement.body):
             return True
     return False
+
+
+def _attempts(handler: Callable[..., object], loop: ast.AST) -> bool:
+    """A loop that counts attempts rather than walking items: a while, or a for over
+    range(...) or itertools.count(...)"""
+    if isinstance(loop, ast.While):
+        return True
+    source = getattr(loop, "iter", None)
+    if not isinstance(source, ast.Call):
+        return False
+    name = _dotted(source.func)
+    return name is not None and (
+        name in ("range", "count", "itertools.count")
+        or resolve_name(handler, name) in (range, itertools.count)
+    )
 
 
 def _sleeps(handler: Callable[..., object], node: ast.AST) -> bool:

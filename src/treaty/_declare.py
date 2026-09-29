@@ -69,10 +69,9 @@ def check_subprocess(
 
 def derive_subprocess(calls: Sequence[CtxCall], fields: Sequence[FieldInfo]) -> Subprocess | None:
     """The declaration the handler's ``ctx.run([...])`` calls show, when every call runs
-    one list literal starting with the same literal binary, and every argument is a literal
-    or reads the command's fields; None when any cannot be read. An argument from a local
-    variable, such as ``*extra`` after ``extra = list(args.extra)``, may carry a field's
-    value without naming it, and a derived declaration would leave that value unchecked"""
+    one list literal starting with the same literal binary; None when any cannot be read.
+    A field is user-controlled when an argument reads it, directly or through a local that
+    holds its value, such as ``*extra`` after ``extra = list(args.extra)``"""
     runs = [c for c in calls if c.method in ("run", "pipeline")]
     if not runs or any(c.argv is None or not c.argv for c in runs):
         return None
@@ -89,11 +88,8 @@ def derive_subprocess(calls: Sequence[CtxCall], fields: Sequence[FieldInfo]) -> 
         for item in rest:
             if item.literal is not None:
                 hardcoded[item.literal] = None
-                continue
-            read = [f for f in item.fields if f in names]
-            if not read:
-                return None  # where the value comes from cannot be read: declare it by hand
-            user.update(dict.fromkeys(read))
+            # A local that holds a field's value carries it (ctx_calls follows it there)
+            user.update(dict.fromkeys(f for f in item.fields if f in names))
     if len(binaries) != 1:
         return None
     return Subprocess(binaries.pop(), tuple(user), tuple(hardcoded))

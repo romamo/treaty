@@ -1132,9 +1132,9 @@ def test_a_throttled_search_is_not_a_retry() -> None:
     assert _findings(app, "retry-declared") == []
 
 
-def test_an_argument_from_a_local_variable_needs_a_declaration() -> None:
-    """The field's values reach git through `extra` without naming the field: a derived
-    declaration would leave them unchecked, so the audit asks for one by hand"""
+def test_a_field_read_through_a_local_is_named_in_the_derived_declaration() -> None:
+    """The field's values reach git through `extra`; the manifest names the field, and a
+    local from anything else, such as a path or a constant, stays hard-coded"""
     from dataclasses import dataclass
 
     from treaty import App, Ctx, Flag
@@ -1158,4 +1158,91 @@ def test_an_argument_from_a_local_variable_needs_a_declaration() -> None:
         extra = list(args.extra)
         return Shown(ctx.run(["git", "log", *extra]).stdout)
 
-    assert _findings(app, "subprocess-declared") == ["local"]
+    @app.command("where", description="Where", danger_level="safe", exit_codes=())
+    def where(args: Log, ctx: Ctx) -> Shown:
+        repo = ctx.cwd / "repo"
+        return Shown(ctx.run(["git", "-C", str(repo), "status"]).stdout)
+
+    assert _findings(app, "subprocess-declared") == []
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    assert commands["local"]["subprocess"]["user_controlled_args"] == ["extra"]
+    assert commands["where"]["subprocess"]["user_controlled_args"] == []
+
+
+def test_backoffs_with_a_gated_sleep_or_a_reraising_handler_are_retries() -> None:
+    import time
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    def call() -> Done:
+        return Done("updated")
+
+    app = App("x", version="1.0.0")
+
+    @app.command("gated", description="Gated", danger_level="mutating", exit_codes=())
+    def gated(args: NoArgs, ctx: Ctx) -> Done:
+        for attempt in range(4):
+            if attempt:
+                time.sleep(2**attempt)
+            try:
+                result = call()
+            except ConnectionError:
+                continue
+            return result
+        return Done("noop")
+
+    @app.command("reraise", description="Reraise", danger_level="mutating", exit_codes=())
+    def reraise(args: NoArgs, ctx: Ctx) -> Done:
+        for _ in range(4):
+            try:
+                result = call()
+            except TimeoutError:
+                time.sleep(1)
+                continue
+            except ValueError:
+                raise
+            return result
+        return Done("noop")
+
+    assert _findings(app, "retry-declared") == ["gated", "reraise"]
+
+
+def test_the_example_check_judges_after_a_global_value_flag_and_keeps_generics() -> None:
+    from dataclasses import dataclass
+    from typing import Literal
+
+    from treaty import App, Arg, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Add:
+        text: str = Arg(description="Text")
+        priority: Literal["low", "high"] = Flag(default="low", description="Priority")
+        kind: str = Flag(default="", description="Type name")
+
+    app = App("todo", version="1.0.0")
+
+    @app.command(
+        "add",
+        description="Add",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("Bad value after a global flag", "todo --format json add x --priority two"),
+            ("A generic type", "todo add x --kind List<String>"),
+        ],
+    )
+    def add(args: Add, ctx: Ctx) -> dict[str, int]:
+        return {}
+
+    errors = [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "describe" for f in r.findings
+    ]
+    assert [f.message.split(" does not parse")[0] for f in errors] == [
+        "the example 'todo --format json add x --priority two'"
+    ]

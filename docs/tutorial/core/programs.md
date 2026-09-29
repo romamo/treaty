@@ -194,12 +194,12 @@ def save(args: Save, ctx: Ctx, store: Store) -> Saved:
   it; `--message` is not, since it never becomes an argument
 
 When every argument list in the handler is written out as a list, as `save`'s are, treaty
-works out a declaration by itself if there is none. The `subprocess-declared` rule warns
-when treaty cannot work one out: when the list is a variable, as in `ctx.run(cmd)`, or an
-argument comes from a local variable, as in `ctx.run(["git", *extra])` after `extra =
-list(args.extra)`, whose values would reach git unchecked. Then declare it by hand, so the
-manifest can say which binary gets which argument. `["git", *args.extra]` reads the field
-directly, and is worked out.
+works out a declaration by itself if there is none. It names a field as user-controlled when
+an argument reads it, directly or through a local variable, as `*extra` after `extra =
+list(args.extra)` does. The `subprocess-declared` rule warns when treaty cannot work one
+out, as when the list is a variable, `ctx.run(cmd)`: then declare it by hand. A worked-out
+declaration only describes the call in the manifest; only one declared by hand has treaty
+check each field's values before the handler runs, as `save`'s does.
 
 **Check:** the schema names git and its version; `doctor` finds it; a `;` in `--db` is
 refused before git runs

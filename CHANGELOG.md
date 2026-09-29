@@ -83,10 +83,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
-- A `ctx.run` argument taken from a local variable, as in `["git", *extra]` after
-  `extra = list(args.extra)`, still let treaty derive a subprocess declaration, one naming no
-  field, so the values were never checked for shell metacharacters. Such an argument now
-  makes the declaration underivable, and `subprocess-declared` asks for it by hand
+- A subprocess declaration treaty worked out missed a field whose value reached `ctx.run`
+  through a local variable, as in `["git", *extra]` after `extra = list(args.extra)`, so
+  the manifest named too few user-controlled arguments. Such a local now carries the
+  field, and a local from anything else, such as a path or a constant, stays hard-coded.
+  `retry-declared` also finds a backoff whose sleep is gated at the top of a loop of
+  attempts, or whose other handler re-raises
 - The example check crashed the audit on a `#` inside a quoted `--flag="..."` value and
   misread the `'\''` apostrophe idiom; comments are found by one quote-aware scan. An
   example that names another command after `--` is not run, a retry's sleep must be in
