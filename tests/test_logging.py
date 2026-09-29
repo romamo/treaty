@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import stat
+import subprocess
 import sys
 import threading
 from collections.abc import Iterator
@@ -316,9 +317,150 @@ def test_debug_routes_library_log_records_and_restores_the_root_logger() -> None
     assert "debug: pool size 4 logger=somelib" in err.splitlines()
     root = logging.getLogger()
     assert root.level == before
-    assert not [h for h in root.handlers if type(h).__name__ == "_TraceHandler"]
+    assert not [h for h in root.handlers if type(h).__name__ == "_Records"]
     _, _, err = run(make_app(), ["lib", "--verbose"])
     assert "pool size" not in err
+
+
+# Library log records by level (#31)
+
+LIB = logging.getLogger("somelib")
+TOKEN = "sk-live-abcdef123456"
+
+
+def library_app() -> App:
+    app = App("libctl", version="1.0.0")
+
+    @app.command("levels", description="Log at each level", danger_level="safe", exit_codes=())
+    def levels(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        LIB.debug("pool size %d", 4)
+        LIB.info("retrying in %ds", 60)
+        LIB.warning("slow response")
+        LIB.error("gave up")
+        return {"ok": True}
+
+    @app.command("leak", description="Log a secret", danger_level="safe", exit_codes=())
+    def leak(args: Login, ctx: Ctx) -> dict[str, bool]:
+        LIB.warning("auth failed for %s", args.api_token)
+        return {"ok": True}
+
+    @app.command("nested", description="Call another app", danger_level="safe", exit_codes=())
+    def nested(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        LIB.info("before")
+        inner = library_app().call("levels", {}, env={"LIBCTL_AUDIT_LOG": "off"})
+        LIB.info("after")
+        return {"ok": inner.ok}
+
+    return app
+
+
+def library_lines(err: str) -> list[tuple[str, str]]:
+    """(level, message) of each stderr line the library's logger wrote"""
+    records = map(json.loads, err.splitlines())
+    return [(r["level"], r["message"]) for r in records if r["fields"].get("logger") == "somelib"]
+
+
+@pytest.mark.parametrize(
+    ("flags", "isatty", "levels"),
+    [
+        ([], False, ["warn", "error"]),
+        ([], True, ["info", "warn", "error"]),
+        (["--verbose"], False, ["info", "warn", "error"]),
+        (["--debug"], False, ["debug", "info", "warn", "error"]),
+        (["--quiet"], False, []),
+    ],
+)
+def test_library_log_records_are_shown_by_their_own_level(
+    flags: list[str], isatty: bool, levels: list[str]
+) -> None:
+    root = logging.getLogger()
+    before = root.level
+    env = {"LIBCTL_AUDIT_LOG": "off"}
+    code, _, err = run(library_app(), ["levels", *flags, "--format", "json"], env, isatty=isatty)
+    assert code == 0
+    every = {
+        "debug": "pool size 4",
+        "info": "retrying in 60s",
+        "warn": "slow response",
+        "error": "gave up",
+    }
+    assert library_lines(err) == [(level, every[level]) for level in levels]
+    assert root.level == before
+    assert not [h for h in root.handlers if type(h).__name__ == "_Records"]
+
+
+def test_a_library_warning_reads_as_a_warn_line_in_plain_output() -> None:
+    _, _, err = run(library_app(), ["levels", "--format", "plain"], {"LIBCTL_AUDIT_LOG": "off"})
+    assert err.splitlines() == [
+        "warn: slow response logger=somelib",
+        "error: gave up logger=somelib",
+    ]
+
+
+def test_a_secret_in_a_library_log_message_is_redacted() -> None:
+    env = {"LIBCTL_API_TOKEN": TOKEN, "LIBCTL_AUDIT_LOG": "off"}
+    code, _, err = run(library_app(), ["leak", "--format", "json"], env)
+    assert code == 0 and TOKEN not in err
+    assert library_lines(err) == [("warn", "auth failed for [REDACTED]")]
+
+
+def test_app_call_and_a_nested_run_route_records_once_and_restore_the_root_logger(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = logging.getLogger()
+    before = root.level
+    code, _, err = run(
+        library_app(), ["nested", "--verbose", "--format", "json"], {"LIBCTL_AUDIT_LOG": "off"}
+    )
+    assert code == 0
+    # The outer run shows its own records; the inner App.call's go to its stderr, once
+    assert library_lines(err) == [("info", "before"), ("info", "after")]
+    inner = capsys.readouterr().err
+    assert library_lines(inner) == [("warn", "slow response"), ("error", "gave up")]
+    assert root.level == before
+    assert not [h for h in root.handlers if type(h).__name__ == "_Records"]
+
+
+@pytest.mark.parametrize(("flags", "lines"), [([], 1), (["--quiet"], 0)])
+def test_a_library_warning_never_falls_through_to_logging_last_resort(
+    flags: list[str], lines: int
+) -> None:
+    """Without a handler on the root logger, a WARNING goes to ``logging.lastResort``,
+    which writes it to ``sys.stderr`` raw, secret included, even under ``--quiet``. A
+    subprocess, since pytest's own capture handlers sit on the root logger"""
+    script = (
+        "import logging\n"
+        "from dataclasses import dataclass\n"
+        "from treaty import App, Ctx, Flag\n"
+        "@dataclass(frozen=True, slots=True)\n"
+        "class Login:\n"
+        "    api_token: str = Flag(description='API token', secret=True)\n"
+        "app = App('libctl', version='1.0.0')\n"
+        "@app.command('leak', description='Leak', danger_level='safe', exit_codes=())\n"
+        "def leak(args: Login, ctx: Ctx) -> dict[str, bool]:\n"
+        "    logging.getLogger('somelib').warning('auth failed for %s', args.api_token)\n"
+        "    return {'ok': True}\n"
+        f"raise SystemExit(app.run(['leak', *{flags!r}]))\n"
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        "LIBCTL_API_TOKEN": TOKEN,
+        "LIBCTL_AUDIT_LOG": "off",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert TOKEN not in proc.stderr
+    assert len(proc.stderr.splitlines()) == lines, proc.stderr
+    if lines:
+        assert library_lines(proc.stderr) == [("warn", "auth failed for [REDACTED]")]
 
 
 # REQ-F-060: --debug attributes stray stdout
