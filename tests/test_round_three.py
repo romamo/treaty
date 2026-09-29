@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from decimal import Decimal
@@ -266,13 +267,27 @@ def test_signal_between_exec_lines_writes_a_cancelled_line() -> None:
 def test_signal_interrupts_exec_waiting_on_stdin() -> None:
     read_fd, write_fd = os.pipe()
     stdin = os.fdopen(read_fd, "r")
-    # A process-directed signal, as `kill` sends: raise_signal would target the timer thread
-    timer = threading.Timer(0.2, os.kill, args=(os.getpid(), signal.SIGTERM))
-    timer.start()
+    before = signal.getsignal(signal.SIGTERM)
+    ended = threading.Event()
+
+    def kill_once_handled() -> None:
+        # Sent only after the run installs its handler, or a slow start kills pytest itself
+        deadline = time.monotonic() + 10
+        while signal.getsignal(signal.SIGTERM) is before and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if signal.getsignal(signal.SIGTERM) is before:
+            ended.set()
+            os.close(write_fd)  # never handled: end the plan so the assertion below fails
+        else:
+            # A process-directed signal, as `kill` sends: raise_signal would target this thread
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=kill_once_handled, daemon=True).start()
     try:
         code, [env], _ = run(App("wait", version="1.0.0"), ["exec"], stdin=stdin)  # type: ignore[arg-type]
     finally:
-        os.close(write_fd)
+        if not ended.is_set():
+            os.close(write_fd)
         stdin.close()
     assert code == 143 and env["error"]["code"] == "CANCELLED"
 
