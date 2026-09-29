@@ -137,18 +137,37 @@ def ctx_attribute(fn: Callable[..., object], name: str) -> int | None:
 
 
 def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
-    """Each local the handler assigns from an expression that reads a field, with the
-    fields it carries: ``extra = list(args.extra)`` carries ``extra``, and a local built
-    from such a local carries them on. A value from anywhere else carries none"""
+    """Each local the handler fills from an expression that reads a field, with the
+    fields it carries: ``extra = list(args.extra)``, ``cmd.extend(args.extra)``,
+    ``cmd[0] = args.ref``, ``(extra := args.extra)``, and ``with open(args.path) as f``
+    all make the local carry the field, and a local built from such a local carries them
+    on. A value from anywhere else carries none"""
     assigned: list[tuple[str, ast.expr]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and node.value is not None:
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names = [n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)]
-            assigned += [(name, node.value) for name in names]
+            assigned += [(name, node.value) for t in targets for name in _bound(t)]
         elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-            names = [n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)]
-            assigned += [(name, node.iter) for name in names]
+            assigned += [(name, node.iter) for name in _bound(node.target)]
+        elif isinstance(node, ast.NamedExpr):
+            assigned.append((node.target.id, node.value))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            assigned += [
+                (name, item.context_expr)
+                for item in node.items
+                if item.optional_vars is not None
+                for name in _bound(item.optional_vars)
+            ]
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.attr in _FILLS
+        ):
+            # cmd.append(x) and the rest put x into cmd
+            assigned += [
+                (node.func.value.id, arg) for arg in (*node.args, *(k.value for k in node.keywords))
+            ]
     carried: dict[str, tuple[str, ...]] = {}
     changed = True
     while changed:
@@ -164,6 +183,23 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
                 carried[name] = fields
                 changed = True
     return {k: v for k, v in carried.items() if v}
+
+
+_FILLS = frozenset({"append", "extend", "insert", "add", "update", "setdefault"})
+
+
+def _bound(target: ast.expr) -> list[str]:
+    """The local names an assignment target binds: a name, each name of a tuple or list, or
+    the base name of ``cmd[0]`` or ``opts.depth``, never a name only read inside it"""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for element in target.elts for name in _bound(element)]
+    if isinstance(target, ast.Starred):
+        return _bound(target.value)
+    if isinstance(target, (ast.Subscript, ast.Attribute)):
+        return _bound(target.value)
+    return []
 
 
 def _reads(args_name: str, *nodes: ast.expr) -> tuple[str, ...]:

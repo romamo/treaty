@@ -1246,3 +1246,48 @@ def test_the_example_check_judges_after_a_global_value_flag_and_keeps_generics()
     assert [f.message.split(" does not parse")[0] for f in errors] == [
         "the example 'todo --format json add x --priority two'"
     ]
+
+
+def test_a_field_put_into_a_list_by_mutation_walrus_or_with_is_named() -> None:
+    """cmd.append(args.x) and cmd.extend(args.extra) are the common way to build argv"""
+    from dataclasses import dataclass
+    from pathlib import Path
+
+    from treaty import App, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Log:
+        stat: bool = Flag(default=False, description="Show stats")
+        extra: tuple[str, ...] = Flag(default=(), description="More arguments")
+        repo: Path = Flag(default=Path("."), description="Repository")
+
+    @dataclass(frozen=True, slots=True)
+    class Shown:
+        text: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("built", description="Built", danger_level="safe", exit_codes=())
+    def built(args: Log, ctx: Ctx) -> Shown:
+        cmd: list[str] = []
+        if args.stat:
+            cmd.append("--stat")
+        cmd.extend(args.extra)
+        return Shown(ctx.run(["git", "log", *cmd]).stdout)
+
+    @app.command("walrus", description="Walrus", danger_level="safe", exit_codes=())
+    def walrus(args: Log, ctx: Ctx) -> Shown:
+        if extra := list(args.extra):
+            return Shown(ctx.run(["git", "log", *extra]).stdout)
+        return Shown("")
+
+    @app.command("opened", description="Opened", danger_level="safe", exit_codes=())
+    def opened(args: Log, ctx: Ctx) -> Shown:
+        with open(args.repo) as f:
+            return Shown(ctx.run(["cat", f.name]).stdout)
+
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    assert commands["built"]["subprocess"]["user_controlled_args"] == ["extra"]
+    assert commands["walrus"]["subprocess"]["user_controlled_args"] == ["extra"]
+    assert commands["opened"]["subprocess"]["user_controlled_args"] == ["repo"]

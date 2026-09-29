@@ -86,7 +86,8 @@ Apps built on treaty keep their own, structured schema changelog with
 - A subprocess declaration treaty worked out missed a field whose value reached `ctx.run`
   through a local variable, as in `["git", *extra]` after `extra = list(args.extra)`, so
   the manifest named too few user-controlled arguments. Such a local now carries the
-  field, and a local from anything else, such as a path or a constant, stays hard-coded.
+  field, whether assigned, filled with `.append`/`.extend`, bound with `:=`, or opened with
+  `with ... as`; a local from anything else, such as a path or a constant, is not listed.
   `retry-declared` also finds a backoff whose sleep is gated at the top of a loop of
   attempts, or whose other handler re-raises
 - The example check crashed the audit on a `#` inside a quoted `--flag="..."` value and
