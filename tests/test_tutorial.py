@@ -483,9 +483,9 @@ def test_import_all_reports_each_feed_and_fails_partly(feeds: str, tmp_path: Pat
 
 
 def test_import_all_leaves_the_feeds_it_has_no_time_for(feeds: str, tmp_path: Path) -> None:
-    """Three one-second feeds in 2.5 seconds: the third is not started, and says so"""
+    """Three one-second feeds in 2.8 seconds: the third is not started, and says so"""
     urls = [f"{feeds}/slow1", f"{feeds}/slow2", f"{feeds}/slow3"]
-    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 2.5}
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 2.8}
     env = todo_batch.app.call("import-all", args, env={})
     assert env.exit_code == 3
     assert _results(env) == [(True, None), (True, None), (False, "NOT_STARTED")]

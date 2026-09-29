@@ -131,7 +131,7 @@ def import_all(args: ImportAll, ctx: Ctx, store: Store) -> Batch[Imported]:
 A feed starts only when the time left is at least what the last one took. The ones it has no
 time for are not started, and say so with `NOT_STARTED`, marked retryable, since nothing
 happened to them. The run then ends with a result the agent can act on: what was imported,
-and what to send again. With three feeds that take a second each and `--timeout 2.5`, the
+and what to send again. With three feeds that take a second each and `--timeout 2.8`, the
 first two are imported and the third is reported as not started; the tests check exactly
 that.
 
