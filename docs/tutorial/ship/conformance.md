@@ -85,9 +85,11 @@ Probes run the real CLI. treaty derives them from your commands:
 - two `invalid` probes: `manifest --etag x`, a malformed etag, and the first probe with
   `--no-such-flag` added
 
-Mutating commands are never probed. Destructive ones are, and the kit is there to check
-exactly the safety you might have got wrong. If `purge` ignored `--dry-run`, a run against
-your real `~/.todo.json` would delete your completed items.
+Mutating commands are never run: the only probes built from them are `invalid` ones, such as
+a network command's malformed `--proxy`, which exit 2 before anything runs. Destructive ones
+are, and the kit is there to check exactly the safety you might have got wrong. If `purge`
+ignored `--dry-run`, a run against your real `~/.todo.json` would delete your completed
+items.
 
 So the kit runs a launcher, not the CLI directly, and the launcher points the CLI at a
 sandbox. `todo` finds its item file through `Path.home()`, so the launcher sets `HOME`:
@@ -106,12 +108,16 @@ That one runs the example file from this repository, so do not copy it; your pro
 launcher, below, runs your installed command instead.
 
 Point the sandbox at whatever your CLI touches: an environment variable for a config file, a
-test account's credentials, a mock server's URL. When a probe names something that must
-exist, such as a destructive command's example `restore 3`, have the launcher seed the sandbox
-with it before running the CLI; otherwise the dry run fails with your not-found code instead
-of previewing. A project made with `treaty init` already has a launcher, `conformance/todo`,
-without a sandbox; a migrated project has none, so create it. Give it a sandbox as soon as a
-command reads or writes real state; for `todo`, two lines give it its own `HOME`:
+test account's credentials, a mock server's URL. A CLI that calls an API needs that server
+running for the whole kit run: start a fake one (the `http.server` fixture from [Declare
+network commands](../core/network-io.md) works as a script too) before `treaty conformance
+--run`, and point the launcher's environment at it. When a probe names something that must
+exist, such as a destructive command's example `restore 3`, have the launcher seed the
+sandbox with it before running the CLI; otherwise the dry run fails with your not-found code
+instead of previewing. A project made with `treaty init` already has a launcher,
+`conformance/todo`, without a sandbox; a migrated project has none, so create it. Give it a
+sandbox as soon as a command reads or writes real state; for `todo`, two lines give it its
+own `HOME`:
 
 ```sh
 #!/bin/sh

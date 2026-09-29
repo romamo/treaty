@@ -136,6 +136,7 @@ follow the finding's suggested fix:
 | `external-data` | content from outside the tool marked untrusted | [Declare network commands](core/network-io.md#step-5-mark-what-came-from-outside) |
 | `schema-version` | an output change that bumps the command's `schema_version` | [Change the contract safely](ship/stability.md) |
 | `log-not-print` | handlers log through `ctx`, never `print()` | [Log without touching stdout](core/logging.md) |
+| `config-write-scope` | a command that writes a config file says whose | [Read settings and secrets](core/config.md#a-command-that-writes-the-config-file) |
 | `settings-declared` | config read through `App(settings=)`, not parsed by a handler | [Read settings and secrets](core/config.md) |
 | `env-prefix` | handlers read only the app's own environment variables | [Read settings and secrets](core/config.md) |
 | `profile` | a conformance profile for the spec kit | [Run the conformance kit](ship/conformance.md) |
@@ -157,8 +158,11 @@ the fix, or leave it when the guess does not fit your command. `todo` keeps two,
   `add` is made safe with `--idempotency-key`, as
   [Choose each command's danger level](core/danger-level.md#step-3-what-mutating-adds) shows
 
-You are done with the core when `treaty audit module:app --strict` exits 0. The shipping
-chapters come after that:
+You are done with the core when `treaty audit module:app --strict` exits 0. The rules read
+source, so they miss what they cannot see: a CLI that calls an HTTP API or reads its own
+config file should read [Declare network commands](core/network-io.md) and [Read settings
+and secrets](core/config.md) even when the audit does not name them. The shipping chapters
+come after that:
 
 - [Run the conformance kit](ship/conformance.md) runs the spec's runtime checks on the
   binary and gates CI on them

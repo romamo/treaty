@@ -871,7 +871,9 @@ def _config_write_scope(app: App) -> Iterator[Finding]:
                 c.path.value,
                 "looks like a config write but declares no config_write_scope; agents cannot "
                 "tell whether it changes a shared user file (REQ-C-025)",
-                'config_write_scope="local" and write through ctx.write_config',
+                'config_write_scope="global" to write the user file, <config home>/<app>/'
+                'config.toml, or "local" for ./.<app>.toml in the working directory; then '
+                "write through ctx.write_config",
             )
 
 

@@ -499,6 +499,10 @@ Migration is a breaking change for callers. Put this list in your release notes:
   show what they would do and exit 2
 - `list` returns 20 items at a time; `--limit 0` returns all of them, and `--cursor` the next
   page ([Page long lists](../core/pagination.md))
+- A text flag refuses a line break unless the field declares `multiline=True`; give
+  every field that takes free text, such as a body or a message, `multiline=True`
+- A config file of the CLI's own moves to the one treaty reads
+  ([Read settings and secrets](../core/config.md#a-command-that-writes-the-config-file))
 - Output is JSON whenever stdout is not a terminal; scripts that grepped the old text should
   read JSON, or pass `--format plain`
 - Exit codes change: failures that were all 1 now have their own numbers, listed in

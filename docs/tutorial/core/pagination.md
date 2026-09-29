@@ -165,9 +165,11 @@ def after_id(cursor: str) -> None:
         raise ParseError("a list cursor is an item number", context={"cursor": cursor})
 ```
 
-The same shape serves a source too large to load at once: a database query with
-`WHERE id > ? ORDER BY id LIMIT ?`, or an API that returns its own continuation token, which
-becomes `next_cursor` as it is.
+The same shape serves a source too large to load at once: a database query with `WHERE id >
+? ORDER BY id LIMIT ?`, or an API that returns its own continuation token, which becomes
+`next_cursor` as it is. An API that pages by number instead gets the page number as the
+cursor. Keep no `--page` flag of your own beside `--limit` and `--cursor`: `meta.pagination`
+would describe only the page it was given, and the audit warns.
 
 **Check:** the same purge between pages, with the keyed cursor: the second page starts at
 item 21

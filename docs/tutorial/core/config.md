@@ -219,10 +219,10 @@ todo list --config tmp/tutorial/bad.toml | jq -e '.meta.exit_code == 2
 
 A field is a secret when it declares `secret=True`, or when any part of its name contains
 `token`, `secret`, `password`, `key`, `credential`, `auth`, or `cookie`, or it has a `pass`
-segment; a boolean never is. So `author` and `keyword` count too; `secret=False` keeps such
-a field a plain flag. A secret is never taken as a value on the command line, where it would
-land in shell history, process listings, and the audit log. The caller passes it one of
-three ways instead:
+segment; a boolean or an enum never is. So `author` and `keyword` count too; `secret=False`
+keeps such a field a plain flag. A secret is never taken as a value on the command line,
+where it would land in shell history, process listings, and the audit log. The caller passes
+it one of three ways instead:
 
 | The caller passes | treaty reads |
 | --- | --- |
@@ -267,6 +267,18 @@ todo import --url https://example.com/todo.json --token-from-file tmp/tutorial/t
   | jq -e '.meta.exit_code == 0'
 todo import --schema | jq -e '.data.secret_env_vars == ["TODO_TOKEN"]'
 ```
+
+## A command that writes the config file
+
+A CLI with its own `config set` writes the file treaty reads. It declares which one with
+`config_write_scope=` on the command and writes through `ctx.write_config(text)`, which
+replaces the file atomically under a lock: `"global"` writes the user file,
+`~/.config/todo/config.toml`, and `"local"` writes `./.todo.toml` in the working directory,
+or the user file with `--global`. The audit's `config-write-scope` rule warns on a
+`config` command without the declaration. A migrated CLI that kept its settings in a file
+of its own, such as `~/.todo.toml`, reads the treaty file instead from now on: move the
+settings, and say so in the release notes. The README's [Config
+writes](../../../README.md#config-writes) has the details.
 
 ## Step 6: Test it against a feed that needs the token
 
