@@ -6,7 +6,8 @@ the framework gives it the right guards and agents know which calls are safe to 
 **You need:** a treaty app, such as `todo` at the end of [Describe every command](describe.md);
 this chapter clears the audit rule `danger-level`
 
-**Done when:** the audit has no `danger-level` finding:
+**Done when:** the audit has no `danger-level` finding; in your own project, run
+`uv run treaty audit todo.cli:app` and look for it:
 
 <!-- check -->
 ```bash

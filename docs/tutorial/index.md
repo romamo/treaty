@@ -67,9 +67,10 @@ drift apart, so what you copy is what the tests run.
 
 ## The example files
 
-Each file under `examples/tutorial/` is `todo` at one point in the tutorial. From
-`todo_exit_codes.py` on, each chapter branches from an earlier file rather than the one
-before it, so `todo_pages.py`, for example, has no `import`:
+Each file under `examples/tutorial/` is `todo` at one point in the tutorial. They live in
+the treaty repository, not in the package you install, so open them through the links here
+and in each chapter. From `todo_exit_codes.py` on, each chapter branches from an earlier
+file rather than the one before it, so `todo_pages.py`, for example, has no `import`:
 
 | File | What it is | Chapters |
 | --- | --- | --- |

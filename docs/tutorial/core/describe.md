@@ -7,7 +7,8 @@ command shows a call an agent can copy, with a test that fails when an example s
 or either migration chapter; this chapter clears the audit rule `describe`
 
 **Done when:** the audit has no `describe` finding, and a test runs every example with
-`--validate-only`:
+`--validate-only`. In your own project, that is `uv run treaty audit todo.cli:app` and the
+example test of Step 4 in your tests:
 
 <!-- check -->
 ```bash
@@ -156,7 +157,7 @@ $ todo add "Buy milk" --priority high --validate-only    # after the rename
 every error, without running the handler. A test that passes every example through it
 catches a stale flag, a wrong argument type, and a leftover placeholder. It reads the
 examples from the manifest, so a new command's examples are tested without touching the
-test:
+test. Here it is as the tutorial runs it on its own copies of `todo`:
 
 <!-- file: tests/test_tutorial.py -->
 ```python
@@ -198,13 +199,16 @@ def test_an_example_parses(cli_app: App, example: str) -> None:
     assert code == 0, out.getvalue()
 ```
 
-The tutorial checks every version of `todo` it ships; in your project, `EXAMPLE_APPS` is
-just `[app]`. `app.builtins` is the set of commands treaty adds to every app, whose own
-examples are treaty's to keep; `path.value` is a command's name as the manifest keys it,
-such as `add`; and `env={}` runs each example with no environment variables, so none of
-yours can change the result. The test calls `app.run` with the parsed words, so no shell
-ever runs an example; an example that uses a pipe or a redirect belongs in prose, not in
-`examples=`.
+The tutorial checks every version of `todo` it ships. For your own project, the same test,
+with its imports and `from todo.cli import app`, is in
+[`new_cli/test_contract.py`](../../../examples/tutorial/new_cli/test_contract.py): copy that
+file into `tests/` and change the import to your app, as [Test the contract and gate
+CI](../ship/testing.md#step-2-test-the-contract-in-every-project) describes. `app.builtins`
+is the set of commands treaty adds to every app, whose own examples are treaty's to keep;
+`path.value` is a command's name as the manifest keys it, such as `add`; and `env={}` runs
+each example with no environment variables, so none of yours can change the result. The test
+calls `app.run` with the parsed words, so no shell ever runs an example; an example that
+uses a pipe or a redirect belongs in prose, not in `examples=`.
 
 **Check:** a renamed flag and a leftover placeholder both fail validation, and `todo`'s own
 examples pass the test

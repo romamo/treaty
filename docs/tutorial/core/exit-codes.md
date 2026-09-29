@@ -8,7 +8,8 @@ declared in the manifest with whether a retry is safe and what state the failure
 CLI](../B-migrate/click-typer.md); this chapter clears the audit rules `exit-codes` and
 `retryable`
 
-**Done when:** the strict audit exits 0:
+**Done when:** the strict audit exits 0; in your own project, that is
+`uv run treaty audit todo.cli:app --strict`:
 
 <!-- check -->
 ```bash
@@ -50,7 +51,9 @@ for example on the way out). An agent can safely reissue a call only if it faile
 
 ## Where todo stands
 
-Point the migrated `todo` at a damaged file and it crashes:
+Point the migrated `todo` at a damaged file and it crashes. In your own project:
+`echo '{not json' > bad.json`, then `uv run todo add x --db bad.json`. The check runs the
+same against the example file:
 
 <!-- check -->
 ```bash
@@ -127,8 +130,15 @@ file is either the old version or the new one:
             ) from exc
 ```
 
+`shlex` is new to the file: add `import shlex` at the top, beside `import json`.
+
 `side_effects` describes what the code guarantees, so the code has to make it true.
 Declaring `none` when a failure can leave half a file is worse than declaring nothing.
+
+In your own project, this behaviour shows once Steps 3 and 5 are done too: until Step 3
+registers `STORE_UNWRITABLE` and Step 5 declares it on the command, raising it is an error
+of its own, `UNDECLARED_EXIT_CODE`. The checks in this chapter run the finished file, so
+they pass at every step.
 
 **Check:** add an item, make the directory read-only, and add another. The run exits 80,
 the file still holds the first item, and no `.partial` file is left behind. The second
@@ -246,8 +256,9 @@ command lists what its own path can reach:
     exit_codes=["STORE_CORRUPT", "STORE_UNWRITABLE"],
 ```
 
-`list` only reads, so it declares `exit_codes=["STORE_CORRUPT"]`, and `done` keeps its
-`NOT_FOUND`: `exit_codes=["NOT_FOUND", "STORE_CORRUPT", "STORE_UNWRITABLE"]`.
+That is `add`. `purge` loads and saves the same way, so it declares the same two. `list`
+only reads, so it declares `exit_codes=["STORE_CORRUPT"]`, and `done` keeps its `NOT_FOUND`:
+`exit_codes=["NOT_FOUND", "STORE_CORRUPT", "STORE_UNWRITABLE"]`.
 
 Forgetting one does not fail silently. A handler that raises a code it did not declare exits
 1 with `UNDECLARED_EXIT_CODE`, and names the code it raised and the ones it declared:

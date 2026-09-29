@@ -345,7 +345,8 @@ EOF
 The scaffold's tests exercise `show`, `create`, and `delete`, which are gone. Test the new
 commands through the envelope: `app.call()` runs a command in-process, the same path `exec`
 and MCP take, and returns the envelope, so a test reads fields instead of parsing text.
-From [`examples/tutorial/new_cli/test_cli.py`](../../../examples/tutorial/new_cli/test_cli.py):
+Copy [`examples/tutorial/new_cli/test_cli.py`](../../../examples/tutorial/new_cli/test_cli.py)
+over the scaffold's `tests/test_cli.py`; one of its tests:
 
 <!-- file: examples/tutorial/new_cli/test_cli.py -->
 ```python
@@ -381,7 +382,11 @@ $ uv run pytest -q
 FAILED tests/test_agents_md.py::test_agents_md_matches_the_cli - AssertionError: ...
   - AGENTS.md:20 command create: not a command of todo
   - AGENTS.md:1 version 0.1.0: declares 0.1.0, todo --version is 1.0.0
+  ...
 ```
+
+The real list is longer: one line for every name AGENTS.md still mentions that `todo` no
+longer has.
 
 AGENTS.md is what an agent reads first, and it still describes the scaffold. The test runs
 `treaty check-docs`, which compares the file with the app: the declared version, the
