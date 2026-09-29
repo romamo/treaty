@@ -29,7 +29,7 @@ from pathlib import Path
 from ._config import local_config, user_config
 from ._env import CONFIG, CONTEXT, INSTANCE_ID, KNOWN, app_var
 from ._errors import ParseError, RegistrationError, SchemaError, UserCodeError, user_code
-from ._flags import FLAG_META, coerce_text
+from ._flags import FLAG_META, apply_scalar, coerce_text
 from ._parse import check_json_base
 from ._paths import check_path
 from ._redact import REDACTED, secret_name
@@ -67,22 +67,24 @@ class Setting:
 
 @dataclass(frozen=True, slots=True)
 class SettingsSpec:
-    """The app's settings dataclass, checked once at ``App(settings=)``"""
+    """The app's settings dataclass: its shape checked at ``App(settings=)``, its field
+    types once the app is in use, after ``app.scalar`` has registered the classes they name"""
 
     cls: type
     fields: tuple[Setting, ...]
 
-    @classmethod
-    def inspect(cls, settings: object, scalars: ScalarRegistry) -> SettingsSpec:
+    @staticmethod
+    def check(settings: object) -> str:
+        """What ``App(settings=)`` checks before any scalar is registered: a frozen
+        dataclass whose fields have defaults and no framework names. Returns how its
+        errors name it"""
         where = f"App(settings={getattr(settings, '__qualname__', settings)!r})"
         if not (isinstance(settings, type) and dataclasses.is_dataclass(settings)):
             raise RegistrationError(f"{where}: settings is a frozen dataclass type")
         params = getattr(settings, "__dataclass_params__", None)
         if params is None or not params.frozen:
             raise RegistrationError(f"{where}: declare it @dataclass(frozen=True)")
-        hints = typing.get_type_hints(settings)
         framework = {v.key for v in KNOWN} | {CONTEXTS_KEY, CURRENT_CONTEXT_KEY}
-        fields: list[Setting] = []
         for f in dataclasses.fields(settings):
             if f.name in framework:
                 raise RegistrationError(
@@ -96,44 +98,48 @@ class SettingsSpec:
                     else "a default"
                 )
                 raise RegistrationError(f"{where}: field {f.name!r} needs {how}")
+            declared = f.metadata.get(FLAG_META)
+            if declared is None:
+                continue
+            # Only what settings enforce: a pattern or a size would pass unchecked
+            ignored = [
+                name
+                for name, value in (
+                    ("positional", declared.positional),
+                    ("short", declared.short),
+                    ("pattern", declared.pattern),
+                    ("pattern_type", declared.pattern_type),
+                    ("max_bytes", declared.max_bytes),
+                    ("multiline", declared.multiline),
+                    ("from_stdin", declared.from_stdin),
+                    ("deprecated", declared.deprecated),
+                )
+                if value not in (None, False)
+            ]
+            if ignored:
+                raise RegistrationError(
+                    f"{where}: field {f.name!r}: a setting takes default, description, and "
+                    f"secret from Flag(...), not {', '.join(ignored)}"
+                )
+        return where
+
+    @classmethod
+    def inspect(cls, settings: type, scalars: ScalarRegistry) -> SettingsSpec:
+        """The shape, then each field's type, a class registered in ``scalars`` included"""
+        where = cls.check(settings)
+        hints = typing.get_type_hints(settings)
+        fields: list[Setting] = []
+        for f in dataclasses.fields(settings):
             try:
                 classified = classify(hints[f.name], scalars)
             except SchemaError as exc:
                 raise RegistrationError(f"{where}: field {f.name!r}: {exc}") from None
-            if classified.scalar is not None or (
-                classified.item is not None and classified.item.scalar is not None
-            ):
-                raise RegistrationError(
-                    f"{where}: field {f.name!r}: settings take str, int, float, bool, Path, "
-                    "enums, Literal, and tuples of them"
-                )
             declared = f.metadata.get(FLAG_META)
             secret = None if declared is None else declared.secret
-            if declared is not None:
-                # Only what settings enforce: a pattern or a size would pass unchecked
-                ignored = [
-                    name
-                    for name, value in (
-                        ("positional", declared.positional),
-                        ("short", declared.short),
-                        ("pattern", declared.pattern),
-                        ("pattern_type", declared.pattern_type),
-                        ("max_bytes", declared.max_bytes),
-                        ("multiline", declared.multiline),
-                        ("from_stdin", declared.from_stdin),
-                        ("deprecated", declared.deprecated),
-                    )
-                    if value not in (None, False)
-                ]
-                if ignored:
-                    raise RegistrationError(
-                        f"{where}: field {f.name!r}: a setting takes default, description, and "
-                        f"secret from Flag(...), not {', '.join(ignored)}"
-                    )
-                if secret and classified.flag_type is FlagType.BOOLEAN:
-                    raise RegistrationError(
-                        f"{where}: field {f.name!r}: a boolean cannot hold a secret"
-                    )
+            if secret and classified.flag_type is FlagType.BOOLEAN:
+                raise RegistrationError(
+                    f"{where}: field {f.name!r}: a boolean cannot hold a secret"
+                )
             fields.append(Setting(f.name, classified, f.default, secret))
         return cls(settings, tuple(fields))
 
@@ -415,7 +421,15 @@ def _from_file(setting: Setting, raw: object, path: Path) -> object:
         if target.flag_type is FlagType.ARRAY:
             if not isinstance(raw, list) or target.item is None:
                 raise ParseError(f"{setting.name!r} expects an array")
-            return tuple(check_json_base(target.item, v, setting.name) for v in raw)
-        return check_json_base(target, raw, setting.name)
+            return tuple(_from_json(setting, target.item, v) for v in raw)
+        return _from_json(setting, target, raw)
     except ParseError as exc:
         raise _invalid(path, setting.name, exc.message) from None
+
+
+def _from_json(setting: Setting, target: Classified, raw: object) -> object:
+    """A file value as its JSON type, then through its registered scalar's checks and parse"""
+    base = check_json_base(target, raw, setting.name)
+    if target.scalar is None:
+        return base
+    return apply_scalar(target.scalar, base, setting.name, secret=setting.secret)
