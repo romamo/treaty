@@ -118,6 +118,13 @@ Apps built on treaty keep their own, structured schema changelog with
   never followed. A finding in a helper ends with where it is, such as
   `found via helpers.enter (helpers.py:6)`. Attributes are read statically, so a lazy
   module's `__getattr__` never runs during the audit
+- A settings field can name a class registered with `app.scalar`: `App(settings=)` checks
+  the dataclass's shape at once and its field types on first use (a run, `call`,
+  `manifest`, or `treaty audit`, which reports a bad one as `APP_IMPORT_FAILED`), and a
+  scalar registered later is picked up on the next use. A value from the environment or a
+  file goes through the scalar's `pattern` or bounds and its `parse`, and a bad one exits
+  `2` with `CONFIG_INVALID` naming the key and its source. A boolean setting declared
+  secret now fails on first use instead of at `App(...)` (#29)
 - An argument list built from the whole arguments object, as `["git", *flags(args)]`, got
   a worked-out declaration naming no user-controlled field and no audit warning. Passing
   `args` on whole, or reading a method or property of it such as `args.argv()`, now makes

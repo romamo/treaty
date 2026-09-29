@@ -845,7 +845,7 @@ app = App("deployctl", version="1.0.0", settings=Settings)
 def deploy(args: DeployArgs, ctx: Ctx, settings: Settings) -> Deployed: ...
 ```
 
-Each field takes the first value found: `DEPLOYCTL_REGION` in the environment, then the config files, then its default. A field declared `Flag(default=..., description=..., secret=True)` is a secret setting, redacted by `--show-config` and left out of the config hash, whatever its name; a relative `Path` setting is resolved against the run's directory, `--cwd` included. The files are `--config PATH` alone (TOML, or JSON by the
+Each field takes the first value found: `DEPLOYCTL_REGION` in the environment, then the config files, then its default. A field declared `Flag(default=..., description=..., secret=True)` is a secret setting, redacted by `--show-config` and left out of the config hash, whatever its name; a relative `Path` setting is resolved against the run's directory, `--cwd` included. A field may name a class registered with `app.scalar`, after `App(settings=)` as well: the field types are checked when the app is first used (a run, `call`, `manifest`, or `treaty audit`), and a value is checked against the scalar's `pattern` or bounds and parsed by its `parse`. The files are `--config PATH` alone (TOML, or JSON by the
 `.json` suffix; a file not written yet reads as empty), or else the project file
 `./.deployctl.toml` over the user file. A file may hold `[contexts.<name>]` tables over its
 top level, chosen by `--context NAME` or its `current_context` key. `--no-config` reads no

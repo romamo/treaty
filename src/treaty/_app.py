@@ -418,7 +418,11 @@ class App:
         """What the token budget flags count with unless ``--tokenizer`` names another"""
         self.credentials = credentials
         self.jobs = jobs
-        self.settings = None if settings is None else SettingsSpec.inspect(settings, self.scalars)
+        if settings is not None:
+            SettingsSpec.check(settings)
+        self._settings_cls = settings
+        self._settings: SettingsSpec | None = None
+        """Inspected on first use, so a field may name a class ``app.scalar`` registers"""
         self.init = init
         if isinstance(companions, str) or not all(
             isinstance(c, str) and c and c == c.strip() and " " not in c for c in companions
@@ -504,9 +508,9 @@ class App:
         Values travel as ``base`` (``str``, ``int``, or ``float``), are checked against
         ``pattern`` or the bounds, then handed to ``parse``; a ``ValueError`` from it is one
         entry in ``error.errors``. ``serialize`` turns an instance back into the base value
-        and defaults to its ``value`` field.
+        and defaults to its ``value`` field. A settings field may name it too.
         """
-        return self.scalars.register(
+        spec = self.scalars.register(
             ScalarSpec(
                 cls=cls,
                 parse=parse,
@@ -518,6 +522,9 @@ class App:
                 maximum=maximum,
             )
         )
+        # Settings already inspected are inspected again on next use, with this class known
+        self._settings = None
+        return spec
 
     def suppress_update_notifier(
         self, fn: Callable[[MutableMapping[str, str]], None]
@@ -871,7 +878,7 @@ class App:
                         retry=retry,
                         sort_key=sort_key,
                         ordered=ordered,
-                        provided=() if self.settings is None else (self.settings.cls,),
+                        provided=() if self._settings_cls is None else (self._settings_cls,),
                         fix_commands=fixes,
                         refreshes_auth=refreshes_auth,
                         requires=requires,
@@ -1033,9 +1040,10 @@ class App:
     def _check_fixes(self) -> None:
         """Every declared ``fix_commands`` value names a command that exists and is not
         destructive, and every ``Deprecated(replacement=)`` a command; run once the table
-        is in use, since a target may register late"""
+        is in use, since a target may register late; the settings' field types too"""
         if self._fixes_checked:
             return
+        _ = self.settings
         for path, command in self._commands.items():
             old = command.deprecated
             if old is not None and old.replacement is not None:
@@ -1427,6 +1435,16 @@ class App:
     @property
     def commands(self) -> Mapping[CommandPath, Command]:
         return self._commands
+
+    @property
+    def settings(self) -> SettingsSpec | None:
+        """The ``App(settings=)`` dataclass and its fields, inspected on first use, once
+        ``app.scalar`` has registered the classes the fields name; None without one"""
+        if self._settings_cls is None:
+            return None
+        if self._settings is None:
+            self._settings = SettingsSpec.inspect(self._settings_cls, self.scalars)
+        return self._settings
 
     def manifest(self) -> dict[str, object]:
         self._check_fixes()
