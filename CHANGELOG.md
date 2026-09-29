@@ -61,6 +61,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `treaty check-docs` passed an AGENTS.md that a command or variable added since was missing
+  from, since every name left in the file still existed. Each generated section between
+  the treaty markers is now compared with what `treaty agents-md` writes, and one that
+  differs is a `section` mismatch. `init`'s `test_agents_md.py` runs the check, so a new
+  project's tests fail as soon as a command is added without regenerating the file
 - Plain-mode stderr printed `[REDACTED]` for three context fields treaty fills with names,
   not values: a conformance `CONFLICT`'s `changed_keys`, `TOKEN_REQUIRED`'s
   `token_env_vars`, and `CONFIG_INVALID`'s `key`. They print as they are; any other

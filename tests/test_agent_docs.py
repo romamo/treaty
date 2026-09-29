@@ -54,8 +54,11 @@ def sections(text: str) -> dict[str, str]:
     return found
 
 
+TARGET = "examples.deployctl:app"
+
+
 def doc(app: App) -> str:
-    return render_file(app, None, "examples.deployctl:app", app.name)
+    return render_file(app, None, TARGET, app.name)
 
 
 # REQ-O-043
@@ -100,6 +103,24 @@ def test_agents_md_includes_cli_version_on_line_1_matching_binary_version_output
     out = io.StringIO()
     deployctl.run(["--version", "--format", "plain"], stdout=out, stderr=io.StringIO(), env={})
     assert first == f"<!-- cli-version: {out.getvalue().strip()} -->"
+
+
+def test_agents_md_missing_a_command_the_app_has_is_out_of_date() -> None:
+    """Every name left in the file exists, so only the comparison with a fresh render sees
+    the command added since the file was written"""
+    text = doc(deployctl)
+    assert check(deployctl, Path("AGENTS.md"), text, agents_md=True, target=TARGET) == []
+    line = next(x for x in text.splitlines() if x.startswith("- `deployctl config set`"))
+    stale = text.replace(line + "\n", "")
+    assert check(deployctl, Path("AGENTS.md"), stale, agents_md=True) == []
+    [mismatch] = check(deployctl, Path("AGENTS.md"), stale, agents_md=True, target=TARGET)
+    assert (mismatch.kind, mismatch.name) == ("section", "Canonical Invocation")
+    assert mismatch.line == stale.splitlines().index("## Canonical Invocation") + 1
+
+
+def test_agents_md_written_with_another_invocation_is_compared_with_that_one() -> None:
+    text = render_file(deployctl, None, TARGET, "uvx deployctl")
+    assert check(deployctl, Path("AGENTS.md"), text, agents_md=True, target=TARGET) == []
 
 
 def test_every_flag_command_and_env_var_documented_in_agents_md_is_present_in_help_output() -> None:

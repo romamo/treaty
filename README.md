@@ -188,7 +188,9 @@ group of the same name replaces them, and the `builtin-shadowed` audit rule says
   Environment Variables, Input Conventions, and CI Validation between treaty markers;
   text outside them, `## Installation` included, is kept. `treaty check-docs myapp.cli:app
   AGENTS.md skills` exits 81 (`DOCS_OUT_OF_DATE`) when a declared version, a section, or a
-  command, flag, or variable named there disagrees with `--help`, one line per mismatch
+  command, flag, or variable named there disagrees with `--help`, or a generated section
+  differs from what `agents-md` writes now, such as one a new command is missing from, one
+  line per mismatch
   (REQ-O-043 to REQ-O-046). `treaty init` writes AGENTS.md and a test that runs the check
 `App(credentials=...)` adds `check-permissions` (see Credentials) and `App(jobs=...)` adds
 `job status` and `job cancel` (see Async jobs).

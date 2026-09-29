@@ -503,7 +503,9 @@ def check_docs_command(args: CheckDocsArgs, ctx: Ctx) -> CheckDocsOut:
                         f"{path} is not JSON: {exc.msg}", context={"path": str(path)}
                     ) from None
             else:
-                mismatches += check(app, path, text, agents_md=path.name == AGENTS_FILE)
+                mismatches += check(
+                    app, path, text, agents_md=path.name == AGENTS_FILE, target=args.target
+                )
     out = CheckDocsOut(app.version, tuple(files), tuple(mismatches))
     if mismatches:
         count = len(mismatches)

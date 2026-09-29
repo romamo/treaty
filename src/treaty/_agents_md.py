@@ -334,8 +334,38 @@ def _command(app: App, words: list[str]) -> tuple[tuple[str, ...], str | None]:
     return parts, None
 
 
-def check(app: App, label: Path, text: str, *, agents_md: bool) -> list[Mismatch]:
-    """Every way ``text`` disagrees with the app; ``agents_md`` adds the section check"""
+_INVOCATION = re.compile(r"^`(.+?) <command> \[arguments\] \[flags\]`", re.MULTILINE)
+
+
+def _stale_sections(app: App, label: Path, text: str, target: str) -> list[Mismatch]:
+    """Each generated section that differs from what ``treaty agents-md`` writes now: a
+    command or variable added since is missing from it, though every name it has exists"""
+    start = text.find(BEGIN)
+    end = text.find(END, start)
+    if start == -1 or end == -1:
+        return []
+    written = text[start : end + len(END)]
+    named = _INVOCATION.search(written)
+    fresh = _sections(render_block(app, target, app.name if named is None else named.group(1)))
+    old, lines = _sections(written), _sections(text)
+    return [
+        Mismatch(
+            label,
+            lines.get(title, (1, ""))[0],
+            "section",
+            title,
+            f"differs from what treaty agents-md {target} writes; run it",
+        )
+        for title, (_, body) in fresh.items()
+        if title in old and old[title][1].strip() != body.strip()
+    ]
+
+
+def check(
+    app: App, label: Path, text: str, *, agents_md: bool, target: str | None = None
+) -> list[Mismatch]:
+    """Every way ``text`` disagrees with the app; ``agents_md`` adds the section check,
+    and ``target``, the app's import path, the check of the generated sections"""
     found: list[Mismatch] = []
     version = declared_version(text)
     if version is None:
@@ -388,7 +418,20 @@ def check(app: App, label: Path, text: str, *, agents_md: bool) -> list[Mismatch
         ):
             if span not in env_names:
                 found.append(Mismatch(label, line, "env", span, f"not a variable {app.name} reads"))
+    if agents_md and target is not None:
+        # A section already reported for a name it should not have is not reported again
+        named = {_section_at(text, m.line) for m in found}
+        found += [m for m in _stale_sections(app, label, text, target) if m.name not in named]
     return found
+
+
+def _section_at(text: str, line: int) -> str | None:
+    """The ``## `` section ``line`` is in"""
+    section: str | None = None
+    for value in text.splitlines()[:line]:
+        if value.startswith("## "):
+            section = value[3:].strip()
+    return section
 
 
 _LAUNCHERS = (("uv", "run"), ("uvx",), ("pipx", "run"))
