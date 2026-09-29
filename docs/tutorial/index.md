@@ -121,7 +121,7 @@ follow the finding's suggested fix:
 | `danger-level` | danger levels that match what command names imply | [Choose each command's danger level](core/danger-level.md) |
 | `exit-codes` | command-specific exit codes on every non-safe command | [Declare exit codes](core/exit-codes.md) |
 | `retryable` | retryable codes only on idempotent commands | [Declare exit codes](core/exit-codes.md) |
-| `delete-not-found` | a command that deletes (a `deleted` effect or a delete verb) answers `noop` for an id already gone, and does not declare `NOT_FOUND` | [Choose each command's danger level](core/danger-level.md#step-4-what-destructive-adds) |
+| `delete-not-found` | a command that deletes (a `deleted` effect or a delete verb) answers `noop` for an id already gone, and does not declare `NOT_FOUND` | [Choose each command's danger level](core/danger-level.md#deleting-what-is-already-gone) |
 | `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
 | `paginated-list` | list commands keep the framework's pagination | [Page long lists](core/pagination.md) |
 | `network-io` | `has_network_io=True` on commands that call out | [Declare network commands](core/network-io.md) |

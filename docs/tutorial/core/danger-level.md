@@ -126,8 +126,8 @@ to retry without changing it twice:
 - **`--idempotency-key`**: a second call with the same key returns the first result without
   running the handler. A retry after a lost response is then safe even for `add`, which
   would otherwise add a second item. Reusing a key with different arguments exits 6
-  (`CONFLICT`) with `error.code`
-`IDEMPOTENCY_KEY_REUSED`, which is why every `mutating` command can exit 6 without declaring it
+  (`CONFLICT`) with `error.code` `IDEMPOTENCY_KEY_REUSED`, which is why every `mutating`
+  command can exit 6 without declaring it
 - **`TIMEOUT` is not retryable**: the call may have written half its work, so an agent
   inspects state before calling again
 
@@ -152,6 +152,22 @@ field that a dry run fills in. Without `--confirm-destructive`, treaty runs the 
 dry run and exits 2 with `CONFIRMATION_REQUIRED`, the preview in `data`. The manifest marks
 the command `requires_confirmation: true`, and MCP clients see the destructive hint.
 
+A `destructive` command is also never offered as a fix: a `fix_command` that runs one is
+refused, since a fix must be safe to run twice, so an agent following a suggestion never
+deletes anything by accident.
+
+**Check:** `purge` requires confirmation, and without it previews and refuses
+
+<!-- check -->
+```bash
+todo purge --schema | jq -e '.data.requires_confirmation
+  and (.data.flags | has("confirm-destructive") and has("dry-run"))'
+todo purge --db tmp/tutorial/todo.json \
+  | jq -e '.meta.exit_code == 2 and .error.code == "CONFIRMATION_REQUIRED" and .data.effect == "would_delete"'
+```
+
+### Preview by default
+
 When most calls of a command are previews, `safe_default=True` turns the gate around: the
 command previews and exits 0 by default, and `--live` applies it. Use it for commands such
 as a cleanup an agent runs often to see what it would remove; keep the default gate when
@@ -159,6 +175,8 @@ applying is the usual intent. `--live` alone is the confirmation, so nothing ref
 command: the conformance kit's destructive checks need a destructive command without
 `safe_default`, and an app whose only destructive commands have it scores `incomplete` at
 every level.
+
+### Deleting what is already gone
 
 A destructive command that takes an id has one more case: the id is already gone. A
 retried delete should succeed rather than fail, so it answers `noop` when confirmed, and on
@@ -180,20 +198,6 @@ command as deleting when its `effect` is a `Literal` that includes `"deleted"`, 
 `remove`, `purge`, or `prune`. A destructive command that does something else to what it
 names, such as a restore that overwrites files from a snapshot, keeps `NOT_FOUND`: a missing
 snapshot is a real failure there.
-
-A `destructive` command is also never offered as a fix: a `fix_command` that runs one is
-refused, since a fix must be safe to run twice, so an agent following a suggestion never
-deletes anything by accident.
-
-**Check:** `purge` requires confirmation, and without it previews and refuses
-
-<!-- check -->
-```bash
-todo purge --schema | jq -e '.data.requires_confirmation
-  and (.data.flags | has("confirm-destructive") and has("dry-run"))'
-todo purge --db tmp/tutorial/todo.json \
-  | jq -e '.meta.exit_code == 2 and .error.code == "CONFIRMATION_REQUIRED" and .data.effect == "would_delete"'
-```
 
 ## Step 5: When the name and the level disagree
 

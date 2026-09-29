@@ -356,19 +356,21 @@ over the scaffold's `tests/test_cli.py`; one of its tests:
 <!-- file: examples/tutorial/new_cli/test_cli.py -->
 ```python
 def test_purge_previews_until_confirmed(db: str) -> None:
-    app.call("add", {"text": "Walk dog", "db": db})
-    app.call("done", {"id": 1, "db": db})
-    preview = app.call("purge", {"db": db})
+    app.call("add", {"text": "Walk dog", "db": db}, env=QUIET)
+    app.call("done", {"id": 1, "db": db}, env=QUIET)
+    preview = app.call("purge", {"db": db}, env=QUIET)
     assert preview.exit_code == 2 and preview.error is not None
     assert preview.error.code == "CONFIRMATION_REQUIRED"
-    applied = app.call("purge", {"db": db, "confirm_destructive": True})
+    applied = app.call("purge", {"db": db, "confirm_destructive": True}, env=QUIET)
     assert applied.exit_code == 0
-    assert app.call("list", {"all": True, "db": db}).data == []
+    assert app.call("list", {"all": True, "db": db}, env=QUIET).data == []
 ```
 
-Arguments are keyed by field name, and the framework flags by theirs: `--confirm-destructive`
-is `"confirm_destructive": True`. `app.run(argv, stdout=..., stderr=...)` takes the argv
-path instead, which is how a test reaches a renderer.
+Arguments are keyed by field name, and the framework flags by theirs:
+`--confirm-destructive` is `"confirm_destructive": True`. `env=QUIET` is the whole
+environment of the call, with the audit log off, so a test run never lands in your real
+audit log. `app.run(argv, stdout=..., stderr=...)` takes the argv path instead, which is how
+a test reaches a renderer.
 
 **Check:** the new tests pass
 

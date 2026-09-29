@@ -83,22 +83,25 @@ Danger level is the column argparse never asked for. `safe` commands only read, 
 commands change state, and `destructive` commands remove something that cannot be restored.
 It decides which framework flags a command gets and whether it can run without confirmation.
 
-Look for names treaty keeps for itself. `--verbose`, `--quiet`, `--debug`, `--config`,
-`--format`, `--fields`, `--cwd`, and `-h` are framework flags on every command, so a field
-with one of those names is refused when the app is built. Every global flag is reserved the
-same way, including `--schema`, `--output-schema`, `--schema-version`, `--stable-output`,
-`--unmask`, and `--max-output`: a command's `--help` lists them under Global flags, so a
-`--schema FILE` option becomes `--schema-file`. Commands have the same rule: `manifest`,
-`version`, `exec`, `status`, `doctor`, `cleanup`, `completion`, `audit-log`,
-`generate-skills`, and `mcp-validate` are built in, and a command of yours with one of those
-names replaces the built-in, which the audit reports as `builtin-shadowed` advice. Some
-framework flags come with a feature: a command with `has_network_io=True` gets `--timeout`,
-`--proxy`, and `--no-proxy`, and a list command `--limit` and `--cursor`. A field of your
-own with one of those names is refused too, and the error says to drop it, since the
-framework's flag does the same job. The handler reads the time limit as
-`ctx.timeout.seconds`, and `timeout=5` on `@app.command` keeps an old default of 5 seconds,
-where treaty's is 60; a list handler reads its page as [Page long
-lists](../core/pagination.md) shows, or `paginated=False` keeps your own flags.
+Look for names treaty keeps for itself. Registration refuses a clash, so rename the option
+now; the audit never sees an app that does not build:
+
+- **On every command**: `--verbose`, `--quiet`, `--debug`, `--config`, `--format`,
+  `--fields`, `--cwd`, `-h`, and every global flag a command's `--help` lists, such as
+  `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the
+  framework's `--verbose`
+- **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`. Drop your own:
+  the handler reads the limit as `ctx.timeout.seconds`, and `timeout=5` on
+  `@app.command` keeps an old default of 5 seconds, where treaty's is 60
+- **On a command that returns a list**: `--limit` and `--cursor`, as [Page long
+  lists](../core/pagination.md) shows, or `paginated=False` to keep your own
+- **Commands**: `manifest`, `version`, and `exec` are refused as names; a command named
+  after another built-in (`status`, `doctor`, `cleanup`, `completion`, `audit-log`,
+  `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
+  advice
+- **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
+  `credential`, `auth`, or `cookie`, such as `author` or `keyword`, is a secret and takes
+  no value on the command line; `secret=False` keeps it a plain flag
 
 **Check:** every subparser has a row, and every `sys.exit`, `parser.error`, and `input()`
 call in the old code shows up in the "Fails when" or "Writes?" column

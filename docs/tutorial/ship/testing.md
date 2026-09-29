@@ -65,9 +65,9 @@ A behaviour test calls a command in-process with `app.call()`, the path `exec` a
 and reads the envelope: `exit_code`, `error.code`, `data`. No subprocess and no parsing of
 printed text, so a test runs in milliseconds and fails with the field that is wrong.
 `app.run(argv, stdout=..., stderr=...)` covers what `app.call` does not: the command line
-itself, renderers, and what reaches stderr. Give the calls an `env` with
-`TODO_AUDIT_LOG=off` and a scratch `TODO_STATE_DIR`, or each test run lands in your real
-audit log and idempotency records. `todo`'s behaviour tests are the four in
+itself, renderers, and what reaches stderr. The calls pass `env=QUIET`, which turns the
+audit log off, so a test run never lands in your real one; a test that passes an idempotency
+key also sets a scratch `TODO_STATE_DIR` in it. `todo`'s behaviour tests are the four in
 [`new_cli/test_cli.py`](../../../examples/tutorial/new_cli/test_cli.py).
 
 ## Step 2: Test the contract in every project

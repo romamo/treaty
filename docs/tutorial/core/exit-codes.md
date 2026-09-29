@@ -101,64 +101,7 @@ The last row matters too. A failure nobody can act on stays unhandled and ends a
 **Check:** every mutating and destructive command has at least one row, and every row
 names a different thing the caller does
 
-## Step 2: Make the failure leave nothing behind
-
-Before choosing `side_effects` for `STORE_UNWRITABLE`, look at what a failed write really
-does. `Path.write_text` truncates the file and then writes it; if the disk fills halfway,
-the item file is left half-written. That failure would have to be declared `partial`, and it
-loses data.
-
-Write to a sibling file and rename it over the old one instead. A rename is atomic, so the
-file is either the old version or the new one:
-
-<!-- file: examples/tutorial/todo_exit_codes.py -->
-```python
-    def save(self, items: Sequence[Item]) -> None:
-        # Write a sibling file, then rename it over the old one: a failure leaves the old
-        # file untouched, which is what lets STORE_UNWRITABLE declare side_effects "none"
-        partial = self.path.with_name(f".{self.path.name}.partial")
-        try:
-            partial.write_text(json.dumps([asdict(i) for i in items], indent=2))
-            partial.replace(self.path)
-        except OSError as exc:
-            partial.unlink(missing_ok=True)
-            missing = not self.path.parent.exists()
-            raise Exit.STORE_UNWRITABLE(
-                f"cannot write {self.path}: {exc.strerror}",
-                context={"path": str(self.path), "errno": exc.errno},
-                fix_required="the directory holding the item file must exist and be writable",
-                fix_command=f"mkdir -p {shlex.quote(str(self.path.parent))}" if missing else None,
-            ) from exc
-```
-
-`shlex` is new to the file: add `import shlex` at the top, beside `import json`.
-
-`side_effects` describes what the code guarantees, so the code has to make it true.
-Declaring `none` when a failure can leave half a file is worse than declaring nothing.
-
-In your own project, this behaviour shows once Steps 3 and 5 are done too: until Step 3
-registers `STORE_UNWRITABLE` and Step 5 declares it on the command, raising it is an error
-of its own, `UNDECLARED_EXIT_CODE`. The checks in this chapter run the finished file, so
-they pass at every step.
-
-**Check:** add an item, make the directory read-only, and add another. The run exits 80,
-the file still holds the first item, and no `.partial` file is left behind. The second
-`add` fails on purpose, so its output goes to a file and the directory is made writable
-again before anything is checked (run this as a normal user: root ignores the read-only bit)
-
-<!-- check -->
-```bash
-mkdir tmp/tutorial/ro
-todo add first --db tmp/tutorial/ro/todo.json | jq -e '.data.effect == "created"'
-chmod a-w tmp/tutorial/ro
-todo add second --db tmp/tutorial/ro/todo.json > tmp/tutorial/second.json || true
-chmod u+w tmp/tutorial/ro
-jq -e '.meta.exit_code == 80 and .error.code == "STORE_UNWRITABLE"' tmp/tutorial/second.json
-jq -e '[.[].text] == ["first"]' tmp/tutorial/ro/todo.json
-test "$(ls -A tmp/tutorial/ro)" = todo.json
-```
-
-## Step 3: Register the codes
+## Step 2: Register the codes
 
 <!-- file: examples/tutorial/todo_exit_codes.py -->
 ```python
@@ -192,63 +135,7 @@ Registration checks the rules:
 Once released, a number is part of your contract. Scripts and agents branch on `79`, so
 never renumber a code or reuse a retired number for something else.
 
-## Step 4: Raise with enough context to act on
-
-Every `Exit.NAME(...)` takes a message and a few optional fields. Fill in the ones the
-caller can use:
-
-| Field | Holds | todo example |
-| --- | --- | --- |
-| `message` | one line saying what failed | `tmp/bad.json is not a todo file` |
-| `context` | the facts, as values a program can read | `{"path": ..., "cause": ...}` |
-| `fix_required` | the condition the caller must fix before reissuing | `--db must name a todo file...` |
-| `fix_command` | one command that fixes it: runs as is, no placeholders, never destructive | `mkdir -p tmp/nodir` |
-| `suggestion` | the next step, phrased for an agent | `pass --db with another path...` |
-| `retry_after_ms` | how long to wait, on retryable codes only | |
-
-`fix_command` is the strongest hint an agent can get, so only set it when it is certain to
-help. `save` sets `mkdir -p` only when the directory is missing; a read-only directory has
-no safe one-command fix, so it gets `fix_required` alone.
-
-treaty checks every `fix_command` before it reaches the agent: one command, no `<`, `>`,
-`$`, pipes, or `;`, and never a destructive command of the tool. The program must be the
-tool itself or a companion, another program the app declares it may tell an agent to run.
-The todo app names `mkdir`:
-
-<!-- file: examples/tutorial/todo_exit_codes.py -->
-```python
-app = App("todo", version="1.0.0", description="Track todo items", companions=("mkdir",))
-```
-
-A fix that fails the check ends the run as `INVALID_EXIT` instead. A fix that is the same
-for every failure of a code can be declared once on the command, where treaty checks it at
-startup. `todo` has none, since its fixes depend on the path; a tool whose data has to be
-set up first might declare `fix_commands={"NOT_INITIALIZED": "mytool init"}`.
-
-Loading follows the same pattern. Catch the exceptions that mean "damaged file", and
-nothing wider:
-
-<!-- file: examples/tutorial/todo_exit_codes.py -->
-```python
-    def load(self) -> list[Item]:
-        if not self.path.exists():
-            return []
-        try:
-            return [Item(**raw) for raw in json.loads(self.path.read_text())]
-        except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
-            raise Exit.STORE_CORRUPT(
-                f"{self.path} is not a todo file",
-                context={"path": str(self.path), "cause": str(exc)},
-                fix_required="--db must name a todo file, or a path that does not exist yet",
-                suggestion="pass --db with another path; the damaged file is left as it is",
-            ) from exc
-```
-
-`TypeError` covers valid JSON of the wrong shape: an object where the list should be, or
-an item with missing or extra keys. A `PermissionError` on read is not caught and stays a
-crash, as Step 1 decided.
-
-## Step 5: Declare the codes on each command
+## Step 3: Declare the codes on each command
 
 A command may raise only the codes it lists in `exit_codes=`. The store is shared, so each
 command lists what its own path can reach:
@@ -273,6 +160,113 @@ Forgetting one does not fail silently. A handler that raises a code it did not d
 
 Mutating and destructive commands also get `CONFLICT` without declaring it, and every
 command gets `GENERAL_ERROR`, `ARG_ERROR`, `PRECONDITION`, and `TIMEOUT`.
+
+## Step 4: Raise with enough context to act on
+
+Every `Exit.NAME(...)` takes a message and a few optional fields. Fill in the ones the
+caller can use:
+
+| Field | Holds | todo example |
+| --- | --- | --- |
+| `message` | one line saying what failed | `tmp/bad.json is not a todo file` |
+| `context` | the facts, as values a program can read | `{"path": ..., "cause": ...}` |
+| `fix_required` | the condition the caller must fix before reissuing | `--db must name a todo file...` |
+| `fix_command` | one command that fixes it: runs as is, no placeholders, never destructive | `mkdir -p tmp/nodir` |
+| `suggestion` | the next step, phrased for an agent | `pass --db with another path...` |
+| `retry_after_ms` | how long to wait, on retryable codes only | |
+
+`fix_command` is the strongest hint an agent can get, so only set it when it is certain to
+help. `save`, in Step 5, sets `mkdir -p` only when the directory is missing; a read-only
+directory has no safe one-command fix, so it gets `fix_required` alone.
+
+treaty checks every `fix_command` before it reaches the agent: one command, no `<`, `>`,
+`$`, pipes, or `;`, and never a destructive command of the tool. The program must be the
+tool itself or a companion, another program the app declares it may tell an agent to run.
+The todo app names `mkdir`:
+
+<!-- file: examples/tutorial/todo_exit_codes.py -->
+```python
+app = App("todo", version="1.0.0", description="Track todo items", companions=("mkdir",))
+```
+
+A fix that fails the check ends the run as `INVALID_EXIT` instead. A fix that is the same
+for every failure of a code can be declared once on the command, where treaty checks it at
+startup. `todo` has none, since its fixes depend on the path; a tool whose data has to be
+set up first might declare `fix_commands={"NOT_INITIALIZED": "mytool init"}`.
+
+`load` raises `STORE_CORRUPT`. Catch the exceptions that mean "damaged file", and nothing wider:
+
+<!-- file: examples/tutorial/todo_exit_codes.py -->
+```python
+    def load(self) -> list[Item]:
+        if not self.path.exists():
+            return []
+        try:
+            return [Item(**raw) for raw in json.loads(self.path.read_text())]
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
+            raise Exit.STORE_CORRUPT(
+                f"{self.path} is not a todo file",
+                context={"path": str(self.path), "cause": str(exc)},
+                fix_required="--db must name a todo file, or a path that does not exist yet",
+                suggestion="pass --db with another path; the damaged file is left as it is",
+            ) from exc
+```
+
+`TypeError` covers valid JSON of the wrong shape: an object where the list should be, or
+an item with missing or extra keys. A `PermissionError` on read is not caught and stays a
+crash, as Step 1 decided.
+
+## Step 5: Make the failure leave nothing behind
+
+Step 2 registered `STORE_UNWRITABLE` with `side_effects="none"`: the file is left as it was.
+Make that true before `save` raises it. `Path.write_text` truncates the file and then writes
+it; if the disk fills halfway, the item file is left half-written, which would have to be
+declared `partial`, and loses data.
+
+Write to a sibling file and rename it over the old one instead. A rename is atomic, so the
+file is either the old version or the new one:
+
+<!-- file: examples/tutorial/todo_exit_codes.py -->
+```python
+    def save(self, items: Sequence[Item]) -> None:
+        # Write a sibling file, then rename it over the old one: a failure leaves the old
+        # file untouched, which is what lets STORE_UNWRITABLE declare side_effects "none"
+        partial = self.path.with_name(f".{self.path.name}.partial")
+        try:
+            partial.write_text(json.dumps([asdict(i) for i in items], indent=2))
+            partial.replace(self.path)
+        except OSError as exc:
+            partial.unlink(missing_ok=True)
+            missing = not self.path.parent.exists()
+            raise Exit.STORE_UNWRITABLE(
+                f"cannot write {self.path}: {exc.strerror}",
+                context={"path": str(self.path), "errno": exc.errno},
+                fix_required="the directory holding the item file must exist and be writable",
+                fix_command=f"mkdir -p {shlex.quote(str(self.path.parent))}" if missing else None,
+            ) from exc
+```
+
+`shlex` is new to the file: add `import shlex` at the top, beside `import json`.
+
+`side_effects` describes what the code guarantees, so the code has to make it true.
+Declaring `none` when a failure can leave half a file is worse than declaring nothing.
+
+**Check:** add an item, make the directory read-only, and add another. The run exits 80,
+the file still holds the first item, and no `.partial` file is left behind. The second
+`add` fails on purpose, so its output goes to a file and the directory is made writable
+again before anything is checked (run this as a normal user: root ignores the read-only bit)
+
+<!-- check -->
+```bash
+mkdir tmp/tutorial/ro
+todo add first --db tmp/tutorial/ro/todo.json | jq -e '.data.effect == "created"'
+chmod a-w tmp/tutorial/ro
+todo add second --db tmp/tutorial/ro/todo.json > tmp/tutorial/second.json || true
+chmod u+w tmp/tutorial/ro
+jq -e '.meta.exit_code == 80 and .error.code == "STORE_UNWRITABLE"' tmp/tutorial/second.json
+jq -e '[.[].text] == ["first"]' tmp/tutorial/ro/todo.json
+test "$(ls -A tmp/tutorial/ro)" = todo.json
+```
 
 **Check:** the damaged file from [Where todo stands](#where-todo-stands) is now
 `STORE_CORRUPT` and left as it was, a missing directory gets its `fix_command`, and the
@@ -321,9 +315,10 @@ For `todo` it exits 0, as it does for this chapter's file,
 `examples.tutorial.todo_exit_codes:app`, in a treaty checkout. The audit still lists two
 pieces of advice for `add`, which `todo` leaves on purpose; [the
 index](../index.md#advice-you-can-leave) says why. A migrated project also sees `profile`
-advice until [Run the conformance kit](../ship/conformance.md) writes its profile. If you
-marked `test_the_strict_audit_passes` as `xfail` in [Describe every command](describe.md),
-remove the mark now: the test passes from here on.
+advice until [Run the conformance kit](../ship/conformance.md) writes its profile. Copy
+[`new_cli/test_contract.py`](../../../examples/tutorial/new_cli/test_contract.py) into your
+tests now, as [Describe every command](describe.md) suggests: its strict-audit test passes
+from here on.
 
 The audit's next rule is `typed-output`, which checks that every command's result has a
 schema an agent can read: [Type every command's output](typed-output.md). Each core chapter

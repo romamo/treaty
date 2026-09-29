@@ -84,22 +84,9 @@ jq -e '.data.commands | has("done") and (.list.flags | has("all"))' tmp/tutorial
 
 ## Step 2: Rename a command behind a redirect
 
-In your project, 1.1.0 is one set of edits, which this step and the next explain;
-[`todo_v2.py`](../../../examples/tutorial/todo_v2.py) has them all:
-
-- `App(version="1.1.0")`
-- `done` renamed `complete`, with its example: `todo complete 3`
-- `app.redirect("done", to="complete")` at module level
-- `list` gains `--include-done`, its handler honours either flag, `--all` is deprecated, and
-  its example uses the new flag
-- your tests call the new names: `app.call("complete", ...)` and `{"include_done": True}`;
-  an `app.call("done", ...)` answers `REDIRECTED`, as an agent's would
-- the MCP client test from [Serve commands over MCP](mcp.md#step-6-test-through-a-real-client)
-  calls `complete`, and its expected tool list has `complete` in place of `done`, plus
-  `changelog` if you take Step 5
-- AGENTS.md, the skills, and the MCP tool list regenerated, as [Ship the agent
-  docs](agent-docs.md) shows
-- the conformance profile replaced with `treaty conformance todo.cli:app --force`, since the profile records the version, and `list`'s new example changes its probe; commit it with the rest
+1.1.0 renames `done` to `complete` and deprecates `list --all`;
+[`todo_v2.py`](../../../examples/tutorial/todo_v2.py) is the result, and [Step
+6](#step-6-gate-the-release) lists every edit the release takes in a project.
 
 1.1.0 calls the command `complete`. The old name keeps answering, with one line at module
 level, after the renamed command's definition (the redirect refuses a target that is not
@@ -277,8 +264,26 @@ uv run treaty audit myapp.cli:app --baseline myapp-1.0.0.json --strict     # not
 With `treaty-schema.lock` committed, the first line also runs `schema-version` against it.
 At each release, save the new manifest as the next baseline, run `treaty schema-lock` if an
 output changed, regenerate the agent docs from [Ship the agent docs](agent-docs.md), and
-replace the conformance profile with `--force` when the commands' examples changed, so every
-file an agent reads names the new commands.
+replace the conformance profile with `--force`, which records the version, so every file an
+agent reads names the new release.
+
+In your project, 1.1.0 is one set of edits, which Steps 2 to 5 explain:
+
+- `App(version="1.1.0")`
+- `done` renamed `complete`, with its example: `todo complete 3`
+- `app.redirect("done", to="complete")` at module level
+- `list` gains `--include-done`, its handler honours either flag, `--all` is deprecated, and
+  its example uses the new flag
+- your tests call the new names: `app.call("complete", ...)` and `{"include_done": True}`;
+  an `app.call("done", ...)` answers `REDIRECTED`, as an agent's would
+- the MCP client test from [Serve commands over MCP](mcp.md#step-6-test-through-a-real-client)
+  calls `complete`, and its expected tool list has `complete` in place of `done`, plus
+  `changelog` if you take Step 5
+- AGENTS.md, the skills, and the MCP tool list regenerated, as [Ship the agent
+  docs](agent-docs.md) shows
+- the conformance profile replaced with `treaty conformance todo.cli:app --force`, since
+  the profile records the version, and `list`'s new example changes its probe; commit it
+  with the rest
 
 ## Next
 

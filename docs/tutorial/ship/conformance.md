@@ -107,17 +107,9 @@ HOME="$here/.sandbox" exec "$here/../../../.venv/bin/python" "$here/../todo_exit
 That one runs the example file from this repository, so do not copy it; your project's
 launcher, below, runs your installed command instead.
 
-Point the sandbox at whatever your CLI touches: an environment variable for a config file, a
-test account's credentials, a mock server's URL. A CLI that calls an API needs that server
-running for the whole kit run: start a fake one (the `http.server` fixture from [Declare
-network commands](../core/network-io.md) works as a script too) before `treaty conformance
---run`, and point the launcher's environment at it. When a probe names something that must
-exist, such as a destructive command's example `restore 3`, have the launcher seed the
-sandbox with it before running the CLI; otherwise the dry run fails with your not-found code
-instead of previewing. A project made with `treaty init` already has a launcher,
-`conformance/todo`, without a sandbox; a migrated project has none, so create it. Give it a
-sandbox as soon as a command reads or writes real state; for `todo`, two lines give it its
-own `HOME`:
+A project made with `treaty init` already has a launcher, `conformance/todo`, without a
+sandbox; a migrated project has none, so create one. Give it a sandbox as soon as a command
+reads or writes real state; for `todo`, two lines give it its own `HOME`:
 
 ```sh
 #!/bin/sh
@@ -126,22 +118,32 @@ mkdir -p "$here/.sandbox"
 HOME="$here/.sandbox" exec "$here/../.venv/bin/todo" "$@"
 ```
 
-`HOME` covers `todo`'s item file. An app with settings also reads its `TODO_*` variables
-and `XDG_CONFIG_HOME`, so a launcher for one clears those too, with `env -u`, or the kit
-reads the settings of the shell that started it.
-
 Save it next to the profile, named after the app (`conformance/todo`), and make it
 executable (`chmod +x`). `treaty conformance` finds it there and writes
 `"command": ["./todo"]` into the profile. Add `.sandbox/` to `.gitignore`, creating the file
 if the project has none.
 
-Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`: the
-kit then runs your real command against your real data, with no sandbox. Under `uv run`,
-`PATH` starts with the project's own environment, so the kit finds your `todo` there and
-runs it unsandboxed; only a command found nowhere exits 4, with the kit's `INVALID_PROFILE`
-in `context.kit_error`. On Windows, where the `/bin/sh` launcher cannot run, treaty uses the
-app's console script in the current environment instead. Either way, `--command` names an
-executable of your own.
+### Beyond `HOME`
+
+Point the sandbox at whatever else your CLI touches:
+
+- **Settings**: an app with settings also reads its `TODO_*` variables and
+  `XDG_CONFIG_HOME`, so its launcher clears them with `env -u`, or the kit reads the
+  settings of the shell that started it
+- **An API**: a CLI that calls one needs a server running for the whole kit run; start a
+  fake one (the `http.server` fixture from [Declare network
+  commands](../core/network-io.md) works as a script too) before `--run`, and point the
+  launcher's environment at it
+- **Things a probe names**: when a probe needs something to exist, such as a destructive
+  command's example `restore 3`, the launcher seeds the sandbox with it; otherwise the dry
+  run fails with your not-found code instead of previewing
+
+Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`. Under
+`uv run`, `PATH` starts with the project's environment, so the kit finds your `todo` there
+and runs it against your real data, with no sandbox; only a command found nowhere exits 4,
+with the kit's `INVALID_PROFILE` in `context.kit_error`. On Windows, where the `/bin/sh`
+launcher cannot run, treaty uses the app's console script in the current environment
+instead. Either way, `--command` names an executable of your own.
 
 **Check:** the launcher runs the CLI against the sandbox, which holds no items: probes never
 run a mutating command, and the destructive probe is only ever previewed or refused
@@ -174,7 +176,9 @@ The run stops with exit 6, `CONFLICT`, whenever the commands changed since the p
 written: in a project made with `treaty init`, whose profile is for the scaffold's commands
 until [Start a new CLI](../A-new/start.md#step-9-rewrite-the-conformance-profile) Step 9
 replaces it, and after any chapter that added a network command or changed the commands or
-first examples the probes come from. Replace it, then run the kit:
+first examples the probes come from. treaty never overwrites a profile silently, since one
+may hold probes someone wrote by hand; `CONFLICT` names the probes that changed, and a
+profile that already matches is left as it is. Replace it, then run the kit:
 
 ```bash
 uv run treaty conformance todo.cli:app --force
@@ -185,12 +189,6 @@ Without `--run`, it only writes the profile. treaty derives the profile from the
 commands and their examples, so change those rather than the file. A command with required
 arguments and no example gets no probe at all, which is one more reason the audit asks for
 examples.
-
-treaty never overwrites a profile silently. When the commands change, the next run finds that
-the profile on disk differs from the one it would write and stops with exit 6, `CONFLICT`,
-naming the probes that changed, since a differing profile may hold probes someone wrote by
-hand. Pass `--force` to replace it with the generated one. A profile that already matches is
-left as it is.
 
 If you need probes treaty cannot derive, such as a bad enum value, keep them in a profile of
 your own, beside the generated one, and run the kit on it directly, as the README's

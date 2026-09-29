@@ -199,19 +199,13 @@ def test_an_example_parses(cli_app: App, example: str) -> None:
     assert code == 0, out.getvalue()
 ```
 
-The tutorial checks every version of `todo` it ships. For your own project, the same test,
-with its imports and `from todo.cli import app`, is in
-[`new_cli/test_contract.py`](../../../examples/tutorial/new_cli/test_contract.py): copy that
-file into `tests/` and change the import to your app, as [Test the contract and gate
-CI](../ship/testing.md#step-2-test-the-contract-in-every-project) describes. Its
-`test_the_strict_audit_passes` fails until [Declare exit codes](exit-codes.md) clears the
-audit's last warnings, so to keep `uv run pytest` green, copy the file at the end of that
-chapter instead, or mark that one test `@pytest.mark.xfail` until then. `app.builtins` is
-the set of commands treaty adds to every app, whose own examples are treaty's to keep;
-`path.value` is a command's name as the manifest keys it, such as `add`; and `env={}` runs
-each example with no environment variables, so none of yours can change the result. The test
-calls `app.run` with the parsed words, so no shell ever runs an example; an example that
-uses a pipe or a redirect belongs in prose, not in `examples=`.
+The audit makes the same check: an example that does not pass `--validate-only` is a
+`describe` error, so `--strict` fails on it. The test keeps it in `uv run pytest`, beside
+your other tests. In your project, copy
+[`new_cli/test_contract.py`](../../../examples/tutorial/new_cli/test_contract.py), which
+holds it with its imports, at the end of [Declare exit codes](exit-codes.md): its
+strict-audit test passes from there on. `env={}` keeps your variables out of the result, and
+since no shell runs an example, a pipe or a redirect belongs in prose, not in `examples=`.
 
 **Check:** a renamed flag and a leftover placeholder both fail validation, and `todo`'s own
 examples pass the test
