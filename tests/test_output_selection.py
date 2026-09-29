@@ -434,9 +434,12 @@ HEARTBEAT = re.compile(r"\[(\d+)s\] (.+)")
 
 
 def test_heartbeat_interval_causes_a_progress_message_to_stderr_every_interval() -> None:
+    started = time.monotonic()
     code, _, err = run(["migrate", "--seconds", "0.6", "--heartbeat-interval", "0.1"])
+    elapsed = time.monotonic() - started
     beats = [line for line in err.splitlines() if HEARTBEAT.fullmatch(line)]
-    assert code == 0 and 3 <= len(beats) <= 7
+    # A slow runner stretches the run, so the ceiling is one beat per interval it really took
+    assert code == 0 and 3 <= len(beats) <= elapsed / 0.1 + 1
 
 
 def test_the_heartbeat_message_includes_elapsed_time_and_the_most_recent_progress_status() -> None:
