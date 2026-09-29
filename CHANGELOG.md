@@ -130,6 +130,9 @@ Apps built on treaty keep their own, structured schema changelog with
 - `--debug` traced a `ctx.http` request only once it was answered, so a refused
   connection, an unknown host, or a timeout left no line; each now has its `http request`
   line with the failure's code in `error` instead of a `status`
+- The `THIRD_PARTY_STDOUT` warning said the stray text went to stderr, but off a terminal
+  and without `--verbose` it is written nowhere else; the message now says the text is
+  in the warning instead
 
 ## [1.0.0rc2] - 2026-09-28
 

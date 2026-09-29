@@ -686,7 +686,7 @@ def test_the_intercepted_string_appears_as_a_warning_with_its_text() -> None:
     assert stray(envelope) == [
         {
             "code": "THIRD_PARTY_STDOUT",
-            "message": "Third-party code wrote to stdout; the text went to stderr",
+            "message": "Third-party code wrote to stdout; the text is in this warning instead",
             # bytes counts what reached descriptor 1: print ends lines with \r\n on Windows
             "context": {"text": "initialized", "bytes": len("initialized" + os.linesep)},
         }

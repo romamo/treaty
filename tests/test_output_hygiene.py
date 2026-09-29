@@ -76,7 +76,7 @@ def test_print_in_a_handler_goes_to_stderr_with_a_warning() -> None:
     assert env["warnings"] == [
         {
             "code": "THIRD_PARTY_STDOUT",
-            "message": "Third-party code wrote to stdout; the text went to stderr",
+            "message": "Third-party code wrote to stdout; the text is in this warning instead",
             "context": {"text": "initialized", "bytes": len("initialized\n")},
         }
     ]

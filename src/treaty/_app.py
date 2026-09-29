@@ -2292,7 +2292,7 @@ class _Run:
         if written and text.strip():
             warning = WarningDetail(
                 "THIRD_PARTY_STDOUT",
-                "Third-party code wrote to stdout; the text went to stderr",
+                "Third-party code wrote to stdout; the text is in this warning instead",
                 context={"text": self._redact_now(text.rstrip("\r\n")), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
