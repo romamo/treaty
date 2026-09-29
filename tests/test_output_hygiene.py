@@ -399,3 +399,12 @@ def test_a_run_nested_in_a_handler_gives_back_the_outer_swap() -> None:
     out = io.StringIO()
     app.run(["outer", "--format", "json"], stdout=out, stderr=io.StringIO(), env={})
     assert json.loads(out.getvalue())["data"] == {"kept": True} and sys.stdout is before
+
+
+def test_a_message_that_starts_with_a_path_keeps_its_case() -> None:
+    from treaty._envelope import sentence
+
+    assert sentence("no item #9") == "No item #9."
+    assert sentence("out.json exists") == "out.json exists."
+    assert sentence("tmp/todo.json is not a todo file") == "tmp/todo.json is not a todo file."
+    assert sentence("sort_key names no field") == "sort_key names no field."

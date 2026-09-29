@@ -235,10 +235,12 @@ def test_manifest_shows_safe_default_and_live_and_validates() -> None:
     assert not list(validator.iter_errors(manifest))
 
 
-def test_conformance_probe_for_safe_default_uses_live() -> None:
+def test_conformance_probe_for_safe_default_is_the_preview() -> None:
+    """--live alone applies, so a destructive probe with it would change real data and
+    could never be refused; the bare call previews, a read"""
     probes = {p.name: p for p in probes_for(make_app(safe_default=True))}
-    assert probes["purge"].argv == ("purge", "logs", "--live")
-    assert probes["purge"].kind == "destructive"
+    assert probes["purge"].argv == ("purge", "logs")
+    assert probes["purge"].kind == "read"
 
 
 # REQ-C-012: the network-timeout audit rule

@@ -73,11 +73,12 @@ def probes_for(app: App) -> list[Probe]:
         if command.recursive_traversal:
             # REQ-O-040: a walk of no levels is not a limit
             probes.append(Probe(f"{label} --max-depth 0", (*argv, "--max-depth", "0"), "invalid"))
-        if command.danger_level is DangerLevel.DESTRUCTIVE:
-            # A safe_default command previews and exits 0 on its own; --live is what the
-            # confirmation gate refuses
-            live = ("--live",) if command.safe_default else ()
-            probes.append(Probe(label, (*argv, *live), "destructive", dry_run_flag="--dry-run"))
+        if command.danger_level is DangerLevel.DESTRUCTIVE and command.safe_default:
+            # Unconfirmed, a safe_default command previews and exits 0, and --live alone is
+            # its confirmation: nothing refuses, so it is probed as the read its default is
+            probes.append(Probe(label, argv, "read"))
+        elif command.danger_level is DangerLevel.DESTRUCTIVE:
+            probes.append(Probe(label, argv, "destructive", dry_run_flag="--dry-run"))
         elif command.danger_level is DangerLevel.SAFE:
             probes.append(Probe(label, argv, "read"))
     probes.append(Probe("version", ("version",), "read"))

@@ -63,11 +63,14 @@ def clean(value: object) -> object:
 
 
 def sentence(text: str) -> str:
-    """An error message as a complete sentence (REQ-C-013): a lowercase first letter is
-    capitalized and closing punctuation is added when missing. Escapes go first, so a
-    colored message is judged by its text."""
+    """An error message as a complete sentence (REQ-C-013): a lowercase first word is
+    capitalized and closing punctuation is added when missing. A first word that is a path,
+    a file name, or an identifier (``out.json``, ``tmp/x``, ``sort_key``) keeps its case,
+    since capitalizing it names another file. Escapes go first, so a colored message is
+    judged by its text."""
     text = _ESCAPES.sub("", text).strip()
-    if text[:1].islower():
+    first = text.split(maxsplit=1)[0] if text else ""
+    if text[:1].islower() and first.replace("'", "").isalpha():
         text = text[0].upper() + text[1:]
     if text and text[-1] not in ".!?":
         text += "."

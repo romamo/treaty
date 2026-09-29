@@ -70,6 +70,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- The conformance profile probed a `safe_default` command as destructive with `--live`,
+  which alone applies it: the kit applied the change against the sandbox and failed L2
+  when nothing refused. Such a command is now probed as the read its default is
+- An error message that began with a path or file name was capitalized into another
+  name, such as `Out.json exists.`; a first word that is not a plain word keeps its case
 - A compat shape's schema lacked the `noop` a replayed idempotency key answers, so a
   replay under `schema_version` failed an MCP client's check; an MCP redirect now names
   the tool to call, not the command path; a streaming command with compat shapes lists
