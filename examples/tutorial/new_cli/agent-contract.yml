@@ -27,7 +27,7 @@ jobs:
       - name: Agent docs are up to date
         run: |
           uv run treaty agents-md todo.cli:app
-          uv run todo generate-skills --output-dir skills
+          rm -rf skills && uv run todo generate-skills --output-dir skills
           uv run treaty-mcp todo.cli:app --list-tools > mcp-tools.json
           git diff --exit-code AGENTS.md skills mcp-tools.json
           uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json

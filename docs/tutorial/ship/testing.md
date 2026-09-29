@@ -38,7 +38,10 @@ uv sync -q
 uv run treaty agents-md todo.cli:app > /dev/null
 ```
 
-Each check exits non-zero when it fails.
+Each check exits non-zero when it fails. `--treaty-source "$PWD"` makes the project depend
+on this checkout, so the checks test the treaty they run in; it writes an absolute path into
+`pyproject.toml` that only works on this machine. Your own project, made with
+`uvx treaty init todo`, depends on the released treaty and has no such path.
 
 ## What to test
 
@@ -135,7 +138,7 @@ The CI job runs the suite and the gates that need more than a test run:
       - name: Agent docs are up to date
         run: |
           uv run treaty agents-md todo.cli:app
-          uv run todo generate-skills --output-dir skills
+          rm -rf skills && uv run todo generate-skills --output-dir skills
           uv run treaty-mcp todo.cli:app --list-tools > mcp-tools.json
           git diff --exit-code AGENTS.md skills mcp-tools.json
           uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json
@@ -160,7 +163,11 @@ adds the checkout and setup around them. Save it as `.github/workflows/agent-con
   new manifest as the next baseline, as
   [Change the contract safely](stability.md#step-1-keep-the-last-releases-manifest) describes
 - **`treaty agents-md`** is a treaty command that reads the app, while **`generate-skills`**
-  is a built-in of every treaty app, so it runs as `todo generate-skills`
+  is a built-in of every treaty app, so it runs as `todo generate-skills`. It never deletes a
+  skill file, so the job removes `skills` first: a renamed command's old file would
+  otherwise stay and pass the diff
+- **The conformance step** clones the spec repository, so the job needs network access to
+  GitHub
 
 Give the conformance kit's launcher a sandbox before the job runs it on anything that holds
 real data, as [Run the conformance kit](conformance.md#step-2-keep-the-probes-away-from-real-data)

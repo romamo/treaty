@@ -78,8 +78,9 @@ uv run treaty-mcp examples.tutorial.todo_exit_codes:app --list-tools | jq -e '
   `idempotency_key`
 - **The input schema** is the arguments dataclass, plus the framework keys the command
   takes: `idempotency_key` on mutating commands, `confirm_destructive` on destructive ones,
-  `timeout` where `--timeout` exists. `add` takes `text` (required), `priority` (an enum of
-  `low`, `normal`, `high`), `db`, and `idempotency_key`
+  `timeout` where `--timeout` exists, and `fields`, `stable_output`, and `validate_only` on
+  every command. `add` takes `text` (required), `priority` (an enum of `low`, `normal`,
+  `high`), and `db`, plus `idempotency_key` and the three every command has
 - **The output schema** is the response envelope with the command's `output_schema` as
   `data`
 
@@ -191,6 +192,12 @@ launcher's sandbox, and `PYTHONPATH` lets the server import the example app from
 repository; in your project, where the app is installed, it is not needed. The rest of
 [`test_todo_over_mcp`](../../../tests/test_tutorial.py) lists the tools, replays an
 idempotency key, previews and confirms `purge`, and checks where a relative path lands.
+
+In your project, copy `test_todo_over_mcp` into `tests/`, with its imports from the top of
+`test_tutorial.py`. Change the app path to `todo.cli:app` and drop `PYTHONPATH`. Every call
+already passes `db` under the test's `tmp_path`, so the test never touches your real item
+file; keep it that way for your own commands. The test needs the `mcp` extra, which Step 1
+added.
 
 **Check:** the chapter's **Done when** command
 

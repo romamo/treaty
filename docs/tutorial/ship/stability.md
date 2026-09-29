@@ -53,7 +53,7 @@ follows three rules:
 The manifest is the contract, so keep a copy of it with every release:
 
 ```bash
-todo manifest > todo-1.0.0.json    # when you release 1.0.0, committed beside the code
+uv run todo manifest > todo-1.0.0.json    # when you release 1.0.0, committed beside the code
 ```
 
 If a release is already out and you kept no copy, make one from its tag, beside your
@@ -76,6 +76,18 @@ jq -e '.data.commands | has("done") and (.list.flags | has("all"))' tmp/tutorial
 ```
 
 ## Step 2: Rename a command behind a redirect
+
+In your project, 1.1.0 is one set of edits, which this step and the next explain;
+[`todo_v2.py`](../../../examples/tutorial/todo_v2.py) has them all:
+
+- `App(version="1.1.0")`
+- `done` renamed `complete`, with its example: `todo complete 3`
+- `app.redirect("done", to="complete")` at module level
+- `list` gains `--include-done`, its handler honours either flag, `--all` is deprecated, and
+  its example uses the new flag
+- your tests call the new names: `app.call("complete", ...)` and `{"include_done": True}`;
+  an `app.call("done", ...)` answers `REDIRECTED`, as an agent's would
+- AGENTS.md and the skills regenerated, as [Ship the agent docs](agent-docs.md) shows
 
 1.1.0 calls the command `complete`. The old name keeps answering, with one line at module
 level:
@@ -103,7 +115,9 @@ todo manifest | jq -e '.data.commands.complete.aliases == ["done"]'
 `treaty audit --baseline` holds you to it. Its `additive` rule compares the app with the
 baseline manifest and reports, as an `error`, every command, flag, and exit code that is
 gone without a redirect or a release that deprecated it, unless the major version went up.
-Without the redirect line, 1.1.0 fails:
+Without the redirect line, 1.1.0 fails. To see it in your project, comment out the
+`app.redirect` line and run `uv run treaty audit todo.cli:app --baseline todo-1.0.0.json`;
+the check below does the same to a copy:
 
 **Check:** 1.1.0 passes against the baseline; the same code without the redirect has an
 `additive` error for `done`
@@ -189,15 +203,57 @@ into its own directory: a real project runs the same commands from its root.
 
 ## Step 5: Write it down for agents
 
-`App(schema_changelog=Path(__file__).parent / "schema-changelog.json")` gives the app a
-`changelog` command, which lists each version's added, removed, and changed fields and
-whether it breaks callers, and `--since 1.0.0` keeps the newer ones. `treaty changelog-add
-myapp.cli:app` writes the next entry. It keeps a snapshot of the manifest,
-`<app>.manifest.json`, beside the changelog file, diffs the live manifest against it, then
-updates the snapshot, so each entry holds what changed since the one before. An agent that
-learned 1.0.0 then asks the tool itself what changed, instead of failing into it. The README
-describes the file's format under Schema changelog, in [Response
-meta](../../../README.md#response-meta).
+This step is optional: the redirect, the deprecation warning, and the manifest already tell
+an agent what moved. A schema changelog also lets it ask what changed since the release it
+learned, instead of failing into each change.
+
+Pass the file to the `App` you already have:
+
+```python
+app = App(
+    "todo",
+    version="1.1.0",
+    description="Track todo items",
+    companions=("mkdir",),
+    schema_changelog=Path(__file__).parent / "schema-changelog.json",
+)
+```
+
+That gives the app a `changelog` command, which lists each version's added, removed, and
+changed fields and whether it breaks callers; `--since 1.0.0` keeps the newer ones.
+`treaty changelog-add myapp.cli:app` writes the next entry. It keeps a snapshot of the
+manifest, `<app>.manifest.json`, beside the changelog file, diffs the live manifest against
+it, then updates the snapshot, so each entry holds what changed since the one before.
+
+With no snapshot, the first entry lists every command as added. Seed the snapshot with the
+last release's manifest from Step 1, so the first entry holds only this release's changes:
+
+```bash
+cp todo-1.0.0.json src/todo/todo.manifest.json   # beside schema-changelog.json
+uv run treaty changelog-add todo.cli:app
+```
+
+Run `changelog-add` once per release, after the last contract change. The entry for 1.1.0
+lists `complete`, `list.flags.include-done`, and `changelog` itself as added, and `done` as
+removed. It is marked `breaking`: a call to `done` now exits 13 instead of completing the
+item, even though the redirect says what to run instead. The README describes the file's
+format under Schema changelog, in [Response meta](../../../README.md#response-meta).
+
+**Check:** seeded with the 1.0.0 manifest, the 1.1.0 entry records the rename and the new
+flag, and the `changelog` command serves it
+
+<!-- check -->
+```bash
+mkdir -p tmp/tutorial/changelog
+perl -pe 's|companions=\("mkdir",\)\)$|companions=("mkdir",), schema_changelog=Path(__file__).parent / "schema-changelog.json")|' \
+  examples/tutorial/todo_v2.py > tmp/tutorial/changelog/todo.py
+cp tmp/tutorial/todo-1.0.0.json tmp/tutorial/changelog/todo.manifest.json
+uv run treaty changelog-add todo:app --cwd tmp/tutorial/changelog | jq -e '.data.entry
+  | .version == "1.1.0" and .breaking and (.removed | index("done")) != null
+  and (.added | index("list.flags.include-done")) != null'
+uv run tmp/tutorial/changelog/todo.py changelog --since 1.0.0 \
+  | jq -e '[.data.entries[].version] == ["1.1.0"]'
+```
 
 ## Step 6: Gate the release
 

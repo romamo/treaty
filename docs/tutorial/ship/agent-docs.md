@@ -59,8 +59,9 @@ parts:
 
 - **`<!-- cli-version: 1.0.0 -->`** on the first line: the version the file describes,
   which `check-docs` compares with `todo --version`
-- **`## Installation`**: a guess from the app's name, `uv tool install todo`. It is written
-  once and then left alone, so replace it with how your CLI is really installed
+- **`## Installation`**: a guess, `uv tool install todo` from the app's name, or
+  `uv tool install .` in a project made with `treaty init`. It is written once and then left
+  alone, so replace it with how your CLI is really installed
 - **The generated sections** between `<!-- treaty:begin -->` and `<!-- treaty:end -->`:
   Canonical Invocation (every command with its description), Non-Interactive Flags (the
   flags that stand in for prompts, such as `--confirm-destructive` on `purge`),
@@ -157,10 +158,11 @@ uv run treaty check-docs examples.tutorial.todo_exit_codes:app tmp/tutorial/drif
 
 ## Step 4: Generate the skill files
 
-Every treaty app has a `generate-skills` built-in:
+Every treaty app has a `generate-skills` built-in. In your project, run it, like every
+other `todo` command in this chapter, through uv:
 
 ```bash
-todo generate-skills --output-dir skills
+uv run todo generate-skills --output-dir skills
 ```
 
 It writes `CONTEXT.md`, an overview of the tool with its commands, danger levels, and exit
@@ -210,7 +212,7 @@ uv run treaty-mcp myapp.cli:app --list-tools > mcp-tools.json
 `mcp-validate`, another built-in, compares a saved list with the current commands:
 
 ```bash
-todo mcp-validate --mcp-schema-file mcp-tools.json
+uv run todo mcp-validate --mcp-schema-file mcp-tools.json
 ```
 
 It reports tools missing from the file, tools the file has that the app no longer serves,
@@ -245,10 +247,14 @@ uv run treaty check-docs myapp.cli:app AGENTS.md skills mcp-tools.json
 uv run myapp mcp-validate --mcp-schema-file mcp-tools.json
 
 uv run treaty agents-md myapp.cli:app
-uv run myapp generate-skills --output-dir skills
+rm -rf skills && uv run myapp generate-skills --output-dir skills
 uv run treaty-mcp myapp.cli:app --list-tools > mcp-tools.json
 git diff --exit-code AGENTS.md skills mcp-tools.json
 ```
+
+`generate-skills` writes a file per command and never deletes one, so the `rm -rf skills`
+first: after a rename, the old command's skill file would stay behind and still pass the
+diff.
 
 A project made with `treaty init` already has the first of these as a test,
 `tests/test_agents_md.py`, so `uv run pytest` fails as soon as AGENTS.md drifts; the

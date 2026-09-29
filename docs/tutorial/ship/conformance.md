@@ -138,6 +138,17 @@ Levels: level_1 pass, level_2 pass, level_3 pass
   pass  L3 argument_order
 ```
 
+The probe count is `todo`'s; yours follows your commands and examples.
+
+In a project made with `treaty init`, the first run stops with exit 6, `CONFLICT`: `init`
+wrote a profile for the scaffold's commands, and yours have replaced them. Replace it once,
+then run the kit:
+
+```bash
+uv run treaty conformance todo.cli:app --force
+uv run treaty conformance todo.cli:app --run
+```
+
 Without `--run`, it only writes the profile. treaty derives the profile from the current
 commands and their examples, so change those rather than the file. A command with required
 arguments and no example gets no probe at all, which is one more reason the audit asks for
