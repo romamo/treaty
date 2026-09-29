@@ -16,7 +16,7 @@ import subprocess
 import sys
 import textwrap
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 
@@ -90,8 +90,7 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
 
     def reads(*nodes: ast.expr) -> tuple[str, ...]:
         """The fields ``nodes`` read, directly or through a local that holds one"""
-        names = (n.id for node in nodes for n in ast.walk(node) if isinstance(n, ast.Name))
-        through = (f for name in names for f in carried.get(name, ()))
+        through = (f for node in nodes for f in _through(node, carried))
         return tuple(dict.fromkeys((*_reads(params[0], *nodes), *through)))
 
     calls: list[CtxCall] = []
@@ -176,9 +175,7 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
     while changed:
         changed = False
         for name, value in assigned:
-            through = (
-                f for n in ast.walk(value) if isinstance(n, ast.Name) for f in carried.get(n.id, ())
-            )
+            through = _through(value, carried)
             fields = tuple(
                 dict.fromkeys((*carried.get(name, ()), *_reads(args_name, value), *through))
             )
@@ -186,6 +183,27 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
                 carried[name] = fields
                 changed = True
     return {k: v for k, v in carried.items() if v}
+
+
+def _through(node: ast.expr, carried: Mapping[str, tuple[str, ...]]) -> list[str]:
+    """The fields ``node`` reads through locals: what each local it names carries, and,
+    for a local that holds the arguments object whole (``clean = replace(args, ...)``), the
+    field a ``clean.ref`` reads rather than every field"""
+    whole = {name for name, fields in carried.items() if EVERY_FIELD in fields}
+    read_by_field = {
+        id(n.value): n.attr
+        for n in ast.walk(node)
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in whole
+    }
+    found: list[str] = []
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Name):
+            continue
+        if id(n) in read_by_field:
+            found.append(read_by_field[id(n)])
+        else:
+            found.extend(carried.get(n.id, ()))
+    return found
 
 
 _FILLS = frozenset({"append", "extend", "insert", "add", "update", "setdefault"})

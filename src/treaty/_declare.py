@@ -88,8 +88,10 @@ def derive_subprocess(calls: Sequence[CtxCall], fields: Sequence[FieldInfo]) -> 
         for item in rest:
             if item.literal is not None:
                 hardcoded[item.literal] = None
-            if EVERY_FIELD in item.fields:
-                return None  # the arguments object passed whole: which fields reach it is unknown
+            if EVERY_FIELD in item.fields or any(f not in names for f in item.fields):
+                # The arguments object passed whole, or a method or property of it such as
+                # args.argv(): which fields reach the program is unknown
+                return None
             # A local that holds a field's value carries it (ctx_calls follows it there)
             user.update(dict.fromkeys(f for f in item.fields if f in names))
     if len(binaries) != 1:

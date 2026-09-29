@@ -1332,3 +1332,36 @@ def test_argv_built_from_the_whole_arguments_object_asks_for_a_declaration() -> 
     commands = app.manifest()["commands"]
     assert isinstance(commands, dict)
     assert commands["member"]["subprocess"]["user_controlled_args"] == ["ref"]
+
+
+def test_a_method_of_the_arguments_is_unknown_and_a_replaced_copy_reads_by_field() -> None:
+    from dataclasses import dataclass, replace
+
+    from treaty import App, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Co:
+        ref: str = Flag(default="main", description="Ref")
+
+        def argv(self) -> list[str]:
+            return [self.ref]
+
+    @dataclass(frozen=True, slots=True)
+    class Shown:
+        text: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("method", description="Method", danger_level="safe", exit_codes=())
+    def method(args: Co, ctx: Ctx) -> Shown:
+        return Shown(ctx.run(["git", "checkout", *args.argv()]).stdout)
+
+    @app.command("copy", description="Copy", danger_level="safe", exit_codes=())
+    def copy(args: Co, ctx: Ctx) -> Shown:
+        clean = replace(args, ref=args.ref.strip())
+        return Shown(ctx.run(["git", "checkout", clean.ref]).stdout)
+
+    assert _findings(app, "subprocess-declared") == ["method"]
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    assert commands["copy"]["subprocess"]["user_controlled_args"] == ["ref"]
