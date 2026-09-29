@@ -1411,3 +1411,48 @@ def test_a_copy_names_the_fields_replaced_into_it_and_a_derived_object_is_unknow
     assert commands["either"]["subprocess"]["user_controlled_args"] == ["ref", "base"]
     assert "base" in commands["through"]["subprocess"]["user_controlled_args"]
     assert _findings(app, "subprocess-declared") == ["loaded"]
+
+
+def test_a_name_is_a_copy_only_when_every_binding_is_one() -> None:
+    import copy
+    from dataclasses import dataclass, replace
+
+    from treaty import App, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Log:
+        ref: str = Flag(default="", description="Ref")
+        base: str = Flag(default="main", description="Base")
+
+    @dataclass(frozen=True, slots=True)
+    class Shown:
+        text: str
+
+    def load(args: Log) -> Log:
+        return Log(ref=args.base)
+
+    app = App("x", version="1.0.0")
+
+    @app.command("branch", description="Branch", danger_level="safe", exit_codes=())
+    def branch(args: Log, ctx: Ctx) -> Shown:
+        opts = args
+        if args.base:
+            opts = load(args)
+        return Shown(ctx.run(["git", "log", opts.ref]).stdout)
+
+    @app.command("rebound", description="Rebound", danger_level="safe", exit_codes=())
+    def rebound(args: Log, ctx: Ctx) -> Shown:
+        args = replace(args, ref=args.ref or args.base)
+        return Shown(ctx.run(["git", "log", args.ref]).stdout)
+
+    @app.command("stdlib", description="Stdlib", danger_level="safe", exit_codes=())
+    def stdlib(args: Log, ctx: Ctx) -> Shown:
+        clean = copy.replace(args, ref=args.base)
+        again = replace(clean, base="x")
+        return Shown(ctx.run(["git", "log", again.ref]).stdout)
+
+    assert _findings(app, "subprocess-declared") == ["branch"]
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    assert commands["rebound"]["subprocess"]["user_controlled_args"] == ["ref", "base"]
+    assert "base" in commands["stdlib"]["subprocess"]["user_controlled_args"]

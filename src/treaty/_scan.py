@@ -187,26 +187,48 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
     return {k: v for k, v in carried.items() if v}
 
 
+_REPLACES = frozenset({"replace", "dataclasses.replace", "copy.replace"})
+
+
 def _copies(args_name: str, tree: ast.AST) -> frozenset[str]:
-    """Locals that hold the arguments object itself: assigned ``args`` bare or
-    ``replace(args, ...)``. Reading a field of one reads that field; a local built from
-    ``args`` any other way, such as ``load_settings(args)``, is not a copy"""
-    found: set[str] = set()
+    """Locals that hold the arguments object itself: every value bound to the name is
+    ``args``, another copy, or ``replace(<one of those>, ...)``. A name also bound to
+    anything else, such as ``load_settings(args)`` on one branch, is not a copy"""
+    bound: dict[str, list[ast.expr]] = {}
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
-            continue
-        value = node.value
-        copy = (isinstance(value, ast.Name) and value.id == args_name) or (
-            isinstance(value, ast.Call)
-            and dotted(value.func) in ("replace", "dataclasses.replace")
-            and bool(value.args)
-            and isinstance(value.args[0], ast.Name)
-            and value.args[0].id == args_name
-        )
-        if copy:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            found.update(t.id for t in targets if isinstance(t, ast.Name))
-    return frozenset(found)
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    bound.setdefault(target.id, []).append(node.value)
+                else:
+                    for name in _bound(target):
+                        bound.setdefault(name, []).append(ast.Constant(None))
+        elif isinstance(node, ast.NamedExpr):
+            bound.setdefault(node.target.id, []).append(node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            for name in _bound(node.target):
+                bound.setdefault(name, []).append(ast.Constant(None))
+
+    def is_copy(value: ast.expr, copies: set[str]) -> bool:
+        if isinstance(value, ast.Name):
+            return value.id == args_name or value.id in copies
+        return (
+            isinstance(value, ast.Call)
+            and dotted(value.func) in _REPLACES
+            and bool(value.args)
+            and is_copy(value.args[0], copies)
+        )
+
+    copies: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for name, values in bound.items():
+            if name not in copies and all(is_copy(v, copies) for v in values):
+                copies.add(name)
+                changed = True
+    return frozenset(copies)
 
 
 def _through(
