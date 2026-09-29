@@ -474,6 +474,9 @@ def test_import_all_reports_each_feed_and_fails_partly(feeds: str, tmp_path: Pat
     assert env.exit_code == 3 and env.error is not None
     assert env.error.code == "PARTIAL_FAILURE"
     assert _results(env) == [(True, None), (False, "FEED_INVALID")]
+    # The feed that worked is still in data, and is tagged as untrusted
+    assert isinstance(env.data, dict) and env.data["_trusted"] is False
+    assert [w.code for w in env.warnings] == ["UNTRUSTED_CONTENT"]
 
 
 def test_import_all_leaves_the_feeds_it_has_no_time_for(feeds: str, tmp_path: Path) -> None:

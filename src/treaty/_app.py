@@ -185,6 +185,7 @@ from ._protect import (
     UNPROTECTED_CODE,
     UNTRUSTED_CODE,
     protect,
+    protect_batch,
     tagged,
 )
 from ._redact import REDACTED, redacted, scrub
@@ -2934,9 +2935,18 @@ class _Run:
         data, warnings = envelope.data, list(envelope.warnings)
         extra = dict(envelope.extra_meta)
         if data is not None:
-            # Exit data and a batch's summary are not the declared output type
-            tp = self._output(command)[0] if envelope.ok and not command.batch else object
-            protected = protect(data, tp, unmask=self.unmask)
+            # A batch keeps its items, and their content, when some items failed: its data
+            # is protected item by item whether or not the run succeeded
+            batch = (
+                command.batch and isinstance(data, dict) and isinstance(data.get("results"), list)
+            )
+            if batch:
+                assert isinstance(data, dict)
+                protected = protect_batch(data, command.output_type, unmask=self.unmask)
+            else:
+                # Exit data is not the declared output type
+                tp = self._output(command)[0] if envelope.ok else object
+                protected = protect(data, tp, unmask=self.unmask)
             data = protected.data
             if protected.masked:
                 warnings.append(
@@ -2949,7 +2959,7 @@ class _Run:
                         },
                     )
                 )
-            external = envelope.ok and (command.external or protected.external)
+            external = (envelope.ok or batch) and (command.external or protected.external)
             if external and not self.unprotected and data not in ([], {}):
                 data = tagged(data)
                 warnings.append(

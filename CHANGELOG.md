@@ -119,6 +119,11 @@ Apps built on treaty keep their own, structured schema changelog with
 - The path in a `Path` argument's suggestion was not quoted, so one with a space or a quote
   broke when pasted into a shell; it is quoted with `shlex.quote`, like treaty's other
   suggested commands
+- A `Batch` command's content from outside the tool reached the agent untagged: an
+  `Out(external=True)` field of the item type was ignored, and a batch with a failed item
+  (exit `3`) was never tagged, even with `external=True` on the command. Each successful
+  result is now protected by the item type, so its `external` and `high_entropy`
+  declarations apply, and a batch's `data` is tagged whether or not every item succeeded
 
 ## [1.0.0rc2] - 2026-09-28
 

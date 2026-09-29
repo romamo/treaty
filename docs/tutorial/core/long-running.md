@@ -64,7 +64,6 @@ asks for two minutes:
     has_network_io=True,
     timeout=120,
     heartbeat=True,
-    external=True,
 ```
 
 Network and streaming commands also take `--timeout SECONDS` from the caller, `0` for no
@@ -190,12 +189,14 @@ todo import-all --schema | jq -e '.data.heartbeat_ms == 10000'
 ## Step 5: Mark what came from outside
 
 The items a batch imports were written by whoever controls each feed, as in
-[Declare network commands](network-io.md#step-5-mark-what-came-from-outside). A batch
-command marks them with `external=True` on the command, as `import-all` does above: `data`
-carries `"_trusted": false` and the run adds an `UNTRUSTED_CONTENT` warning.
+[Declare network commands](network-io.md#step-5-mark-what-came-from-outside). `import-all`
+needs no marking of its own: each result is an `Imported`, whose `added` field is already
+`Out(external=True)`, and treaty protects a batch's results by their own type. So `data`
+carries `"_trusted": false` and the run adds an `UNTRUSTED_CONTENT` warning, also when some
+feeds failed and the run exits 3, since the ones that worked are still in `data`.
 
-**Check:** the tests for this chapter pass: a good and a broken feed, three slow feeds
-under a short limit, and the trust tags
+**Check:** the tests for this chapter pass: a good and a broken feed, tagged as external
+though one failed; three slow feeds under a short limit; and the tags on a full success
 
 <!-- check -->
 ```bash

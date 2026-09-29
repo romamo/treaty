@@ -285,7 +285,6 @@ class ImportAll(Common):
     has_network_io=True,
     timeout=120,
     heartbeat=True,
-    external=True,
     exit_codes=["FEED_INVALID", "STORE_CORRUPT", "STORE_UNWRITABLE"],
     examples=[
         (

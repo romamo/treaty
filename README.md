@@ -1288,7 +1288,9 @@ class Report:
   `"_source": "external", "_trusted": false` to the top of `data`, or to each object when
   `data` is a list, and an `UNTRUSTED_CONTENT` warning. A field marked
   `Out(external=True)` tags `data` as a whole whenever the field is not `null`, not each
-  object inside the field. `--no-injection-protection` drops the tags, sets
+  object inside the field. A `Batch` is protected by its item type, so a field marked on
+  the item type tags the batch's `data`, and a batch keeps its tags when some items failed
+  (exit `3`), since the items that worked are still in `data`. `--no-injection-protection` drops the tags, sets
   `meta.injection_protection: false`, and reports its use on stderr. Rule `external-data`
 
 ```python

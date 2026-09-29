@@ -20,6 +20,7 @@ import math
 import re
 import typing
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
@@ -60,6 +61,28 @@ def protect(data: object, tp: object, *, unmask: bool) -> Protected:
     masked unless ``unmask``; the walk also finds declared external content"""
     walk = _Walk(unmask)
     out = walk.value(data, tp, (), None)
+    return Protected(out, tuple(walk.masked), walk.external)
+
+
+def protect_batch(data: Mapping[str, object], item: object, *, unmask: bool) -> Protected:
+    """A ``Batch``'s ``data``: each successful result against the item type, so its
+    ``Out(external=...)`` and ``Out(high_entropy=...)`` apply, and the summary and the
+    failed items by name, as any undeclared object"""
+    walk = _Walk(unmask)
+    out: dict[str, object] = {}
+    for key, value in data.items():
+        if key == "results" and isinstance(value, list):
+            out[key] = [
+                walk.value(
+                    r,
+                    item if isinstance(r, dict) and r.get("ok") is True else object,
+                    (key, i),
+                    None,
+                )
+                for i, r in enumerate(value)
+            ]
+        else:
+            out[key] = walk.value(value, object, (key,), _by_name(key, value, None))
     return Protected(out, tuple(walk.masked), walk.external)
 
 
