@@ -111,6 +111,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `exit-code-suggestion` advised redeclaring a retryable framework code such as
+  `RATE_LIMITED` with `app.exit_code("RATE_LIMITED", 11, ..., suggestion=...)`, which
+  registration refuses, so the advice could never clear. Framework codes are skipped: they
+  carry a generic suggestion, and a raise gives its own with `suggestion=` (#30)
 - Audit rules that read handler source followed only helpers of the handler's own module,
   and `no-chdir`, `env-prefix`, and the other behaviour heuristics none at all, so I/O kept
   in a helper module passed clean (#14). Every source rule now follows the handler into its

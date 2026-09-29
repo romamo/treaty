@@ -460,7 +460,8 @@ Every `error.message` is written as a sentence, with a capital first letter and 
 punctuation, author messages included (REQ-C-013). A recoverable error (`retryable`, or one
 with `fix_required`) always has a `suggestion`: the one given to `Exit`, else the exit
 code's `app.exit_code(..., suggestion=...)`, else the `fix_required` text or a generic
-retry step. The audit rule `exit-code-suggestion` flags retryable codes without one.
+retry step. The audit rule `exit-code-suggestion` flags the app's retryable codes without
+one; a framework code such as `RATE_LIMITED` takes its suggestion on the raise.
 
 ## Running programs
 

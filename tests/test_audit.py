@@ -1,3 +1,4 @@
+import ast
 import io
 import json
 import os
@@ -209,6 +210,86 @@ def test_every_exit_codes_fix_registers_when_applied_as_written() -> None:
 
 
 FIX = r'app\.exit_code\("(\w+)", (\d+), description="([^"]+)"'
+
+UPSTREAM_BUSY = {
+    "code": 80,
+    "description": "The upstream is busy",
+    "retryable": True,
+    "side_effects": "none",
+}
+
+
+def _fixctl(declared: dict[str, dict[str, object]]) -> object:
+    """An app whose findings print app.exit_code(...) fixes, with ``declared`` registered"""
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("fixctl", version="1.0.0")
+    for name, declaration in declared.items():
+        app.exit_code(name, **declaration)  # type: ignore[arg-type]
+
+    @app.command(
+        "fetch",
+        description="Fetch",
+        danger_level="safe",
+        exit_codes=("UPSTREAM_BUSY", "RATE_LIMITED", "UNAVAILABLE"),
+    )
+    def fetch(args: NoArgs, ctx: Ctx) -> Done:
+        return Done("noop")
+
+    @app.command("sync", description="Sync", danger_level="mutating", exit_codes=())
+    def sync(args: NoArgs, ctx: Ctx) -> Done:
+        return Done("updated")
+
+    return app
+
+
+def _registration(fix: str) -> ast.Call | None:
+    """The app.exit_code(...) call a fix prints, parsed; None when it prints none"""
+    start = fix.find("app.exit_code(")
+    if start < 0:
+        return None
+    for end in (i + 1 for i, ch in enumerate(fix) if ch == ")" and i > start):
+        try:
+            node = ast.parse(fix[start:end], mode="eval").body
+        except SyntaxError:
+            continue  # the call ends at a later parenthesis
+        assert isinstance(node, ast.Call)
+        return node
+    raise AssertionError(f"the fix prints an app.exit_code( call that does not parse: {fix}")
+
+
+def test_every_printed_exit_code_registration_registers() -> None:
+    """A fix printed as app.exit_code(...) registers when applied, with ``...`` keeping the
+    rest of the declaration; a framework code such as RATE_LIMITED gets none (#30)"""
+    declared = {"UPSTREAM_BUSY": UPSTREAM_BUSY}
+    report = audit(_fixctl(declared), "x:app", limit=100)  # type: ignore[arg-type]
+    calls = [
+        (r.id, call) for r in report.rules for f in r.findings if (call := _registration(f.fix))
+    ]
+    assert sorted(rule for rule, _ in calls) == ["exit-code-suggestion", "exit-codes"]
+    for rule, call in calls:
+        name, code = (ast.literal_eval(a) for a in call.args[:2])
+        keeps = any(isinstance(a, ast.Constant) and a.value is Ellipsis for a in call.args)
+        declaration = {
+            **(declared.get(name, {}) if keeps else {}),
+            "code": code,
+            **{k.arg: ast.literal_eval(k.value) for k in call.keywords if k.arg},
+        }
+        fixed = _fixctl({**declared, name: declaration})  # a RegistrationError fails here
+        assert name not in " ".join(
+            f.message for f in _findings_of(fixed, "exit-code-suggestion")
+        ), rule
+
+
+def _findings_of(app: object, rule: str) -> list:
+    report = audit(app, "x:app", limit=3)  # type: ignore[arg-type]
+    return [f for r in report.rules if r.id == rule for f in r.findings]
 
 
 def _findings(app: object, rule: str) -> list[str]:
