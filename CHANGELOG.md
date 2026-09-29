@@ -70,6 +70,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- A compat shape's schema lacked the `noop` a replayed idempotency key answers, so a
+  replay under `schema_version` failed an MCP client's check; an MCP redirect now names
+  the tool to call, not the command path; a streaming command with compat shapes lists
+  one array schema per shape; a `tuple[A, B]` output no longer crashes registration
+- Following helpers, the audit crashed on a lambda helper, and flagged `network-io` for a
+  helper whose docstring said "requests" or that called `urllib.parse`; helpers and
+  resources now count only calls into a network module, decorated helpers are followed
+  through `__wrapped__`, and the parsed sources are cached across rules
 - An MCP call to a redirected command's old tool name answered `UNKNOWN_TOOL`; it answers
   `REDIRECTED` with the new path, as the command line and `exec` do
 - The `network-io`, `network-timeout`, `http-client`, and `subprocess-declared` rules read

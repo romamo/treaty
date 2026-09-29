@@ -378,3 +378,21 @@ def test_an_old_tool_name_answers_redirected_as_on_the_command_line() -> None:
     assert envelope.exit_code == 13 and envelope.error is not None
     assert envelope.error.code == "REDIRECTED"
     assert call_tool(app, entries, "nosuch", {}).error.code == "UNKNOWN_TOOL"  # type: ignore[union-attr]
+
+
+def test_a_redirect_over_mcp_names_the_tool_to_call() -> None:
+    app = App("x", version="1.0.0")
+    labels = app.group("labels", description="Labels")
+
+    @labels.command("list", description="List labels", danger_level="safe", exit_codes=())
+    def list_labels(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        return {"ok": True}
+
+    app.redirect("tags.list", to="labels.list")
+    entries = {e.name: e for e in tool_entries(app)}
+    error = call_tool(app, entries, "tags_list", {}).error
+    assert error is not None and error.redirect is not None
+    assert (
+        error.redirect.command == "labels_list" and error.suggestion == "call labels_list instead"
+    )
+    assert error.context == {"from": "tags_list", "to": "labels_list"}

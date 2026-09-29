@@ -2,6 +2,7 @@
 checks it with: the trust tags are listed wherever the runtime puts them"""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import jsonschema
 import pytest
@@ -92,3 +93,50 @@ def test_the_published_schema_lists_the_tags(name: str) -> None:
         return {}
 
     assert "_trusted" in str(app.manifest()["commands"][name]["output_schema"])  # type: ignore[index]
+
+
+def test_a_replayed_call_in_a_compat_shape_validates_over_mcp(tmp_path: Path) -> None:
+    from typing import Literal
+
+    @dataclass(frozen=True, slots=True)
+    class New:
+        effect: Literal["created"]
+        title: str
+
+    @dataclass(frozen=True, slots=True)
+    class Old:
+        effect: Literal["created"]
+        name: str
+
+    def to_v1(new: New) -> Old:
+        return Old(new.effect, new.title)
+
+    app = App("x", version="1.0.0")
+
+    @app.command(
+        "make",
+        description="Make",
+        danger_level="mutating",
+        exit_codes=(),
+        schema_version="2.0",
+        compat={"1.0": to_v1},
+    )
+    def make(args: NoArgs, ctx: Ctx) -> New:
+        return New("created", "x")
+
+    call = {"schema_version": "1", "idempotency_key": "k1"}
+    schema = output_schema(app.commands[CommandPath("make")])
+    for _ in range(2):
+        envelope = app.call("make", call, env={"X_STATE_DIR": str(tmp_path)})
+        assert envelope.ok, envelope.error
+        jsonschema.validate(envelope.to_json(), schema)
+
+
+def test_a_fixed_length_tuple_output_registers() -> None:
+    app = App("x", version="1.0.0")
+
+    @app.command("pair", description="Pair", danger_level="safe", exit_codes=())
+    def pair(args: NoArgs, ctx: Ctx) -> tuple[Item, Item]:
+        return (Item("a"), Item("b"))
+
+    assert app.call("pair", {}, env={}).ok

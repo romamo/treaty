@@ -75,12 +75,11 @@ def output_schema(command: Command) -> JsonSchema:
     a subset, either of which may lack required fields; a failed one carries whatever
     ``Exit(data=...)`` or a preview put there.
     """
-    data = command.output_schema
-    if command.compat:
-        # schema_version picks an older shape, which its shim's own schema describes
-        data = {"anyOf": [data, *(c.output_schema for c in command.compat)]}
+    shapes = [command.output_schema, *(c.output_schema for c in command.compat)]
     if command.streaming:
-        data = {"type": "array", "items": data}
+        shapes = [{"type": "array", "items": s} for s in shapes]
+    # schema_version picks an older shape, which its shim's own schema describes
+    data = shapes[0] if len(shapes) == 1 else {"anyOf": shapes}
     truncated = {
         "properties": {
             "meta": {

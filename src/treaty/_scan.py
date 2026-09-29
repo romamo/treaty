@@ -9,9 +9,11 @@ again when the call happens.
 from __future__ import annotations
 
 import ast
+import functools
 import inspect
 import os
 import subprocess
+import sys
 import textwrap
 import types
 from collections.abc import Callable
@@ -43,10 +45,13 @@ class CtxCall:
     """``ctx.run``'s argument list, when it is a list or tuple literal"""
 
 
+@functools.cache
 def source_tree(fn: Callable[..., object]) -> ast.Module | None:
     """The syntax tree of ``fn``'s source, lines numbered from its first; None without
-    source (a REPL, ``exec``, a C extension). A nested function holding a multi-line
-    string at column 0 cannot be dedented, so it is parsed inside an ``if`` block."""
+    source (a REPL, ``exec``, a C extension), or when the source is not a whole statement,
+    as for a lambda written inside a call. A nested function holding a multi-line string at
+    column 0 cannot be dedented, so it is parsed inside an ``if`` block. Cached: the audit
+    reads the same functions for several rules"""
     try:
         source = inspect.getsource(fn)
     except OSError, TypeError:
@@ -54,8 +59,13 @@ def source_tree(fn: Callable[..., object]) -> ast.Module | None:
     try:
         return ast.parse(textwrap.dedent(source))
     except IndentationError:
-        tree = ast.parse("if 1:\n" + source)
+        try:
+            tree = ast.parse("if 1:\n" + source)
+        except SyntaxError:
+            return None
         return ast.increment_lineno(tree, -1)
+    except SyntaxError:
+        return None
 
 
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
@@ -179,7 +189,7 @@ def _program_starters() -> tuple[object, ...]:
 _STARTERS = _program_starters()
 
 
-def _closure(fn: Callable[..., object]) -> dict[str, object]:
+def _closure(fn: Callable[..., object] | type) -> dict[str, object]:
     """The names a handler defined inside a function sees from it, such as that function's
     imports; a cell not assigned yet, for a name bound later, holds nothing to resolve"""
     code = getattr(fn, "__code__", None)
@@ -196,11 +206,25 @@ def _closure(fn: Callable[..., object]) -> dict[str, object]:
     return found
 
 
-def _resolve(fn: Callable[..., object], name: str) -> object:
+def module_scope(fn: Callable[..., object] | type) -> dict[str, object]:
+    """The globals ``fn`` sees: its own for a function, its module's for a class"""
+    found = getattr(fn, "__globals__", None)
+    if isinstance(found, dict):
+        return found
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    return {} if module is None else vars(module)
+
+
+def resolve_name(fn: Callable[..., object] | type, name: str) -> object:
+    """What ``name`` refers to where ``fn`` is defined, as ``_resolve`` finds it"""
+    return _resolve(fn, name)
+
+
+def _resolve(fn: Callable[..., object] | type, name: str) -> object:
     """What ``name``, such as ``sp.run`` or ``run``, refers to in the handler's module; None
     when it is not a module-level name or goes through something other than a module"""
     root, *rest = name.split(".")
-    scope: dict[str, object] = {**getattr(fn, "__globals__", {}), **_closure(fn)}
+    scope: dict[str, object] = {**module_scope(fn), **_closure(fn)}
     target = scope.get(root)
     for part in rest:
         if not isinstance(target, types.ModuleType):
@@ -209,10 +233,13 @@ def _resolve(fn: Callable[..., object], name: str) -> object:
     return target
 
 
-def reached_functions(fn: Callable[..., object]) -> list[Callable[..., object]]:
-    """The handler and every function of its own module it calls by name, transitively:
-    a fetch() helper beside the handler runs as part of it, while a function from another
-    module is that module's to declare. Each appears once, the handler first"""
+@functools.cache
+def reached_functions(fn: Callable[..., object]) -> tuple[Callable[..., object], ...]:
+    """The handler and every function of its own module it calls by a bare name,
+    transitively: a fetch() helper beside the handler runs as part of it, while a function
+    from another module is that module's to declare. A decorated helper is followed through
+    ``__wrapped__``; methods, lambdas, and ``functools.partial`` are not. Each appears
+    once, the handler first. Cached: four rules ask for the same command"""
     module = getattr(fn, "__module__", None)
     found: list[Callable[..., object]] = [fn]
     queue = [fn]
@@ -224,15 +251,17 @@ def reached_functions(fn: Callable[..., object]) -> list[Callable[..., object]]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
                 continue
-            target = _resolve(current, node.func.id)
+            found_name = _resolve(current, node.func.id)
+            target = inspect.unwrap(found_name) if callable(found_name) else found_name
             if (
                 isinstance(target, types.FunctionType)
+                and target.__name__ != "<lambda>"
                 and target.__module__ == module
                 and all(target is not seen for seen in found)
             ):
                 found.append(target)
                 queue.append(target)
-    return found
+    return tuple(found)
 
 
 def direct_subprocess_calls(fn: Callable[..., object]) -> list[ShellCall]:

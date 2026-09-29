@@ -451,3 +451,52 @@ def test_the_network_and_subprocess_rules_follow_helpers_in_the_same_module() ->
     assert _findings(app, "network-timeout") == ["refresh"]
     assert _findings(app, "http-client") == ["refresh"]
     assert _findings(app, "subprocess-declared") == ["backup"]
+
+
+def _lambda_fetch() -> object:
+    from urllib.request import urlopen
+
+    return (
+        lambda url: urlopen(url, timeout=5).read()  # noqa: S310
+    )
+
+
+def test_helper_following_survives_lambdas_and_ignores_network_words() -> None:
+    """A lambda's source is not a statement; a docstring or urllib.parse is no network call"""
+    import functools
+    import urllib.parse
+    import urllib.request
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    fetch = _lambda_fetch()
+
+    def slug(text: str) -> str:
+        """Built without any requests to a server"""
+        return urllib.parse.quote(text)
+
+    @functools.cache
+    def cached_fetch(url: str) -> bytes:
+        with urllib.request.urlopen(url, timeout=5) as response:  # noqa: S310
+            return bytes(response.read())
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("note", description="Note it", danger_level="safe", exit_codes=())
+    def note(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"slug": slug("a b")}
+
+    @app.command("peek", description="Peek", danger_level="safe", exit_codes=())
+    def peek(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(fetch("https://example.com"))}  # type: ignore[operator]
+
+    @app.command("pull", description="Pull", danger_level="safe", exit_codes=())
+    def pull(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(cached_fetch("https://example.com"))}
+
+    assert _findings(app, "network-io") == ["pull"]

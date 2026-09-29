@@ -160,8 +160,8 @@ todo import --cwd tmp/tutorial/project --no-config --show-config \
 ```
 
 A handler asks for the settings by annotating a parameter with the class, as it does for a
-resource, and a resource's `acquire` can take them the same way, such as a store whose path
-is a setting:
+resource. A resource's `acquire` can take them the same way, such as a store whose path is a
+setting. `import` takes them in the handler:
 
 <!-- file: examples/tutorial/todo_config.py -->
 ```python

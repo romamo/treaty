@@ -11,6 +11,7 @@ import dataclasses
 import inspect
 import json
 import re
+import types
 import typing
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
@@ -25,7 +26,13 @@ from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
 from ._redact import secret_field
-from ._scan import ctx_calls, direct_subprocess_calls, reached_functions, source_tree
+from ._scan import (
+    ctx_calls,
+    direct_subprocess_calls,
+    reached_functions,
+    resolve_name,
+    source_tree,
+)
 from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
 from ._values import InvalidValue, SchemaVersion
 
@@ -258,28 +265,72 @@ def _network_io(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if c.has_network_io:
             continue
-        # A migrated CLI often keeps its HTTP client in a resource, as ctx.obj was
-        # Every resource the handler reaches, including one a resource acquires
-        where: list[tuple[str, Callable[..., object] | type]] = [
-            (_called(c, f), f) for f in reached_functions(c.handler)
+        # The handler's source is searched as text; a helper or a resource (where a migrated
+        # CLI keeps its HTTP client, as ctx.obj was) only for calls into a network module, so
+        # a docstring that says "requests" or a urllib.parse.quote does not count
+        label = "handler" if _mentions_network(c.handler) else ""
+        places: list[tuple[str, Callable[..., object] | type]] = [
+            (_called(c, f), f) for f in reached_functions(c.handler)[1:]
         ]
-        where += [(f"resource {r.__name__}", r) for r in c.resource_graph]
-        for label, code in where:
-            try:
-                source = inspect.getsource(code)
-            except OSError, TypeError:
-                continue  # no source to scan (REPL, exec, C extension); the heuristic cannot apply
-            if _NETWORK_HINTS.search(source):
-                yield Finding(
-                    "network-io",
-                    Severity.WARNING,
-                    c.path.value,
-                    f"{label} source mentions a network library "
-                    "but has_network_io is not declared (heuristic)",
-                    "has_network_io=True, then call out through ctx.http, which keeps to "
-                    "the command's --timeout",
-                )
+        places += [(f"resource {r.__name__}", r) for r in c.resource_graph]
+        for where, code in places:
+            if label:
                 break
+            if _calls_network(code):
+                label = where
+        if label:
+            yield Finding(
+                "network-io",
+                Severity.WARNING,
+                c.path.value,
+                f"{label} source mentions a network library "
+                "but has_network_io is not declared (heuristic)",
+                "has_network_io=True, then call out through ctx.http, which keeps to "
+                "the command's --timeout",
+            )
+
+
+def _mentions_network(fn: Callable[..., object]) -> bool:
+    try:
+        source = inspect.getsource(fn)
+    except OSError, TypeError:
+        return False  # no source to scan (REPL, exec, C extension); the heuristic cannot apply
+    return _NETWORK_HINTS.search(source) is not None
+
+
+_NETWORK_PACKAGES = (
+    "socket",
+    "http.client",
+    "urllib.request",
+    "requests",
+    "httpx",
+    "aiohttp",
+    "grpc",
+)
+
+
+def _calls_network(code: Callable[..., object] | type) -> bool:
+    """A call in ``code``'s source to something a network module defines"""
+    tree = source_tree(code)
+    if tree is None:
+        return False
+    for node in ast.walk(tree):
+        name = _dotted(node.func) if isinstance(node, ast.Call) else None
+        if name is None:
+            continue
+        target = resolve_name(code, name)
+        if target is None and any(name.startswith(f"{p}.") for p in _NETWORK_PACKAGES):
+            return True  # a call spelled through a network package imported out of sight
+        module = (
+            target.__name__
+            if isinstance(target, types.ModuleType)
+            else getattr(target, "__module__", None)
+        )
+        if isinstance(module, str) and any(
+            module == p or module.startswith(f"{p}.") for p in _NETWORK_PACKAGES
+        ):
+            return True
+    return False
 
 
 # Calls that open a connection and take timeout=: by name, and the request verbs of

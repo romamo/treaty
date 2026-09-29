@@ -15,6 +15,7 @@ plain data so it can be inspected and tested without the SDK.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import io
 import json
 import sys
@@ -36,6 +37,7 @@ from ._tools import (
     tool_list,
     tool_name,
 )
+from ._values import CommandPath
 
 __all__ = [
     "DRAFT_07",
@@ -75,8 +77,8 @@ def call_tool(
     entry = entries.get(name)
     moved = next((p for p in app.redirected_paths if tool_name(p) == name), None)
     if entry is None and moved is not None:
-        # An old name answers REDIRECTED with the new path, as on the command line and exec
-        return app.call(moved.value, arguments, env=env)
+        # An old name answers REDIRECTED, naming the tool to call instead
+        return _as_tools(app.call(moved.value, arguments, env=env))
     if entry is None:
         run = _Run(app, io.StringIO(), io.StringIO(), env if env is not None else {})
         return run.arg_error(
@@ -87,6 +89,23 @@ def call_tool(
             meta={"_cmd": name},
         )
     return app.call(entry.path.value, arguments, env=env)
+
+
+def _as_tools(envelope: Envelope) -> Envelope:
+    """A REDIRECTED envelope with tool names where the command line has command paths"""
+    error = envelope.error
+    if error is None or error.redirect is None:
+        return envelope
+    to = tool_name(CommandPath(error.redirect.command))
+    was = error.context.get("from")
+    redirect = dataclasses.replace(error.redirect, command=to)
+    context = {**error.context, "to": to}
+    if isinstance(was, str):
+        context["from"] = tool_name(CommandPath(was))
+    detail = dataclasses.replace(
+        error, context=context, suggestion=f"call {to} instead", redirect=redirect
+    )
+    return dataclasses.replace(envelope, error=detail)
 
 
 # The SDK-facing part

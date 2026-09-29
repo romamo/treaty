@@ -540,7 +540,9 @@ def build_command(
     # any batch or job wrapper: a schema without them fails a client that validates
     # structured content, as MCP clients do
     trust_tags = bool(external) or declares_external(output_type)
-    shims = _compat(path, compat or {}, schema_version, output_type, scalars, trust_tags)
+    shims = _compat(
+        path, compat or {}, schema_version, output_type, scalars, trust_tags, danger_level
+    )
     for shim in shims:
         # An older shape still answers the same contracts, or every pinned call fails
         # after the handler has run
@@ -659,6 +661,9 @@ def _id_field(
             raise RegistrationError(f"{path}: a treaty.Batch has no one id; drop id_field=")
         return None
     item = schema.get("items", {}) if schema.get("type") == "array" else schema
+    if not isinstance(item, dict):
+        # A fixed-length tuple lists one schema per position: no one item to take an id from
+        return declared
     properties = item.get("properties")
     if properties is None:
         if declared is not None and item.get("type") != "object":
@@ -827,6 +832,7 @@ def _compat(
     output_type: object,
     scalars: ScalarRegistry,
     trust_tags: bool,
+    danger_level: DangerLevel,
 ) -> tuple[Compat, ...]:
     """``compat={"1.4": to_v1}``: each shim takes the command's output and returns the
     older shape, whose schema ``--output-schema`` shows when that major is pinned"""
@@ -858,6 +864,9 @@ def _compat(
             )
         check_order(returned, f"{path}: compat[{key!r}]")
         schema = schema_for(returned, scalars, output=True)
+        if danger_level is not DangerLevel.SAFE:
+            # A replayed idempotency key answers noop in the older shape too
+            schema = with_replay_effect(schema)
         if trust_tags or declares_external(returned):
             schema = with_trust_tags(schema)
         out.append(Compat(version, shim, returned, schema))

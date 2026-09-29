@@ -56,10 +56,10 @@ $ uv run treaty audit myapp.cli:app --format plain
      fix: has_network_io=True, then call out through ctx.http, which keeps to the command's --timeout
 ```
 
-The rule searches the source of the handler, of the functions in its module it calls, and of
-the resources it takes for `socket`, `http.client`, `urllib`, `requests`, `httpx`,
-`aiohttp`, and `grpc`. It cannot see further: a handler that calls your API client in
-another module, or an SDK that wraps its own HTTP, passes the rule while calling out on
+The rule searches the handler's source, and the functions of its module it calls by name and
+the resources it takes for calls into `socket`, `http.client`, `urllib`, `requests`,
+`httpx`, `aiohttp`, and `grpc`. It cannot see further: a handler that calls your API client
+in another module, or an SDK that wraps its own HTTP, passes the rule while calling out on
 every run. List those commands yourself; the rule only catches the obvious ones.
 
 Calling `ctx.http` without the declaration is not left to the audit: the app refuses to
