@@ -153,7 +153,7 @@ it:
 
 ```bash
 $ todo add "Buy milk" --priority high --validate-only    # after the rename
-# exit 2, error.code ARG_ERROR: "Unknown flag '--priority'."
+# exit 2, error.code ARG_ERROR: "Unknown flag '--priority'"
 ```
 
 `--validate-only` is the check: it parses the arguments and stops, exit 0 or exit 2 with

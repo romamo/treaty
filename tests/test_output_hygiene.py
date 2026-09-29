@@ -348,7 +348,10 @@ def test_every_framework_error_message_is_a_sentence(argv: list[str]) -> None:
         ('unknown region "xx"', 'Unknown region "xx"'),
         ("set the variable APP_TOKEN", "Set the variable APP_TOKEN"),
         ("pass --confirm-destructive", "Pass --confirm-destructive"),
-        ("the tag is 9.9", "The tag is 9.9"),
+        ("the tag is v9.x", "The tag is v9.x"),
+        # A number or a version is prose and takes the period
+        ("the tag is 9.9", "The tag is 9.9."),
+        ("upgrade to 1.4.0", "Upgrade to 1.4.0."),
         ("the path is C:\\temp", "The path is C:\\temp"),
         ("retry after 5 seconds", "Retry after 5 seconds."),
         ("the limit is 5", "The limit is 5."),

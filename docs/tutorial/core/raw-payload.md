@@ -199,7 +199,7 @@ todo edit --raw-payload '{"id": "one", "priority": "urgent"}' \
   | jq -e '[.error.errors[].message] == ["'"'id'"' expects an integer.",
     "'"'priority'"' must be one of low, normal, high."]'
 todo edit --raw-payload '{"id": 1, "txt": "x"}' \
-  | jq -e '.meta.exit_code == 2 and .error.message == "Unknown field '"'txt'"'."'
+  | jq -e '.meta.exit_code == 2 and .error.message == "Unknown field '"'txt'"'"'
 ```
 
 ## Step 5: Framework keys go in the payload too

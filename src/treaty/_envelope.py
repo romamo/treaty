@@ -66,8 +66,9 @@ def clean(value: object) -> object:
 
 
 # A last word no period may follow, which would read as part of it: a URL, a path, a
-# quoted value, a flag, or an identifier (snake_case, dotted, camelCase)
-_CODE_TAIL = re.compile(r"://|^[~.]|['\"`]$|[_/\\=]|\w\.\w|^-|[a-z][A-Z]")
+# quoted value, a flag, or an identifier (snake_case, dotted with a letter, camelCase). A
+# number or a version (``5``, ``1.4.0``) is prose and takes the period
+_CODE_TAIL = re.compile(r"://|^[~.]|['\"`]$|[_/\\=]|[^\W\d]\.\w|\w\.[^\W\d]|^-|[a-z][A-Z]")
 
 
 def sentence(text: str) -> str:
