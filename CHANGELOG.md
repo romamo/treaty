@@ -103,9 +103,21 @@ Apps built on treaty keep their own, structured schema changelog with
   context carries `target`, `exception`, and the registration `message`, with no
   traceback, on `audit`, `schema-lock`, `changelog-add`, `agents-md`, `check-docs`, and
   `conformance` (#4)
+- `treaty audit` reports its `scope` in JSON and on a `Scope:` line in plain output: what
+  the source rules read, so a clean audit is not taken for a runtime check
 
 ### Fixed
 
+- Audit rules that read handler source followed only helpers of the handler's own module,
+  and `no-chdir`, `env-prefix`, and the other behaviour heuristics none at all, so I/O kept
+  in a helper module passed clean (#14). Every source rule now follows the handler into its
+  first-party code: its own module however deep, as before, and the other modules of its
+  top-level package (or, for an app that is a top-level module, files under its directory)
+  up to 3 calls deep, through modules and classes (`helpers.enter(...)`, `Store.load(...)`)
+  and a module a helper imports itself. treaty, the standard library, and site-packages are
+  never followed. A finding in a helper ends with where it is, such as
+  `found via helpers.enter (helpers.py:6)`. Attributes are read statically, so a lazy
+  module's `__getattr__` never runs during the audit
 - An argument list built from the whole arguments object, as `["git", *flags(args)]`, got
   a worked-out declaration naming no user-controlled field and no audit warning. Passing
   `args` on whole, or reading a method or property of it such as `args.argv()`, now makes

@@ -9,15 +9,19 @@ again when the call happens.
 from __future__ import annotations
 
 import ast
+import collections
 import functools
+import importlib.util
 import inspect
 import os
 import subprocess
 import sys
+import sysconfig
 import textwrap
 import types
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,21 +390,25 @@ def resolve_name(fn: Callable[..., object] | type, name: str) -> object:
 
 def _resolve(fn: Callable[..., object] | type, name: str) -> object:
     """What ``name``, such as ``sp.run`` or ``run``, refers to in the handler's module; None
-    when it is not a module-level name or goes through something other than a module"""
+    when it is not a module-level name or goes through something other than a module. A
+    module's attributes are read statically, so a lazy module's ``__getattr__`` never runs"""
     root, *rest = name.split(".")
     scope: dict[str, object] = {**module_scope(fn), **_closure(fn)}
     target = scope.get(root)
     for part in rest:
         if not isinstance(target, types.ModuleType):
             return None
-        target = getattr(target, part, None)
+        try:
+            target = inspect.getattr_static(target, part)
+        except AttributeError:
+            return None
     return target
 
 
 def clear_caches() -> None:
     """Forget parsed sources and followed helpers, so a new audit sees the code as it is"""
     _cached_tree.cache_clear()
-    reached_functions.cache_clear()
+    _cached_reach.cache_clear()
 
 
 def _unwrapped(target: object) -> object:
@@ -414,35 +422,191 @@ def _unwrapped(target: object) -> object:
     return target
 
 
+FOLLOW_DEPTH = 3
+"""How many calls from the handler the audit follows into another first-party module"""
+
+
+@dataclass(frozen=True, slots=True)
+class Reached:
+    """A function the audit reads for a command: the handler, or a helper it calls"""
+
+    fn: Callable[..., object]
+    via: tuple[str, ...] = ()
+    """The helpers from the handler to ``fn``, each ``module.name (file:line)``; empty for
+    the handler itself"""
+
+    @property
+    def where(self) -> str:
+        """``; found via helpers.enter (helpers.py:6)``, or nothing for the handler"""
+        return f"; found via {' -> '.join(self.via)}" if self.via else ""
+
+
+def reached_functions(fn: Callable[..., object]) -> tuple[Reached, ...]:
+    """The handler and the first-party functions it calls, each once, the handler first
+    and then by distance. A function of the handler's own module is followed however deep,
+    as a fetch() beside the handler runs as part of it; one in another module of the same
+    top-level package, or, for an app that is a top-level module, in a file under its
+    directory, within ``FOLLOW_DEPTH`` calls of the handler. treaty, the standard library,
+    and site-packages are never followed.
+
+    A call is followed by name (``fetch(...)``), through modules and classes
+    (``helpers.enter(...)``, ``Store.load(...)``) read without running their code, and
+    through a module the function imports itself; a decorated helper through the
+    ``__wrapped__`` its decorator set. Methods of objects, lambdas, ``functools.partial``,
+    and callbacks are not. Cached, since several rules ask for the same command; an
+    unhashable callable is followed each time"""
+    try:
+        return _cached_reach(fn)
+    except TypeError:
+        return _reach(fn)
+
+
 @functools.lru_cache(maxsize=4096)
-def reached_functions(fn: Callable[..., object]) -> tuple[Callable[..., object], ...]:
-    """The handler and every function of its own module it calls by a bare name,
-    transitively: a fetch() helper beside the handler runs as part of it, while a function
-    from another module is that module's to declare. A decorated helper is followed through
-    ``__wrapped__``; methods, lambdas, and ``functools.partial`` are not. Each appears
-    once, the handler first. Cached: four rules ask for the same command"""
+def _cached_reach(fn: Callable[..., object]) -> tuple[Reached, ...]:
+    return _reach(fn)
+
+
+def _reach(fn: Callable[..., object]) -> tuple[Reached, ...]:
     module = getattr(fn, "__module__", None)
-    found: list[Callable[..., object]] = [fn]
-    queue = [fn]
+    home = _home(fn)
+    found = [Reached(fn)]
+    seen = {id(fn)}
+    queue = collections.deque([(found[0], 0)])
     while queue:
-        current = queue.pop()
-        tree = source_tree(current)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+        unit, depth = queue.popleft()
+        for target in _callees(unit.fn):
+            if id(target) in seen:
                 continue
-            found_name = _resolve(current, node.func.id)
-            target = _unwrapped(found_name)
-            if (
-                isinstance(target, types.FunctionType)
-                and target.__name__ != "<lambda>"
-                and target.__module__ == module
-                and all(target is not seen for seen in found)
+            if target.__module__ != module and (
+                depth >= FOLLOW_DEPTH or home is None or not _first_party(target, home)
             ):
-                found.append(target)
-                queue.append(target)
+                continue
+            seen.add(id(target))
+            following = Reached(target, (*unit.via, _label(target, home)))
+            found.append(following)
+            queue.append((following, depth + 1))
     return tuple(found)
+
+
+@dataclass(frozen=True, slots=True)
+class _Home:
+    package: str | None
+    """The handler's top-level package, or None for a top-level module"""
+    root: Path
+    """The directory that holds the package, or the module when it has none"""
+
+
+_INSTALLED = frozenset({"site-packages", "dist-packages"})
+_STDLIB = Path(sysconfig.get_paths()["stdlib"]).resolve()
+
+
+def _home(fn: Callable[..., object]) -> _Home | None:
+    """Where the handler's first-party code lives; None for treaty's own or when unknown"""
+    module = sys.modules.get(getattr(fn, "__module__", None) or "")
+    file = getattr(module, "__file__", None)
+    if module is None or not isinstance(file, str) or module.__name__.startswith("treaty."):
+        return None
+    path = Path(file).resolve()
+    if module.__name__ != "__main__" and ("." in module.__name__ or path.stem == "__init__"):
+        top = module.__name__.partition(".")[0]
+        top_file = getattr(sys.modules.get(top), "__file__", None)
+        if not isinstance(top_file, str):
+            return None  # a namespace package has no single directory
+        return _Home(top, Path(top_file).resolve().parent.parent)
+    return _Home(None, path.parent)
+
+
+def _first_party(fn: types.FunctionType, home: _Home) -> bool:
+    top = (fn.__module__ or "").partition(".")[0]
+    if top == "treaty":
+        return False
+    if home.package is not None:
+        return top == home.package
+    path = Path(fn.__code__.co_filename).resolve()
+    return (
+        path.is_relative_to(home.root)
+        and not _INSTALLED & set(path.parts)
+        and not path.is_relative_to(_STDLIB)
+    )
+
+
+def _label(fn: types.FunctionType, home: _Home | None) -> str:
+    """``helpers.enter (helpers.py:6)``: the helper, and where it is defined"""
+    path = Path(fn.__code__.co_filename).resolve()
+    if home is not None and path.is_relative_to(home.root):
+        path = path.relative_to(home.root)
+    return f"{fn.__module__}.{fn.__qualname__} ({path.as_posix()}:{fn.__code__.co_firstlineno})"
+
+
+def _callees(fn: Callable[..., object]) -> list[types.FunctionType]:
+    """The Python functions ``fn``'s calls name, in its module, closure, or own imports"""
+    tree = source_tree(fn)
+    if tree is None:
+        return []
+    scope: dict[str, object] = {**module_scope(fn), **_closure(fn), **_imported(fn, tree)}
+    found: list[types.FunctionType] = []
+    for node in ast.walk(tree):
+        name = dotted(node.func) if isinstance(node, ast.Call) else None
+        target = None if name is None else _static(scope, name.split("."))
+        if isinstance(target, types.FunctionType) and target.__name__ != "<lambda>":
+            found.append(target)
+    return found
+
+
+def _static(scope: Mapping[str, object], parts: list[str]) -> object:
+    """``parts`` looked up through modules and classes without running their code, so a
+    module's ``__getattr__`` or a proxy is never asked; a decorated function unwrapped"""
+    target = _unwrapped(scope.get(parts[0]))
+    for part in parts[1:]:
+        if not isinstance(target, (types.ModuleType, type)):
+            return None
+        try:
+            target = inspect.getattr_static(target, part)
+        except AttributeError:
+            return None
+        if isinstance(target, (staticmethod, classmethod)):
+            target = target.__func__
+        target = _unwrapped(target)
+    return target
+
+
+def _imported(fn: Callable[..., object], tree: ast.AST) -> dict[str, object]:
+    """The names ``fn`` binds by importing inside its body, from modules already loaded:
+    the audit reads what the app imported and imports nothing itself"""
+    found: dict[str, object] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.name if alias.asname else alias.name.partition(".")[0]
+                module = sys.modules.get(name)
+                if module is not None:
+                    found[alias.asname or name] = module
+        elif isinstance(node, ast.ImportFrom):
+            source = sys.modules.get(absolute_module(fn, node) or "")
+            if source is None:
+                continue
+            for alias in node.names:
+                try:
+                    value = inspect.getattr_static(source, alias.name)
+                except AttributeError:
+                    value = sys.modules.get(f"{source.__name__}.{alias.name}")
+                if value is not None:
+                    found[alias.asname or alias.name] = value
+    return found
+
+
+def absolute_module(code: Callable[..., object] | type, node: ast.ImportFrom) -> str | None:
+    """The module an ``from ... import`` names, a relative one resolved against the
+    package ``code`` belongs to"""
+    if not node.level:
+        return node.module
+    package = getattr(sys.modules.get(getattr(code, "__module__", "") or ""), "__package__", None)
+    if not package:
+        return None
+    try:
+        return importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+    except ImportError:
+        return None  # beyond the top-level package: an import that never runs
 
 
 def direct_subprocess_calls(fn: Callable[..., object]) -> list[ShellCall]:

@@ -1432,6 +1432,14 @@ conformance kit covers runtime behaviour. A target that fails to register (a
 message and no traceback, on `audit` and every other command that loads a `module:app`
 target.
 
+Rules that read source follow each handler into the functions of its own code it calls, by
+plain name (`fetch(...)`) or through modules and classes (`helpers.enter(...)`,
+`Store.load(...)`); a finding there ends with `found via helpers.enter (helpers.py:6)`.
+The handler's module is followed however deep, and its other first-party modules 3 calls
+deep: the handler's top-level package, or, when the app is a top-level module such as
+`mycli.py`, files under its directory. treaty, the standard library, and site-packages are
+never followed, nor are methods of objects or callbacks, which the report's `scope` says.
+
 ## Stability
 
 treaty follows semantic versioning from 1.0. The frozen surface is listed in

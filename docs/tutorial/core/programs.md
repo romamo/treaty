@@ -80,8 +80,8 @@ locale, and nothing declares it. Change the call to `ctx.run` with the same list
 ways: it raises on a non-zero exit unless you pass `check=False`, which code that reads
 `returncode` itself needs, and it takes no `capture_output=` or `text=`, since it always
 captures text. The same goes for a call imported as `from subprocess import run`; a call in
-a helper function of the same module, called by name, is found too, but one in a method or
-in another module is not, so check those by hand.
+a helper function of your own code, such as `git_ops.save(...)`, is found too, but one in an
+object's method is not, so check those by hand.
 
 The `--` before the file name ends git's options: whatever the name is, git reads it as a
 path. Put `--` before every argument that comes from the caller when the program supports

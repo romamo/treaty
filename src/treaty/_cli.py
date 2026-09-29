@@ -141,6 +141,8 @@ class AuditOut:
     rules_total: int
     passed: int
     failed: int
+    scope: str
+    """What the source-reading rules saw: handlers and the first-party code they call"""
     next_steps: tuple[FindingOut, ...] = Out(ordered=True)
     """Most important first"""
     rules: tuple[RuleOut, ...] = Out(ordered=True)
@@ -228,13 +230,18 @@ def _to_out(report: AuditReport, show_all: bool) -> AuditOut:
         rules_total=len(report.rules),
         passed=report.passed,
         failed=report.failed,
+        scope=report.scope,
         next_steps=pending if show_all else tuple(conv(f) for f in report.next_steps),
         rules=rules,
     )
 
 
 def render_audit(data: Any) -> str:
-    lines = [f"{data['target']}: {data['passed']} of {data['rules_total']} rules pass", ""]
+    lines = [
+        f"{data['target']}: {data['passed']} of {data['rules_total']} rules pass",
+        f"Scope: {data['scope']}",
+        "",
+    ]
     for rule in data["rules"]:
         mark = "ok " if rule["passed"] else "-- "
         lines.append(f"  {mark} {rule['id']:<13} {rule['title']}")
