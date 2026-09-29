@@ -67,9 +67,9 @@ drift apart, so what you copy is what the tests run.
 
 ## The example files
 
-Each file under `examples/tutorial/` is `todo` at one point in the tutorial. After
-`todo_exit_codes.py`, each chapter changes its own copy, so the later files do not have each
-other's commands:
+Each file under `examples/tutorial/` is `todo` at one point in the tutorial. From
+`todo_exit_codes.py` on, each chapter branches from an earlier file rather than the one
+before it, so `todo_pages.py`, for example, has no `import`:
 
 | File | What it is | Chapters |
 | --- | --- | --- |
@@ -98,8 +98,10 @@ file it starts from and the one it ends at.
 `treaty audit module:app` checks your commands against every rule `treaty rules` lists, and
 prints the first things to fix, each with a suggested fix that uses your own names.
 
-The chapters follow the audit's rules in the audit's order. When the audit names one of the
-rules below, open its chapter. For any other rule, follow the finding's suggested fix:
+The chapters follow the audit's rules, mostly in the audit's order; where one chapter uses
+another's example, the reading order changes a little, and each chapter's **Next** keeps you
+on it. When the audit names one of the rules below, open its chapter. For any other rule,
+follow the finding's suggested fix:
 
 | Audit rule | What it asks for | Chapter |
 | --- | --- | --- |
@@ -168,8 +170,8 @@ uv run treaty audit myapp.cli:app | jq '.data.next_steps[0]'
 
 `next_steps` holds the first few findings, errors first, then warnings, then advice, so
 what fails `--strict` is always at the top. `--all` lists every finding, and
-`.data.rules[].findings` holds them all in JSON; a check that one rule is clear reads that,
-since `next_steps` may stop before that rule's findings.
+`.data.rules[].findings` holds them all in JSON. To check that one rule is clear, read
+`.data.rules[].findings`: `next_steps` is cut short and may stop before that rule.
 
 Rules only see declarations. After the loop ends, `treaty conformance myapp.cli:app --run`
 checks runtime behaviour against the spec kit.

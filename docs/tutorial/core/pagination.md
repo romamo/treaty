@@ -44,7 +44,8 @@ the condition is false.
 An agent reads a command's whole answer into its context, where every item costs tokens and
 crowds out the rest of the task. A list that returns everything works on the day it has ten
 items and fails the day it has ten thousand. So treaty pages every list by default: a
-command whose handler returns `list[T]` is a list command with no declaration, and gets:
+command whose handler returns `list[T]` is a list command without any extra declaration,
+and gets:
 
 - **`--limit N`**, 20 by default (`default_limit=` changes it per command), `0` for every item
 - **`--cursor TEXT`**, to ask for the page after the one a cursor came from
@@ -175,9 +176,10 @@ todo list --db tmp/tutorial/todo.json --cursor "$cursor" | jq -e '[.data[].id] =
 ## Paging from `exec` and MCP
 
 The pagination flags have JSON spellings, as every framework flag does: `limit` as an
-integer and `cursor` as text, in the `_opts` of an `exec` line and as arguments of the MCP
-tool. An agent pages the same way on every route: read `meta.pagination.next_cursor`, and
-send it back until it is `null`.
+integer and `cursor` as text. An `exec` line, one JSON object per call on `todo exec`'s
+stdin, takes them in its `_opts` object, beside `_cmd`, which names the command; the MCP
+tool takes them as arguments. An agent pages the same way on every route: read
+`meta.pagination.next_cursor`, and send it back until it is `null`.
 
 ## Next
 

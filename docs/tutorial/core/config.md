@@ -89,6 +89,11 @@ app = App(
 )
 ```
 
+Only `settings=Settings` is new here. `companions=("mkdir",)` comes from
+[Declare exit codes](exit-codes.md): it names `mkdir` as a program an error may tell an agent
+to run as its fix. `REQ-C-030` in the comment, like the other `REQ-` ids in treaty's code and
+messages, names the CLI Agent Spec requirement it implements.
+
 Every command now answers `--show-config`: the value each setting took, where it came from,
 and the order the sources are read in.
 
@@ -106,8 +111,10 @@ todo import --show-config | jq -e '.data.effective_config == {"feed_url": ""}
 
 Each setting takes the first value it finds, in this order:
 
-1. **The environment**: `TODO_FEED_URL`, the app's name in capitals, then the field's
-2. **The project file**: `.todo.toml` in the working directory, or under `--cwd`
+1. **The environment**: `TODO_FEED_URL`, the app name and the field name in capitals,
+   joined by `_`
+2. **The project file**: `.todo.toml` in the working directory. Every command takes
+   `--cwd DIR`, which runs it as if started in `DIR`, so the project file is read there
 3. **The user file**: `todo/config.toml` under `XDG_CONFIG_HOME`, else `~/.config`
 4. **The default** in the dataclass
 
@@ -153,8 +160,8 @@ A flag the caller passed wins over a setting, so `--url` still picks another fee
 call. When neither gives a value, the run exits 4 with `PRECONDITION`, and `fix_required`
 names all three ways to supply one.
 
-A setting the command cannot work without belongs in the settings only when it has a
-sensible default or a clear message when missing, as here. A value every call needs is a
+Use a setting for a value with a sensible default, or one that is missing only by mistake,
+as here, where a clear message says how to supply it. Make a value every call needs a
 required flag.
 
 **Check:** with no flag, no file, and no variable, `import` exits 4 and says how to supply
@@ -229,8 +236,10 @@ todo import --schema | jq -e '.data.secret_env_vars == ["TODO_TOKEN"]'
 `tests/test_tutorial.py` serves a feed that answers only a request carrying the right bearer
 token, and checks the setting and the secret end to end: with `TODO_FEED_URL` and
 `TODO_TOKEN` set, `import` adds the list, and the token appears nowhere in the envelope; with
-the wrong token, the run exits 8 with `UNAUTHENTICATED`, because `import` declares
-`AUTH_REQUIRED` and `ctx.http` maps a 401 to it; with no feed at all, it exits 4.
+the wrong token, the run exits 8, because `import` declares `AUTH_REQUIRED` and `ctx.http`
+maps a 401 to it; with no feed at all, it exits 4. The wrong-token envelope's `error.code` is
+`UNAUTHENTICATED`, not `AUTH_REQUIRED`: an exit code has one name, but the `error.code` under
+it can be more specific, and an agent reads both.
 
 **Check:** the three tests pass
 

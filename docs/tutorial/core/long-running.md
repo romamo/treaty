@@ -83,7 +83,9 @@ todo add "Buy milk" --db tmp/tutorial/todo.json | jq -e '.meta.timeout_ms == 600
 
 `TIMEOUT` is the framework's last resort: the handler is still running, the result is lost,
 and the state may be partly changed. A handler that knows it is working through a list can
-do better, by checking `ctx.remaining`, the seconds left, before it starts each item:
+do better, by checking `ctx.remaining`, the seconds left, before it starts each item. The
+code uses four names from treaty that Step 3 explains: `Batch` and `Outcome`, the result and
+one item of it, `ItemError`, one item's error, and `CliExit`, the class of treaty's errors:
 
 <!-- file: examples/tutorial/todo_batch.py -->
 ```python
@@ -141,10 +143,10 @@ failed `ctx.http` request, and nothing wider.
 }
 ```
 
-Any failed item makes the run exit 3 with `PARTIAL_FAILURE` ("1 of 2 items failed"), and
-keeps `data`, with `partial: true` when some items succeeded. An agent reads `results`,
-keeps what worked, and sends only the failed feeds again, the retryable ones at once and the
-others after meeting what their error asks for.
+Any failed item makes the run exit 3 with `PARTIAL_FAILURE` ("1 of 2 items failed"), also
+when every item failed, and keeps `data`, with `partial: true` when some items succeeded.
+An agent reads `results`, keeps what worked, and sends only the failed feeds again: the
+retryable ones at once, the others after fixing what their error names.
 
 **Check:** two feeds that refuse the connection: exit 3, both failed, both retryable, and
 nothing partial, since nothing succeeded
@@ -172,8 +174,14 @@ is. Where it shows depends on who is watching:
 `heartbeat=True` on the command adds one more signal, on stdout: while the handler runs, a
 line `{"status": "running", "heartbeat": true, "elapsed_ms": N}` every `--heartbeat-ms`
 milliseconds, 10 000 by default, `0` for none. An agent that reads stdout line by line sees
-the command is alive without waiting for the end; the envelope is still the last line.
-`--schema` shows `heartbeat_ms`, so a reader knows which lines to skip.
+the command is alive without waiting for the end. The envelope is still the last line, so
+an agent that waits for the end parses the last line of stdout, and `--schema` shows
+`heartbeat_ms`, so it knows which lines to skip. The two flags are easy to mix up:
+
+| Flag | Unit | Where | For |
+| --- | --- | --- | --- |
+| `--heartbeat-interval` | seconds | stderr, plain text | a person reading a log |
+| `--heartbeat-ms` | milliseconds | stdout, JSON lines before the envelope | an agent reading stdout |
 
 **Check:** with `--verbose`, one progress line per feed reaches stderr; the schema announces
 the heartbeat

@@ -88,12 +88,16 @@ Every field of an output dataclass is written on every call, so the schema lists
 them as `required` and allows no others. That is the point: an agent can read `data.item.id`
 without checking whether the key is there.
 
-Some types are refused when the app is built, each for a reason an agent would feel:
+Some types are refused when the app is built, each for a reason:
 
 - **`Any`, a `TypedDict`, or a bare `str` or `int` as the whole result**: `data` must be a
   JSON object, an array, or `null`, and its shape must be declared
 - **`list[X] | None`**: an empty collection is `[]`, never `null`, so a caller never has two
   ways to read "nothing". Write `tags: list[str] = Out(default_factory=list)`
+
+`Out(...)` is to an output field what `Flag` is to an argument: it gives the field a default,
+and settings for how treaty writes it, such as the order of a list (`sort_key=`) or whether
+its content came from outside the tool (`external=True`), which later chapters use.
 
 **Check:** `add`'s schema names every field of the result, and of the item inside it
 

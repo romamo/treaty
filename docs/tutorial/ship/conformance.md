@@ -15,6 +15,12 @@ uv run treaty conformance examples.tutorial.todo_exit_codes:app \
   | jq -e '.data.levels == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}'
 ```
 
+The kit groups its checks in three levels. Level 1 is what every CLI an agent calls must do:
+never wait for input, write one JSON envelope, use the spec's exit codes, keep colour and
+help text off stdout, exit 2 on a bad argument, and preview a destructive command under
+`--dry-run`. Level 2 adds refusing a destructive call that is not confirmed. Level 3 adds a valid
+manifest and flags that work in any position. The table below gives each check's level.
+
 In your own project, drop `--out`: the profile goes to `conformance/<name>.json`, where
 the audit's `profile` rule looks for it. The tutorial keeps its files under
 [`examples/tutorial/conformance/`](../../../examples/tutorial/conformance/) only because this
@@ -47,7 +53,8 @@ launcher, its environment, and any handler that writes to stdout itself.
 
 ## Step 1: Get the kit
 
-The kit ships with the spec. Clone it next to your project, where treaty looks by default:
+The kit ships with the spec, in the `cli-agent-spec` repository. Clone it next to your
+project, under the folder name treaty looks for by default:
 
 ```bash
 git clone https://github.com/cli-agent-spec/cli-agent-spec ../cli-agent-ergonomics
