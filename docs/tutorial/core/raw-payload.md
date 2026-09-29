@@ -47,7 +47,7 @@ wrong: a key with an underscore becomes a flag with a hyphen, a `null` has no fl
 a string with a quote needs escaping. With `--raw-payload`, the agent passes the object as
 it is, and treaty checks it against the same field types as the flags.
 
-## Step 1: Find the wide commands
+## Step 1: Add `edit`, then find the wide commands
 
 `edit` is new. Its arguments name the item and the fields to change, each optional:
 
@@ -62,8 +62,8 @@ class Edit(Common):
     )
 ```
 
-Its handler changes only the fields that were given, and answers `noop` when nothing
-differs:
+Its handler changes only the fields that were given, with `dataclasses.replace`, and answers
+`noop` when nothing differs:
 
 <!-- file: examples/tutorial/todo_payload.py -->
 ```python
@@ -123,7 +123,7 @@ is largest.
 )
 ```
 
-The handler takes no part in it: it receives the same `Edit` arguments however they arrived.
+The handler needs no change: it receives the same `Edit` arguments however they arrived.
 The second example shows the payload form, since agents copy examples before they read the
 schema.
 
@@ -224,6 +224,10 @@ todo edit --raw-payload '{"id": 1, "priority": "normal", "idempotency_key": "edi
 substitute the file: `todo edit --raw-payload "$(cat edit.json)"`. For many calls, or objects
 too large for a command line, write one `exec` line per call instead: each line is the same
 object with `"_cmd": "edit"` added, and `todo exec --input-file plan.jsonl` runs them all.
+
+In your project, this chapter changed the commands, so regenerate what is derived from them:
+`uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and
+`uv run treaty conformance todo.cli:app --force` before the next run of the kit.
 
 ## Next
 

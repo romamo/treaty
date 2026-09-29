@@ -295,6 +295,10 @@ Tokens that expire, logins, and scopes are the next step up from a static token:
 for expired and missing credentials. See [Credentials](../../../README.md#credentials) in the
 README.
 
+In your project, this chapter changed the commands, so regenerate what is derived from them:
+`uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and
+`uv run treaty conformance todo.cli:app --force` before the next run of the kit.
+
 ## Next
 
 The audit's `log-not-print` rule is about what a command writes while it runs, and uses the

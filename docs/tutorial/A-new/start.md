@@ -65,8 +65,9 @@ uv run pytest -q
 uv run treaty audit todo.cli:app --strict > /dev/null
 ```
 
-Keep that state as the bar: after each step, the tests pass and the audit has nothing new to
-say.
+Keep that state as the bar. Steps 4 to 7 replace the scaffold's commands, so its tests fail
+until Step 7 replaces them too, and the AGENTS.md test until Step 8; from Step 8 on, after
+each step, the tests pass and the audit has nothing new to say.
 
 ## Step 2: Read what you got
 
@@ -118,10 +119,11 @@ the "Fails when" column
 ## Step 4: Replace the app and add shared state
 
 The file you are building is [`todo_treaty.py`](../../../examples/tutorial/todo_treaty.py).
-Copy it over `src/todo/cli.py` now (its docstring's usage lines name the tutorial's copy;
-change them to `todo ...`), then read Steps 4 to 6, which walk through its parts in
-order. Typing it in piece by piece works too, but nothing runs until every piece is there,
-since the commands share definitions. The app keeps the name `todo`:
+Copy it over `src/todo/cli.py` now (its docstring names the tutorial's copy and its usage
+lines run it from the treaty repository; change both to describe your `todo`), then read
+Steps 4 to 6, which walk through its parts in order. Typing it in piece by piece works too,
+but nothing runs until every piece is there, since the commands share definitions. The app
+keeps the name `todo`:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python

@@ -50,7 +50,9 @@ Each chapter serves two ways of reading it:
 
 - **Building your own CLI.** Work in your project and run the commands the prose shows, with
   your app's import path, such as `myapp.cli:app`, and your own command in place of `todo`.
-  Each **Check** shows what the same step prints for `todo`, so you know what to expect
+  Each **Check** shows what the same step prints for `todo`, so you know what to expect.
+  Counts in a **Check** are for that chapter's own example file: a project that carries
+  every chapter forward has more commands, tools, and findings
 - **Re-running the tutorial.** The **Check** blocks run from the root of a treaty checkout,
   where the example files live. Each chapter's first block defines `todo` as a shell function
   that runs that chapter's example file, and `tests/test_tutorial.py` runs every block in

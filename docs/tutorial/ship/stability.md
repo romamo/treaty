@@ -168,7 +168,8 @@ whole command is deprecated the same way, with `deprecated=Deprecated(...)` on
 `@app.command`, and warns `DEPRECATED`.
 
 Update the examples when you deprecate: `list`'s example now shows `--include-done`, since
-agents copy examples before they read descriptions.
+agents copy examples before they read descriptions. Update suggestions and fixes that name
+the old flag too, such as `done`'s `NOT_FOUND` suggestion.
 
 **Check:** `--all` still works and warns with the replacement; the schema marks it
 
@@ -201,7 +202,7 @@ each output with the lock, and reports a change the version does not announce:
 ```
 
 **Check:** lock the 1.1.0 outputs, then add a field to `Item` without a version bump: the
-audit reports all four commands whose result holds an item
+audit reports every command whose result holds an item, four in this file
 
 <!-- check -->
 ```bash
@@ -221,16 +222,11 @@ This step is optional: the redirect, the deprecation warning, and the manifest a
 an agent what moved. A schema changelog also lets it ask what changed since the release it
 learned, instead of failing into each change.
 
-Pass the file to the `App` you already have:
+Add one keyword to the `App(...)` you already have, keeping every other argument, such as
+`settings=` from [Read settings and secrets](../core/config.md):
 
 ```python
-app = App(
-    "todo",
-    version="1.1.0",
-    description="Track todo items",
-    companions=("mkdir",),
     schema_changelog=Path(__file__).parent / "schema-changelog.json",
-)
 ```
 
 That gives the app a `changelog` command, which lists each version's added, removed, and

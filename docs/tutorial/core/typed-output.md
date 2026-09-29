@@ -167,7 +167,7 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
     commands = app.manifest()["commands"]
     assert isinstance(commands, dict)
     db = str(tmp_path / "todo.json")
-    calls = [
+    calls: list[tuple[str, dict[str, object]]] = [
         ("add", {"text": "Buy milk", "priority": "high", "db": db}),
         ("done", {"id": 1, "db": db}),
         ("list", {"all": True, "db": db}),
@@ -180,9 +180,10 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
         jsonschema.validate(env.data, commands[name]["output_schema"])
 ```
 
-It needs `jsonschema` as a test dependency: `uv add --dev jsonschema`. Cover each shape a
-command can return: `purge` returns a preview with `would_affect` on a dry run and the
-deleted items on a real one, so it is called both ways.
+It needs `jsonschema` as a test dependency, and its type stubs for `mypy --strict tests`:
+`uv add --dev jsonschema types-jsonschema`. Cover each shape a command can return: `purge`
+returns a preview with `would_affect` on a dry run and the deleted items on a real one, so
+it is called both ways.
 
 In your own project the test is the same with your app in it: import it
 (`from todo.cli import app` in a project `treaty init` made), use it where the test says

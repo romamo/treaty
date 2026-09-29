@@ -116,6 +116,9 @@ The contract tests are there for the change nobody thinks to check. Rename a fla
 example, as a refactoring does when it renames the flag and misses the example, and the
 suite fails before any agent copies it:
 
+In a project where another example also uses `--priority high`, such as one with `edit`,
+the sed renames it there too, and two tests fail.
+
 **Check:** with `--priority` misspelled in `add`'s example, the example test fails; with the
 file restored, it passes again
 
@@ -178,7 +181,7 @@ adds the checkout and setup around them. Save it as `.github/workflows/agent-con
   `skills` first, for the reason [Ship the agent docs](agent-docs.md#step-6-gate-ci-on-all-three)
   gives
 
-Either way, the pull request that changed a command also shows what changed for agents.
+With these gates, the pull request that changed a command also shows what changed for agents.
 
 Give the conformance kit's launcher a sandbox before the job runs it on anything that holds
 real data, as [Run the conformance kit](conformance.md#step-2-keep-the-probes-away-from-real-data)

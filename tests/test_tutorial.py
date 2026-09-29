@@ -329,7 +329,7 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
     commands = app.manifest()["commands"]
     assert isinstance(commands, dict)
     db = str(tmp_path / "todo.json")
-    calls = [
+    calls: list[tuple[str, dict[str, object]]] = [
         ("add", {"text": "Buy milk", "priority": "high", "db": db}),
         ("done", {"id": 1, "db": db}),
         ("list", {"all": True, "db": db}),

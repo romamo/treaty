@@ -206,10 +206,10 @@ from typing import Any
 import pytest
 ```
 
-Change the app path to `todo.cli:app` and drop `PYTHONPATH`. Every call
-already passes `db` under the test's `tmp_path`, so the test never touches your real item
-file; keep it that way for your own commands. The test needs the `mcp` extra, which Step 1
-added.
+Change the app path to `todo.cli:app` and drop `PYTHONPATH`, and set the expected tool list
+to your own: `uv run treaty-mcp todo.cli:app --list-tools` prints it. Every call already
+passes `db` under the test's `tmp_path`, so the test never touches your real item file; keep
+it that way for your own commands. The test needs the `mcp` extra, which Step 1 added.
 
 **Check:** the chapter's **Done when** command
 

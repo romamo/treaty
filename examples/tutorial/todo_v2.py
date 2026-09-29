@@ -169,7 +169,7 @@ def complete(args: Done, ctx: Ctx, store: Store) -> Changed:
     raise Exit.NOT_FOUND(
         f"no item #{args.id}",
         context={"id": args.id},
-        suggestion="todo list --all shows every item number",
+        suggestion="todo list --include-done shows every item number",
     )
 
 

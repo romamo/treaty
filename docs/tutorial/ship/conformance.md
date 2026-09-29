@@ -123,10 +123,10 @@ executable (`chmod +x`). `treaty conformance` finds it there and writes
 if the project has none.
 
 Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`: the
-kit then runs your real command against your real data, with no sandbox, and when `todo`
-is not on `PATH` the run exits 4, with the kit's `INVALID_PROFILE` in `context`. On Windows, where
-the `/bin/sh` launcher cannot run, treaty uses the app's console script in the current
-environment instead. Either way, `--command` names an executable of your own.
+kit then runs your real command against your real data, with no sandbox, and when `todo` is
+not on `PATH` the run exits 4, with the kit's `INVALID_PROFILE` in `context.kit_error`. On
+Windows, where the `/bin/sh` launcher cannot run, treaty uses the app's console script in
+the current environment instead. Either way, `--command` names an executable of your own.
 
 **Check:** the launcher runs the CLI against the sandbox, which holds no items: probes never
 run a mutating command, and the destructive probe is only ever previewed or refused
@@ -155,10 +155,11 @@ The kit lists any failures first, then the passing checks by id.
 
 The probe count is `todo`'s; yours follows your commands and examples.
 
-In a project made with `treaty init`, the first run stops with exit 6, `CONFLICT`: `init`
-wrote a profile for the scaffold's commands, and yours have replaced them. [Start a new
-CLI](../A-new/start.md#step-9-rewrite-the-conformance-profile) replaces it in Step 9; if you
-have not, replace it once, then run the kit:
+The run stops with exit 6, `CONFLICT`, whenever the commands changed since the profile was
+written: in a project made with `treaty init`, whose profile is for the scaffold's commands
+until [Start a new CLI](../A-new/start.md#step-9-rewrite-the-conformance-profile) Step 9
+replaces it, and after any chapter that added a command or changed an example. Replace it,
+then run the kit:
 
 ```bash
 uv run treaty conformance todo.cli:app --force

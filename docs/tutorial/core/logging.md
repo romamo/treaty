@@ -132,8 +132,9 @@ The tests call `import` against the `feed` and `private_feed` servers already in
 `tests/conftest.py` from [Declare network
 commands](network-io.md#step-4-handle-what-the-server-answered) and [Read settings and
 secrets](config.md#step-6-test-it-against-a-feed-that-needs-the-token). Copy them, with the
-`_log_lines` helper, from the "Log without touching stdout" part of
-[`tests/test_tutorial.py`](../../../tests/test_tutorial.py).
+`_log_lines` helper (it needs `io`, `json`, and `typing.Any`; the stray-print test also
+needs `App`, `Ctx`, and `NoArgs` from `treaty`), from the "Log without touching stdout" part
+of [`tests/test_tutorial.py`](../../../tests/test_tutorial.py).
 
 **Check:** the logging tests pass: `import` logs only under `--verbose`, a stray `print`
 never reaches stdout, and the `--debug` trace redacts the token

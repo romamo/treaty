@@ -54,7 +54,7 @@ Each step below removes one of these.
 
 Every handler runs under a wall-clock limit: `App(default_timeout=...)` for the app, 60
 seconds unless set, and `timeout=` on a command that needs a different one. `import-all`
-asks for two minutes. Here is the new command's arguments and declaration; the steps
+asks for two minutes. Here are the new command's arguments and declaration; the steps
 below explain `heartbeat=` and the handler's `Batch` result:
 
 <!-- file: examples/tutorial/todo_batch.py -->
@@ -101,9 +101,10 @@ todo add "Buy milk" --db tmp/tutorial/todo.json | jq -e '.meta.timeout_ms == 600
 
 `TIMEOUT` is the framework's last resort: the handler is still running, the result is lost,
 and the state may be partly changed. A handler that knows it is working through a list can
-do better, by checking `ctx.remaining`, the seconds left, before it starts each item. The
-code uses four names from treaty that Step 3 explains: `Batch` and `Outcome`, the result and
-one item of it, `ItemError`, one item's error, and `CliExit`, the class of treaty's errors:
+do better, by checking `ctx.remaining`, the seconds left, before it starts each item, and
+times each one with `time.monotonic()` (add `import time`). The code uses four names from
+treaty that Step 3 explains: `Batch` and `Outcome`, the result and one item of it,
+`ItemError`, one item's error, and `CliExit`, the class of treaty's errors:
 
 <!-- file: examples/tutorial/todo_batch.py -->
 ```python
@@ -225,9 +226,9 @@ To test your own `import-all`, add the `_Feeds` handler and the `feeds` fixture 
 "Long-running work" in [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) to
 `tests/conftest.py`, beside the server from [Declare network
 commands](network-io.md#step-4-handle-what-the-server-answered): it serves feeds that answer
-slowly or not at all, and needs `time` besides that server's imports. Copy the `_results`
-helper and the `import_all` tests into a test file; they also import `Envelope` from
-`treaty`.
+slowly, or with a body that is not a list, and needs `time` besides that server's imports.
+Copy the `_results` helper and the `import_all` tests into a test file, with `Envelope` from
+`treaty` among its imports.
 
 **Check:** the tests for this chapter pass: a good and a broken feed, tagged as external
 though one failed; three slow feeds under a short limit; and the tags on a full success
@@ -253,7 +254,13 @@ The `async-job` audit rule reports a command named `start`, `submit`, `enqueue`,
 or `trigger` that does not return a job, since the name suggests work that goes on after
 the command returns and an agent has nothing to poll.
 
+In your project, this chapter changed the commands, so regenerate what is derived from them:
+`uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and
+`uv run treaty conformance todo.cli:app --force` before the next run of the kit.
+
 ## Next
 
-The audit's next rules with a chapter are `settings-declared` and `env-prefix`, about how a
+The next rules this tutorial takes up are `settings-declared` and `env-prefix`, about how a
 command reads its settings and secrets: [Read settings and secrets](config.md).
+`log-not-print`, which the audit checks before them, comes after that chapter, since it uses
+the `todo` it builds.

@@ -253,6 +253,12 @@ repository, such as one under a new directory in `/tmp`: inside your project's o
 repository, git finds that repository instead. The checks set `GIT_CEILING_DIRECTORIES`
 for the same reason: it stops git from looking above a directory.
 
+To test `save` in your project, copy the `repository` fixture, the `_git_env` helper, and
+the two tests under "Run other programs" in
+[`tests/test_tutorial.py`](../../../tests/test_tutorial.py), with `os`, `shutil`,
+`subprocess`, and `pytest` imported, calling your `app`. `_git_env` gives git an author and
+sets `GIT_CEILING_DIRECTORIES`, so the tests never touch your own repository.
+
 A failure `save` does not name ends as `SUBPROCESS_FAILED`. The check below makes one with a
 new item file the repository's `.gitignore` excludes: git refuses to add it. A file git
 already tracks would be committed whatever `.gitignore` says, which is why the check uses a
@@ -289,11 +295,11 @@ For a hash the tag costs nothing; for a command that returns a child's text outp
 a log or a file's contents, it is what keeps that text from being read as instructions. See
 [Declare network commands](network-io.md#step-5-mark-what-came-from-outside).
 
-To test `save` in your project, copy the `repository` fixture, the `_git_env` helper, and
-the two tests under "Run other programs" in
-[`tests/test_tutorial.py`](../../../tests/test_tutorial.py), calling your `app`. `_git_env`
-gives git an author and sets `GIT_CEILING_DIRECTORIES`, so the tests never touch your own
-repository.
+
+
+In your project, this chapter changed the commands, so regenerate what is derived from them:
+`uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and
+`uv run treaty conformance todo.cli:app --force` before the next run of the kit.
 
 ## Next
 

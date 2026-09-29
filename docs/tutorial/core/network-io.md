@@ -17,6 +17,9 @@ uv run treaty audit examples.tutorial.todo_network:app --strict > /dev/null
 The chapter gives `todo` an `import` command that adds the items listed at a URL. It
 starts from [`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py)
 and ends at [`examples/tutorial/todo_network.py`](../../../examples/tutorial/todo_network.py).
+The steps show the parts that matter for agents; in your project, copy `Import`,
+`Imported`, `feed_entries` (with `from typing import get_args`), and `import_items` from
+that file.
 
 ## Running the checks
 
@@ -245,8 +248,10 @@ import pytest
 
 Copy the tests under "Declare network commands" in
 [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) into a test file of your own,
-and call your `app` where they call `todo_network.app`. The chapters that follow add their
-own servers to `conftest.py` the same way.
+and call your `app` where they call `todo_network.app`. Each test file needs its own
+imports: `pytest`, `Path`, your `app`, and whatever else the copied code names; `uv run ruff
+check --select F821 tests` lists any you missed. The chapters that follow add their own
+servers to `conftest.py` the same way.
 
 **Check:** against a local server, a list of two items is added, and a 404 or a body that
 is not a list exits 81 and writes no item file
@@ -275,6 +280,10 @@ A caller that trusts the source passes `--no-injection-protection`, which drops 
 and reports its use.
 
 Only mark what really came from outside: an id the tool computed, or a count, is its own.
+
+In your project, this chapter changed the commands, so regenerate what is derived from them:
+`uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and
+`uv run treaty conformance todo.cli:app --force` before the next run of the kit.
 
 ## Next
 

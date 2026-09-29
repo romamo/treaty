@@ -744,8 +744,7 @@ tools take them as arguments. `--schema` shows `default_limit`. Streams are not 
 
 A field declared `Flag(secret=True)`, or whose name contains `token`, `secret`, `password`,
 `key`, `credential`, `auth`, or `cookie` anywhere (so `author` too), or has a `pass`
-segment, never takes its value on the command line (REQ-C-016); a boolean never does, and
-`secret=False` opts a field out. The
+segment, never takes its value on the command line (REQ-C-016). A boolean is never a secret, and `secret=False` opts a field out. The
 framework exposes `--<name>-from-env VAR` and `--<name>-from-file PATH` instead
 (REQ-O-022), and reads `<APP>_<NAME>` when neither is given; the manifest lists that default
 in `secret_env_vars`. The value is read in the validation phase, coerced and pattern-checked
