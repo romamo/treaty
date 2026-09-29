@@ -321,7 +321,9 @@ For `todo` it exits 0, as it does for this chapter's file,
 `examples.tutorial.todo_exit_codes:app`, in a treaty checkout. The audit still lists two
 pieces of advice for `add`, which `todo` leaves on purpose; [the
 index](../index.md#advice-you-can-leave) says why. A migrated project also sees `profile`
-advice until [Run the conformance kit](../ship/conformance.md) writes its profile.
+advice until [Run the conformance kit](../ship/conformance.md) writes its profile. If you
+marked `test_the_strict_audit_passes` as `xfail` in [Describe every command](describe.md),
+remove the mark now: the test passes from here on.
 
 The audit's next rule is `typed-output`, which checks that every command's result has a
 schema an agent can read: [Type every command's output](typed-output.md). Each core chapter

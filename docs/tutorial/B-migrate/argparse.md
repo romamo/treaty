@@ -416,10 +416,14 @@ env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")})
 assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 ```
 
-`app.run(argv, stdout=..., stderr=...)` covers the argv path and the plain renderers.
-A whole test file for `todo` in this style, with its imports and a fixture for a scratch
-item file, is [`new_cli/test_cli.py`](../../../examples/tutorial/new_cli/test_cli.py): copy it
-into your project's `tests/` and change `from todo.cli import app` to your app. Treaty's own
+`app.run(argv, stdout=..., stderr=...)` covers the argv path and the plain renderers. A
+whole test file for `todo` in this style, with its imports and a fixture for a scratch item
+file, is [`new_cli/test_cli.py`](../../../examples/tutorial/new_cli/test_cli.py): copy it
+into your project's `tests/` and change `from todo.cli import app` to your app. Your
+existing tests are callers too: those that pass flags before the command, read printed text,
+or expect exit 1 fail after the migration, as [What changes for the people using your
+CLI](#what-changes-for-the-people-using-your-cli) lists. Update them or replace them, and
+copy the example under another name if `tests/test_cli.py` exists. Treaty's own
 [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) tests the finished example both
 ways.
 

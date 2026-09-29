@@ -282,9 +282,11 @@ and reports its use.
 
 Only mark what really came from outside: an id the tool computed, or a count, is its own.
 
-In your project, this chapter changed the commands, so regenerate what is derived from them:
-`uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and
-`uv run treaty conformance todo.cli:app --force` before the next run of the kit.
+If your project already has AGENTS.md, from `treaty init` or [Ship the agent
+docs](../ship/agent-docs.md), this chapter changed the commands, so regenerate what is
+derived from them: `uv run treaty agents-md todo.cli:app`, or the AGENTS.md test fails, and,
+once it has a conformance profile, `uv run treaty conformance todo.cli:app --force` before
+the next run of the kit.
 
 ## Next
 
