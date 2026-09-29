@@ -126,6 +126,9 @@ Apps built on treaty keep their own, structured schema changelog with
   field has its arrays re-sorted and suggests a typed output or `ordered=True`.
   `ordered=True` and `Out(ordered=True)` keep the order of arrays inside a
   `list[dict[str, object]]` too, as they already did inside a `dict[str, object]` (#27)
+- A short flag that takes a value keeps a global option's name as that value, as the long
+  form does: `-s -h` and `-s -v` pass `-h` and `-v` to `-s` instead of reading them as
+  `--help` and `--verbose`
 - An argument list built from the whole arguments object, as `["git", *flags(args)]`, got
   a worked-out declaration naming no user-controlled field and no audit warning. Passing
   `args` on whole, or reading a method or property of it such as `args.argv()`, now makes

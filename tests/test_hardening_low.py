@@ -147,7 +147,7 @@ def test_schema_version_takes_a_major_or_a_served_major_minor(pin: str, code: in
 
 @dataclass(frozen=True, slots=True)
 class Said:
-    say: str = Flag(description="What to say")
+    say: str = Flag(short="s", description="What to say")
 
 
 def echo_app() -> App:
@@ -160,9 +160,12 @@ def echo_app() -> App:
     return app
 
 
+@pytest.mark.parametrize("flag", ["--say", "-s"])
 @pytest.mark.parametrize("value", ["-h", "--help", "--format", "--schema", "-v", "-vv"])
-def test_a_global_options_name_is_a_flags_value_when_the_flag_takes_one(value: str) -> None:
-    code, envelope, _ = run(echo_app(), ["echo", "--say", value])
+def test_a_global_options_name_is_a_flags_value_when_the_flag_takes_one(
+    flag: str, value: str
+) -> None:
+    code, envelope, _ = run(echo_app(), ["echo", flag, value])
     assert code == 0, envelope
     assert envelope["data"] == {"said": value}
 
