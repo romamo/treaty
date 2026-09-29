@@ -319,8 +319,9 @@ def _subprocess_declared(app: App) -> Iterator[Finding]:
                 f"{direct[0].name}() on line {direct[0].line} of the handler runs a program "
                 "outside ctx.run, so it has no time limit, locale, or argv the manifest can "
                 "show, and doctor cannot check the program is installed (REQ-C-019)",
-                "ctx.run([...]) with the same argument list, then "
-                'subprocess=treaty.Subprocess("<binary>", ...) and required_tools=',
+                "ctx.run([...]) with the same argument list, check=False where the code reads "
+                "returncode itself, and no capture_output= or text= (ctx.run captures text); "
+                'then subprocess=treaty.Subprocess("<binary>", ...) and required_tools=',
             )
             continue
         if c.subprocess is not None:
@@ -1742,7 +1743,22 @@ def creates(command: Command) -> bool:
     return command.path.parts[-1].split("-")[0] in ("create", "add", "new", "register")
 
 
-_DELETE_VERBS = ("delete", "remove", "rm", "drop", "destroy", "purge", "erase", "unregister")
+_DELETE_VERBS = (
+    "delete",
+    "del",
+    "remove",
+    "rm",
+    "drop",
+    "destroy",
+    "purge",
+    "erase",
+    "wipe",
+    "clear",
+    "prune",
+    "forget",
+    "unset",
+    "unregister",
+)
 
 
 def deletes(command: Command) -> bool:

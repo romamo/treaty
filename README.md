@@ -615,8 +615,7 @@ def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
   arguments always passed (REQ-C-019). A declared field holding `; | & $ ( ) < >`, a
   backtick, a line break, or a leading `-` exits `2` with `SHELL_METACHARACTER` before the
   handler runs. Without it the manifest's `subprocess` is derived from `ctx.run([...])`
-  list literals, unchecked, and the `subprocess-declared` audit rule flags a command whose
-  argument list cannot be read
+  list literals, unchecked, and the `subprocess-declared` audit rule flags a command whose argument list cannot be read, or that starts a program outside `ctx.run` (`subprocess.run` and its siblings, `os.exec*`, `os.spawn*`, however imported)
 - `platform=` lists `sys.platform` values; elsewhere the command still runs, with an
   `UNSUPPORTED_PLATFORM` warning. `required_tools=` maps each program the command runs to
   its minimum version (REQ-C-018)

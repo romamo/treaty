@@ -125,7 +125,8 @@ to retry without changing it twice:
   retries reads `noop` and knows the first call already did the work
 - **`--idempotency-key`**: a second call with the same key returns the first result without
   running the handler. A retry after a lost response is then safe even for `add`, which
-  would otherwise add a second item. Reusing a key with different arguments exits 6 (`CONFLICT`) with `error.code`
+  would otherwise add a second item. Reusing a key with different arguments exits 6
+  (`CONFLICT`) with `error.code`
 `IDEMPOTENCY_KEY_REUSED`, which is why every `mutating` command can exit 6 without declaring it
 - **`TIMEOUT` is not retryable**: the call may have written half its work, so an agent
   inspects state before calling again
@@ -170,10 +171,12 @@ if found is None:
 ```
 
 Then drop `NOT_FOUND` from its `exit_codes`: a gone id is no longer a failure. The audit's
-`delete-not-found` rule warns while a command that deletes declares `NOT_FOUND`. A
-destructive command that does something else to what it names, such as a restore that
-overwrites files from a snapshot, keeps `NOT_FOUND`: a missing snapshot is a real failure
-there.
+`delete-not-found` rule warns while a command that deletes declares `NOT_FOUND`; it counts a
+command as deleting when its `effect` is a `Literal` that includes `"deleted"`, or, when
+`effect` is a plain `str`, when its name starts with a delete verb such as `delete`,
+`remove`, `purge`, or `prune`. A destructive command that does something else to what it
+names, such as a restore that overwrites files from a snapshot, keeps `NOT_FOUND`: a missing
+snapshot is a real failure there.
 
 A `destructive` command is also never offered as a fix: a `fix_command` that runs one is
 refused, since a fix must be safe to run twice, so an agent following a suggestion never

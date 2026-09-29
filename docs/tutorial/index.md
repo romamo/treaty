@@ -51,10 +51,11 @@ Each chapter serves two ways of reading it:
 - **Building your own CLI.** Work in your project and run the commands the prose shows, with
   your app's import path, such as `myapp.cli:app`, and your own command in place of `todo`.
   Each **Check** shows what the same step prints for `todo`, so you know what to expect.
-  Counts in a **Check** are for that chapter's own example file: a project that carries every chapter forward has more commands, tools, and findings.
-  Once it has agent docs, regenerate them after any chapter that changes a command, its
-  flags, or its exit codes, as [Ship the agent docs](ship/agent-docs.md#step-6-gate-ci-on-all-three)
-  shows; the core chapters that add a command say so
+  Counts in a **Check** are for that chapter's own example file: a project that carries
+  every chapter forward has more commands, tools, and findings. Once it has agent docs,
+  regenerate them after any chapter that changes a command, its flags, or its exit codes,
+  as [Ship the agent docs](ship/agent-docs.md#step-6-gate-ci-on-all-three) shows; the core
+  chapters that add a command say so
 - **Re-running the tutorial.** The **Check** blocks run from the root of a treaty checkout,
   where the example files live. Each chapter's first block defines `todo` as a shell function
   that runs that chapter's example file, and `tests/test_tutorial.py` runs every block in
@@ -120,7 +121,7 @@ follow the finding's suggested fix:
 | `danger-level` | danger levels that match what command names imply | [Choose each command's danger level](core/danger-level.md) |
 | `exit-codes` | command-specific exit codes on every non-safe command | [Declare exit codes](core/exit-codes.md) |
 | `retryable` | retryable codes only on idempotent commands | [Declare exit codes](core/exit-codes.md) |
-| `delete-not-found` | a destructive command that answers `noop` for an id already gone, and does not declare `NOT_FOUND` | [Choose each command's danger level](core/danger-level.md#step-4-what-destructive-adds) |
+| `delete-not-found` | a command that deletes (a `deleted` effect or a delete verb) answers `noop` for an id already gone, and does not declare `NOT_FOUND` | [Choose each command's danger level](core/danger-level.md#step-4-what-destructive-adds) |
 | `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
 | `paginated-list` | list commands keep the framework's pagination | [Page long lists](core/pagination.md) |
 | `network-io` | `has_network_io=True` on commands that call out | [Declare network commands](core/network-io.md) |

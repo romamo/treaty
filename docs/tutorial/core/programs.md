@@ -75,8 +75,12 @@ the source shows it, and a handler that calls `os.system`, `os.popen`, or anythi
 
 A migrated handler that calls `subprocess.run` with a list passes registration, but the
 audit's `subprocess-declared` rule warns: outside `ctx.run` the child has no time limit or C
-locale, and nothing declares it. Change the call to `ctx.run` with the same list, which
-returns the same `returncode`, `stdout`, and `stderr`.
+locale, and nothing declares it. Change the call to `ctx.run` with the same list. It returns
+`returncode`, `stdout`, and `stderr` as text, but it differs from `subprocess.run` in two
+ways: it raises on a non-zero exit unless you pass `check=False`, which code that reads
+`returncode` itself needs, and it takes no `capture_output=` or `text=`, since it always
+captures text. The same goes for a call imported as `from subprocess import run`; a call
+inside a helper function the handler calls is not seen, so check those by hand.
 
 The `--` before the file name ends git's options: whatever the name is, git reads it as a
 path. Put `--` before every argument that comes from the caller when the program supports

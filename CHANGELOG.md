@@ -44,9 +44,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 - `external=False` on a command that calls out says it returns only values it computed,
   which clears the `external-data` warning; unset, `external` is `None`, undeclared
-- The `subprocess-declared` rule reports `subprocess.run` and its siblings, and
-  `os.exec*` and `os.spawn*`, called in a handler: outside `ctx.run` a child has no time
-  limit or declared argv, and `doctor` cannot check the program
+- The `subprocess-declared` rule reports `subprocess.run` and its siblings, `os.exec*`,
+  `os.spawn*`, and `os.posix_spawn*`, called in a handler however they were imported:
+  outside `ctx.run` a child has no time limit or declared argv, and `doctor` cannot check
+  the program. Its fix says `ctx.run` checks the exit status unless `check=False`
 - `Arg(multiline=True)` lets a positional hold newlines, as `Flag(multiline=True)` does; the
   `multiline-flag` advice now suggests `Arg` for a positional instead of a `Flag` it cannot take
 - Did-you-mean on an unknown command: `context.did_you_mean` lists up to three close
@@ -70,7 +71,8 @@ Apps built on treaty keep their own, structured schema changelog with
 
 - `delete-not-found` fired on every destructive command with `NOT_FOUND`, such as a
   restore from a missing snapshot; it now applies to commands whose output admits
-  `deleted`, or, without an effect enum, whose name is a delete verb
+  `deleted`, or, without an effect enum, whose name is a delete verb (`delete`, `remove`,
+  `purge`, `prune`, `wipe`, `clear`, and the like)
 - An app whose type has no JSON Schema, found as `treaty audit` imported it, crashed the
   treaty command; it is `APP_IMPORT_FAILED` like a registration error
 - The `delete-not-found` fix said to return `noop` when the resource is gone, which a dry

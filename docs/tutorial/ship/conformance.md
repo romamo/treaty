@@ -107,7 +107,7 @@ launcher, below, runs your installed command instead.
 
 Point the sandbox at whatever your CLI touches: an environment variable for a config file, a
 test account's credentials, a mock server's URL. When a probe names something that must
-exist, such as a destructive command's example `restore 3`, the launcher seeds the sandbox
+exist, such as a destructive command's example `restore 3`, have the launcher seed the sandbox
 with it before running the CLI; otherwise the dry run fails with your not-found code instead
 of previewing. A project made with `treaty init` already has a launcher, `conformance/todo`,
 without a sandbox; a migrated project has none, so create it. Give it a sandbox as soon as a

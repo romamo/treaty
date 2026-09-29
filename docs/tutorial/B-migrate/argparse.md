@@ -485,7 +485,7 @@ command.
 | `parser.error(msg)` | `raise ParseError(msg, context=...)` in the arguments' `__post_init__`: exit 2; from a handler it exits 1 |
 | `sys.exit(n)` | `raise Exit.NAME(msg, ...)`, declared in `exit_codes=` |
 | `print(...)` | return a dataclass; add a renderer for custom text |
-| `subprocess.run([...])` | `ctx.run([...])`, declared with `subprocess=` ([Run other programs](../core/programs.md)) |
+| `subprocess.run([...])` | `ctx.run([...])`, with `check=False` if you read `returncode`, declared with `subprocess=` ([Run other programs](../core/programs.md)) |
 | `-v`/`--verbose` printing progress | `ctx.log(...)`, shown under the framework's `--verbose`; a `-v` short is gone |
 | `input("Sure?")`, `--yes` | `danger_level="destructive"`, `dry_run`, `--confirm-destructive` |
 | a `--password` flag | `secret=True` (inferred from the name): read from env or file only |

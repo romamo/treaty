@@ -917,7 +917,8 @@ class App:
             renamed = " ".join(f"--{f}" for f in taken if f not in _BUILT_IN_FEATURE)
             advice = "; ".join([*instead, *([f"rename {renamed}"] if renamed else [])])
             raise RegistrationError(
-                f"{path}: flags {taken} are supplied by the framework for this command, or "
+                f"{path}: flags {', '.join(f'--{f}' for f in taken)} are supplied by the "
+                "framework for this command, or "
                 f"reserved for it (REQ-F-079), and would never reach the handler; {advice}"
             )
         if path in self._commands:

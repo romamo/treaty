@@ -231,6 +231,41 @@ def test_a_raw_subprocess_call_in_a_handler_is_reported() -> None:
     assert _findings(app, "subprocess-declared") == ["pack"]
 
 
+def test_a_raw_subprocess_call_is_found_however_it_was_imported() -> None:
+    """A migrated CLI often imports run by name, or subprocess under another name"""
+    import subprocess as sp
+    from dataclasses import dataclass
+    from subprocess import run
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("x", version="1.0.0")
+
+    @app.command("pack", description="Pack it", danger_level="mutating", exit_codes=())
+    def pack(args: NoArgs, ctx: Ctx) -> Done:
+        run(["tar", "-cf", "x.tar", "."], check=True)
+        return Done("created")
+
+    @app.command("unpack", description="Unpack it", danger_level="mutating", exit_codes=())
+    def unpack(args: NoArgs, ctx: Ctx) -> Done:
+        sp.check_output(["tar", "-xf", "x.tar"])
+        return Done("updated")
+
+    @app.command("count", description="Count it", danger_level="safe", exit_codes=())
+    def count(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        # A local name that happens to be called run is not subprocess.run
+        def run(items: list[str]) -> int:
+            return len(items)
+
+        return {"n": run(["a"])}
+
+    assert _findings(app, "subprocess-declared") == ["pack", "unpack"]
+
+
 def test_delete_not_found_is_only_for_commands_that_delete() -> None:
     """A restore from a missing snapshot is a real failure, not a delete of something gone"""
     from dataclasses import dataclass
@@ -248,13 +283,13 @@ def test_delete_not_found_is_only_for_commands_that_delete() -> None:
         would_affect: Affects | None = None
 
     app = App("x", version="1.0.0")
-    for name in ("restore", "delete"):
+    for name in ("restore", "delete", "wipe", "prune"):
 
         @app.command(name, description=name, danger_level="destructive", exit_codes=["NOT_FOUND"])
         def handler(args: ById, ctx: Ctx) -> Result:
             return Result("noop")
 
-    assert _findings(app, "delete-not-found") == ["delete"]
+    assert _findings(app, "delete-not-found") == ["delete", "prune", "wipe"]
 
 
 def test_external_false_acknowledges_a_network_command_that_returns_computed_values() -> None:

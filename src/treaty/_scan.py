@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import ast
 import inspect
+import os
+import subprocess
 import textwrap
+import types
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -161,13 +164,57 @@ def shell_calls(fn: Callable[..., object]) -> list[ShellCall]:
     return sorted(found, key=lambda c: c.line)
 
 
-_DIRECT = frozenset({"run", "call", "check_call", "check_output", "Popen"})
+def _program_starters() -> tuple[object, ...]:
+    """The functions and classes that start a program without ctx.run"""
+    names = ("run", "call", "check_call", "check_output", "Popen")
+    found: list[object] = [getattr(subprocess, n) for n in names]
+    found += [
+        getattr(os, n)
+        for n in dir(os)
+        if n.startswith(("exec", "spawn", "posix_spawn")) and callable(getattr(os, n))
+    ]
+    return tuple(found)
+
+
+_STARTERS = _program_starters()
+
+
+def _closure(fn: Callable[..., object]) -> dict[str, object]:
+    """The names a handler defined inside a function sees from it, such as that function's
+    imports; a cell not assigned yet, for a name bound later, holds nothing to resolve"""
+    code = getattr(fn, "__code__", None)
+    cells = getattr(fn, "__closure__", None) or ()
+    if code is None:
+        return {}
+    found: dict[str, object] = {}
+    for name, cell in zip(code.co_freevars, cells, strict=True):
+        try:
+            found[name] = cell.cell_contents
+        except ValueError:
+            # An empty cell: the enclosing function binds the name after this definition
+            continue
+    return found
+
+
+def _resolve(fn: Callable[..., object], name: str) -> object:
+    """What ``name``, such as ``sp.run`` or ``run``, refers to in the handler's module; None
+    when it is not a module-level name or goes through something other than a module"""
+    root, *rest = name.split(".")
+    scope: dict[str, object] = {**getattr(fn, "__globals__", {}), **_closure(fn)}
+    target = scope.get(root)
+    for part in rest:
+        if not isinstance(target, types.ModuleType):
+            return None
+        target = getattr(target, part, None)
+    return target
 
 
 def direct_subprocess_calls(fn: Callable[..., object]) -> list[ShellCall]:
     """Calls in the handler's source that start a program without ``ctx.run``:
-    ``subprocess.run`` and its siblings, and ``os.exec*`` and ``os.spawn*``. A shell one is
-    refused at registration already; this finds the argv lists"""
+    ``subprocess.run`` and its siblings, ``os.exec*``, ``os.spawn*``, and
+    ``os.posix_spawn*``, however the handler's module imported them (``import subprocess as
+    sp``, ``from subprocess import run``). A shell one is refused at registration already;
+    this finds the argv lists. A call inside a helper the handler calls is not seen"""
     tree = source_tree(fn)
     if tree is None:
         return []
@@ -178,10 +225,8 @@ def direct_subprocess_calls(fn: Callable[..., object]) -> list[ShellCall]:
         name = dotted(node.func)
         if name is None:
             continue
-        module, _, last = name.rpartition(".")
-        if (module == "subprocess" and last in _DIRECT) or (
-            module == "os" and last.startswith(("exec", "spawn"))
-        ):
+        target = _resolve(fn, name)
+        if any(target is starter for starter in _STARTERS):
             found.append(ShellCall(name, node.lineno))
     return sorted(found, key=lambda c: c.line)
 
