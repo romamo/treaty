@@ -12,7 +12,7 @@ import inspect
 import json
 import re
 import typing
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -41,6 +41,10 @@ class Severity(StrEnum):
     ERROR = "error"
     WARNING = "warning"
     ADVICE = "advice"
+
+
+_RANK = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.ADVICE: 2}
+"""The order of the next steps: what fails --strict before what only advises"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -2117,5 +2121,11 @@ def audit(
     for rule in rules:
         findings = tuple(rule.check(app))
         results.append(RuleResult(rule.id, rule.title, rule.severity.value, not findings, findings))
-    pending = [f for r in results for f in r.findings]
-    return AuditReport(target=target, rules=tuple(results), next_steps=tuple(pending[:limit]))
+    pending = in_order(f for r in results for f in r.findings)
+    return AuditReport(target=target, rules=tuple(results), next_steps=pending[:limit])
+
+
+def in_order(findings: Iterable[Finding]) -> tuple[Finding, ...]:
+    """Errors first, then warnings, then advice, so what fails --strict is never behind
+    advice; within a severity, the order the rules run in, since sorted is stable"""
+    return tuple(sorted(findings, key=lambda f: _RANK[f.severity]))

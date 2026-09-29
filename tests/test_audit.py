@@ -32,7 +32,8 @@ def test_audit_finds_each_planted_problem(tmp_path) -> None:
     assert [f.command for f in by_rule["cleanup"].findings] == []
     assert [f.command for f in by_rule["already-exists"].findings] == ["create-item"]
     assert not by_rule["profile"].passed
-    assert len(report.next_steps) == 3 and report.next_steps[0].rule == "describe"
+    # The fixture's findings are warnings and advice: warnings lead, in rule order
+    assert [f.rule for f in report.next_steps] == ["danger-level", "retryable", "network-io"]
     assert report.failed == 10
 
 
@@ -72,7 +73,8 @@ def test_cli_audit_json_and_plain(tmp_path) -> None:
     assert len(data["next_steps"]) == 2
     code, out = run_cli(["audit", "fixture_audit_app:app", "--all", *where], isatty=True)
     assert code == 0
-    assert "Next steps" in out and "1. (advice) describe [create-item]" in out
+    assert "Next steps" in out and "1. (warning) danger-level [" in out
+    assert "(advice) describe [create-item]" in out
     assert out.count("fix:") == 12
 
 
@@ -150,3 +152,15 @@ def test_heuristics_skip_words_that_only_start_like_a_verb_or_end_like_a_path() 
     by_rule = {r.id: r for r in audit(app, "prefs:app", limit=10).rules}
     assert by_rule["danger-level"].findings == ()
     assert [f.message.split()[0] for f in by_rule["path-typed"].findings] == ["outfile"]
+
+
+def test_next_steps_put_what_fails_strict_before_advice() -> None:
+    """An error from the last rule leads, though earlier rules found advice"""
+    old = fixture_audit_app.app.manifest()
+    commands = old["commands"]
+    assert isinstance(commands, dict)
+    baseline = {**old, "commands": {**commands, "gone": next(iter(commands.values()))}}
+    report = audit(fixture_audit_app.app, "fixture_audit_app", limit=100, baseline=baseline)
+    ranks = {"error": 0, "warning": 1, "advice": 2}
+    order = [ranks[f.severity.value] for f in report.next_steps]
+    assert order == sorted(order) and report.next_steps[0].rule == "additive"

@@ -1408,7 +1408,8 @@ commands without `--raw-payload`, missing cleanup hooks, blanket scopes, login c
 without `auth=`, commands that start work without returning a job, config writes without a
 scope, per-call values in output data, output schema changes without a `schema_version`
 bump, handlers that find a project root or retry by hand, and a missing conformance
-profile. `--all` lists
+profile. The next steps come errors first, then warnings, then advice, in rule order within
+each, so what fails `--strict` is never behind advice. `--all` lists
 everything, `--strict` exits 79 (`AUDIT_FAILED`) on any warning so CI can gate on it, and
 piping the output gives an envelope an agent can act on. Rules see declarations only; the
 conformance kit covers runtime behaviour.

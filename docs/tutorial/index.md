@@ -129,10 +129,10 @@ uv run treaty audit myapp.cli:app | jq '.data.next_steps[0]'
 # read .rule, open that chapter, apply .fix, run the project's tests, repeat
 ```
 
-`next_steps` holds the first few findings in the order the rules run, not by severity, so
-an error from a late rule can sit behind advice from an early one. `--all` lists every
-finding, and `.data.rules[].findings` holds them all in JSON; a check that a rule is clear
-reads that, not `next_steps`.
+`next_steps` holds the first few findings, errors first, then warnings, then advice, so
+what fails `--strict` is always at the top. `--all` lists every finding, and
+`.data.rules[].findings` holds them all in JSON; a check that one rule is clear reads that,
+since `next_steps` may stop before that rule's findings.
 
 Rules only see declarations. After the loop ends, `treaty conformance myapp.cli:app --run`
 checks runtime behaviour against the spec kit.

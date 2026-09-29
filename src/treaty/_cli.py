@@ -17,7 +17,16 @@ from . import __version__
 from ._agents_md import AGENTS_FILE, Mismatch, check, check_tools, render_file
 from ._app import App, NoArgs
 from ._atomic import write_atomic
-from ._audit import ADDITIVE, LOCK_FILE, RULES, AuditReport, Severity, audit, schema_lock
+from ._audit import (
+    ADDITIVE,
+    LOCK_FILE,
+    RULES,
+    AuditReport,
+    Severity,
+    audit,
+    in_order,
+    schema_lock,
+)
 from ._changelog import ChangelogEntry, diff, dump_changelog, load_changelog, record
 from ._context import Ctx
 from ._errors import Exit, ParseError, RegistrationError
@@ -208,7 +217,7 @@ def _to_out(report: AuditReport, show_all: bool) -> AuditOut:
         RuleOut(r.id, r.title, r.severity, r.passed, tuple(conv(f) for f in r.findings))
         for r in report.rules
     )
-    pending = tuple(conv(f) for r in report.rules for f in r.findings)
+    pending = tuple(conv(f) for f in in_order(f for r in report.rules for f in r.findings))
     return AuditOut(
         target=report.target,
         rules_total=len(report.rules),
