@@ -661,7 +661,7 @@ command.
 Migration is a breaking change for callers. Put this list in your release notes:
 
 - Group options go after the command: `todo --db x list` becomes `todo list --db x`
-- `--yes` is gone; destructive commands take `--confirm-destructive`, and without it they
+- `--yes` is gone from destructive commands, which take `--confirm-destructive`, and without it they
   show what they would do and exit 2
 - A command that returns a list, such as `list`, returns 20 items at a time; `--limit 0`
   returns all of them, and `--cursor` the next
@@ -679,8 +679,7 @@ Migration is a breaking change for callers. Put this list in your release notes:
 - Secret options (`--token`, `--password`) no longer take a value on the command line; use
   `--token-from-env VAR` or `--token-from-file PATH`
 - `-v` is gone; pass `--verbose`
-- `--config` and `--format` are treaty's flags; a CLI that had its own now answers to the
-  names it gave them in Step 1
+- `--config` and `--format` are now treaty's; the CLI's own options of those names are renamed (list the new names)
 - Completion scripts have to be generated again with `todo completion`
 
 ## Next

@@ -516,8 +516,7 @@ Migration is a breaking change for callers. Put this list in your release notes:
 - A text flag refuses a line break unless the field declares `multiline=True`; give
   every field that takes free text, such as a body or a message, `multiline=True`
 - `-v` is gone; pass `--verbose`
-- `--config` and `--format` are treaty's flags; a CLI that had its own now answers to the
-  names it gave them in Step 1
+- `--config` and `--format` are now treaty's; the CLI's own options of those names are renamed (list the new names)
 - Completion scripts come from `todo completion`, generated from the manifest
 - A command that read a file or `-` for stdin takes the file as `--input-file PATH` and
   otherwise reads its stdin

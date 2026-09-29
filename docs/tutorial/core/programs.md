@@ -183,7 +183,8 @@ def save(args: Save, ctx: Ctx, store: Store) -> Saved:
 
 - **`required_tools=`** maps each program to its minimum version. `todo doctor` then checks
   git is installed and new enough, and names the fix when it is not. Without it the audit
-  reports `(advice) required-tools [save]: runs 'git' (line N of the handler), which required_tools does not list, so doctor cannot check it is installed`
+  reports `(advice) required-tools [save]: runs 'git' (line N of the handler), which
+  required_tools does not list, so doctor cannot check it is installed`
 - **`subprocess=`** names the binary, the fields whose values become its arguments, and the
   fixed arguments its calls pass, here the git subcommands and the main switches `save`
   uses. The manifest publishes that list for a reader; treaty checks the fields' values,
@@ -192,15 +193,17 @@ def save(args: Save, ctx: Ctx, store: Store) -> Saved:
   `SHELL_METACHARACTER`. `--db` is declared because the file name git receives comes from
   it; `--message` is not, since it never becomes an argument
 
-When every argument list in the handler is written out as a list and starts with the same
-program, as `save`'s do, treaty works out a declaration by itself if there is none. A
-command that runs two programs gets none, since `subprocess=` names one: run the second one
-from a command of its own. It names a field as user-controlled when an argument reads it,
-directly or through a local variable, as `*extra` after `extra = list(args.extra)` does. The
-`subprocess-declared` rule warns when treaty cannot work one out, as when the list is a
-variable, `ctx.run(cmd)`: then declare it by hand. A worked-out declaration only describes
-the call in the manifest; only one declared by hand has treaty check each field's values
-before the handler runs, as `save`'s does.
+If `save` had no `subprocess=`, treaty would work one out: that needs every `ctx.run` in the
+handler to take a list written out in place, starting with the same program as a string
+literal. A field counts as user-controlled when an argument reads it, directly or through a
+local such as `extra = list(args.extra)`. A worked-out declaration only describes the call in
+the manifest; only a declaration by hand makes treaty check the values, as `save`'s does.
+
+Where treaty cannot work one out, `subprocess-declared` warns, and you declare it by hand:
+when the list is a variable (`ctx.run(cmd)`), the program is a constant (`[GIT, ...]`), or
+the command uses `ctx.pipeline`. A command that runs two programs can declare only one, so
+move the second into its own command. A `ctx.run` inside a helper function is not read at
+all: declare it on the command, with `required_tools=`, so `doctor` checks the program.
 
 **Check:** the schema names git and its version; `doctor` finds it; a `;` in `--db` is
 refused before git runs

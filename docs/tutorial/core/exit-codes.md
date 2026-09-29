@@ -176,7 +176,7 @@ caller can use:
 | `retry_after_ms` | how long to wait, on retryable codes only | |
 
 `fix_command` is the strongest hint an agent can get, so only set it when it is certain to
-help. `save`, in Step 5, sets `mkdir -p` only when the directory is missing; a read-only
+help. `Store.save`, in Step 5, sets `mkdir -p` only when the directory is missing; a read-only
 directory has no safe one-command fix, so it gets `fix_required` alone.
 
 treaty checks every `fix_command` before it reaches the agent: one command, no `<`, `>`,
