@@ -144,9 +144,11 @@ The checks catch the paths agents get wrong by accident. They do not decide whic
 command may touch:
 
 - **An absolute path passes.** `--db /etc/hosts` is a valid path; `todo` then reads it and
-  exits 79 with `STORE_CORRUPT`. If a command must stay inside a directory, resolve the
-  path in the arguments dataclass's `__post_init__` and raise `ParseError` when it falls
-  outside, so the call exits 2 before anything runs
+  exits 79 with `STORE_CORRUPT`. If a command must stay inside a directory, check in the
+  handler, where a relative path is already resolved against `--cwd`, and raise a declared
+  exit code when it falls outside, before touching the file. `__post_init__` also sees the
+  path as the caller typed it, relative to the process's directory, so a check there is
+  wrong under `--cwd`
 - **Nothing checks that the path exists**, or that it is a file rather than a directory.
   Check what the command needs, and raise an exit code the caller can act on, as `todo`'s
   store does with `STORE_UNWRITABLE`

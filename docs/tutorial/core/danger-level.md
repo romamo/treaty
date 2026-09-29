@@ -155,7 +155,10 @@ the command `requires_confirmation: true`, and MCP clients see the destructive h
 When most calls of a command are previews, `safe_default=True` turns the gate around: the
 command previews and exits 0 by default, and `--live` applies it. Use it for commands such
 as a cleanup an agent runs often to see what it would remove; keep the default gate when
-applying is the usual intent.
+applying is the usual intent. `--live` alone is the confirmation, so nothing refuses such a
+command: the conformance kit's destructive checks need a destructive command without
+`safe_default`, and an app whose only destructive commands have it scores `incomplete` at
+every level.
 
 A destructive command that takes an id has one more case: the id is already gone. A
 retried delete should succeed rather than fail, so it answers `noop` when confirmed, and on

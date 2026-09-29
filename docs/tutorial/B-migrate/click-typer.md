@@ -206,9 +206,10 @@ Unlike `ctx.obj`, the resource is typed, so a handler that asks for a `Store` ge
 Typing `db` as `Path` also gets the argument checked before any handler runs: `..` segments,
 percent-encoded bytes, and null bytes exit 2. `click.Path(exists=True)` has no flag of its
 own; check in the handler, where a relative path has already been resolved against `--cwd`,
-and raise a declared exit code such as `NOT_FOUND`, as [Type path arguments as
-Path](../core/path-typed.md) shows. `__post_init__` runs before that resolution, so a check
-there looks in the wrong directory under `--cwd`.
+and raise a declared exit code such as `NOT_FOUND`, as `todo`'s store raises
+`STORE_UNWRITABLE` in [Type path arguments as Path](../core/path-typed.md). `__post_init__`
+first runs on the path as typed, before that resolution (and again after it), so a check
+there looks in the wrong directory under `--cwd`, and anything else it does happens twice.
 
 **Check:** the old order fails with the new order in the suggestion, so a caller that still
 uses it is told how to fix the call
@@ -627,7 +628,7 @@ command.
 | `click.Path(exists=True)` | `exists=True` | a check in the handler that raises `Exit.NOT_FOUND` |
 | `click.IntRange` | `min=`, `max=` | a check in `__post_init__` that raises `ParseError` |
 | `click.File("r")`, a `-` for stdin | `typer.FileText` | `stdin_input=True`: the text arrives as `ctx.stdin_text`, from a pipe or `--input-file PATH`, which replaces the file argument |
-| an `--output FILE` the command writes itself | the same | keep an `output: Path` flag, refused with `CONFLICT` unless `--force`; `output_file=True` instead writes `data` in the `--format` representation |
+| an `--output FILE` the command writes itself | the same | keep an `output: Path` flag, and raise `treaty.already_exists` (`CONFLICT`) yourself when the file exists and `--force` is not given; `output_file=True` instead writes `data` in the `--format` representation |
 | `is_flag=True` | `bool = False` | `bool = Flag(default=False, ...)` |
 | `--x/--no-x` | `bool = True` | `bool = Flag(default=True, ...)`: treaty adds `--no-x` |
 | `multiple=True` | `list[str]` option | `tuple[str, ...]` flag: repeats accumulate |
