@@ -7,7 +7,7 @@ manifest an agent can read
 start](../index.md#before-you-start))
 
 **Done when:** your tests pass, if the CLI has any, and `treaty audit` reports only
-`exit-codes` warnings, which the next chapter clears:
+`exit-codes` warnings, which [Declare exit codes](../core/exit-codes.md) clears:
 
 <!-- check -->
 ```bash
@@ -276,7 +276,7 @@ def add(args: Add, ctx: Ctx, store: Store) -> Changed:
 Four things are new:
 
 - **`danger_level=` and `exit_codes=`** are required on every command. `add` changes state,
-  so it is `mutating`; its own failures come in the next chapter, so the list is empty for
+  so it is `mutating`; its own failures come in [Declare exit codes](../core/exit-codes.md), so the list is empty for
   now. A read-only command such as `list` is `safe`
 - **`examples=`** is the first thing an agent copies. The audit's `describe` rule asks for
   one on every command
@@ -339,7 +339,8 @@ codes its manifest entry lists; anything else exits 1 with `UNDECLARED_EXIT_CODE
 manifest never lies about how a command can fail.
 
 `NOT_FOUND` is one of treaty's framework codes (0 to 13). When none of them fits, declare
-your own in the 79 to 125 range with `app.exit_code(...)`; the next chapter does that.
+your own in the 79 to 125 range with `app.exit_code(...)`; [Declare exit
+codes](../core/exit-codes.md) does that.
 
 `click.UsageError` and `click.BadParameter` become `ParseError`. Raised from the arguments
 dataclass's `__post_init__`, it exits 2 before anything runs, as click's did. Raised from a

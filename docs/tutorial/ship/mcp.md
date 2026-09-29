@@ -9,7 +9,7 @@ shell
 envelope. In this repository, the client session in the tests proves it:
 
 ```bash
-uv run pytest tests/test_tutorial.py -k mcp
+uv run pytest tests/test_tutorial.py -k test_todo_over_mcp
 # 1 passed
 ```
 

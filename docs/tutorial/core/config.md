@@ -24,8 +24,8 @@ gains a default feed URL from the settings, and a token for feeds that require o
 [Run long work an agent can follow](long-running.md) branches from the same file, so its
 `import-all` is not in this chapter's `todo`. If your `todo` has both, `import_all` calls
 `import_items` directly: give it a `settings: Settings` parameter too, and pass `settings`
-on, or `import-all` crashes with a missing argument while the audit and the tests still
-pass.
+on, or `import-all` crashes with `HANDLER_CRASHED`. The audit does not notice; the
+`import_all` tests copied from that chapter do.
 
 ## Running the checks
 

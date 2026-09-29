@@ -157,9 +157,10 @@ These are the job's steps; the [whole file](../../../examples/tutorial/new_cli/a
 adds the checkout and setup around them. Save it as `.github/workflows/agent-contract.yml`.
 
 - **`git diff --exit-code`** fails the job when a regenerated agent doc differs from the
-  committed one, or, after `git add --intent-to-add`, when one was never committed, and the kit step fails with `CONFLICT` when the conformance profile no
-  longer matches the commands, so the pull request that changed a command also shows what
-  changed for agents
+  committed one, or, after `git add --intent-to-add`, when one was never committed
+- **The kit step** fails with `CONFLICT` when the conformance profile no longer matches
+  the commands. Either way, the pull request that changed a command also shows what changed
+  for agents
 - **The baseline step** is skipped until `todo-1.0.0.json` exists. At each release, save the
   new manifest as the next baseline, as
   [Change the contract safely](stability.md#step-1-keep-the-last-releases-manifest) describes

@@ -8,7 +8,7 @@ core chapters clear
 project brings its own treaty
 
 **Done when:** in the project, the tests pass and `treaty audit` reports only `exit-codes`
-warnings, which the next chapter clears:
+warnings, which [Declare exit codes](../core/exit-codes.md) clears:
 
 ```bash
 uv run pytest -q
@@ -227,7 +227,7 @@ def add(args: Add, ctx: Ctx, store: Store) -> Changed:
 What each part is for:
 
 - **`danger_level=` and `exit_codes=`** are required on every command. `add` changes state,
-  so it is `mutating`. Its own failures come in the next chapter, so the list is empty for
+  so it is `mutating`. Its own failures come in [Declare exit codes](../core/exit-codes.md), so the list is empty for
   now
 - **`examples=`** is the first thing an agent copies. The audit's `describe` rule asks for
   one on every command, and the conformance kit builds its probes from them
@@ -457,9 +457,10 @@ Next steps
   ...
 ```
 
-`add` and `purge` change state but declare no failures of their own: a damaged item file
-or a read-only directory ends as a crash with exit 1, which tells an agent nothing. That
-is the next chapter's subject, and every chapter after it follows the audit the same way.
+`add` and `purge` change state but declare no failures of their own: a damaged item file or
+a read-only directory ends as a crash with exit 1, which tells an agent nothing. That is the
+subject of [Declare exit codes](../core/exit-codes.md), and every chapter follows the audit
+the same way.
 
 **Check:** the chapter's **Done when**
 

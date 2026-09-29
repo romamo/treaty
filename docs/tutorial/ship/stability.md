@@ -10,8 +10,11 @@ and `schema-version`
 **Done when:** `todo` 1.1.0 passes the strict audit against the 1.0.0 manifest:
 
 ```bash
-uv run treaty audit examples.tutorial.todo_v2:app --baseline todo-1.0.0.json --strict
+uv run treaty audit todo.cli:app --baseline todo-1.0.0.json --strict
 ```
+
+In this repository, the 1.1.0 file is `examples.tutorial.todo_v2:app`, and the checks keep
+the baseline under `tmp/tutorial/`.
 
 The chapter takes `todo` from 1.0.0,
 [`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py), to
@@ -66,6 +69,10 @@ git worktree remove ../todo-1.0.0
 ```
 
 Every check below compares the working tree against that file.
+
+The version that counts is `App(version=...)`: `--version`, the manifest, AGENTS.md, and the
+baseline's name all read it. Keep the one in `pyproject.toml` the same, or have the app read
+it with `importlib.metadata.version("todo")` so there is only one to change.
 
 **Check:** the 1.0.0 manifest lists `done` and `list --all`
 

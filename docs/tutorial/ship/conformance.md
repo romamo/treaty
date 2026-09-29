@@ -54,7 +54,9 @@ launcher, its environment, and any handler that writes to stdout itself.
 ## Step 1: Get the kit
 
 The kit ships with the spec, in the `cli-agent-spec` repository. Clone it next to your
-project, under the folder name treaty looks for by default:
+project, under the folder name treaty looks for by default. The repository is
+`cli-agent-spec`, but treaty's default folder is `../cli-agent-ergonomics`, so the clone
+names it that on purpose:
 
 ```bash
 git clone https://github.com/cli-agent-spec/cli-agent-spec ../cli-agent-ergonomics
@@ -78,7 +80,9 @@ Probes run the real CLI. treaty derives them from your commands:
 - one `destructive` probe per destructive command, from its first example with the
   confirmation removed: `todo purge`. The kit runs it with `--dry-run`, and again with no
   flags to check that it is refused
-- `version`, and an `invalid` probe that adds `--no-such-flag` to the first probe
+- `version`, and `status`, a built-in that always exits 0
+- two `invalid` probes: `manifest --etag x`, a malformed etag, and the first probe with
+  `--no-such-flag` added
 
 Mutating commands are never probed. Destructive ones are, and the kit is there to check
 exactly the safety you might have got wrong. If `purge` ignored `--dry-run`, a run against
@@ -97,14 +101,16 @@ mkdir -p "$here/.sandbox"
 HOME="$here/.sandbox" exec "$here/../../../.venv/bin/python" "$here/../todo_exit_codes.py" "$@"
 ```
 
-Save it next to the profile, named after the app, and make it executable (`chmod +x`).
-`treaty conformance` finds it there and writes `"command": ["./todo"]` into the profile.
-Add `.sandbox/` to `.gitignore`.
+That one runs the example file from this repository. Your project's launcher runs your
+installed command instead, as the next one does. Save it next to the profile, named after the
+app (`conformance/todo`), and make it executable (`chmod +x`). `treaty conformance` finds it
+there and writes `"command": ["./todo"]` into the profile. Add `.sandbox/` to `.gitignore`.
 
 Point the sandbox at whatever your CLI touches: an environment variable for a config file,
 a test account's credentials, a mock server's URL. A project made with `treaty init` already
-has a launcher, `conformance/todo`, without a sandbox. Add one as soon as a command reads or
-writes real state; for `todo`, two lines give it its own `HOME`:
+has a launcher, `conformance/todo`, without a sandbox; a migrated project has none, so create
+it. Give it a sandbox as soon as a command reads or writes real state; for `todo`, two lines
+give it its own `HOME`:
 
 ```sh
 #!/bin/sh
@@ -113,8 +119,10 @@ mkdir -p "$here/.sandbox"
 HOME="$here/.sandbox" exec "$here/../.venv/bin/todo" "$@"
 ```
 
-On Windows the `/bin/sh` launcher cannot run. treaty falls back to the app's console script
-in the current environment, or you pass `--command` with an executable of your own.
+Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`: the
+kit then runs your real command against your real data, with no sandbox. On Windows, where
+the `/bin/sh` launcher cannot run, treaty uses the app's console script in the current
+environment instead. Either way, `--command` names an executable of your own.
 
 **Check:** the launcher runs the CLI against the sandbox, which holds no items: probes never
 run a mutating command, and the destructive probe is only ever previewed or refused
@@ -129,7 +137,7 @@ examples/tutorial/conformance/todo list | jq -e '.ok and .data == []'
 ```bash
 $ uv run treaty conformance examples.tutorial.todo_exit_codes:app \
     --out examples/tutorial/conformance/todo.json --run --format plain
-Profile: examples/tutorial/conformance/todo.json (4 probes)
+Profile: examples/tutorial/conformance/todo.json (6 probes)
 Levels: level_1 pass, level_2 pass, level_3 pass
 
   pass  L1 no_hang_stdin_closed
@@ -141,8 +149,9 @@ Levels: level_1 pass, level_2 pass, level_3 pass
 The probe count is `todo`'s; yours follows your commands and examples.
 
 In a project made with `treaty init`, the first run stops with exit 6, `CONFLICT`: `init`
-wrote a profile for the scaffold's commands, and yours have replaced them. Replace it once,
-then run the kit:
+wrote a profile for the scaffold's commands, and yours have replaced them. [Start a new
+CLI](../A-new/start.md#step-9-rewrite-the-conformance-profile) replaces it in Step 9; if you
+have not, replace it once, then run the kit:
 
 ```bash
 uv run treaty conformance todo.cli:app --force
@@ -176,7 +185,7 @@ $ uv run treaty conformance examples.tutorial.todo_exit_codes:app --out tmp/argp
     --command examples/tutorial/conformance/todo-argparse --run --format plain
 treaty: CONFORMANCE_FAILED: 7 conformance checks failed
   summary: {'passed': 5, 'failed': 7, 'skipped': 0}
-Profile: tmp/argparse/todo.json (4 probes)
+Profile: tmp/argparse/todo.json (6 probes)
 Levels: level_1 fail, level_2 fail, level_3 fail
 
   pass  L1 no_hang_stdin_closed

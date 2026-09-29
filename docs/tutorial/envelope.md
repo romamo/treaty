@@ -32,6 +32,7 @@ rm -rf tmp/tutorial && mkdir -p tmp/tutorial
   },
   "error": null,
   "meta": {
+    "audit_log_path": "/home/me/.local/share/todo/audit.jsonl",
     "command": "add",
     "config_sources": [],
     "cwd": "/home/me/project",
@@ -215,12 +216,13 @@ These are on every run:
 | `timeout_ms` | the time limit the run had |
 | `headless` | `true` when there is no person or display to open a window for |
 | `config_sources`, `effective_config_hash` | the config files read, highest first, and a hash of the settings they produced |
+| `audit_log_path` | the audit log this run was written to; absent when `TODO_AUDIT_LOG=off` turns the log off |
 
 Others appear only when they apply: `pagination` on a list command (`returned`, `total`,
-`has_more`, `next_cursor`), `idempotency_hit` when a repeated idempotency key returned the
-first result, `validation_only` under `--validate-only`, `trace_id` when `TOOL_TRACE_ID` is
-set, `retries` when the command retried. None of them is ever `null`: a key that does not
-apply is left out.
+`has_more`, `next_cursor`, `truncated`), `idempotency_hit` when a repeated idempotency key
+returned the first result, `validation_only` under `--validate-only`, `trace_id` when
+`TOOL_TRACE_ID` is set, `retries` when the command retried. None of them is ever `null`: a
+key that does not apply is left out.
 
 **Check:** `list` carries `pagination`; a run without an idempotency key has no
 `idempotency_hit` at all
