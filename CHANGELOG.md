@@ -63,6 +63,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- The `delete-not-found` fix said to return `noop` when the resource is gone, which a dry
+  run refuses with `INVALID_EFFECT`; it now names `would_delete` with an empty `Affects` for
+  the dry run. `already-exists` no longer says a create lacks `CONFLICT` when the manifest
+  lists the generic one
+- A field named like a framework flag the command gets, such as a migrated `--timeout` on a
+  network command, was refused with "rename the fields". For `--timeout`, `--limit`,
+  `--cursor`, `--proxy`, and `--no-proxy` the error now says to drop the field and use the
+  framework's, since a renamed one would duplicate it
 - The `schema-version` rule called any change inside an `anyOf`, `oneOf`, or `allOf` breaking, so
   a field added to the items of a `Batch` result, or to an optional object, demanded a new
   major version. Union branches are now compared one by one; a branch added or removed is

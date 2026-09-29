@@ -403,3 +403,23 @@ def test_argument_order_ignores_example_globals_and_streams() -> None:
 
     order = argument_order_for(app)
     assert order is not None and order["local_args"] == ["--limit", "3"]
+
+
+def test_a_field_the_framework_already_provides_is_dropped_not_renamed() -> None:
+    """A migrated --timeout is the framework's own feature: renaming it keeps two timeouts"""
+    app = App("t", version="1.0.0")
+    with pytest.raises(RegistrationError) as caught:
+
+        @app.command("a", description="A", has_network_io=True, danger_level="safe", exit_codes=())
+        def a(args: TimeoutField, ctx: Ctx) -> dict[str, int]:
+            return {}
+
+    assert "drop timeout:" in str(caught.value) and "ctx.timeout" in str(caught.value)
+    assert "rename" not in str(caught.value)
+    with pytest.raises(RegistrationError, match=r"rename \['raw-payload'\]"):
+
+        @app.command(
+            "b", description="B", supports_raw_payload=True, danger_level="safe", exit_codes=()
+        )
+        def b(args: RawPayloadField, ctx: Ctx) -> dict[str, int]:
+            return {}

@@ -1735,8 +1735,9 @@ def _already_exists(app: App) -> Iterator[Finding]:
                 "already-exists",
                 Severity.ADVICE,
                 c.path.value,
-                "a create command does not declare CONFLICT, so a retried create cannot answer "
-                "with the resource that already exists (REQ-C-028, heuristic)",
+                "a create command does not list CONFLICT in its own exit_codes (the manifest's "
+                "entry every mutating command gets does not count), so a retried create cannot "
+                "answer with the resource that already exists (REQ-C-028, heuristic)",
                 'exit_codes=("CONFLICT",), then raise treaty.already_exists(existing, '
                 "conflict_id=existing.id) when the resource is there",
             )
@@ -1753,8 +1754,9 @@ def _delete_not_found(app: App) -> Iterator[Finding]:
                 c.path.value,
                 "a delete declares NOT_FOUND; deleting what is already gone succeeds, so a "
                 "retried delete does not fail (REQ-C-028)",
-                'return {"effect": "noop", "status": "not_found"} when the resource is gone, '
-                "and drop NOT_FOUND from exit_codes",
+                'when the resource is gone, return effect "noop", and on a dry run '
+                '"would_delete" with would_affect=Affects("Deletes nothing: ...", (), 0); '
+                "drop NOT_FOUND from exit_codes",
             )
 
 

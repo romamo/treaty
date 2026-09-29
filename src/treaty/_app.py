@@ -321,6 +321,20 @@ class Group:
         return self._app.command(f"{self._prefix}.{name}", **meta)
 
 
+_PAGED = (
+    "a list command pages with the framework's --limit and --cursor (paginated=False keeps yours)"
+)
+_PROXIED = "ctx.http applies the framework's --proxy and --no-proxy"
+_BUILT_IN_FEATURE = {
+    "timeout": "the framework's --timeout bounds the run, and the handler reads it as ctx.timeout",
+    "limit": _PAGED,
+    "cursor": _PAGED,
+    "proxy": _PROXIED,
+    "no-proxy": _PROXIED,
+}
+"""Framework flags that do what a field of the same name did, so the field goes, not renamed"""
+
+
 class App:
     def __init__(
         self,
@@ -894,9 +908,13 @@ class App:
         self._yield_to(path)
         taken = framework_collisions(command)
         if taken:
+            # A migrated CLI often had its own --timeout or --limit: the framework's does the job
+            instead = [f"drop {f}: {_BUILT_IN_FEATURE[f]}" for f in taken if f in _BUILT_IN_FEATURE]
+            renamed = [f for f in taken if f not in _BUILT_IN_FEATURE]
+            advice = "; ".join([*instead, *([f"rename {renamed}"] if renamed else [])])
             raise RegistrationError(
                 f"{path}: flags {taken} are supplied by the framework for this command, or "
-                "reserved for it (REQ-F-079), and would never reach the handler; rename the fields"
+                f"reserved for it (REQ-F-079), and would never reach the handler; {advice}"
             )
         if path in self._commands:
             raise RegistrationError(f"{path} is already registered")

@@ -350,7 +350,8 @@ def test_audit_asks_creates_for_conflict_and_deletes_to_drop_not_found() -> None
     assert [f.command for f in rules["already-exists"].findings] == ["add"]
     assert "treaty.already_exists(" in rules["already-exists"].findings[0].fix
     assert [f.command for f in rules["delete-not-found"].findings] == ["drop"]
-    assert '"not_found"' in rules["delete-not-found"].findings[0].fix
+    fix = rules["delete-not-found"].findings[0].fix
+    assert '"noop"' in fix and '"would_delete"' in fix
     # Declaring CONFLICT on the create answers the first rule
     assert not [f for f in audit(resource_app(), "res", limit=3).rules if f.id == "already-exists"][
         0
