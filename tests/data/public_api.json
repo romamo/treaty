@@ -148,7 +148,7 @@
     },
     "Arg": {
       "kind": "function",
-      "signature": "(*, description: 'str', pattern: 'str | None' = None, secret: 'bool | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False) -> 'Any'"
+      "signature": "(*, description: 'str', pattern: 'str | None' = None, secret: 'bool | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, multiline: 'bool' = False) -> 'Any'"
     },
     "AuditLog": {
       "fields": [
@@ -905,7 +905,8 @@
       "pattern",
       "secret",
       "pattern_type",
-      "from_stdin"
+      "from_stdin",
+      "multiline"
     ],
     "Deprecated": [
       "since",

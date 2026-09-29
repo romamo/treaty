@@ -6,6 +6,7 @@ Command-specific codes must fall in 79 to 125.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from enum import IntEnum, StrEnum
 
@@ -224,6 +225,10 @@ class ExitCodeRegistry:
             raise RegistrationError(f"{entry.name}: command-specific exit codes must be in 79..125")
         self._add(entry)
         return entry
+
+    def unused(self) -> Iterator[int]:
+        """The command-specific codes, 79 to 125, that no entry has yet, lowest first"""
+        return (n for n in range(79, 126) if ExitCode(n) not in self._by_code)
 
     def __contains__(self, name: ExitCodeName) -> bool:
         return name in self._by_name

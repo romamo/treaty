@@ -124,9 +124,11 @@ def Arg(
     secret: bool | None = None,
     pattern_type: str | None = None,
     from_stdin: bool = False,
+    multiline: bool = False,
 ) -> Any:
     """Declare a positional argument on an arguments dataclass; ``from_stdin=True`` makes
-    the literal ``-`` read it from stdin"""
+    the literal ``-`` read it from stdin, and ``multiline`` lets it contain newlines, as
+    on ``Flag``"""
     spec = FlagSpec(
         description,
         positional=True,
@@ -134,6 +136,7 @@ def Arg(
         secret=secret,
         pattern_type=pattern_type,
         from_stdin=from_stdin,
+        multiline=multiline,
     )
     return field(metadata={_META: spec})
 

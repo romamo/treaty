@@ -42,6 +42,8 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Added
 
+- `Arg(multiline=True)` lets a positional hold newlines, as `Flag(multiline=True)` does; the
+  `multiline-flag` advice now suggests `Arg` for a positional instead of a `Flag` it cannot take
 - Did-you-mean on an unknown command: `context.did_you_mean` lists up to three close
   registered commands, best first, and `suggestion` names them, on the command line (as
   invocations, matching a mistyped word, a command's own name without its group, or the
@@ -61,6 +63,9 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- The `exit-codes` audit fix suggested code 79 for every command, and a `description="..."`
+  that registration refuses, so applying the fixes as written failed. Each finding now names
+  the next free code from 79 up and a placeholder description that registers
 - `treaty check-docs` passed an AGENTS.md that a command or variable added since was missing
   from, since every name left in the file still existed. Each generated section between
   the treaty markers is now compared with what `treaty agents-md` writes, and one that

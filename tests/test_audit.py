@@ -1,5 +1,6 @@
 import io
 import json
+import re
 
 import fixture_audit_app
 
@@ -164,3 +165,41 @@ def test_next_steps_put_what_fails_strict_before_advice() -> None:
     ranks = {"error": 0, "warning": 1, "advice": 2}
     order = [ranks[f.severity.value] for f in report.next_steps]
     assert order == sorted(order) and report.next_steps[0].rule == "additive"
+
+
+def test_every_exit_codes_fix_registers_when_applied_as_written() -> None:
+    """Each finding suggests its own free code, and a description registration accepts"""
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    app = App("x", version="1.0.0")
+    app.exit_code("TAKEN", 79, description="Already here", retryable=False, side_effects="none")
+    for name in ("add", "remove"):
+
+        @app.command(name, description=f"{name} it", exit_codes=(), danger_level="mutating")
+        def handler(args: NoArgs, ctx: Ctx) -> Done:
+            return Done("updated")
+
+    rule = next(r for r in audit(app, "x:app", limit=3).rules if r.id == "exit-codes")
+    suggested = [re.match(FIX, f.fix) for f in rule.findings]
+    assert [m.group(1, 2) for m in suggested if m] == [
+        ("ADD_FAILED", "80"),
+        ("REMOVE_FAILED", "81"),
+    ]
+    for m in suggested:
+        assert m is not None
+        app.exit_code(
+            m.group(1),
+            int(m.group(2)),
+            description=m.group(3),
+            retryable=False,
+            side_effects="none",
+        )
+
+
+FIX = r'app\.exit_code\("(\w+)", (\d+), description="([^"]+)"'

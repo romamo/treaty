@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from treaty import App, Ctx, Exit, Flag, ParseError, RegistrationError
+from treaty import App, Arg, Ctx, Exit, Flag, ParseError, RegistrationError
 from treaty._audit import audit
 
 SIDE_EFFECTS: list[str] = []
@@ -240,3 +240,35 @@ def test_every_exit_2_path_leaves_the_handler_untouched(argv: list[str]) -> None
     code, env = run(argv)
     assert code == 2 and error_of(env)["phase"] == "validation"
     assert SIDE_EFFECTS == []
+
+
+def test_a_multiline_positional_is_suggested_as_an_arg_and_accepts_newlines() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Post:
+        body: str = Arg(description="Post body")
+
+    app = App("x", version="1.0.0")
+
+    @app.command("post", description="Post", exit_codes=(), danger_level="safe")
+    def post(args: Post, ctx: Ctx) -> None:
+        return None
+
+    report = audit(app, "x:app", limit=3)
+    rule = next(r for r in report.rules if r.id == "multiline-flag")
+    assert rule.findings[0].fix.startswith("body: str = Arg(..., multiline=True)")
+
+    @dataclass(frozen=True, slots=True)
+    class Fixed:
+        body: str = Arg(description="Post body", multiline=True)
+
+    fixed = App("y", version="1.0.0")
+
+    @fixed.command("post", description="Post", exit_codes=(), danger_level="safe")
+    def post_fixed(args: Fixed, ctx: Ctx) -> dict[str, str]:
+        return {"body": args.body}
+
+    env = fixed.call("post", {"body": "one\ntwo"})
+    assert env.ok and env.data == {"body": "one\ntwo"}
+    assert not any(
+        r.findings for r in audit(fixed, "y:app", limit=3).rules if r.id == "multiline-flag"
+    )

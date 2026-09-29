@@ -136,18 +136,27 @@ def _danger_level(app: App) -> Iterator[Finding]:
 
 
 def _exit_codes(app: App) -> Iterator[Finding]:
+    # Each finding suggests its own free code, so applying every fix as written registers
+    free = app.exits.unused()
     for c in user_commands(app):
         if c.danger_level is DangerLevel.SAFE or c.exit_codes:
             continue
         name = c.path.parts[-1].upper().replace("-", "_") + "_FAILED"
+        code = next(free, None)
+        fix = (
+            f'app.exit_code("{name}", {code}, description="<what failed and what it left>", '
+            f'retryable=False, side_effects="none") then exit_codes=["{name}"]'
+            if code is not None
+            else "every code from 79 to 125 is registered: list the ones this command "
+            "exits with in exit_codes=[...]"
+        )
         yield Finding(
             "exit-codes",
             Severity.WARNING,
             c.path.value,
             "non-safe command declares no command-specific exit codes; "
             "agents cannot tell failures apart",
-            f'app.exit_code("{name}", 79, description="...", retryable=False, side_effects="none")'
-            f' then exit_codes=["{name}"]',
+            fix,
         )
 
 
@@ -692,7 +701,8 @@ def _multiline_flag(app: App) -> Iterator[Finding]:
                     Severity.ADVICE,
                     c.path.value,
                     f"{f.name} looks like free text, but newlines in it are refused (heuristic)",
-                    f"{f.name}: str = Flag(..., multiline=True) if it may span lines",
+                    f"{f.name}: str = {'Arg' if f.positional else 'Flag'}(..., multiline=True) "
+                    "if it may span lines",
                 )
 
 
