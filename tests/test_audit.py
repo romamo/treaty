@@ -1291,3 +1291,44 @@ def test_a_field_put_into_a_list_by_mutation_walrus_or_with_is_named() -> None:
     assert commands["built"]["subprocess"]["user_controlled_args"] == ["extra"]
     assert commands["walrus"]["subprocess"]["user_controlled_args"] == ["extra"]
     assert commands["opened"]["subprocess"]["user_controlled_args"] == ["repo"]
+
+
+def test_argv_built_from_the_whole_arguments_object_asks_for_a_declaration() -> None:
+    """flags(args) may pass any field: a worked-out declaration naming none would be wrong"""
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Log:
+        ref: str = Flag(default="HEAD", description="Ref")
+        pos: int = Flag(default=0, description="Where to insert")
+
+    @dataclass(frozen=True, slots=True)
+    class Shown:
+        text: str
+
+    def flags(args: Log) -> list[str]:
+        return [args.ref]
+
+    class Builder:
+        def __init__(self) -> None:
+            self.cmd: list[str] = ["git", "log"]
+
+    app = App("x", version="1.0.0")
+
+    @app.command("whole", description="Whole", danger_level="safe", exit_codes=())
+    def whole(args: Log, ctx: Ctx) -> Shown:
+        return Shown(ctx.run(["git", "log", *flags(args)]).stdout)
+
+    @app.command("member", description="Member", danger_level="safe", exit_codes=())
+    def member(args: Log, ctx: Ctx) -> Shown:
+        builder = Builder()
+        builder.cmd.append(args.ref)
+        builder.cmd.insert(args.pos, "--oneline")
+        return Shown(ctx.run(["git", "log", *builder.cmd]).stdout)
+
+    assert _findings(app, "subprocess-declared") == ["whole"]
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    assert commands["member"]["subprocess"]["user_controlled_args"] == ["ref"]

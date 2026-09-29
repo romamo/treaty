@@ -11,7 +11,7 @@ from enum import StrEnum
 
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo
-from ._scan import CtxCall
+from ._scan import EVERY_FIELD, CtxCall
 
 # REQ-F-044: what a shell would act on, rejected in a declared user-controlled argument
 _METACHARACTERS = re.compile(r"[;|&$()<>`\n\r]")
@@ -88,6 +88,8 @@ def derive_subprocess(calls: Sequence[CtxCall], fields: Sequence[FieldInfo]) -> 
         for item in rest:
             if item.literal is not None:
                 hardcoded[item.literal] = None
+            if EVERY_FIELD in item.fields:
+                return None  # the arguments object passed whole: which fields reach it is unknown
             # A local that holds a field's value carries it (ctx_calls follows it there)
             user.update(dict.fromkeys(f for f in item.fields if f in names))
     if len(binaries) != 1:

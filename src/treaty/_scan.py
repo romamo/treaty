@@ -161,12 +161,15 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
             and node.func.attr in _FILLS
         ):
-            # cmd.append(x) and the rest put x into cmd
+            # cmd.append(x) and the rest put x into cmd, or into self.cmd; insert's first
+            # argument is a position, not a value
+            put = node.args[1:] if node.func.attr == "insert" else node.args
             assigned += [
-                (node.func.value.id, arg) for arg in (*node.args, *(k.value for k in node.keywords))
+                (name, arg)
+                for name in _bound(node.func.value)
+                for arg in (*put, *(k.value for k in node.keywords))
             ]
     carried: dict[str, tuple[str, ...]] = {}
     changed = True
@@ -202,18 +205,27 @@ def _bound(target: ast.expr) -> list[str]:
     return []
 
 
+EVERY_FIELD = "*"
+"""What an expression reads when it passes the arguments object whole, as ``flags(args)``
+does: any field may reach the call"""
+
+
 def _reads(args_name: str, *nodes: ast.expr) -> tuple[str, ...]:
-    """The ``<args>.<field>`` reads under ``nodes``, each once, in order"""
-    return tuple(
-        dict.fromkeys(
-            n.attr
-            for node in nodes
-            for n in ast.walk(node)
-            if isinstance(n, ast.Attribute)
-            and isinstance(n.value, ast.Name)
-            and n.value.id == args_name
-        )
-    )
+    """The ``<args>.<field>`` reads under ``nodes``, each once, in order, and
+    ``EVERY_FIELD`` when ``<args>`` itself is passed on rather than read by field"""
+    found: dict[str, None] = {}
+    for node in nodes:
+        bases = {id(n.value) for n in ast.walk(node) if isinstance(n, ast.Attribute)}
+        for n in ast.walk(node):
+            if (
+                isinstance(n, ast.Attribute)
+                and isinstance(n.value, ast.Name)
+                and n.value.id == args_name
+            ):
+                found[n.attr] = None
+            elif isinstance(n, ast.Name) and n.id == args_name and id(n) not in bases:
+                found[EVERY_FIELD] = None
+    return tuple(found)
 
 
 def _literal(node: ast.expr | None) -> str | None:

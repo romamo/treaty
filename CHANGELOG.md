@@ -83,6 +83,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- An argument list built from the whole arguments object, as `["git", *flags(args)]`, got
+  a worked-out declaration naming no user-controlled field and no audit warning. Passing
+  `args` on whole now makes the declaration underivable, so `subprocess-declared` asks for
+  one by hand; `self.cmd.append(args.x)` carries the field, and `insert`'s position does not
 - A subprocess declaration treaty worked out missed a field whose value reached `ctx.run`
   through a local variable, as in `["git", *extra]` after `extra = list(args.extra)`, so
   the manifest named too few user-controlled arguments. Such a local now carries the

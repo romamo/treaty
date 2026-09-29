@@ -200,10 +200,11 @@ local such as `extra = list(args.extra)`. A worked-out declaration only describe
 the manifest; only a declaration by hand makes treaty check the values, as `save`'s does.
 
 Where treaty cannot work one out, `subprocess-declared` warns, and you declare it by hand:
-when the list is a variable (`ctx.run(cmd)`), the program is a constant (`[GIT, ...]`), or
-the command uses `ctx.pipeline`. A command that runs two programs can declare only one, so
-move the second into its own command. A `ctx.run` inside a helper function is not read at
-all: declare it on the command, with `required_tools=`, so `doctor` checks the program.
+when the list is a variable (`ctx.run(cmd)`), the program is a constant (`[GIT, ...]`), an
+argument comes from the whole arguments object (`*flags(args)`), or the command uses
+`ctx.pipeline`. A command that runs two programs can declare only one, so move the second
+into its own command. A `ctx.run` inside a helper function is not read at all: declare it on
+the command, with `required_tools=`, so `doctor` checks the program.
 
 **Check:** the schema names git and its version; `doctor` finds it; a `;` in `--db` is
 refused before git runs
