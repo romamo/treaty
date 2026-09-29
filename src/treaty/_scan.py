@@ -510,9 +510,12 @@ def _home(fn: Callable[..., object]) -> _Home | None:
     if module.__name__ != "__main__" and ("." in module.__name__ or path.stem == "__init__"):
         top = module.__name__.partition(".")[0]
         top_file = getattr(sys.modules.get(top), "__file__", None)
-        if not isinstance(top_file, str):
-            return None  # a namespace package has no single directory
-        return _Home(top, Path(top_file).resolve().parent.parent)
+        if isinstance(top_file, str):
+            return _Home(top, Path(top_file).resolve().parent.parent)
+        # A namespace package has no single directory: its modules are known by name, and
+        # the handler's own portion of it names where a helper is
+        depth = module.__name__.count(".") + (path.stem == "__init__")
+        return _Home(top, path.parents[depth])
     return _Home(None, path.parent)
 
 

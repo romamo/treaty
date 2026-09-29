@@ -1625,6 +1625,14 @@ def test_a_package_follows_its_own_modules_only() -> None:
     assert net.fetch in [u.fn for u in reached_functions(pkg.pull)]
 
 
+def test_a_namespace_package_follows_its_own_modules_too() -> None:
+    from fixture_follow_ns import cli as ns
+
+    assert _messages(ns.app, "fixture_follow_ns.cli:app", "no-chdir")["enter"].endswith(
+        "; found via fixture_follow_ns.helpers.enter (fixture_follow_ns/helpers.py:4)"
+    )
+
+
 def test_treaty_code_is_never_followed_out_of_its_module() -> None:
     from treaty import _cli
 
