@@ -99,7 +99,7 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie`, or has a `pass` segment, such as `author` or `keyword`, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
+  `credential`, `auth`, or `cookie`, such as `author` or `keyword`, or has a `pass` segment, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
 
 **Check:** every subparser has a row, and every `sys.exit`, `parser.error`, and `input()`
 call in the old code shows up in the "Fails when" or "Writes?" column

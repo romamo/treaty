@@ -112,7 +112,7 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie`, or has a `pass` segment, such as `author` or `keyword`, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
+  `credential`, `auth`, or `cookie`, such as `author` or `keyword`, or has a `pass` segment, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
 
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
 `click.confirm`, and `click.prompt` in the old code shows up in the "Fails when" or "Writes?"
@@ -674,9 +674,7 @@ Migration is a breaking change for callers. Put this list in your release notes:
   `todo manifest`
 - Secret options (`--token`, `--password`) no longer take a value on the command line; use
   `--token-from-env VAR` or `--token-from-file PATH`
-- Your own `-v` counter, `--config`, or `--format` option is replaced by the framework's
-  flag of the same name, and completion scripts have to be generated again with
-  `todo completion`
+- `-v` is gone, so a caller passes `--verbose`; your own `--config` or `--format` option gives way to the framework's flag of the same name; and completion scripts have to be generated again with `todo completion`
 
 ## Next
 

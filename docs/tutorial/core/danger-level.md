@@ -51,7 +51,7 @@ enforces it on every call:
 | `dry_run` flag and `would_affect` | no | no | required |
 | Runs without `--confirm-destructive` | yes | yes | no: previews and exits 2 |
 | MCP tool hints | read-only, idempotent | none | destructive |
-| Conformance kit probes it | yes, from its first example | never | yes, as a preview and a refusal |
+| Conformance kit probes it | yes, from its first example | only as an `invalid` probe, for a network command | yes, as a preview and a refusal |
 
 The MCP row is what a client such as a desktop assistant is told about each tool: whether
 it only reads, may be repeated, or destroys data. Two more rules follow from the level: only

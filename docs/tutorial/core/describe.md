@@ -119,7 +119,10 @@ Each example is a pair: what the call does, and the call. `add`'s:
 
 An agent copies the command and edits the values, so write it the way it should be called:
 
-- **Real values, never placeholders.** The audit's suggested fix writes `todo done 1`, a value of the right type; replace it with one that reads as a real use, such as `3`. A placeholder such as `<id>` fails the audit's example check, and so does the test in Step 4
+- **Real values, never placeholders.** The audit's suggested fix writes `todo done 1`, a
+  value of the right type; replace it with one that reads as a real use, such as `3`. The
+  audit reports a placeholder such as `<id>` as an error, and the test in Step 4 fails on
+  one in a typed field
 - **The whole call.** Start with the program name, then the command path, then the
   arguments, with flags after the path, as the parser wants them
 - **One example per way of using the command.** `purge` could show the preview as well as
@@ -156,9 +159,10 @@ $ todo add "Buy milk" --priority high --validate-only    # after the rename
 `--validate-only` is the check: it parses the arguments and stops, exit 0 or exit 2 with
 every error, without running the handler. A test that passes every example through it
 catches a stale flag, a wrong argument type, and a placeholder in a typed field, such as
-`<id>` where an integer belongs; a placeholder in a text field parses, so read those
-yourself. It reads the examples from the manifest, so a new command's examples are tested
-without touching the test. Here it is as the tutorial runs it on its own copies of `todo`:
+`<id>` where an integer belongs; a placeholder in a text field parses there, but the audit
+reports every `<name>` placeholder. It reads the examples from the manifest, so a new
+command's examples are tested without touching the test. Here it is as the tutorial runs it
+on its own copies of `todo`:
 
 <!-- file: tests/test_tutorial.py -->
 ```python

@@ -337,7 +337,7 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
         ("purge", {"confirm_destructive": True, "db": db}),
     ]
     for name, args in calls:
-        env = app.call(name, args)
+        env = app.call(name, args, env={"TODO_AUDIT_LOG": "off"})
         assert env.ok, env.error
         jsonschema.validate(env.data, commands[name]["output_schema"])
 
@@ -734,7 +734,11 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
         command=server,
         args=["examples.tutorial.todo_exit_codes:app"],
         cwd=str(tmp_path),
-        env={"PYTHONPATH": str(ROOT), "TODO_STATE_DIR": str(tmp_path / "state")},
+        env={
+            "PYTHONPATH": str(ROOT),
+            "TODO_STATE_DIR": str(tmp_path / "state"),
+            "TODO_AUDIT_LOG": "off",
+        },
     )
 
     async def session() -> dict[str, Any]:

@@ -293,6 +293,6 @@ uv run treaty check-docs examples.tutorial.todo_exit_codes:app \
 ## Next
 
 `todo` passes the strict audit and the conformance kit, serves the same contract over MCP,
-and ships docs that CI keeps honest. The next step is the next release: changing that
+and ships docs that CI keeps honest. The next step is the next release, which changes that
 contract without breaking the agents that learned it: [Change the contract
 safely](stability.md).

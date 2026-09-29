@@ -1,7 +1,8 @@
 """The agent contract, checked on every test run: the strict audit, every example, and the
 manifest's shape. Copy it into a project's tests and change APP and the import to your app
 
-The testing chapter copies it into a project made with treaty init, next to test_cli.py.
+Declare exit codes says to copy it into a project's tests at that chapter's end, next to
+test_cli.py; the testing chapter explains every test in it.
 """
 
 import io

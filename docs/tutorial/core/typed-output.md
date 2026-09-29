@@ -175,7 +175,7 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
         ("purge", {"confirm_destructive": True, "db": db}),
     ]
     for name, args in calls:
-        env = app.call(name, args)
+        env = app.call(name, args, env={"TODO_AUDIT_LOG": "off"})
         assert env.ok, env.error
         jsonschema.validate(env.data, commands[name]["output_schema"])
 ```
@@ -190,8 +190,8 @@ one, so it is called both ways.
 In your own project the test is the same with your app in it: import it (`from todo.cli
 import app` in a project `treaty init` made), use it where the test says
 `todo_exit_codes.app`, and list one call per command with arguments that work against a
-scratch directory, as `calls` does above. Pass `env={"TODO_AUDIT_LOG": "off"}` to each call,
-as `test_cli.py`'s `QUIET` does, so the test never writes your real audit log.
+scratch directory, as `calls` does above. Keep the `env={"TODO_AUDIT_LOG": "off"}` on each
+call, so the test never writes your real audit log.
 
 **Check:** the test passes for `todo`
 

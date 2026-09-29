@@ -182,16 +182,21 @@ the server the way a client does and make calls:
         command=server,
         args=["examples.tutorial.todo_exit_codes:app"],
         cwd=str(tmp_path),
-        env={"PYTHONPATH": str(ROOT), "TODO_STATE_DIR": str(tmp_path / "state")},
+        env={
+            "PYTHONPATH": str(ROOT),
+            "TODO_STATE_DIR": str(tmp_path / "state"),
+            "TODO_AUDIT_LOG": "off",
+        },
     )
 ```
 
 It starts the `treaty-mcp` command of the test's own environment, as a client would. The
-environment keeps the idempotency records in the test's own directory, like the conformance
-launcher's sandbox, and `PYTHONPATH` lets the server import the example app from this
-repository; in your project, where the app is installed, it is not needed. The rest of
-[`test_todo_over_mcp`](../../../tests/test_tutorial.py) lists the tools, replays an
-idempotency key, previews and confirms `purge`, and checks where a relative path lands.
+environment keeps the idempotency records in the test's own directory and turns the audit
+log off, like the conformance launcher's sandbox, and `PYTHONPATH` lets the server import
+the example app from this repository; in your project, where the app is installed, it is not
+needed. The rest of [`test_todo_over_mcp`](../../../tests/test_tutorial.py) lists the tools,
+replays an idempotency key, previews and confirms `purge`, and checks where a relative path
+lands.
 
 In your project, copy `test_todo_over_mcp` into `tests/`. It needs only these imports
 (the others at the top of `test_tutorial.py` are for this repository):
