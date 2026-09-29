@@ -393,6 +393,10 @@ def _exit_code_suggestion(app: App) -> Iterator[Finding]:
     seen: set[str] = set()
     for c in user_commands(app):
         for name in c.exit_codes:
+            # A framework code carries a generic suggestion and cannot be redeclared with
+            # an app's own; a raise gives one with suggestion=, which the registry never sees
+            if name.value in FRAMEWORK_NAMES:
+                continue
             entry = app.exits.by_name(name)
             if name.value in seen or not entry.retryable or entry.suggestion is not None:
                 continue
