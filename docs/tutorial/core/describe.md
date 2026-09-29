@@ -3,21 +3,20 @@
 **Goal:** every command says what it does, every field says what it holds, and every
 command shows a call an agent can copy, with a test that fails when an example stops working
 
-**You need:** a treaty app, such as `todo` at the end of any earlier chapter; this chapter
-clears the audit rule `describe`
+**You need:** a treaty app, such as `todo` at the end of [Start a new CLI](../A-new/start.md)
+or either migration chapter; this chapter clears the audit rule `describe`
 
 **Done when:** the audit has no `describe` finding, and a test runs every example with
 `--validate-only`:
 
 <!-- check -->
 ```bash
-uv run treaty audit examples.tutorial.todo_exit_codes:app \
+uv run treaty audit examples.tutorial.todo_treaty:app \
   | jq -e '[.data.rules[].findings[] | select(.rule == "describe")] == []'
 ```
 
-The chapter uses `todo` as [Declare exit codes](exit-codes.md) left it,
-[`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py);
-nothing here depends on its exit codes.
+The chapter uses `todo` as the starting chapters leave it,
+[`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py).
 
 ## Running the checks
 
@@ -25,7 +24,7 @@ Run the **Check** commands from the root of a treaty checkout. `todo` runs the e
 
 <!-- check -->
 ```bash
-todo() { uv run examples/tutorial/todo_exit_codes.py "$@"; }
+todo() { uv run examples/tutorial/todo_treaty.py "$@"; }
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when
@@ -74,7 +73,7 @@ the manifest carries
 
 <!-- check -->
 ```bash
-todo add --help 2>&1 >/dev/null | sed -n 3p | grep -qx 'Add an item'
+todo add --help 2>&1 >/dev/null | grep -qx 'Add an item'
 todo manifest | jq -e '.data.commands.add.description == "Add an item"'
 ```
 
@@ -88,7 +87,7 @@ the type: the unit, what an empty or missing value means, the default when the d
 default is `None`. `todo`'s `--db` defaults to `None` in the manifest, because the real
 default depends on the machine, so the description names it:
 
-<!-- file: examples/tutorial/todo_exit_codes.py -->
+<!-- file: examples/tutorial/todo_treaty.py -->
 ```python
     db: Path | None = Flag(default=None, description="Item file; default ~/.todo.json")
 ```
@@ -110,7 +109,7 @@ todo add --schema | jq -e '.data.flags.db == {"description": "Item file; default
 
 Each example is a pair: what the call does, and the call. `add`'s:
 
-<!-- file: examples/tutorial/todo_exit_codes.py -->
+<!-- file: examples/tutorial/todo_treaty.py -->
 ```python
     examples=[("Add an urgent item", 'todo add "Buy milk" --priority high')],
 ```

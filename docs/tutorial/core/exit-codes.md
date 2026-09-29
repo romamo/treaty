@@ -19,9 +19,8 @@ The chapter continues the `todo` CLI. It starts from
 [`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py) and ends at
 [`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py).
 
-Run the **Check** commands from the root of a treaty checkout, in order, as in the
-[migration chapter](../B-migrate/argparse.md#running-the-checks). Here `todo` runs this
-chapter's finished example:
+Run the **Check** commands from the root of a treaty checkout, in order: each one uses the
+files the one before it left behind. Here `todo` runs this chapter's finished example:
 
 <!-- check -->
 ```bash

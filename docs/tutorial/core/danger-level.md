@@ -3,19 +3,19 @@
 **Goal:** every command declares the danger level that matches what it does to state, so
 the framework gives it the right guards and agents know which calls are safe to repeat
 
-**You need:** a treaty app, such as `todo` at the end of any earlier chapter; this chapter
-clears the audit rule `danger-level`
+**You need:** a treaty app, such as `todo` at the end of [Describe every command](describe.md);
+this chapter clears the audit rule `danger-level`
 
 **Done when:** the audit has no `danger-level` finding:
 
 <!-- check -->
 ```bash
-uv run treaty audit examples.tutorial.todo_exit_codes:app \
+uv run treaty audit examples.tutorial.todo_treaty:app \
   | jq -e '[.data.rules[].findings[] | select(.rule == "danger-level")] == []'
 ```
 
-The chapter uses `todo` as [Declare exit codes](exit-codes.md) left it,
-[`examples/tutorial/todo_exit_codes.py`](../../../examples/tutorial/todo_exit_codes.py).
+The chapter uses `todo` as the starting chapters leave it,
+[`examples/tutorial/todo_treaty.py`](../../../examples/tutorial/todo_treaty.py).
 
 ## Running the checks
 
@@ -24,7 +24,7 @@ example, and the item file and idempotency records go to a scratch directory:
 
 <!-- check -->
 ```bash
-todo() { uv run examples/tutorial/todo_exit_codes.py "$@"; }
+todo() { uv run examples/tutorial/todo_treaty.py "$@"; }
 rm -rf tmp/tutorial && mkdir -p tmp/tutorial
 export TODO_STATE_DIR="$PWD/tmp/tutorial/state"
 ```

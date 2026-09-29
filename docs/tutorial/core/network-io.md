@@ -196,7 +196,8 @@ Only mark what really came from outside: an id the tool computed, or a count, is
 
 ## Next
 
-The audit still has advice for `import`: the `cleanup` rule asks network commands for a
-hook that runs however the run ends, which [Release what a run holds](cleanup.md) takes
-up. The audit's next rules are about commands that run other programs:
+The audit's next rules are about commands that run other programs:
 [Run other programs](programs.md).
+
+The audit also has advice for `import`: the `cleanup` rule asks network commands for a
+hook that runs however the run ends. A later chapter takes it up, in the audit's order.
