@@ -231,8 +231,8 @@ def add(args: Add, ctx: Ctx, store: Store) -> Changed:
 What each part is for:
 
 - **`danger_level=` and `exit_codes=`** are required on every command. `add` changes state,
-  so it is `mutating`. Its own failures come in [Declare exit codes](../core/exit-codes.md), so the list is empty for
-  now
+  so it is `mutating`. Its own failures come in [Declare exit codes](../core/exit-codes.md),
+  so the list is empty for now
 - **`examples=`** is the first thing an agent copies. The audit's `describe` rule asks for
   one on every command, and the conformance kit builds its probes from them
 - **The return type** is a dataclass, so the manifest carries an `output_schema` and the

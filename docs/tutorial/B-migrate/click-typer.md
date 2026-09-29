@@ -101,7 +101,8 @@ now; the audit never sees an app that does not build:
 
 - **On every command**: `--verbose`, `--quiet`, `--debug`, `--config`, `--format`,
   `--fields`, `--cwd`, `-h`, and every global flag a command's `--help` lists, such as
-  `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the framework's `--verbose`, which has no `-v` short
+  `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the
+  framework's `--verbose`, which has no `-v` short
 - **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`. Drop your own:
   the handler reads the limit as `ctx.timeout.seconds`, and `timeout=5` on
   `@app.command` keeps an old default of 5 seconds, where treaty's is 60
@@ -112,7 +113,9 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie` (so `author` and `keyword` count), or has a `pass` segment, takes no value on the command line; booleans and enums are never secrets, and `secret=False` opts out
+  `credential`, `auth`, or `cookie` (so `author` and `keyword` count), or has a `pass`
+  segment, takes no value on the command line; booleans and enums are never secrets, and
+  `secret=False` opts out
 
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
 `click.confirm`, and `click.prompt` in the old code shows up in the "Fails when" or "Writes?"
@@ -293,8 +296,8 @@ def add(args: Add, ctx: Ctx, store: Store) -> Changed:
 Four things are new:
 
 - **`danger_level=` and `exit_codes=`** are required on every command. `add` changes state,
-  so it is `mutating`; its own failures come in [Declare exit codes](../core/exit-codes.md), so the list is empty for
-  now. A read-only command such as `list` is `safe`
+  so it is `mutating`; its own failures come in [Declare exit codes](../core/exit-codes.md),
+  so the list is empty for now. A read-only command such as `list` is `safe`
 - **`examples=`** is the first thing an agent copies. The audit's `describe` rule asks for
   one on every command
 - **The return type** is a dataclass, so the manifest carries an `output_schema` and the
@@ -453,7 +456,8 @@ now an agent gets it too, as data. `--confirm-destructive` replaces `--yes`.
 A question that is not about destroying something, such as `click.prompt` for a missing
 name, becomes a required flag. When a person at a terminal should still be asked, declare
 `interactive=True` and ask through `ctx.prompt` or `ctx.confirm`: off a terminal they exit 4
-instead of waiting, and `ctx.prompt(text, flag=...)` names the flag that answers it.
+instead of waiting. `ctx.prompt(text, flag=...)` names the flag that answers it, and `--yes`
+answers a `ctx.confirm`, the one place a `--yes` remains.
 
 **Check:** without confirmation, `purge` exits 2 and lists item 1, the one completed item,
 without deleting it; with confirmation it deletes item 1 and keeps item 2
@@ -675,7 +679,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
 - Secret options (`--token`, `--password`) no longer take a value on the command line; use
   `--token-from-env VAR` or `--token-from-file PATH`
 - `-v` is gone; pass `--verbose`
-- `--config` and `--format` now mean treaty's flags; the old options have new names
+- `--config` and `--format` are treaty's flags; a CLI that had its own now answers to the
+  names it gave them in Step 1
 - Completion scripts have to be generated again with `todo completion`
 
 ## Next
