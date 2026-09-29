@@ -1227,6 +1227,7 @@ class Change(StrEnum):
 
 
 _NOTES = ("description", "title", "examples")
+_BRANCHES = ("anyOf", "oneOf", "allOf")
 
 
 def schema_change(old: object, new: object) -> Change:
@@ -1234,7 +1235,7 @@ def schema_change(old: object, new: object) -> Change:
     an added field does not; a field that became optional breaks it too"""
     if not isinstance(old, dict) or not isinstance(new, dict):
         return Change.NONE if old == new else Change.BREAKING
-    shape_keys = ("properties", "required", "items", *_NOTES)
+    shape_keys = ("properties", "required", "items", *_BRANCHES, *_NOTES)
     if {k: v for k, v in old.items() if k not in shape_keys} != {
         k: v for k, v in new.items() if k not in shape_keys
     }:
@@ -1242,6 +1243,19 @@ def schema_change(old: object, new: object) -> Change:
     changes: list[Change] = []
     if "items" in old or "items" in new:
         changes.append(schema_change(old.get("items"), new.get("items")))
+    for key in _BRANCHES:
+        # A union, such as a Batch result or an optional object, changes branch by branch;
+        # a branch added or removed is a shape the reader did not know
+        old_branches, new_branches = old.get(key), new.get(key)
+        if old_branches is None and new_branches is None:
+            continue
+        if (
+            not isinstance(old_branches, list)
+            or not isinstance(new_branches, list)
+            or len(old_branches) != len(new_branches)
+        ):
+            return Change.BREAKING
+        changes += [schema_change(o, n) for o, n in zip(old_branches, new_branches, strict=True)]
     old_props, new_props = old.get("properties", {}), new.get("properties", {})
     if not isinstance(old_props, dict) or not isinstance(new_props, dict):
         return Change.BREAKING

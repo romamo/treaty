@@ -799,3 +799,20 @@ def test_help_and_version_answer_in_a_removed_working_directory(tmp_path: Path) 
         )
         assert "Traceback" not in proc.stderr, argv
         assert proc.returncode == 0 or json.loads(proc.stdout)["meta"]["cwd"] == str(gone), argv
+
+
+def test_schema_change_compares_union_branches_one_by_one() -> None:
+    """A Batch result's items are an anyOf: a field added in one branch is additive"""
+    item = {"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]}
+    failed = {"type": "object", "properties": {"error": {"type": "string"}}, "required": ["error"]}
+    old = {"type": "array", "items": {"anyOf": [item, failed]}}
+    grown = {**item, "properties": {**item["properties"], "b": {"type": "string"}}}
+    assert schema_change(old, {"type": "array", "items": {"anyOf": [grown, failed]}}).value == (
+        "additive"
+    )
+    retyped = {**item, "properties": {"a": {"type": "integer"}}}
+    assert schema_change(old, {"type": "array", "items": {"anyOf": [retyped, failed]}}).value == (
+        "breaking"
+    )
+    assert schema_change(old, {"type": "array", "items": {"anyOf": [item]}}).value == "breaking"
+    assert schema_change(old, {"type": "array", "items": item}).value == "breaking"

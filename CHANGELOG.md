@@ -63,6 +63,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- The `schema-version` rule called any change inside an `anyOf`, `oneOf`, or `allOf` breaking, so
+  a field added to the items of a `Batch` result, or to an optional object, demanded a new
+  major version. Union branches are now compared one by one; a branch added or removed is
+  still breaking
 - `@app.command` and `@group.command` typed the function they return as `Callable[..., Any]`,
   so mypy passed a direct call to a handler that no longer matched its signature, such as
   one missing a parameter added later. The decorated function now keeps its own type
