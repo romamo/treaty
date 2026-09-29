@@ -229,7 +229,8 @@ def test_conformance_without_spec_dir_is_precondition(tmp_path: Path) -> None:
         cwd=tmp_path, argv=["conformance", "examples.deployctl:app", "--run", "--spec-dir", "/nope"]
     )
     assert code == 4 and env["error"]["code"] == "PRECONDITION"
-    assert env["error"]["context"] == {"source": "--spec-dir", "spec_dir": str(Path("/nope"))}
+    # argv paths are anchored at the cwd, so on Windows "/nope" gains its drive
+    assert env["error"]["context"] == {"source": "--spec-dir", "spec_dir": str(tmp_path / "/nope")}
     assert not (tmp_path / "conformance").exists()  # validated before the profile is written
 
 
