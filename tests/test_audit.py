@@ -980,3 +980,73 @@ def test_pollers_consumers_and_searches_are_not_retries() -> None:
         return Done("updated")
 
     assert _findings(app, "retry-declared") == []
+
+
+def test_the_example_check_never_runs_a_handler_and_keeps_quoted_values() -> None:
+    """A value flag missing its value must not swallow --validate-only and run the handler"""
+    from dataclasses import dataclass
+
+    from treaty import App, Arg, Ctx, Flag
+
+    ran: list[str] = []
+
+    @dataclass(frozen=True, slots=True)
+    class Label:
+        name: str = Arg(description="Name")
+        color: str = Flag(default="", description="Color")
+        body: str = Flag(default="", description="Body")
+
+    app = App("labels", version="1.0.0")
+
+    @app.command(
+        "create",
+        description="Create a label",
+        danger_level="safe",
+        exit_codes=(),
+        examples=[
+            ("Missing value", "labels create bug --color"),
+            ("Quoted hash", "labels create bug --color '#d73a4a'"),
+            ("HTML", "labels create bug --body '<p>Hello</p>'"),
+            ("Commented", "labels create bug  # the name"),
+        ],
+    )
+    def create(args: Label, ctx: Ctx) -> dict[str, str]:
+        ran.append(args.color)
+        return {}
+
+    errors = [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "describe" for f in r.findings
+    ]
+    assert ran == []
+    assert [f.message for f in errors] == [
+        "the example 'labels create bug --color' does not parse: '--color' needs a value"
+    ]
+
+
+def test_a_retry_that_continues_and_returns_after_the_try_is_found() -> None:
+    import time
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Done:
+        effect: str
+
+    def call() -> Done:
+        return Done("updated")
+
+    app = App("x", version="1.0.0")
+
+    @app.command("send", description="Send", danger_level="mutating", exit_codes=())
+    def send(args: NoArgs, ctx: Ctx) -> Done:
+        for attempt in range(5):
+            try:
+                result = call()
+            except ConnectionError:
+                time.sleep(2**attempt)
+                continue
+            return result
+        return Done("noop")
+
+    assert _findings(app, "retry-declared") == ["send"]

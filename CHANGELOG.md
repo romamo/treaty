@@ -49,9 +49,10 @@ Apps built on treaty keep their own, structured schema changelog with
   parse is an error: agents copy examples verbatim, and a `<name>` placeholder is one too.
   Only the spelling is judged: a secret's `--<name>-from-env` or `-from-file` reads a dummy
   value, `--cwd`, `--input-file`, and `--config` are dropped with their values, leading
-  `VAR=` words set the call's environment, `uv run` and `sudo` are skipped, a `#` starts a
-  comment only at a word's start, and an example with a pipe, a redirect, `;`, or a lone
-  `-` for stdin is not judged. The no-example fix suggests values its checks accept (a
+  `VAR=` words set the call's environment, `uv run` and `sudo` are skipped, an unquoted `#`
+  at a word's start begins a comment, and an example with a pipe, a redirect, `;`, or a
+  lone `-` for stdin is not judged. `--validate-only` goes right after the command path, so
+  no handler ever runs during the audit. The no-example fix suggests values its checks accept (a
   preset's sample, a secret from a variable, a tuple's item type); a custom `pattern=`
   leaves a `<name>` to replace
 - `App.redirected_paths`: the old command paths `redirect` keeps answering
@@ -92,8 +93,9 @@ Apps built on treaty keep their own, structured schema changelog with
   keeps its case
 - `retry-declared` fired on a loop that sleeps to throttle between items; it now counts a
   loop that sleeps and is left from inside a `try` once the call succeeds (a `return` or a
-  `break` directly in its body, or in a `with` there), which a throttle, a poller, a
-  consumer, or a search is not.
+  `break` directly in its body, or in a `with` there, or right after a `try` whose
+  handlers `continue`), which a throttle, a poller, a consumer, or a search is not. A retry
+  that returns only behind an `if` in the `try`, such as on a status code, is not found.
   `asyncio.sleep` and an aliased `time.sleep` count as sleeps
 - Following helpers, the audit looped forever on a lazy proxy or mock a handler calls, and
   failed on an unhashable doctor check; it unwraps only what a decorator set, and parses an

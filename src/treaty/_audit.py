@@ -12,6 +12,7 @@ import dataclasses
 import importlib.util
 import inspect
 import io
+import itertools
 import json
 import re
 import shlex
@@ -27,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._command import Command, DangerLevel, OptionPlacement
 from ._deps import Endpoint
-from ._env import AUDIT_LOG, UNPREFIXED, app_var
+from ._env import AUDIT_LOG, FORMAT, UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
@@ -181,7 +182,8 @@ def _describe(app: App) -> Iterator[Finding]:
 # field's --<name>-from-env and --<name>-from-file, which name a variable or a file
 _WORLD_FLAGS = ("--cwd", "--input-file", "--config")
 _WRAPPERS = (("uv", "run"), ("uvx",), ("sudo",))
-_PLACEHOLDER = re.compile(r"<[A-Za-z][\w-]*>")
+# <id> as a word of its own or a whole value; not <p> in HTML or List<String>
+_PLACEHOLDER = re.compile(r"(?<![\w<])<([A-Za-z][\w-]*)>(?![\w<])")
 
 
 def _example_problem(app: App, command: Command, example: str) -> str | None:
@@ -191,22 +193,29 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
     variable or file reads a dummy value, ``--cwd``, ``--input-file``, and ``--config`` are
     dropped, and a pipeline or redirect is not judged. Only the spelling is checked"""
     placeholder = _PLACEHOLDER.search(example)
-    if placeholder is not None:
+    if placeholder is not None and f"</{placeholder.group(1)}>" not in example:
         # <id> would read as a redirect below; it is a value the agent cannot use as is
         return f"{placeholder.group()} is a placeholder; write a real value"
-    lexer = shlex.shlex(example, posix=True, punctuation_chars=True)
+    # A comment starts at an unquoted # at a word's start; a quoted '#general' or a
+    # repo#12 is a value. Raw tokens keep their quotes, so the cut is made on them
+    raw = shlex.shlex(example, posix=False, punctuation_chars=True)
+    raw.whitespace_split = True
+    raw.commenters = ""
+    kept = list(itertools.takewhile(lambda w: not w.startswith("#"), raw))
+    lexer = shlex.shlex(" ".join(kept), posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
-    lexer.commenters = ""  # a # inside a word, as in owner/repo#12, is part of it
+    lexer.commenters = ""
     words = list(lexer)
-    comment = next((n for n, w in enumerate(words) if w.startswith("#")), len(words))
-    words = words[:comment]
     if any(w and set(w) <= set("|&;<>()") for w in words):
         return None  # a pipeline, a redirect, or a list of commands: the shell's, not ours
-    env = {app_var(app.name, AUDIT_LOG.key): "off"}
+    env: dict[str, str] = {}
     while words and "=" in words[0] and not words[0].startswith("-"):
         key, _, value = words[0].partition("=")
         env[key] = value  # VAR=value before the command sets it for the call
         words = words[1:]
+    # The audit's own settings win: its log stays off and its answer stays JSON
+    env[app_var(app.name, AUDIT_LOG.key)] = "off"
+    env.pop(app_var(app.name, FORMAT.key), None)
     for wrapper in _WRAPPERS:
         if tuple(words[: len(wrapper)]) == wrapper:
             words = words[len(wrapper) :]
@@ -241,7 +250,12 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
             argv += [f"{base}-from-env", dummy]
             continue
         argv.append(word)
-    at = argv.index("--") if "--" in argv else len(argv)
+    # Right after the command path, where no flag can take it as its value: at the end, a
+    # value flag missing its value would swallow it, and the handler would run
+    parts = list(command.path.parts)
+    at = next((n + len(parts) for n in range(len(argv)) if argv[n : n + len(parts)] == parts), None)
+    if at is None:
+        return None
     argv[at:at] = ["--validate-only"]
     out, err = io.StringIO(), io.StringIO()
     code = app.run(argv, stdout=out, stderr=err, stdin=io.StringIO(""), env=env)
@@ -1831,6 +1845,18 @@ def retries_by_hand(handler: Callable[..., object]) -> bool:
             continue
         for attempt in (n for n in inner if isinstance(n, ast.Try)):
             if _exits_on_success([*attempt.body, *attempt.orelse]):
+                return True
+        # try: r = call() / except E: sleep; continue / return r: the exit follows the try
+        body = getattr(loop, "body", [])
+        for n, statement in enumerate(body[:-1]):
+            if (
+                isinstance(statement, ast.Try)
+                and statement.handlers
+                and all(
+                    isinstance(h.body[-1], (ast.Continue, ast.Raise)) for h in statement.handlers
+                )
+                and isinstance(body[n + 1], (ast.Return, ast.Break))
+            ):
                 return True
     return False
 
