@@ -414,9 +414,9 @@ def test_a_field_the_framework_already_provides_is_dropped_not_renamed() -> None
         def a(args: TimeoutField, ctx: Ctx) -> dict[str, int]:
             return {}
 
-    assert "drop timeout:" in str(caught.value) and "ctx.timeout" in str(caught.value)
+    assert "drop --timeout:" in str(caught.value) and "ctx.timeout.seconds" in str(caught.value)
     assert "rename" not in str(caught.value)
-    with pytest.raises(RegistrationError, match=r"rename \['raw-payload'\]"):
+    with pytest.raises(RegistrationError, match="rename --raw-payload"):
 
         @app.command(
             "b", description="B", supports_raw_payload=True, danger_level="safe", exit_codes=()

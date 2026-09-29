@@ -326,7 +326,8 @@ _PAGED = (
 )
 _PROXIED = "ctx.http applies the framework's --proxy and --no-proxy"
 _BUILT_IN_FEATURE = {
-    "timeout": "the framework's --timeout bounds the run, and the handler reads it as ctx.timeout",
+    "timeout": "the framework's --timeout bounds the run; the handler reads ctx.timeout.seconds, "
+    "and timeout= on the command sets the default",
     "limit": _PAGED,
     "cursor": _PAGED,
     "proxy": _PROXIED,
@@ -909,8 +910,10 @@ class App:
         taken = framework_collisions(command)
         if taken:
             # A migrated CLI often had its own --timeout or --limit: the framework's does the job
-            instead = [f"drop {f}: {_BUILT_IN_FEATURE[f]}" for f in taken if f in _BUILT_IN_FEATURE]
-            renamed = [f for f in taken if f not in _BUILT_IN_FEATURE]
+            instead = [
+                f"drop --{f}: {_BUILT_IN_FEATURE[f]}" for f in taken if f in _BUILT_IN_FEATURE
+            ]
+            renamed = " ".join(f"--{f}" for f in taken if f not in _BUILT_IN_FEATURE)
             advice = "; ".join([*instead, *([f"rename {renamed}"] if renamed else [])])
             raise RegistrationError(
                 f"{path}: flags {taken} are supplied by the framework for this command, or "
