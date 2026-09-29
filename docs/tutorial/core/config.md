@@ -272,13 +272,14 @@ todo import --schema | jq -e '.data.secret_env_vars == ["TODO_TOKEN"]'
 
 A CLI with its own `config set` writes the file treaty reads. It declares which one with
 `config_write_scope=` on the command and writes through `ctx.write_config(text)`, which
-replaces the file atomically under a lock: `"global"` writes the user file,
-`~/.config/todo/config.toml`, and `"local"` writes `./.todo.toml` in the working directory,
-or the user file with `--global`. The audit's `config-write-scope` rule warns on a
-`config` command without the declaration. A migrated CLI that kept its settings in a file
-of its own, such as `~/.todo.toml`, reads the treaty file instead from now on: move the
-settings, and say so in the release notes. The README's [Config
-writes](../../../README.md#config-writes) has the details.
+replaces the file atomically under a lock. `"global"` writes the user file,
+`~/.config/todo/config.toml` (or under `$XDG_CONFIG_HOME`), and every call must pass
+`--global`, or it exits 2; `"local"` writes `./.todo.toml` in the working directory, or the
+user file with `--global`. The audit's `config-write-scope` rule warns on a `config` command
+without the declaration. A migrated CLI that kept its settings in a file of its own, such as
+`~/.todo.toml`, reads the treaty file instead from now on: move the settings, and say so in
+the release notes. The README's [Config writes](../../../README.md#config-writes) has the
+details.
 
 ## Step 6: Test it against a feed that needs the token
 

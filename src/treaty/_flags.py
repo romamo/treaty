@@ -176,7 +176,10 @@ class FieldInfo:
         are public, so neither is inferred one"""
         if self.spec.secret is not None:
             return self.spec.secret
-        if self.flag_type in (FlagType.BOOLEAN, FlagType.ENUM):
+        item = self.classified.item
+        if self.flag_type in (FlagType.BOOLEAN, FlagType.ENUM) or (
+            item is not None and item.flag_type is FlagType.ENUM
+        ):
             return False
         return secret_name(self.name)
 

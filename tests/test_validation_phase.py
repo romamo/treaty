@@ -290,3 +290,22 @@ def test_an_enum_named_like_a_secret_stays_a_plain_argument() -> None:
 
     env = app.call("set", {"key": "token"}, env={})
     assert env.ok and env.data == {"key": "token"}
+
+
+def test_an_array_of_enums_named_like_a_secret_stays_plain() -> None:
+    from typing import Literal
+
+    @dataclass(frozen=True, slots=True)
+    class Methods:
+        auth_methods: tuple[Literal["basic", "bearer"], ...] = Flag(
+            default=(), description="Methods to try"
+        )
+
+    app = App("x", version="1.0.0")
+
+    @app.command("try", description="Try", exit_codes=(), danger_level="safe")
+    def try_(args: Methods, ctx: Ctx) -> dict[str, list[str]]:
+        return {"methods": list(args.auth_methods)}
+
+    env = app.call("try", {"auth_methods": ["basic"]}, env={})
+    assert env.ok and env.data == {"methods": ["basic"]}

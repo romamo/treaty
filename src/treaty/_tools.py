@@ -76,6 +76,9 @@ def output_schema(command: Command) -> JsonSchema:
     ``Exit(data=...)`` or a preview put there.
     """
     data = command.output_schema
+    if command.compat:
+        # schema_version picks an older shape, which its shim's own schema describes
+        data = {"anyOf": [data, *(c.output_schema for c in command.compat)]}
     if command.streaming:
         data = {"type": "array", "items": data}
     truncated = {

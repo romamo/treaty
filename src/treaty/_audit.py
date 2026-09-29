@@ -217,7 +217,9 @@ def _typed_output(app: App) -> Iterator[Finding]:
             )
 
 
-_OWN_PAGING = frozenset({"page", "offset", "per_page", "page_size", "page_number", "skip"})
+_OWN_PAGING = frozenset(
+    {"page", "offset", "per_page", "page_size", "page_number", "page_token", "next_token", "skip"}
+)
 
 
 def _paginated_list(app: App) -> Iterator[Finding]:
@@ -252,9 +254,10 @@ def _network_io(app: App) -> Iterator[Finding]:
         if c.has_network_io:
             continue
         # A migrated CLI often keeps its HTTP client in a resource, as ctx.obj was
+        # Every resource the handler reaches, including one a resource acquires
         where: list[tuple[str, Callable[..., object] | type]] = [
             ("handler", c.handler),
-            *((f"resource {r.__name__}", r) for r in c.resources),
+            *((f"resource {r.__name__}", r) for r in c.resource_graph),
         ]
         for label, code in where:
             try:
@@ -872,7 +875,8 @@ def _config_write_scope(app: App) -> Iterator[Finding]:
                 "looks like a config write but declares no config_write_scope; agents cannot "
                 "tell whether it changes a shared user file (REQ-C-025)",
                 'config_write_scope="global" to write the user file, <config home>/<app>/'
-                'config.toml, or "local" for ./.<app>.toml in the working directory; then '
+                'config.toml, which every call then passes --global for, or "local" for '
+                "./.<app>.toml in the working directory; then "
                 "write through ctx.write_config",
             )
 

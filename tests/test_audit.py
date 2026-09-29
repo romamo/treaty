@@ -348,6 +348,40 @@ def test_network_io_scans_the_resources_a_handler_uses() -> None:
     assert finding.command == "show" and "resource Client" in finding.message
 
 
+def test_network_io_scans_a_resource_that_another_resource_acquires() -> None:
+    import urllib.request
+    from dataclasses import dataclass
+
+    from treaty import App, Ctx, NoArgs
+
+    @dataclass(frozen=True, slots=True)
+    class Session:
+        @classmethod
+        def acquire(cls, args: NoArgs, ctx: Ctx) -> Session:
+            return cls()
+
+        def get(self, url: str) -> bytes:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                return bytes(response.read())
+
+    @dataclass(frozen=True, slots=True)
+    class Api:
+        session: Session
+
+        @classmethod
+        def acquire(cls, args: NoArgs, ctx: Ctx, session: Session) -> Api:
+            return cls(session)
+
+    app = App("x", version="1.0.0")
+
+    @app.command("show", description="Show it", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx, api: Api) -> dict[str, int]:
+        return {"size": len(api.session.get("https://example.com"))}
+
+    report = audit(app, "x:app", limit=3)
+    assert [f.command for r in report.rules if r.id == "network-io" for f in r.findings] == ["show"]
+
+
 def test_a_list_that_keeps_its_own_page_flag_is_warned() -> None:
     """meta.pagination would say has_more: false while the API has more pages"""
     from dataclasses import dataclass
