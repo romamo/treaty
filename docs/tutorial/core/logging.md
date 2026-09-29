@@ -60,9 +60,9 @@ importing the app, as the `entry.py` of `treaty init` does.
 
 `import` logs each feed it imports, with the facts as fields rather than in the message:
 
-<!-- file: examples/tutorial/todo_network.py -->
+<!-- file: examples/tutorial/todo_config.py -->
 ```python
-    ctx.log("imported feed", url=args.url, added=len(added))
+    ctx.log("imported feed", url=url, added=len(added))
 ```
 
 `ctx` has one method per level:
@@ -86,7 +86,7 @@ What reaches stderr depends on who is running the command:
 
 | The run | On stderr |
 | --- | --- |
-| off a terminal, or under `CI` | errors and warnings only |
+| off a terminal, or under `CI` | errors and warnings only, such as a deprecated flag's notice |
 | at a terminal | also `ctx.log` and progress |
 | `--verbose` | info and progress anywhere, even under `CI` |
 | `--debug` | also `ctx.debug`, and treaty's own trace: settings resolved, the command started, each `ctx.http` request, each child process |

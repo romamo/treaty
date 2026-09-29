@@ -90,7 +90,7 @@ anything safer.
 ## Step 2: Give each resource a `release`
 
 What a run acquires for its own use belongs in a resource, and a resource that holds
-something defines `release`:
+something defines `release`. This one is an illustration, not part of `todo`:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -144,9 +144,9 @@ and is registered on the command:
 
 Write the hook for the worst case: the run may have ended before the handler created
 anything, so the hook checks what exists and gives back only that. treaty runs it once per
-run, but an `exec` plan runs many requests in one process, so module-level state the hook
-closes may be opened again by the next line: open it lazily, and let the hook leave it ready
-to be opened again.
+run, but an `exec` plan runs many requests in one process: after the hook closes a
+module-level client, the next request may need it again. Create such a client on first use,
+and have the hook reset it to not yet created.
 
 **Check:** the hook runs after a result and after a timeout, and not after an argument
 error, where nothing ran

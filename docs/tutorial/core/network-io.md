@@ -82,7 +82,7 @@ The declaration adds to the command, and only to it:
 - **`--timeout`**, since a network call can take any time; the other `todo` commands keep
   the default and have no flag
 - **`--proxy URL` and `--no-proxy`**, which override the proxy variables for this run
-- **exit 12** in its exit codes without declaring it: the server could not be reached, or
+- **exit 12**, added to its exit codes automatically: the server could not be reached, or
   answered 502 to 504
 - **the open-world hint** on its MCP tool, which tells a client the call touches systems
   outside the tool

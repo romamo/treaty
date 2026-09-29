@@ -13,6 +13,7 @@ or either migration chapter; this chapter clears the audit rule `describe`
 ```bash
 uv run treaty audit examples.tutorial.todo_treaty:app \
   | jq -e '[.data.rules[].findings[] | select(.rule == "describe")] == []'
+uv run pytest -q tests/test_tutorial.py -k test_an_example_parses
 ```
 
 The chapter uses `todo` as the starting chapters leave it,
@@ -198,8 +199,12 @@ def test_an_example_parses(cli_app: App, example: str) -> None:
 ```
 
 The tutorial checks every version of `todo` it ships; in your project, `EXAMPLE_APPS` is
-just `[app]`. The test calls `app.run` with the parsed words, so no shell ever runs an
-example; an example that uses a pipe or a redirect belongs in prose, not in `examples=`.
+just `[app]`. `app.builtins` is the set of commands treaty adds to every app, whose own
+examples are treaty's to keep; `path.value` is a command's name as the manifest keys it,
+such as `add`; and `env={}` runs each example with no environment variables, so none of
+yours can change the result. The test calls `app.run` with the parsed words, so no shell
+ever runs an example; an example that uses a pipe or a redirect belongs in prose, not in
+`examples=`.
 
 **Check:** a renamed flag and a leftover placeholder both fail validation, and `todo`'s own
 examples pass the test

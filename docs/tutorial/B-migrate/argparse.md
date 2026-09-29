@@ -164,7 +164,11 @@ class Add(Common):
 `Priority` is `Literal["low", "normal", "high"]`, so `choices=` moves into the type and the
 manifest lists the allowed values. A `StrEnum` works the same way.
 
-The handler returns data instead of printing it:
+The handler returns data instead of printing it. Besides `args`, the handler takes `ctx`,
+the run's context (logging, the time limit, and more, which later chapters use), and
+`store`, the resource from Step 3, whose `load()` and `save()` read and write the item file.
+`Changed` is a dataclass of the example file with two fields, the `effect` and the `item`;
+`Item` is one todo item: `id`, `text`, `priority`, and `done`:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
@@ -285,7 +289,8 @@ def purge(args: Purge, ctx: Ctx, store: Store) -> Purged:
     return Purged(effect="deleted", deleted=completed)
 ```
 
-A dry run also returns `would_affect`, a `treaty.Affects` with a one-line summary, the
+`Purged` is `purge`'s result dataclass: the `effect`, the `deleted` items, and
+`would_affect`. A dry run fills `would_affect` with a `treaty.Affects`: a one-line summary, the
 resources it would touch, and their count; the result type declares it as
 `would_affect: Affects | None = None`, and treaty refuses a destructive dry run without it.
 

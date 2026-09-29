@@ -175,16 +175,20 @@ the server the way a client does and make calls:
 
 <!-- file: tests/test_tutorial.py -->
 ```python
+    server = shutil.which("treaty-mcp", path=str(Path(sys.executable).parent))
+    assert server is not None, "treaty-mcp is not installed in this environment"
     params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "treaty._mcp", "examples.tutorial.todo_exit_codes:app"],
+        command=server,
+        args=["examples.tutorial.todo_exit_codes:app"],
         cwd=str(tmp_path),
         env={"PYTHONPATH": str(ROOT), "TODO_STATE_DIR": str(tmp_path / "state")},
     )
 ```
 
-The environment keeps the idempotency records in the test's own directory, like the
-conformance launcher's sandbox. The rest of
+It starts the `treaty-mcp` command of the test's own environment, as a client would. The
+environment keeps the idempotency records in the test's own directory, like the conformance
+launcher's sandbox, and `PYTHONPATH` lets the server import the example app from this
+repository; in your project, where the app is installed, it is not needed. The rest of
 [`test_todo_over_mcp`](../../../tests/test_tutorial.py) lists the tools, replays an
 idempotency key, previews and confirms `purge`, and checks where a relative path lands.
 

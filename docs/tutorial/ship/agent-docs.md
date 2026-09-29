@@ -180,14 +180,15 @@ The body has the usage, the flags, and guardrails taken from the declarations. F
 - Shared exit codes, 2 among them for bad arguments: todo manifest
 ```
 
-The exit codes from [Declare exit codes](../core/exit-codes.md) are there with their
-descriptions and `retryable` flags, next to `CONFLICT`, which every mutating and
-destructive command gets, which is why those descriptions are worth writing
+The skill lists each exit code from [Declare exit codes](../core/exit-codes.md) with its
+description and whether it is retryable. treaty adds `CONFLICT` to every mutating and
+destructive command. Agents read these descriptions to decide what to do, so write them
 carefully. Skill files are always Markdown: `--format` changes the envelope the command
 answers with, not the files. Commit the directory, or copy it to wherever your agent loads
 skills from.
 
-**Check:** a context file and one skill per `todo` command, and they pass `check-docs`
+**Check:** a context file and one skill per `todo` command, and they pass `check-docs`; the
+`null` in the list is `CONTEXT.md`, which belongs to no single command
 
 <!-- check -->
 ```bash
@@ -236,7 +237,8 @@ todo mcp-validate --mcp-schema-file tmp/tutorial/mcp-tools-old.json | jq -e '.me
 
 Two kinds of check cover the docs. `check-docs` and `mcp-validate` fail when a name the
 docs use no longer exists; regenerating and diffing fails when anything treaty writes has
-changed at all, descriptions included, and shows the change in the pull request:
+changed at all, descriptions included, and shows the change in the pull request. Below,
+`myapp` is your CLI's command and `myapp.cli:app` the import path of its `App`:
 
 ```bash
 uv run treaty check-docs myapp.cli:app AGENTS.md skills mcp-tools.json

@@ -728,9 +728,11 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
     db = str(tmp_path / "todo.json")
+    server = shutil.which("treaty-mcp", path=str(Path(sys.executable).parent))
+    assert server is not None, "treaty-mcp is not installed in this environment"
     params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "treaty._mcp", "examples.tutorial.todo_exit_codes:app"],
+        command=server,
+        args=["examples.tutorial.todo_exit_codes:app"],
         cwd=str(tmp_path),
         env={"PYTHONPATH": str(ROOT), "TODO_STATE_DIR": str(tmp_path / "state")},
     )

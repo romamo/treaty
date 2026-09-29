@@ -60,7 +60,7 @@ $ uv run treaty audit myapp.cli:app --format plain
      fix: supports_raw_payload=True
 ```
 
-The finding is `advice`, so it does not fail `--strict`. Three fields is a line of thumb,
+The finding is `advice`, so it does not fail `--strict`. Three fields is a rule of thumb,
 not a limit: a command with two fields that mirrors an API's request body is worth the
 payload too, and a `safe` command can declare it as well; the rule only asks where the gain
 is largest.
