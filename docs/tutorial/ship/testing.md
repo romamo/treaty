@@ -141,20 +141,21 @@ The CI job runs the suite and the gates that need more than a test run:
           uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json
 
       # The runtime checks the audit cannot make; ../cli-agent-ergonomics is where treaty
-      # looks for the kit when TREATY_SPEC_DIR is not set
+      # looks for the kit when TREATY_SPEC_DIR is not set. A profile that no longer matches
+      # the commands fails with CONFLICT: run with --force and commit the new one
       - name: Conformance kit
         run: |
           git clone --depth 1 https://github.com/cli-agent-spec/cli-agent-spec ../cli-agent-ergonomics
           uv run treaty conformance todo.cli:app --run
-          git diff --exit-code conformance/
 ```
 
 These are the job's steps; the [whole file](../../../examples/tutorial/new_cli/agent-contract.yml)
 adds the checkout and setup around them. Save it as `.github/workflows/agent-contract.yml`.
 
-- **`git diff --exit-code`** fails the job when a regenerated file differs from the
-  committed one, so the pull request that changed a command also shows what changed for
-  agents
+- **`git diff --exit-code`** fails the job when a regenerated agent doc differs from the
+  committed one, and the kit step fails with `CONFLICT` when the conformance profile no
+  longer matches the commands, so the pull request that changed a command also shows what
+  changed for agents
 - **The baseline step** is skipped until `todo-1.0.0.json` exists. At each release, save the
   new manifest as the next baseline, as
   [Change the contract safely](stability.md#step-1-keep-the-last-releases-manifest) describes

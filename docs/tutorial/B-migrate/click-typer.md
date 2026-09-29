@@ -276,7 +276,8 @@ Four things are new:
 - **The return type** is a dataclass, so the manifest carries an `output_schema` and the
   agent knows the shape of `data` before it calls
 - **`effect`** is required on mutating and destructive results: `created`, `updated`,
-  `deleted`, or `noop`. An agent that retries reads `noop` and knows nothing changed
+  `deleted`, or `noop`, and on a dry run the `would_` form of what the real run would do,
+  such as `would_delete`. An agent that retries reads `noop` and knows nothing changed
 
 The command name is given explicitly, `"add"`, rather than taken from the function, so
 renaming the function never renames the command. `help=` becomes `description=`, and it is

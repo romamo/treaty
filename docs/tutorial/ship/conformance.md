@@ -123,13 +123,19 @@ Levels: level_1 pass, level_2 pass, level_3 pass
   pass  L3 argument_order
 ```
 
-Without `--run`, it only writes the profile. The profile is rewritten on every run from the
-current commands, so do not edit it by hand: change the commands or their examples instead.
-A command with required arguments and no example gets no probe at all, which is one more
-reason the audit asks for examples.
+Without `--run`, it only writes the profile. treaty derives the profile from the current
+commands and their examples, so change those rather than the file. A command with required
+arguments and no example gets no probe at all, which is one more reason the audit asks for
+examples.
 
-If you need probes treaty cannot derive, such as a bad enum value, write the profile
-yourself and run the kit on it directly, as the README's
+treaty never overwrites a profile silently. When the commands change, the next run finds that
+the profile on disk differs from the one it would write and stops with exit 6, `CONFLICT`,
+naming the probes that changed, since a differing profile may hold probes someone wrote by
+hand. Pass `--force` to replace it with the generated one. A profile that already matches is
+left as it is.
+
+If you need probes treaty cannot derive, such as a bad enum value, keep them in a profile of
+your own, beside the generated one, and run the kit on it directly, as the README's
 [Conformance](../../../README.md#conformance) section does for `deployctl`.
 
 **Check:** the chapter's **Done when** command
@@ -191,13 +197,17 @@ Run the audit and the kit in CI. Both exit non-zero on failure:
 
 ```bash
 uv run treaty audit myapp.cli:app --strict
-TREATY_SPEC_DIR=path/to/cli-agent-spec uv run treaty conformance myapp.cli:app --run
+TREATY_SPEC_DIR=/path/to/the/kit uv run treaty conformance myapp.cli:app --run
 ```
 
-Commit the profile and the launcher. CI rewrites the profile on every run, so
-`git diff --exit-code conformance/` after the kit fails the job when a change to the
-commands changed the probes and nobody committed the new profile, and lets reviewers see
-probe changes in the pull request.
+`TREATY_SPEC_DIR` names wherever CI cloned the spec repository; without it, treaty looks in
+`../cli-agent-ergonomics`, which is why Step 1 clones it there. The folder name matters only
+for that default.
+
+Commit the profile and the launcher. When a pull request changes the commands in a way that
+changes the probes, the kit step fails with `CONFLICT` until someone runs
+`treaty conformance myapp.cli:app --force` and commits the new profile, so the probe changes
+show up in review.
 
 ## Next
 

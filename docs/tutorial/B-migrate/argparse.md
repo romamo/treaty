@@ -192,7 +192,8 @@ Four things are new:
 - **The return type** is a dataclass, so the manifest carries an `output_schema` and the
   agent knows the shape of `data` before it calls
 - **`effect`** is required on mutating and destructive results: `created`, `updated`,
-  `deleted`, or `noop`. An agent that retries reads `noop` and knows nothing changed
+  `deleted`, or `noop`, and on a dry run the `would_` form of what the real run would do,
+  such as `would_delete`. An agent that retries reads `noop` and knows nothing changed
 
 Mutating commands also get `--idempotency-key` for free. `add` is not safe to repeat (a
 retry adds a second item), and the key is how a caller makes it safe: the second call with

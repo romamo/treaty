@@ -33,9 +33,9 @@ jobs:
           uv run treaty check-docs todo.cli:app AGENTS.md skills mcp-tools.json
 
       # The runtime checks the audit cannot make; ../cli-agent-ergonomics is where treaty
-      # looks for the kit when TREATY_SPEC_DIR is not set
+      # looks for the kit when TREATY_SPEC_DIR is not set. A profile that no longer matches
+      # the commands fails with CONFLICT: run with --force and commit the new one
       - name: Conformance kit
         run: |
           git clone --depth 1 https://github.com/cli-agent-spec/cli-agent-spec ../cli-agent-ergonomics
           uv run treaty conformance todo.cli:app --run
-          git diff --exit-code conformance/
