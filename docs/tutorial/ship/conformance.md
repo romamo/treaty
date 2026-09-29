@@ -96,7 +96,15 @@ Add `.sandbox/` to `.gitignore`.
 
 Point the sandbox at whatever your CLI touches: an environment variable for a config file,
 a test account's credentials, a mock server's URL. A project made with `treaty init` already
-has a launcher, without a sandbox; add one as soon as a command reads or writes real state.
+has a launcher, `conformance/todo`, without a sandbox. Add one as soon as a command reads or
+writes real state; for `todo`, two lines give it its own `HOME`:
+
+```sh
+#!/bin/sh
+here="$(cd "$(dirname "$0")" && pwd)"
+mkdir -p "$here/.sandbox"
+HOME="$here/.sandbox" exec "$here/../.venv/bin/todo" "$@"
+```
 
 On Windows the `/bin/sh` launcher cannot run. treaty falls back to the app's console script
 in the current environment, or you pass `--command` with an executable of your own.
@@ -173,8 +181,10 @@ Levels: level_1 fail, level_2 fail, level_3 fail
         argument_order --format json before the command path: --format json before the command path exited 2, expected 0
 ```
 
-Every failure names the probe that caused it, and each one is something an earlier chapter
-fixed:
+Every failure names the probe that caused it, and each one is something a migration to
+treaty fixes. The fixes below are steps of the argparse chapter, since the failing version
+is the argparse one; a CLI started with `treaty init` passes these checks from its first
+command:
 
 | Failed check | Cause in the argparse version | Fixed in |
 | --- | --- | --- |

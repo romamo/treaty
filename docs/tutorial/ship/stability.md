@@ -53,7 +53,16 @@ follows three rules:
 The manifest is the contract, so keep a copy of it with every release:
 
 ```bash
-todo manifest > todo-1.0.0.json    # at the 1.0.0 tag, committed beside the code
+todo manifest > todo-1.0.0.json    # when you release 1.0.0, committed beside the code
+```
+
+If a release is already out and you kept no copy, make one from its tag, beside your
+working tree:
+
+```bash
+git worktree add ../todo-1.0.0 v1.0.0
+(cd ../todo-1.0.0 && uv run todo manifest) > todo-1.0.0.json
+git worktree remove ../todo-1.0.0
 ```
 
 Every check below compares the working tree against that file.
@@ -183,9 +192,12 @@ into its own directory: a real project runs the same commands from its root.
 `App(schema_changelog=Path(__file__).parent / "schema-changelog.json")` gives the app a
 `changelog` command, which lists each version's added, removed, and changed fields and
 whether it breaks callers, and `--since 1.0.0` keeps the newer ones. `treaty changelog-add
-myapp.cli:app` writes the next entry by diffing the manifest against the last snapshot. An
-agent that learned 1.0.0 then asks the tool itself what changed, instead of failing into
-it. See [Response meta](../../../README.md#response-meta) for the file's format.
+myapp.cli:app` writes the next entry. It keeps a snapshot of the manifest,
+`<app>.manifest.json`, beside the changelog file, diffs the live manifest against it, then
+updates the snapshot, so each entry holds what changed since the one before. An agent that
+learned 1.0.0 then asks the tool itself what changed, instead of failing into it. The README
+describes the file's format under Schema changelog, in [Response
+meta](../../../README.md#response-meta).
 
 ## Step 6: Gate the release
 

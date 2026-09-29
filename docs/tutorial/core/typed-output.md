@@ -179,6 +179,11 @@ It needs `jsonschema` as a test dependency: `uv add --dev jsonschema`. Cover eac
 command can return: `purge` returns a preview with `would_affect` on a dry run and the
 deleted items on a real one, so it is called both ways.
 
+In your own project the test is the same with your app in it: import it
+(`from todo.cli import app` in a project `treaty init` made), use it where the test says
+`todo_exit_codes.app`, and list one call per command with arguments that work against a
+scratch directory, as `calls` does above.
+
 **Check:** the test passes for `todo`
 
 <!-- check -->

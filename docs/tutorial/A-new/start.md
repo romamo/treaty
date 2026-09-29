@@ -117,10 +117,10 @@ the "Fails when" column
 
 ## Step 4: Replace the app and add shared state
 
-Open `src/todo/cli.py` and replace the scaffold's code with `todo`'s, a piece at a time,
-starting with the app. The whole file you are building is
-[`todo_treaty.py`](../../../examples/tutorial/todo_treaty.py); the steps show its parts in
-order. The app keeps the name `todo`:
+The file you are building is [`todo_treaty.py`](../../../examples/tutorial/todo_treaty.py).
+Copy it over `src/todo/cli.py` now, then read Steps 4 to 6, which walk through its parts in
+order. Typing it in piece by piece works too, but nothing runs until every piece is there,
+since the commands share definitions. The app keeps the name `todo`:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
