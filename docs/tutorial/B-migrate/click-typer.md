@@ -9,7 +9,8 @@ start](../index.md#before-you-start))
 **Done when:** your tests pass, if the CLI has any, and, for `todo`, `treaty audit` reports
 only `exit-codes` warnings, which [Declare exit codes](../core/exit-codes.md) clears.
 Another CLI may get other rules too; [the
-index](../index.md#after-the-first-chapter-follow-the-audit) maps each to its chapter:
+index](../index.md#after-the-first-chapter-follow-the-audit) maps each to its chapter. The
+check, for `todo`:
 
 <!-- check -->
 ```bash
@@ -101,8 +102,11 @@ with one of those names is refused when the app is built. A `-v` counter, a `--c
 option, or a `--format` choice has to be renamed or dropped in favour of the framework's.
 Some framework flags come with a feature: a command with `has_network_io=True` gets
 `--timeout`, `--proxy`, and `--no-proxy`, and a list command `--limit` and `--cursor`. A
-field of your own with one of those names is refused too, and the error says to drop it: the
-framework's flag does the same job, and the handler reads a timeout as `ctx.timeout`.
+field of your own with one of those names is refused too, and the error says to drop it,
+since the framework's flag does the same job. The handler reads the time limit as
+`ctx.timeout.seconds`, and `timeout=5` on `@app.command` keeps an old default of 5 seconds,
+where treaty's is 60; a list handler reads its page as [Page long
+lists](../core/pagination.md) shows, or `paginated=False` keeps your own flags.
 
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
 `click.confirm`, and `click.prompt` in the old code shows up in the "Fails when" or "Writes?"
@@ -566,8 +570,7 @@ assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 ```
 
 A command in a group is called by its dotted path, as the manifest keys it:
-`app.call("remote.add", {...})` for `todo remote add`.
-
+in a CLI with a `remote` group, `app.call("remote.add", {...})` runs `mycli remote add`.
 
 `app.run(argv, stdout=..., stderr=...)` covers the argv path and the plain renderers, where
 `CliRunner` did. A whole test file for `todo` in this style, with its imports and a fixture

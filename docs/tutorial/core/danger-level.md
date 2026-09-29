@@ -125,8 +125,8 @@ to retry without changing it twice:
   retries reads `noop` and knows the first call already did the work
 - **`--idempotency-key`**: a second call with the same key returns the first result without
   running the handler. A retry after a lost response is then safe even for `add`, which
-  would otherwise add a second item. Reusing a key with different arguments exits 6
-  (`CONFLICT`), which is why every `mutating` command can exit 6 without declaring it
+  would otherwise add a second item. Reusing a key with different arguments exits 6 (`CONFLICT`) with `error.code`
+`IDEMPOTENCY_KEY_REUSED`, which is why every `mutating` command can exit 6 without declaring it
 - **`TIMEOUT` is not retryable**: the call may have written half its work, so an agent
   inspects state before calling again
 
@@ -157,16 +157,20 @@ as a cleanup an agent runs often to see what it would remove; keep the default g
 applying is the usual intent.
 
 A destructive command that takes an id has one more case: the id is already gone. A
-retried delete should succeed rather than fail, so it answers `noop` when confirmed, and
-on a dry run `would_delete` with an empty preview; the audit's `delete-not-found` rule asks
-for this when such a command declares `NOT_FOUND`:
+retried delete should succeed rather than fail, so it answers `noop` when confirmed, and on
+a dry run `would_delete` with an empty preview. Its result type is shaped like `Purged`, an
+`effect` and `would_affect: Affects | None = None`:
 
 ```python
 if found is None:
     if args.dry_run:
-        return Removed("would_delete", Affects(f"Deletes nothing: no #{args.id}", (), 0))
-    return Removed("noop")
+        preview = Affects(f"Deletes nothing: no #{args.id}", (), 0)
+        return Removed(effect="would_delete", would_affect=preview)
+    return Removed(effect="noop")
 ```
+
+Then drop `NOT_FOUND` from its `exit_codes`: a gone id is no longer a failure. The audit's
+`delete-not-found` rule warns while a destructive command declares `NOT_FOUND`.
 
 A `destructive` command is also never offered as a fix: a `fix_command` that runs one is
 refused, since a fix must be safe to run twice, so an agent following a suggestion never
