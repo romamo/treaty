@@ -100,10 +100,13 @@ Look for names treaty keeps for itself. `--verbose`, `--quiet`, `--debug`, `--co
 `--format`, `--fields`, `--cwd`, and `-h` are framework flags on every command, so a field
 with one of those names is refused when the app is built. A `-v` counter, a `--config`
 option, or a `--format` choice has to be renamed or dropped in favour of the framework's.
-Some framework flags come with a feature: a command with `has_network_io=True` gets
-`--timeout`, `--proxy`, and `--no-proxy`, and a list command `--limit` and `--cursor`. A
-field of your own with one of those names is refused too, and the error says to drop it,
-since the framework's flag does the same job. The handler reads the time limit as
+Every global flag is reserved the same way, including `--schema`, `--output-schema`,
+`--schema-version`, `--stable-output`, `--unmask`, and `--max-output`: a command's `--help`
+lists them under Global flags, so a `--schema FILE` option becomes `--schema-file`. Some
+framework flags come with a feature: a command with `has_network_io=True` gets `--timeout`,
+`--proxy`, and `--no-proxy`, and a list command `--limit` and `--cursor`. A field of your
+own with one of those names is refused too, and the error says to drop it, since the
+framework's flag does the same job. The handler reads the time limit as
 `ctx.timeout.seconds`, and `timeout=5` on `@app.command` keeps an old default of 5 seconds,
 where treaty's is 60; a list handler reads its page as [Page long
 lists](../core/pagination.md) shows, or `paginated=False` keeps your own flags.
@@ -200,10 +203,12 @@ class Store:
 
 Unlike `ctx.obj`, the resource is typed, so a handler that asks for a `Store` gets one.
 
-Typing `db` as `Path` also gets the argument checked before any handler runs: `..`
-segments, percent-encoded bytes, and null bytes exit 2. `click.Path(exists=True)` has no
-flag of its own; check the path in the arguments dataclass's `__post_init__` and raise
-`ParseError`, which exits 2 before the handler runs.
+Typing `db` as `Path` also gets the argument checked before any handler runs: `..` segments,
+percent-encoded bytes, and null bytes exit 2. `click.Path(exists=True)` has no flag of its
+own; check in the handler, where a relative path has already been resolved against `--cwd`,
+and raise a declared exit code such as `NOT_FOUND`, as [Type path arguments as
+Path](../core/path-typed.md) shows. `__post_init__` runs before that resolution, so a check
+there looks in the wrong directory under `--cwd`.
 
 **Check:** the old order fails with the new order in the suggestion, so a caller that still
 uses it is told how to fix the call
@@ -619,7 +624,10 @@ command.
 | `type=int`, `type=float` | the annotation | the field's annotation |
 | `click.Choice([...])` | an `Enum` | `Literal[...]` or a `StrEnum` |
 | `click.Path(path_type=Path)` | `Path` | `Path`, checked for `..` and encoded bytes |
-| `click.Path(exists=True)`, `click.IntRange` | `exists=True`, `min=`, `max=` | a check in `__post_init__` that raises `ParseError` |
+| `click.Path(exists=True)` | `exists=True` | a check in the handler that raises `Exit.NOT_FOUND` |
+| `click.IntRange` | `min=`, `max=` | a check in `__post_init__` that raises `ParseError` |
+| `click.File("r")`, a `-` for stdin | `typer.FileText` | `stdin_input=True`: the text arrives as `ctx.stdin_text`, from a pipe or `--input-file PATH`, which replaces the file argument |
+| an `--output FILE` the command writes itself | the same | keep an `output: Path` flag, refused with `CONFLICT` unless `--force`; `output_file=True` instead writes `data` in the `--format` representation |
 | `is_flag=True` | `bool = False` | `bool = Flag(default=False, ...)` |
 | `--x/--no-x` | `bool = True` | `bool = Flag(default=True, ...)`: treaty adds `--no-x` |
 | `multiple=True` | `list[str]` option | `tuple[str, ...]` flag: repeats accumulate |
@@ -653,6 +661,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
   page ([Page long lists](../core/pagination.md))
 - A text flag refuses a line break unless the field declares `multiline=True`; give
   every field that takes free text, such as a body or a message, `multiline=True`
+- A command that read a file or `-` for stdin takes the file as `--input-file PATH` and
+  otherwise reads its stdin
 - A config file of the CLI's own moves to the one treaty reads
   ([Read settings and secrets](../core/config.md#a-command-that-writes-the-config-file))
 - Output is JSON whenever stdout is not a terminal; scripts that grepped the old text should

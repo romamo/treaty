@@ -85,11 +85,14 @@ It decides which framework flags a command gets and whether it can run without c
 
 Look for names treaty keeps for itself. `--verbose`, `--quiet`, `--debug`, `--config`,
 `--format`, `--fields`, `--cwd`, and `-h` are framework flags on every command, so a field
-with one of those names is refused when the app is built. Some framework flags come with a
-feature: a command with `has_network_io=True` gets `--timeout`, `--proxy`, and `--no-proxy`,
-and a list command `--limit` and `--cursor`. A field of your own with one of those names is
-refused too, and the error says to drop it, since the framework's flag does the same job.
-The handler reads the time limit as `ctx.timeout.seconds`, and `timeout=5` on `@app.command`
+with one of those names is refused when the app is built. Every global flag is reserved the
+same way, including `--schema`, `--output-schema`, `--schema-version`, `--stable-output`,
+`--unmask`, and `--max-output`: a command's `--help` lists them under Global flags, so a
+`--schema FILE` option becomes `--schema-file`. Some framework flags come with a feature: a
+command with `has_network_io=True` gets `--timeout`, `--proxy`, and `--no-proxy`, and a list
+command `--limit` and `--cursor`. A field of your own with one of those names is refused
+too, and the error says to drop it, since the framework's flag does the same job. The
+handler reads the time limit as `ctx.timeout.seconds`, and `timeout=5` on `@app.command`
 keeps an old default of 5 seconds, where treaty's is 60; a list handler reads its page as
 [Page long lists](../core/pagination.md) shows, or `paginated=False` keeps your own flags.
 
@@ -485,6 +488,7 @@ command.
 | `parser.error(msg)` | `raise ParseError(msg, context=...)` in the arguments' `__post_init__`: exit 2; from a handler it exits 1 |
 | `sys.exit(n)` | `raise Exit.NAME(msg, ...)`, declared in `exit_codes=` |
 | `print(...)` | return a dataclass; add a renderer for custom text |
+| `type=argparse.FileType("r")`, `-` for stdin | `stdin_input=True`: the text arrives as `ctx.stdin_text`, from a pipe or `--input-file PATH` |
 | `subprocess.run([...])` | `ctx.run([...])`, with `check=False` if you read `returncode`, declared with `subprocess=` ([Run other programs](../core/programs.md)) |
 | `-v`/`--verbose` printing progress | `ctx.log(...)`, shown under the framework's `--verbose`; a `-v` short is gone |
 | `input("Sure?")`, `--yes` | `danger_level="destructive"`, `dry_run`, `--confirm-destructive` |
@@ -501,6 +505,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
   page ([Page long lists](../core/pagination.md))
 - A text flag refuses a line break unless the field declares `multiline=True`; give
   every field that takes free text, such as a body or a message, `multiline=True`
+- A command that read a file or `-` for stdin takes the file as `--input-file PATH` and
+  otherwise reads its stdin
 - A config file of the CLI's own moves to the one treaty reads
   ([Read settings and secrets](../core/config.md#a-command-that-writes-the-config-file))
 - Output is JSON whenever stdout is not a terminal; scripts that grepped the old text should
