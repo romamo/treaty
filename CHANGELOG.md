@@ -63,6 +63,9 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `treaty conformance --run --format plain` printed "Kit not run; add --run to execute it"
+  when `--run` was passed but the kit could not run or rejected the profile. The data gains
+  `run_requested`, and the hint appears only when `--run` was not passed
 - `--idempotency-key`'s help printed `($<APP>_SESSION)`, and a truncation hint on an
   `exec` line or MCP call `<APP>_MAX_OUTPUT_BYTES`, instead of the app's own variable, such
   as `$TODO_SESSION`

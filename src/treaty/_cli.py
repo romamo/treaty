@@ -653,6 +653,8 @@ class ConformanceOut:
     effect: str
     profile: str
     probes: int
+    run_requested: bool
+    """--run was passed; with ran false, the kit could not run or rejected the profile"""
     ran: bool
     levels: dict[str, str]
     """Empty until the kit runs"""
@@ -662,7 +664,8 @@ class ConformanceOut:
 def render_conformance(data: Any) -> str:
     lines = [f"Profile: {data['profile']} ({data['probes']} probes)"]
     if not data["ran"]:
-        lines.append("Kit not run; add --run to execute it")
+        if not data["run_requested"]:
+            lines.append("Kit not run; add --run to execute it")
         return "\n".join(lines) + "\n"
     lines.append("Levels: " + ", ".join(f"{k} {v}" for k, v in data["levels"].items()))
     lines.append("")
@@ -737,7 +740,7 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
         )
     if effect != "noop":
         write_profile(profile, profile_path)
-    result = ConformanceOut(effect, str(profile_path), len(probes), False, {}, ())
+    result = ConformanceOut(effect, str(profile_path), len(probes), args.run, False, {}, ())
     if spec_dir is None:
         return result
     # The kit's deadline ends first, so it is killed rather than orphaned by the TIMEOUT path
@@ -775,7 +778,7 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
         for c in report["checks"]
     )
     result = ConformanceOut(
-        effect, str(profile_path), len(probes), True, dict(report["levels"]), checks
+        effect, str(profile_path), len(probes), True, True, dict(report["levels"]), checks
     )
     if kit.exit_code != 0:
         raise Exit.CONFORMANCE_FAILED(

@@ -285,3 +285,12 @@ def test_scaffold_pins_the_treaty_version_it_was_generated_by() -> None:
 
     pyproject = render(ProjectName("demo"))["pyproject.toml"]
     assert f'dependencies = ["treaty>={__version__}"]' in pyproject
+
+
+def test_plain_output_asks_for_run_only_when_it_was_not_passed() -> None:
+    """A kit that could not run after --run is an error on stderr, not a missing flag"""
+    from treaty._cli import render_conformance
+
+    data = {"profile": "p.json", "probes": 6, "ran": False, "levels": {}, "checks": []}
+    assert "add --run" in render_conformance({**data, "run_requested": False})
+    assert "add --run" not in render_conformance({**data, "run_requested": True})
