@@ -7,8 +7,9 @@ command shows a call an agent can copy, with a test that fails when an example s
 or either migration chapter; this chapter clears the audit rule `describe`
 
 **Done when:** the audit has no `describe` finding, and a test runs every example with
-`--validate-only`. In your own project, that is `uv run treaty audit todo.cli:app` and the
-example test of Step 4 in your tests:
+`--validate-only`. In your own project, that is `uv run treaty audit todo.cli:app`; the
+example test arrives with `test_contract.py` at the end of [Declare exit
+codes](exit-codes.md):
 
 <!-- check -->
 ```bash
@@ -154,9 +155,10 @@ $ todo add "Buy milk" --priority high --validate-only    # after the rename
 
 `--validate-only` is the check: it parses the arguments and stops, exit 0 or exit 2 with
 every error, without running the handler. A test that passes every example through it
-catches a stale flag, a wrong argument type, and a leftover placeholder. It reads the
-examples from the manifest, so a new command's examples are tested without touching the
-test. Here it is as the tutorial runs it on its own copies of `todo`:
+catches a stale flag, a wrong argument type, and a placeholder in a typed field, such as
+`<id>` where an integer belongs; a placeholder in a text field parses, so read those
+yourself. It reads the examples from the manifest, so a new command's examples are tested
+without touching the test. Here it is as the tutorial runs it on its own copies of `todo`:
 
 <!-- file: tests/test_tutorial.py -->
 ```python
@@ -198,9 +200,12 @@ def test_an_example_parses(cli_app: App, example: str) -> None:
     assert code == 0, out.getvalue()
 ```
 
-The audit makes the same check: an example that does not pass `--validate-only` is a
-`describe` error, so `--strict` fails on it. The test keeps it in `uv run pytest`, beside
-your other tests. In your project, copy
+The audit makes a similar check: an example that does not pass `--validate-only` is a
+`describe` error, so `--strict` fails on it. It judges only the spelling, leaving out what
+depends on the caller's world, such as a variable an `--x-from-env` names or a `--cwd`
+directory; the test runs each example as written, so write examples that work in the test's
+empty environment. The test keeps it in `uv run pytest`, beside your other tests. In your
+project, copy
 [`new_cli/test_contract.py`](../../../examples/tutorial/new_cli/test_contract.py), which
 holds it with its imports, at the end of [Declare exit codes](exit-codes.md): its
 strict-audit test passes from there on. `env={}` keeps your variables out of the result, and

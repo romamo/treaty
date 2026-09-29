@@ -171,10 +171,9 @@ todo purge --db tmp/tutorial/todo.json \
 When most calls of a command are previews, `safe_default=True` turns the gate around: the
 command previews and exits 0 by default, and `--live` applies it. Use it for commands such
 as a cleanup an agent runs often to see what it would remove; keep the default gate when
-applying is the usual intent. `--live` alone is the confirmation, so nothing refuses such a
-command: the conformance kit's destructive checks need a destructive command without
-`safe_default`, and an app whose only destructive commands have it scores `incomplete` at
-every level.
+applying is the usual intent. `--live` is the only confirmation, so such a command is never
+refused. The conformance kit's destructive checks therefore skip it, and an app whose only
+destructive commands use `safe_default` scores `incomplete` at every level.
 
 ### Deleting what is already gone
 

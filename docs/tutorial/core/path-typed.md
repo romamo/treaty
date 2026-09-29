@@ -146,7 +146,10 @@ command may touch:
 - **An absolute path passes.** `--db /etc/hosts` is a valid path; `todo` then reads it and
   exits 79 with `STORE_CORRUPT`. If a command must stay inside a directory, check in the
   handler, where a relative path is already resolved against `--cwd`, and raise a declared
-  exit code when it falls outside, before touching the file. `__post_init__` runs first on the path as the caller typed it and again after `--cwd` resolves it, so a check there fails under `--cwd`, and anything else it does happens twice
+  exit code when it falls outside, before touching the file
+- **Check in the handler, not `__post_init__`.** `__post_init__` runs first on the path as
+  the caller typed it and again after `--cwd` resolves it, so a check there fails under
+  `--cwd`, and anything else it does happens twice
 - **Nothing checks that the path exists**, or that it is a file rather than a directory.
   Check what the command needs, and raise an exit code the caller can act on, as `todo`'s
   store does with `STORE_UNWRITABLE`

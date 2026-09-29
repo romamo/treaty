@@ -88,8 +88,7 @@ now; the audit never sees an app that does not build:
 
 - **On every command**: `--verbose`, `--quiet`, `--debug`, `--config`, `--format`,
   `--fields`, `--cwd`, `-h`, and every global flag a command's `--help` lists, such as
-  `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the
-  framework's `--verbose`
+  `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the framework's `--verbose`, which has no `-v` short
 - **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`. Drop your own:
   the handler reads the limit as `ctx.timeout.seconds`, and `timeout=5` on
   `@app.command` keeps an old default of 5 seconds, where treaty's is 60
@@ -100,8 +99,7 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie`, such as `author` or `keyword`, is a secret and takes
-  no value on the command line; `secret=False` keeps it a plain flag
+  `credential`, `auth`, or `cookie`, or has a `pass` segment, such as `author` or `keyword`, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
 
 **Check:** every subparser has a row, and every `sys.exit`, `parser.error`, and `input()`
 call in the old code shows up in the "Fails when" or "Writes?" column

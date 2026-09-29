@@ -101,8 +101,7 @@ now; the audit never sees an app that does not build:
 
 - **On every command**: `--verbose`, `--quiet`, `--debug`, `--config`, `--format`,
   `--fields`, `--cwd`, `-h`, and every global flag a command's `--help` lists, such as
-  `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the
-  framework's `--verbose`
+  `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the framework's `--verbose`, which has no `-v` short
 - **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`. Drop your own:
   the handler reads the limit as `ctx.timeout.seconds`, and `timeout=5` on
   `@app.command` keeps an old default of 5 seconds, where treaty's is 60
@@ -113,8 +112,7 @@ now; the audit never sees an app that does not build:
   `changelog`, `generate-skills`, `mcp-validate`) replaces it, with `builtin-shadowed`
   advice
 - **Secrets**: a field whose name contains `token`, `secret`, `password`, `key`,
-  `credential`, `auth`, or `cookie`, such as `author` or `keyword`, is a secret and takes
-  no value on the command line; `secret=False` keeps it a plain flag
+  `credential`, `auth`, or `cookie`, or has a `pass` segment, such as `author` or `keyword`, is a secret and takes no value on the command line, unless it is a boolean or an enum; `secret=False` keeps it a plain flag
 
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
 `click.confirm`, and `click.prompt` in the old code shows up in the "Fails when" or "Writes?"
@@ -209,12 +207,10 @@ class Store:
 Unlike `ctx.obj`, the resource is typed, so a handler that asks for a `Store` gets one.
 
 Typing `db` as `Path` also gets the argument checked before any handler runs: `..` segments,
-percent-encoded bytes, and null bytes exit 2. `click.Path(exists=True)` has no flag of its
-own; check in the handler, where a relative path has already been resolved against `--cwd`,
-and raise a declared exit code such as `NOT_FOUND`, as `todo`'s store raises
-`STORE_UNWRITABLE` in [Type path arguments as Path](../core/path-typed.md). `__post_init__`
-first runs on the path as typed, before that resolution (and again after it), so a check
-there looks in the wrong directory under `--cwd`, and anything else it does happens twice.
+percent-encoded bytes, and null bytes exit 2. `click.Path(exists=True)` has no equivalent
+flag. Check existence in the handler, after `--cwd` has resolved the path, and raise a
+declared code such as `NOT_FOUND`. Not in `__post_init__`: it runs once on the typed path
+and again on the resolved one.
 
 **Check:** the old order fails with the new order in the suggestion, so a caller that still
 uses it is told how to fix the call

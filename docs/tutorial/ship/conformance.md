@@ -172,13 +172,12 @@ The kit lists any failures first, then the passing checks by id.
 
 The probe count is `todo`'s; yours follows your commands and examples.
 
-The run stops with exit 6, `CONFLICT`, whenever the commands changed since the profile was
-written: in a project made with `treaty init`, whose profile is for the scaffold's commands
-until [Start a new CLI](../A-new/start.md#step-9-rewrite-the-conformance-profile) Step 9
-replaces it, and after any chapter that added a network command or changed the commands or
-first examples the probes come from. treaty never overwrites a profile silently, since one
-may hold probes someone wrote by hand; `CONFLICT` names the probes that changed, and a
-profile that already matches is left as it is. Replace it, then run the kit:
+`--run` stops with exit 6, `CONFLICT`, when the commands, the version, or the first examples
+the probes come from changed since the profile was written, as they have in a project made
+with `treaty init` until [Start a new
+CLI](../A-new/start.md#step-9-rewrite-the-conformance-profile) Step 9. treaty never
+overwrites a profile silently, since it may hold probes written by hand; `CONFLICT` names
+the probes that changed. Replace it, then run the kit:
 
 ```bash
 uv run treaty conformance todo.cli:app --force

@@ -71,7 +71,7 @@ Every chapter opens with the same three lines:
 - **You need:** the chapter or state it builds on
 - **Done when:** the command that proves it, and what it prints
 
-Inside, each step ends with a **Check**. The code shown is an excerpt of a runnable file
+Inside, most steps end with a **Check**. The code shown is an excerpt of a runnable file
 under `examples/tutorial/`, named at the top of the chapter: open it for the imports and the
 definitions around an excerpt. `tests/test_tutorial.py` fails when an excerpt and its file
 drift apart, so what you copy is what the tests run.

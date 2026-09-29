@@ -171,7 +171,7 @@ caller can use:
 | `message` | one line saying what failed | `tmp/bad.json is not a todo file` |
 | `context` | the facts, as values a program can read | `{"path": ..., "cause": ...}` |
 | `fix_required` | the condition the caller must fix before reissuing | `--db must name a todo file...` |
-| `fix_command` | one command that fixes it: runs as is, no placeholders, never destructive | `mkdir -p tmp/nodir` |
+| `fix_command` | one command that fixes it: runs as is, no placeholders, never destructive | `mkdir -p tmp/tutorial/nodir` |
 | `suggestion` | the next step, phrased for an agent | `pass --db with another path...` |
 | `retry_after_ms` | how long to wait, on retryable codes only | |
 
