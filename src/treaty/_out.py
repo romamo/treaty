@@ -55,7 +55,7 @@ def Out(
 
     ``sort_key`` names the item field an array of objects is sorted by; ``ordered=True``
     keeps the handler's order instead (a ranking), also of arrays inside an untyped
-    (``object``) value; ``volatile=True`` marks a value that
+    (``object`` or ``dict[str, object]``) value; ``volatile=True`` marks a value that
     differs between identical calls, which ``--stable-output`` leaves out.
     ``high_entropy=True`` masks the value unless ``--unmask``, ``False`` exempts it (a
     content hash to compare), and the default masks it when the name says credential.
@@ -157,7 +157,18 @@ def arrange(value: object, tp: object, spec: OutSpec = NO_ORDER, *, stable: bool
 
 
 def _untyped(tp: object) -> bool:
-    return resolve_alias(tp) in (object, Any)
+    """Content no annotation describes: ``object``, ``Any``, or a list, tuple, or dict of it,
+    such as the ``dict[str, object]`` of a ``model_dump()``"""
+    base, _ = strip_optional(resolve_alias(tp))
+    if base in (object, Any):
+        return True
+    origin = typing.get_origin(base)
+    args = typing.get_args(base)
+    if origin is dict and len(args) == 2:
+        return _untyped(args[1])
+    if (origin is list and args) or (origin is tuple and len(args) == 2 and args[1] is Ellipsis):
+        return _untyped(args[0])
+    return False
 
 
 def _kind(value: object) -> str:
