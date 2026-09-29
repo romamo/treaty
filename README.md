@@ -706,7 +706,9 @@ with no declaration: it gets `--limit` (default 20, `default_limit=` per command
 every item) and `--cursor`. `paginated=False` opts a small, bounded `list[T]` out, and the
 `paginated-list` audit rule advises on each opt-out; streams are never paginated.
 Every successful response carries `meta.pagination` with `total`, `returned`, `truncated`,
-`has_more`, and `next_cursor`; pass `next_cursor` as `--cursor` for the next page:
+`has_more`, and `next_cursor`; pass `next_cursor` as `--cursor` for the next page. Text
+formats carry no `meta`, so a cut page writes `20 of 25 shown; next page: --cursor ...,
+or --limit 0 for all` to stderr (`--format id` writes `next: --cursor ...`):
 
 ```python
 @app.command("releases.list", description="List releases", danger_level="safe",

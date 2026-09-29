@@ -52,11 +52,12 @@ command whose handler returns `list[T]` is a list command with no declaration, a
   `next_cursor`, which is `null` on the last page
 
 This is a change for a migrated CLI: `todo list` used to print every item, and now prints
-20. A caller that wants everything says so with `--limit 0`, and a person at a terminal
-sees only the first page, since a renderer receives `data` alone and has no place to say
-more exist.
+20. A caller that wants everything says so with `--limit 0`. Text output carries no `meta`,
+so when a page is cut, treaty says so on stderr, where a person at a terminal sees it and a
+script's stdout stays clean: `20 of 25 shown; next page: --cursor ..., or --limit 0 for all`.
 
-**Check:** 25 items come back as 20, then the other 5; `--limit 0` returns all 25
+**Check:** 25 items come back as 20, then the other 5; `--limit 0` returns all 25; the plain
+output says on stderr that a page was cut
 
 <!-- check -->
 ```bash
@@ -66,6 +67,7 @@ cursor=$(before list --db tmp/tutorial/todo.json | jq -r .meta.pagination.next_c
 before list --db tmp/tutorial/todo.json --cursor "$cursor" | jq -e '[.data[].id] == [21, 22, 23, 24, 25]
   and .meta.pagination.has_more == false and .meta.pagination.next_cursor == null'
 before list --db tmp/tutorial/todo.json --limit 0 | jq -e '(.data | length) == 25'
+before list --db tmp/tutorial/todo.json --format plain 2>&1 > /dev/null | grep -q '^20 of 25 shown; next page: --cursor '
 ```
 
 ## Step 1: Keep it paginated, and give it an order

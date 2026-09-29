@@ -4491,9 +4491,20 @@ class _Run:
             envelope = self.settle(envelope)
         code = envelope.exit_code
         pagination = envelope.extra_meta.get("pagination")
-        if mode is Format.ID and isinstance(pagination, dict) and pagination.get("has_more"):
-            # The ids stay pipeable; the way to the next page goes to stderr
-            self.err.write(f"next: --cursor {pagination['next_cursor']}\n", Level.WARN)
+        if isinstance(pagination, dict) and pagination.get("has_more"):
+            # The text carries no meta: that a page was cut, and the way on, go to stderr
+            cursor = pagination["next_cursor"]
+            if mode is Format.ID:
+                # The ids stay pipeable, and scripts read this line
+                self.err.write(f"next: --cursor {cursor}\n", Level.WARN)
+            else:
+                total = pagination.get("total")
+                returned = pagination.get("returned")
+                shown = f"{returned} of {total}" if total is not None else f"{returned}"
+                self.err.write(
+                    f"{shown} shown; next page: --cursor {cursor}, or --limit 0 for all\n",
+                    Level.WARN,
+                )
         if envelope.data is not None and render is not None:
             try:
                 text = _rendered(render, envelope.data)

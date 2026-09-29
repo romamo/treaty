@@ -375,6 +375,23 @@ def test_a_page_with_more_writes_the_next_cursor_on_stderr() -> None:
     assert out == "u1\nu2\n" and err.startswith("next: --cursor ")
 
 
+@pytest.mark.parametrize("fmt", ["plain", "tsv"])
+def test_a_text_page_with_more_says_so_on_stderr(fmt: str) -> None:
+    """A person reading text sees no meta: the cut and the next cursor go to stderr"""
+    app = App("t", version="1.0.0")
+
+    @app.command("list", description="List", danger_level="safe", exit_codes=(), default_limit=2)
+    def listing(args: NoArgs, ctx: Ctx) -> list[User]:
+        return USERS
+
+    _, _, err = run(["list", "--format", fmt], app=app)
+    [line] = [x for x in err.splitlines() if "shown" in x]
+    shown, cursor = line.split("; next page: --cursor ")
+    assert shown == f"2 of {len(USERS)} shown" and cursor.endswith(", or --limit 0 for all")
+    _, _, err = run(["list", "--format", fmt, "--limit", "0"], app=app)
+    assert "shown" not in err
+
+
 def test_id_field_is_checked_at_registration() -> None:
     app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match="not a field of the output"):

@@ -133,6 +133,9 @@ Apps built on treaty keep their own, structured schema changelog with
 - The `THIRD_PARTY_STDOUT` warning said the stray text went to stderr, but off a terminal
   and without `--verbose` it is written nowhere else; the message now says the text is
   in the warning instead
+- A list cut to a page in a text format (`plain`, `tsv`, a custom renderer) gave no sign that
+  more items exist, since text carries no `meta`; stderr now says how many were shown and
+  gives the next `--cursor`, as `--format id` already did
 
 ## [1.0.0rc2] - 2026-09-28
 
