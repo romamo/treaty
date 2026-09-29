@@ -221,9 +221,9 @@ These are on every run:
 Others appear only when they apply: `pagination` on a list command (`returned`, `total`,
 `has_more`, `next_cursor`, `truncated`), `idempotency_hit` when a repeated idempotency key
 returned the first result, `validation_only` under `--validate-only`, `trace_id` when
-`TOOL_TRACE_ID` is set, `retries` when the command retried. None of them is ever `null`
-(inside `pagination`, `next_cursor` is `null` on the last page): a key that does not apply
-is left out.
+`TOOL_TRACE_ID` is set, `retries` when the command retried. None of them is ever `null`:
+a key that does not apply is left out. Inside `pagination`, `next_cursor` is `null` on the
+last page.
 
 **Check:** `list` carries `pagination`; a run without an idempotency key has no
 `idempotency_hit` at all

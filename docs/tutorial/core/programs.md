@@ -102,12 +102,14 @@ Every program `ctx.run` starts gets an environment that keeps it from waiting fo
 
 <!-- file: examples/tutorial/todo_git.py -->
 ```python
+@dataclass(frozen=True, slots=True)
 class Save(Common):
     message: str = Flag(default="Update todo items", description="Commit message", multiline=True)
 ```
 
 <!-- file: examples/tutorial/todo_git.py -->
 ```python
+@dataclass(frozen=True, slots=True)
 class Saved:
     effect: str
     commit: str | None = Out(external=True)
@@ -147,17 +149,26 @@ should.
 
 ## Step 4: Declare the program
 
-Two declarations on the command tell an agent, and `doctor`, what it runs; `Subprocess`
-comes from `treaty`, beside `App` and the rest:
+Two declarations on the command, `required_tools=` and `subprocess=`, tell an agent, and
+`doctor`, what it runs; `Subprocess` comes from `treaty`, beside `App` and the rest. The
+whole declaration of `save`:
 
 <!-- file: examples/tutorial/todo_git.py -->
 ```python
+@app.command(
+    "save",
+    description="Commit the item file to the git repository it is in",
+    danger_level="mutating",
+    exit_codes=["NOT_A_REPOSITORY"],
     required_tools={"git": "2.30.0"},
     subprocess=Subprocess(
         "git",
         user_controlled_args=("db",),
         hardcoded_args=("rev-parse", "add", "diff", "--cached", "commit", "--file", "-"),
     ),
+    examples=[("Commit the items with a message", 'todo save --message "Plan the week"')],
+)
+def save(args: Save, ctx: Ctx, store: Store) -> Saved:
 ```
 
 - **`required_tools=`** maps each program to its minimum version. `todo doctor` then checks
@@ -238,10 +249,9 @@ hash, which `save` returns:
 ```
 
 In your own project, try the missing-repository case with an item file outside every git
-repository, such as one under a new directory in `/tmp`. Inside your project's own
-repository, git finds that repository instead; and git refuses to add a file your
-`.gitignore` excludes, which ends as `SUBPROCESS_FAILED` rather than exit 82. The checks set
-`GIT_CEILING_DIRECTORIES` for the same reason: it stops git from looking above a directory.
+repository, such as one under a new directory in `/tmp`: inside your project's own
+repository, git finds that repository instead. The checks set `GIT_CEILING_DIRECTORIES`
+for the same reason: it stops git from looking above a directory.
 
 A failure `save` does not name ends as `SUBPROCESS_FAILED`. The check below makes one with a
 new item file the repository's `.gitignore` excludes: git refuses to add it. A file git
@@ -278,6 +288,12 @@ tell a value the handler checked from one it passed through. `save` marks the fi
 For a hash the tag costs nothing; for a command that returns a child's text output, such as
 a log or a file's contents, it is what keeps that text from being read as instructions. See
 [Declare network commands](network-io.md#step-5-mark-what-came-from-outside).
+
+To test `save` in your project, copy the `repository` fixture, the `_git_env` helper, and
+the two tests under "Run other programs" in
+[`tests/test_tutorial.py`](../../../tests/test_tutorial.py), calling your `app`. `_git_env`
+gives git an author and sets `GIT_CEILING_DIRECTORIES`, so the tests never touch your own
+repository.
 
 ## Next
 

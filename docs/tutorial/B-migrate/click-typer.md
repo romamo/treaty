@@ -405,6 +405,7 @@ def purge(args: Purge, ctx: Ctx, store: Store) -> Purged:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
+@dataclass(frozen=True, slots=True)
 class Purged:
     effect: str
     deleted: list[Item] = Out(sort_key="id")
@@ -417,10 +418,12 @@ would touch, and their count, and treaty refuses a destructive dry run without i
 `stable-order` rule asks of every list of objects; [Page long
 lists](../core/pagination.md#step-1-keep-it-paginated-and-give-it-an-order) explains why.
 
-`list` keeps its `-a` through `short=` on the flag:
+The check reads the items back with `list -a`; `list` keeps its `-a` through `short=` on
+the flag:
 
 <!-- file: examples/tutorial/todo_treaty.py -->
 ```python
+@dataclass(frozen=True, slots=True)
 class ListArgs(Common):
     all: bool = Flag(default=False, short="a", description="Include completed items")
 ```
@@ -629,6 +632,8 @@ Migration is a breaking change for callers. Put this list in your release notes:
 - Group options go after the command: `todo --db x list` becomes `todo list --db x`
 - `--yes` is gone; destructive commands take `--confirm-destructive`, and without it they
   show what they would do and exit 2
+- `list` returns 20 items at a time; `--limit 0` returns all of them, and `--cursor` the next
+  page ([Page long lists](../core/pagination.md))
 - Output is JSON whenever stdout is not a terminal; scripts that grepped the old text should
   read JSON, or pass `--format plain`
 - Exit codes change: failures that were all 1 now have their own numbers, listed in

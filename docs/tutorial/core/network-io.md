@@ -84,12 +84,14 @@ before the handler runs by `pattern_type="url"`, and the result carries what was
 
 <!-- file: examples/tutorial/todo_network.py -->
 ```python
+@dataclass(frozen=True, slots=True)
 class Import(Common):
     url: str = Flag(description="URL of a JSON list of items to add", pattern_type="url")
 ```
 
 <!-- file: examples/tutorial/todo_network.py -->
 ```python
+@dataclass(frozen=True, slots=True)
 class Imported:
     effect: str
     added: list[Item] = Out(sort_key="id", external=True)
@@ -226,11 +228,25 @@ def test_import_adds_the_items_at_a_url_marked_untrusted(feed: str, tmp_path: Pa
     env = todo_network.app.call("import", {"url": f"{feed}/todo.json", "db": db}, env={})
 ```
 
-In your project, copy the fixture, `_Quiet` above it (a handler that keeps the server's
-request log off the test output), and the tests under "Declare network commands" in
-[`tests/test_tutorial.py`](../../../tests/test_tutorial.py) into `tests/`, and call your
-own `app` where they call `todo_network.app`. The chapters that follow test against the
-same kind of server.
+In your project, put the fixture and `_Quiet` above it (a handler that keeps the server's
+request log off the test output) in `tests/conftest.py`, where pytest finds a fixture for
+every test file, with the imports they use:
+
+```python
+import functools
+import http.server
+import json
+import threading
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+```
+
+Copy the tests under "Declare network commands" in
+[`tests/test_tutorial.py`](../../../tests/test_tutorial.py) into a test file of your own,
+and call your `app` where they call `todo_network.app`. The chapters that follow add their
+own servers to `conftest.py` the same way.
 
 **Check:** against a local server, a list of two items is added, and a 404 or a body that
 is not a list exits 81 and writes no item file

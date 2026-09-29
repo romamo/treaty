@@ -49,9 +49,45 @@ it is, and treaty checks it against the same field types as the flags.
 
 ## Step 1: Find the wide commands
 
-The `raw-payload` rule reports mutating and destructive commands with more than three fields
-that are not booleans, counting the ones they inherit. `edit` has four: `id`, `--text`,
-`--priority`, and `--db` from the shared base:
+`edit` is new. Its arguments name the item and the fields to change, each optional:
+
+<!-- file: examples/tutorial/todo_payload.py -->
+```python
+@dataclass(frozen=True, slots=True)
+class Edit(Common):
+    id: int = Arg(description="Item number")
+    text: str | None = Flag(default=None, description="New text; unchanged when absent")
+    priority: Priority | None = Flag(
+        default=None, description="New priority; unchanged when absent"
+    )
+```
+
+Its handler changes only the fields that were given, and answers `noop` when nothing
+differs:
+
+<!-- file: examples/tutorial/todo_payload.py -->
+```python
+def edit(args: Edit, ctx: Ctx, store: Store) -> Changed:
+    items = store.load()
+    for n, item in enumerate(items):
+        if item.id == args.id:
+            changed = replace(
+                item,
+                text=item.text if args.text is None else args.text,
+                priority=item.priority if args.priority is None else args.priority,
+            )
+            if changed == item:
+                return Changed(effect="noop", item=item)
+            items[n] = changed
+            store.save(items)
+            return Changed(effect="updated", item=changed)
+    raise Exit.NOT_FOUND(f"no item #{args.id}", context={"id": args.id})
+```
+
+Register it with `@app.command("edit", ...)` as Step 2 shows. The `raw-payload` rule reports
+mutating and destructive commands with more than three fields that are not booleans,
+counting the ones they inherit. `edit` has four: `id`, `--text`, `--priority`, and `--db`
+from the shared base:
 
 ```bash
 $ uv run treaty audit myapp.cli:app --format plain
@@ -87,7 +123,7 @@ is largest.
 )
 ```
 
-The handler does not change: it receives the same `Edit` arguments however they arrived.
+The handler takes no part in it: it receives the same `Edit` arguments however they arrived.
 The second example shows the payload form, since agents copy examples before they read the
 schema.
 

@@ -273,11 +273,11 @@ first: after a rename, the old command's skill file would stay behind and still 
 diff. `git diff` ignores files git does not track, so `git add --intent-to-add` first: a new
 command's skill file, never committed, then shows up in the diff and fails it.
 
-A project made with `treaty init` already has the first of these as a test,
-`tests/test_agents_md.py` (a migrated project adds it, as [Test the contract and gate
-CI](testing.md#step-2-test-the-contract-in-every-project) shows), so `uv run pytest` fails
-as soon as AGENTS.md drifts; the [new CLI
-chapter](../A-new/start.md#step-8-regenerate-agentsmd) shows it failing and the fix.
+A project made with `treaty init` runs the AGENTS.md part as a test,
+`tests/test_agents_md.py`, so `uv run pytest` fails as soon as AGENTS.md drifts ([Start a
+new CLI](../A-new/start.md#step-8-regenerate-agentsmd) shows it failing and the fix); a
+migrated project adds it in [Test the contract and gate
+CI](testing.md#step-2-test-the-contract-in-every-project).
 
 When a check fails, regenerate, read the diff, and commit it with the change that caused
 it. The diff is the part of your release notes that agents read.
@@ -293,6 +293,6 @@ uv run treaty check-docs examples.tutorial.todo_exit_codes:app \
 ## Next
 
 `todo` passes the strict audit and the conformance kit, serves the same contract over MCP,
-and ships docs that CI keeps honest. The last step is the next release: changing that
+and ships docs that CI keeps honest. The next step is the next release: changing that
 contract without breaking the agents that learned it: [Change the contract
 safely](stability.md).

@@ -150,6 +150,7 @@ the old one says what replaces it:
 
 <!-- file: examples/tutorial/todo_v2.py -->
 ```python
+@dataclass(frozen=True, slots=True)
 class ListArgs(Common):
     all: bool = Flag(
         default=False,

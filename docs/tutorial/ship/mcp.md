@@ -10,7 +10,7 @@ envelope. In this repository, the client session in the tests proves it:
 
 ```bash
 uv run pytest tests/test_tutorial.py -k test_todo_over_mcp
-# 1 passed
+# 1 passed, the rest deselected
 ```
 
 ## Why serve both
@@ -216,5 +216,5 @@ added.
 ## Next
 
 `todo` passes the audit and the conformance kit, and serves the same contract to agents
-with a shell and without one. The last step is the docs those agents read before they call:
+with a shell and without one. The next step is the docs those agents read before they call:
 [Ship the agent docs](agent-docs.md).

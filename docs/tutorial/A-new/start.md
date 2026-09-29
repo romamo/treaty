@@ -4,8 +4,8 @@
 its tests pass, AGENTS.md matches the binary, and `treaty audit` has only the findings the
 core chapters clear
 
-**You need:** Python 3.14 and [uv](https://docs.astral.sh/uv/); nothing else, since the
-project brings its own treaty
+**You need:** Python 3.14, [uv](https://docs.astral.sh/uv/), and jq ([Before you
+start](../index.md#before-you-start)); the project brings its own treaty
 
 **Done when:** in the project, the tests pass and `treaty audit` reports only `exit-codes`
 warnings, which [Declare exit codes](../core/exit-codes.md) clears:

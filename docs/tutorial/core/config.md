@@ -24,8 +24,8 @@ gains a default feed URL from the settings, and a token for feeds that require o
 [Run long work an agent can follow](long-running.md) branches from the same file, so its
 `import-all` is not in this chapter's `todo`. If your `todo` has both, `import_all` calls
 `import_items` directly: give it a `settings: Settings` parameter too, and pass `settings`
-on, or `import-all` crashes with `HANDLER_CRASHED`. The audit does not notice; the
-`import_all` tests copied from that chapter do.
+on, or `import-all` crashes with `HANDLER_CRASHED`. The audit does not notice; `mypy` and
+the `import_all` tests copied from that chapter do.
 
 ## Running the checks
 
@@ -217,12 +217,12 @@ todo list --config tmp/tutorial/bad.toml | jq -e '.meta.exit_code == 2
     token: str | None = Flag(default=None, description="Bearer token the feed requires")
 ```
 
-A field named with `token`, `secret`, `password`, `key`, `credential`, or `auth` in it is a
-secret, and `secret=True` makes any other field one. The match is on any part of the name,
-so `author`, `sort_key`, and `keyword` count too; `secret=False` keeps such a field a plain
-flag. A secret is never taken as a value on the command line, where it would land in shell
-history, process listings, and the audit log. The caller passes it one of three ways
-instead:
+A field is a secret when it declares `secret=True`, or when any part of its name contains
+`token`, `secret`, `password`, `key`, `credential`, `auth`, or `cookie`, or it has a `pass`
+segment; a boolean never is. So `author` and `keyword` count too; `secret=False` keeps such
+a field a plain flag. A secret is never taken as a value on the command line, where it would
+land in shell history, process listings, and the audit log. The caller passes it one of
+three ways instead:
 
 | The caller passes | treaty reads |
 | --- | --- |
@@ -278,6 +278,10 @@ in the envelope; with the wrong token, the run exits 8, because `import` declare
 `AUTH_REQUIRED` and `ctx.http` maps a 401 to it; with no feed at all, it exits 4. The
 wrong-token envelope's `error.code` is `UNAUTHENTICATED`, not `AUTH_REQUIRED`: an exit code
 has one name, but the `error.code` under it can be more specific, and an agent reads both.
+
+In your project, add `_Private` and the `private_feed` fixture under "Read settings and
+secrets" in [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) to
+`tests/conftest.py`, and copy the three tests after them, calling your `app`.
 
 **Check:** the three tests pass
 

@@ -13,6 +13,7 @@ pass:
 <!-- check -->
 ```bash
 uv run treaty audit examples.tutorial.todo_batch:app --strict > /dev/null
+uv run pytest -q tests/test_tutorial.py -k import_all > /dev/null
 ```
 
 The chapter gives `todo` an `import-all` command that imports several feeds in one call. It
@@ -53,10 +54,18 @@ Each step below removes one of these.
 
 Every handler runs under a wall-clock limit: `App(default_timeout=...)` for the app, 60
 seconds unless set, and `timeout=` on a command that needs a different one. `import-all`
-asks for two minutes:
+asks for two minutes. Here is the new command's arguments and declaration; the steps
+below explain `heartbeat=` and the handler's `Batch` result:
 
 <!-- file: examples/tutorial/todo_batch.py -->
 ```python
+@dataclass(frozen=True, slots=True)
+class ImportAll(Common):
+    urls: tuple[str, ...] = Arg(
+        description="URLs of JSON lists of items to add", pattern_type="url"
+    )
+
+
 @app.command(
     "import-all",
     description="Add the items listed at several URLs, with one result per URL",
@@ -64,6 +73,15 @@ asks for two minutes:
     has_network_io=True,
     timeout=120,
     heartbeat=True,
+    exit_codes=["FEED_INVALID", "STORE_CORRUPT", "STORE_UNWRITABLE"],
+    examples=[
+        (
+            "Add two shared lists",
+            "todo import-all https://example.com/a.json https://example.com/b.json",
+        )
+    ],
+)
+def import_all(args: ImportAll, ctx: Ctx, store: Store) -> Batch[Imported]:
 ```
 
 Network and streaming commands also take `--timeout SECONDS` from the caller, `0` for no
@@ -203,10 +221,13 @@ needs no marking of its own: each result is an `Imported`, whose `added` field i
 carries `"_trusted": false` and the run adds an `UNTRUSTED_CONTENT` warning, also when some
 feeds failed and the run exits 3, since the ones that worked are still in `data`.
 
-To test your own `import-all`, copy the `feeds` fixture and the `import_all` tests from
-[`tests/test_tutorial.py`](../../../tests/test_tutorial.py): a server like the one in
-[Declare network commands](network-io.md#step-4-handle-what-the-server-answered), with
-feeds that answer slowly or not at all.
+To test your own `import-all`, add the `_Feeds` handler and the `feeds` fixture under
+"Long-running work" in [`tests/test_tutorial.py`](../../../tests/test_tutorial.py) to
+`tests/conftest.py`, beside the server from [Declare network
+commands](network-io.md#step-4-handle-what-the-server-answered): it serves feeds that answer
+slowly or not at all, and needs `time` besides that server's imports. Copy the `_results`
+helper and the `import_all` tests into a test file; they also import `Envelope` from
+`treaty`.
 
 **Check:** the tests for this chapter pass: a good and a broken feed, tagged as external
 though one failed; three slow feeds under a short limit; and the tags on a full success

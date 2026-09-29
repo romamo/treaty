@@ -128,10 +128,12 @@ Redaction works on names and declared secrets. A secret you put in a message str
 `ctx.log(f"using {token}")`, is text like any other: pass values as fields, and name them
 for what they are.
 
-The tests call `import` against the local `feed` server from [Declare network
-commands](network-io.md#step-4-handle-what-the-server-answered); copy them from the "Log
-without touching stdout" part of [`tests/test_tutorial.py`](../../../tests/test_tutorial.py)
-the same way.
+The tests call `import` against the `feed` and `private_feed` servers already in your
+`tests/conftest.py` from [Declare network
+commands](network-io.md#step-4-handle-what-the-server-answered) and [Read settings and
+secrets](config.md#step-6-test-it-against-a-feed-that-needs-the-token). Copy them, with the
+`_log_lines` helper, from the "Log without touching stdout" part of
+[`tests/test_tutorial.py`](../../../tests/test_tutorial.py).
 
 **Check:** the logging tests pass: `import` logs only under `--verbose`, a stray `print`
 never reaches stdout, and the `--debug` trace redacts the token
@@ -170,5 +172,5 @@ test "$(grep -c s3cret tmp/tutorial/audit.jsonl)" -eq 0
 
 ## Next
 
-The audit's last rule, `profile`, asks for a conformance profile, which
+The last rule the core chapters leave open, `profile`, asks for a conformance profile, which
 [Run the conformance kit](../ship/conformance.md) writes and runs.

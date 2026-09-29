@@ -123,7 +123,8 @@ executable (`chmod +x`). `treaty conformance` finds it there and writes
 if the project has none.
 
 Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`: the
-kit then runs your real command against your real data, with no sandbox. On Windows, where
+kit then runs your real command against your real data, with no sandbox, and when `todo`
+is not on `PATH` the run exits 4, with the kit's `INVALID_PROFILE` in `context`. On Windows, where
 the `/bin/sh` launcher cannot run, treaty uses the app's console script in the current
 environment instead. Either way, `--command` names an executable of your own.
 

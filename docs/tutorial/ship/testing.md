@@ -167,18 +167,18 @@ adds the checkout and setup around them. Save it as `.github/workflows/agent-con
 
 - **`git diff --exit-code`** fails the job when a regenerated agent doc differs from the
   committed one, or, after `git add --intent-to-add`, when one was never committed
-- **The kit step** fails with `CONFLICT` when the conformance profile no longer matches
-  the commands. Either way, the pull request that changed a command also shows what changed
-  for agents
+- **The conformance step** clones the spec repository, so the job needs network access to
+  GitHub, and fails with `CONFLICT` when the conformance profile no longer matches the
+  commands
 - **The baseline step** is skipped until `todo-1.0.0.json` exists. At each release, save the
   new manifest as the next baseline, as
   [Change the contract safely](stability.md#step-1-keep-the-last-releases-manifest) describes
 - **`treaty agents-md`** is a treaty command that reads the app, while **`generate-skills`**
-  is a built-in of every treaty app, so it runs as `todo generate-skills`. It never deletes a
-  skill file, so the job removes `skills` first: a renamed command's old file would
-  otherwise stay and pass the diff
-- **The conformance step** clones the spec repository, so the job needs network access to
-  GitHub
+  is a built-in of every treaty app, so it runs as `todo generate-skills`; the job removes
+  `skills` first, for the reason [Ship the agent docs](agent-docs.md#step-6-gate-ci-on-all-three)
+  gives
+
+Either way, the pull request that changed a command also shows what changed for agents.
 
 Give the conformance kit's launcher a sandbox before the job runs it on anything that holds
 real data, as [Run the conformance kit](conformance.md#step-2-keep-the-probes-away-from-real-data)
