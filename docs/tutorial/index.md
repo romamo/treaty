@@ -43,9 +43,10 @@ apart, so what you copy is what the tests run.
 
 Every chapter works on one small CLI, `todo`, and each file under `examples/tutorial/` is
 `todo` at one point in the tutorial. The files do not form a single line: after
-`todo_exit_codes.py`, chapters change their own copy: `todo_network.py` adds `import`,
-`todo_payload.py` adds `edit`, and `todo_pages.py` changes how `list` pages, but none has the
-others' changes. `todo_config.py` and `todo_batch.py` build on `todo_network.py` in turn.
+`todo_exit_codes.py`, chapters change their own copy. `todo_network.py` adds `import`,
+`todo_payload.py` adds `edit`, `todo_git.py` adds `save`, and `todo_pages.py` changes how
+`list` pages, but none has the others' changes. `todo_config.py` and `todo_batch.py` build
+on `todo_network.py` in turn.
 
 | File | What it is | Chapters |
 | --- | --- | --- |
@@ -58,6 +59,7 @@ others' changes. `todo_config.py` and `todo_batch.py` build on `todo_network.py`
 | [`todo_config.py`](../../examples/tutorial/todo_config.py) | `todo_network.py` plus settings and a token for `import` | [settings and secrets](core/config.md) |
 | [`todo_pages.py`](../../examples/tutorial/todo_pages.py) | a `list` that pages by item id | [pagination](core/pagination.md) |
 | [`todo_batch.py`](../../examples/tutorial/todo_batch.py) | `todo_network.py` plus `import-all`, several feeds in one call | [long-running work](core/long-running.md) |
+| [`todo_git.py`](../../examples/tutorial/todo_git.py) | plus `save`, which commits the item file with git | [other programs](core/programs.md) |
 | [`todo_v2.py`](../../examples/tutorial/todo_v2.py) | release 1.1.0: `done` renamed `complete`, `--all` deprecated | [stability](ship/stability.md) |
 | [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
@@ -83,6 +85,9 @@ rule, the finding's suggested fix is the guide:
 | `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
 | `paginated-list` | list commands keep the framework's pagination | [Page long lists](core/pagination.md) |
 | `network-io` | `has_network_io=True` on commands that call out | [Declare network commands](core/network-io.md) |
+| `subprocess-declared` | a declared argument list for each program a command runs | [Run other programs](core/programs.md) |
+| `required-tools` | every program a command runs listed for `doctor` | [Run other programs](core/programs.md) |
+| `preserve-locale` | children run in the C locale, or say why not | [Run other programs](core/programs.md) |
 | `path-typed` | `pathlib.Path` on path-like fields | [Type path arguments as Path](core/path-typed.md) |
 | `raw-payload` | `--raw-payload` on wide mutating commands | [Accept a raw JSON payload](core/raw-payload.md) |
 | `cleanup` | a cleanup hook on network commands | [Release what a run holds](core/cleanup.md) |

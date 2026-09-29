@@ -28,6 +28,7 @@ from examples.tutorial import (
     todo_batch,
     todo_config,
     todo_exit_codes,
+    todo_git,
     todo_network,
     todo_pages,
     todo_payload,
@@ -234,6 +235,7 @@ EXAMPLE_APPS = [
     todo_pages.app,
     todo_batch.app,
     todo_v2.app,
+    todo_git.app,
 ]
 """todo as the chapters leave it: todo_treaty.py, todo_exit_codes.py, and its branches"""
 
@@ -256,6 +258,7 @@ BRANCHES = [
     ("todo_exit_codes.py", "todo_network.py", ()),
     ("todo_exit_codes.py", "todo_payload.py", ()),
     ("todo_network.py", "todo_batch.py", ()),
+    ("todo_exit_codes.py", "todo_git.py", ()),
     # A list that pages by id instead of by position
     ("todo_exit_codes.py", "todo_pages.py", ("def list_items(",)),
     # 1.1.0: done renamed to complete, and list's --all deprecated for --include-done
@@ -497,6 +500,57 @@ def test_import_all_marks_what_it_imported_as_external(feeds: str, tmp_path: Pat
     assert env.exit_code == 0 and isinstance(env.data, dict)
     assert env.data["_trusted"] is False
     assert [w.code for w in env.warnings] == ["UNTRUSTED_CONTENT"]
+
+
+# Run other programs
+
+
+@pytest.fixture
+def repository(tmp_path: Path) -> Iterator[Path]:
+    """A git working tree with its own identity, and git kept from looking above it"""
+    if shutil.which("git") is None:
+        pytest.skip("the save command runs git")
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    yield root
+
+
+def _git_env(tmp_path: Path) -> dict[str, str]:
+    who = {"NAME": "todo", "EMAIL": "todo@example.com"}
+    return {
+        **{f"GIT_{role}_{k}": v for role in ("AUTHOR", "COMMITTER") for k, v in who.items()},
+        "GIT_CEILING_DIRECTORIES": str(tmp_path),
+        "PATH": os.environ["PATH"],
+    }
+
+
+def test_save_commits_the_item_file_once(repository: Path, tmp_path: Path) -> None:
+    db = str(repository / "todo.json")
+    env = _git_env(tmp_path)
+    todo_git.app.call("add", {"text": "Buy milk", "db": db}, env=env)
+    message = "Plan the week (urgent); -rf"
+    first = todo_git.app.call("save", {"message": message, "db": db}, env=env)
+    again = todo_git.app.call("save", {"db": db}, env=env)
+    assert first.exit_code == 0 and isinstance(first.data, dict)
+    assert first.data["effect"] == "created" and len(first.data["commit"]) == 40
+    assert again.exit_code == 0 and isinstance(again.data, dict)
+    assert again.data["effect"] == "noop"
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"], cwd=repository, capture_output=True, text=True
+    ).stdout.strip()
+    assert subject == message  # stdin carries the free text as written
+
+
+def test_save_outside_a_repository_is_not_a_repository(tmp_path: Path) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("the save command runs git")
+    db = str(tmp_path / "todo.json")
+    env = _git_env(tmp_path)
+    todo_git.app.call("add", {"text": "x", "db": db}, env=env)
+    got = todo_git.app.call("save", {"db": db}, env=env)
+    assert got.exit_code == 82 and got.error is not None
+    assert got.error.code == "NOT_A_REPOSITORY"
 
 
 # Read settings and secrets
