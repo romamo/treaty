@@ -1365,3 +1365,49 @@ def test_a_method_of_the_arguments_is_unknown_and_a_replaced_copy_reads_by_field
     commands = app.manifest()["commands"]
     assert isinstance(commands, dict)
     assert commands["copy"]["subprocess"]["user_controlled_args"] == ["ref"]
+
+
+def test_a_copy_names_the_fields_replaced_into_it_and_a_derived_object_is_unknown() -> None:
+    from dataclasses import dataclass, replace
+
+    from treaty import App, Ctx, Flag
+
+    @dataclass(frozen=True, slots=True)
+    class Log:
+        ref: str = Flag(default="", description="Ref")
+        base: str = Flag(default="main", description="Base")
+
+    @dataclass(frozen=True, slots=True)
+    class Shown:
+        text: str
+
+    @dataclass(frozen=True, slots=True)
+    class Settings:
+        ref: str
+
+    def load(args: Log) -> Settings:
+        return Settings(args.ref or "HEAD")
+
+    app = App("x", version="1.0.0")
+
+    @app.command("either", description="Either", danger_level="safe", exit_codes=())
+    def either(args: Log, ctx: Ctx) -> Shown:
+        clean = replace(args, ref=args.ref or args.base)
+        return Shown(ctx.run(["git", "log", "-1", clean.ref]).stdout)
+
+    @app.command("through", description="Through", danger_level="safe", exit_codes=())
+    def through(args: Log, ctx: Ctx) -> Shown:
+        base = args.base
+        clean = replace(args, ref=base)
+        return Shown(ctx.run(["git", "log", "-1", clean.ref]).stdout)
+
+    @app.command("loaded", description="Loaded", danger_level="safe", exit_codes=())
+    def loaded(args: Log, ctx: Ctx) -> Shown:
+        cfg = load(args)
+        return Shown(ctx.run(["git", "log", "-1", cfg.ref]).stdout)
+
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    assert commands["either"]["subprocess"]["user_controlled_args"] == ["ref", "base"]
+    assert "base" in commands["through"]["subprocess"]["user_controlled_args"]
+    assert _findings(app, "subprocess-declared") == ["loaded"]

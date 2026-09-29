@@ -87,10 +87,11 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     if tree is None:
         return []
     carried = _carried(params[0], tree)
+    copies = _copies(params[0], tree)
 
     def reads(*nodes: ast.expr) -> tuple[str, ...]:
         """The fields ``nodes`` read, directly or through a local that holds one"""
-        through = (f for node in nodes for f in _through(node, carried))
+        through = (f for node in nodes for f in _through(node, carried, copies))
         return tuple(dict.fromkeys((*_reads(params[0], *nodes), *through)))
 
     calls: list[CtxCall] = []
@@ -170,12 +171,13 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
                 for name in _bound(node.func.value)
                 for arg in (*put, *(k.value for k in node.keywords))
             ]
+    copies = _copies(args_name, tree)
     carried: dict[str, tuple[str, ...]] = {}
     changed = True
     while changed:
         changed = False
         for name, value in assigned:
-            through = _through(value, carried)
+            through = _through(value, carried, copies)
             fields = tuple(
                 dict.fromkeys((*carried.get(name, ()), *_reads(args_name, value), *through))
             )
@@ -185,22 +187,46 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
     return {k: v for k, v in carried.items() if v}
 
 
-def _through(node: ast.expr, carried: Mapping[str, tuple[str, ...]]) -> list[str]:
+def _copies(args_name: str, tree: ast.AST) -> frozenset[str]:
+    """Locals that hold the arguments object itself: assigned ``args`` bare or
+    ``replace(args, ...)``. Reading a field of one reads that field; a local built from
+    ``args`` any other way, such as ``load_settings(args)``, is not a copy"""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+            continue
+        value = node.value
+        copy = (isinstance(value, ast.Name) and value.id == args_name) or (
+            isinstance(value, ast.Call)
+            and dotted(value.func) in ("replace", "dataclasses.replace")
+            and bool(value.args)
+            and isinstance(value.args[0], ast.Name)
+            and value.args[0].id == args_name
+        )
+        if copy:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            found.update(t.id for t in targets if isinstance(t, ast.Name))
+    return frozenset(found)
+
+
+def _through(
+    node: ast.expr, carried: Mapping[str, tuple[str, ...]], copies: frozenset[str]
+) -> list[str]:
     """The fields ``node`` reads through locals: what each local it names carries, and,
-    for a local that holds the arguments object whole (``clean = replace(args, ...)``), the
-    field a ``clean.ref`` reads rather than every field"""
-    whole = {name for name, fields in carried.items() if EVERY_FIELD in fields}
-    read_by_field = {
+    for a copy of the arguments object (``clean = replace(args, ref=args.base)``), the field
+    a ``clean.ref`` reads plus the fields replaced into the copy, rather than every field"""
+    by_field = {
         id(n.value): n.attr
         for n in ast.walk(node)
-        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in whole
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in copies
     }
     found: list[str] = []
     for n in ast.walk(node):
         if not isinstance(n, ast.Name):
             continue
-        if id(n) in read_by_field:
-            found.append(read_by_field[id(n)])
+        if id(n) in by_field:
+            found.append(by_field[id(n)])
+            found.extend(f for f in carried.get(n.id, ()) if f != EVERY_FIELD)
         else:
             found.extend(carried.get(n.id, ()))
     return found

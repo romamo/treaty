@@ -86,8 +86,10 @@ Apps built on treaty keep their own, structured schema changelog with
 - An argument list built from the whole arguments object, as `["git", *flags(args)]`, got
   a worked-out declaration naming no user-controlled field and no audit warning. Passing
   `args` on whole, or reading a method or property of it such as `args.argv()`, now makes
-  the declaration underivable, so `subprocess-declared` asks for one by hand; a copy such as
-  `clean = replace(args, ...)` still counts `clean.ref` as `ref`. `self.cmd.append(args.x)`
+  the declaration underivable, so `subprocess-declared` asks for one by hand, as does a
+  class constant read from `args`. A copy, `clean = args` or `clean = replace(args, ...)`,
+  counts `clean.ref` as `ref` plus the fields replaced into it; a local built from `args`
+  any other way, such as `load_settings(args)`, is not a copy and is unknown. `self.cmd.append(args.x)`
   carries the field, and `insert`'s position does not
 - A subprocess declaration treaty worked out missed a field whose value reached `ctx.run`
   through a local variable, as in `["git", *extra]` after `extra = list(args.extra)`, so
