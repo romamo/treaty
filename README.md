@@ -944,9 +944,9 @@ naming the flag. `-0` and `-0.00` are zero, so a handler never sees a signed zer
 `exec` lines and `--raw-payload` the value is a JSON string, or a JSON number read from the
 digits as written: `{"amount": 12.30}` is `Decimal("12.30")`. A float from anywhere else,
 such as an MCP client's arguments or `app.call(...)`, is refused, since it may already have
-lost digits; send a string. Arguments and output share one schema, `{"type": "string",
-"pattern": "^-?[0-9]+(\\.[0-9]+)?$", "format": "decimal"}`, and the manifest lists the flag
-as a `string` with that `pattern`. An app that registers `app.scalar(Decimal, ...)` gets its
+lost digits; send a string. The argument's schema is `{"type": "string", "pattern":
+"^-?[0-9]+(\\.[0-9]+)?$", "format": "decimal"}`, an output field's the same without
+`format`, and the manifest lists the flag as a `string` with that `pattern`. An app that registers `app.scalar(Decimal, ...)` gets its
 own parsing and schema instead.
 
 ## Custom scalars

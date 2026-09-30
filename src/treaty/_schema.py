@@ -117,7 +117,9 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
             # Before the built-ins it may replace, such as Decimal, as serialization is
             return spec.json_schema()
         if base is Decimal:
-            return {"type": "string", "pattern": DECIMAL_PATTERN, "format": "decimal"}
+            schema: JsonSchema = {"type": "string", "pattern": DECIMAL_PATTERN}
+            # An argument says format: decimal; output keeps the schema locks recorded
+            return schema if output else {**schema, "format": "decimal"}
         if issubclass(base, Enum):
             return _enum_schema(base)
         if dataclasses.is_dataclass(base):
@@ -127,8 +129,7 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
 
 # REQ-F-005: dates and times travel as ISO 8601 text, keyed by exact class
 _TEMPORAL: dict[object, str] = {dt.datetime: "date-time", dt.date: "date", dt.time: "time"}
-# A Decimal is written and read as fixed-point text, so no float rounding touches it; an
-# argument and an output field share one schema
+# A Decimal is written and read as fixed-point text, so no float rounding touches it
 DECIMAL_PATTERN = f"^{DECIMAL_TEXT}$"
 
 
