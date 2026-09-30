@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
 
-from ._atomic import write_atomic
+from ._atomic import retry_sharing_violation, write_atomic
 from ._changelog import version_key
 from ._env import NO_UPDATE, app_var
 from ._values import InvalidValue, ToolVersion
@@ -67,7 +67,7 @@ def _refresh(check: UpdateCheck, current: str, path: Path) -> None:
 def _read(path: Path) -> tuple[float, ToolVersion | None] | None:
     """The cache, or None when it is missing or not one treaty wrote"""
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(retry_sharing_violation(lambda: path.read_text(encoding="utf-8")))
     except FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError:
         return None
     if not isinstance(raw, dict):

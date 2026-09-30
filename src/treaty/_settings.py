@@ -26,6 +26,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._atomic import retry_sharing_violation
 from ._config import local_config, user_config
 from ._env import CONFIG, CONTEXT, INSTANCE_ID, KNOWN, app_var
 from ._errors import ParseError, RegistrationError, SchemaError, UserCodeError, user_code
@@ -366,7 +367,7 @@ def _invalid(path: Path, key: str | None, why: str, **extra: object) -> ParseErr
 
 def _load(path: Path) -> dict[str, object]:
     try:
-        text = path.read_text(encoding="utf-8")
+        text = retry_sharing_violation(lambda: path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
         raise _invalid(path, None, f"cannot read it: {exc.__class__.__name__}") from None
     try:

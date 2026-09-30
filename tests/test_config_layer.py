@@ -490,7 +490,13 @@ def test_without_instance_id_concurrent_config_writes_use_file_locking_and_succe
         spawn(["config", "set", f"r{n}", "--global"], tmp_path, XDG_CONFIG_HOME=str(tmp_path))
         for n in range(6)
     ]
-    assert [p.wait(timeout=60) for p in procs] == [0] * 6
+    finished = [(p, *p.communicate(timeout=60)) for p in procs]
+    failed = [
+        f"exit {p.returncode}\nstderr: {err}\nstdout: {out}"
+        for p, out, err in finished
+        if p.returncode
+    ]
+    assert not failed, "\n\n".join(failed)
     written = (tmp_path / "configctl" / "config.toml").read_text()
     assert written in {f'region = "r{n}"\n' for n in range(6)}
 

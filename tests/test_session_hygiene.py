@@ -18,6 +18,7 @@ from conftest import WINDOWS, needs_posix_signals
 from fixture_session_app import app as session_app
 
 from treaty import App, CachePolicy, Ctx, NoArgs
+from treaty._atomic import retry_sharing_violation
 from treaty._audit import audit
 
 SESSIONCTL = Path(__file__).resolve().parent / "fixture_session_app.py"
@@ -236,6 +237,13 @@ def cached(state: Path, latest: str, age: float = 0.0) -> None:
     (state / "update.json").write_text(json.dumps(body))
 
 
+def cached_latest(state: Path) -> object:
+    """The cache's latest version; on Windows a read while the update check replaces the
+    file is retried, as treaty's own read is"""
+    text = retry_sharing_violation(lambda: (state / "update.json").read_text())
+    return json.loads(text)["latest"]
+
+
 def test_meta_update_available_names_a_newer_cached_release_for_a_person(tmp_path: Path) -> None:
     checker = Checker()
     cached(tmp_path, "2.1.0")
@@ -263,7 +271,7 @@ def test_a_pep_440_release_from_the_checker_is_cached_in_its_semver_spelling(
     while not (tmp_path / "update.json").exists():
         assert time.monotonic() < deadline
         time.sleep(0.01)
-    while json.loads((tmp_path / "update.json").read_text())["latest"] != "2.0.0-rc.1":
+    while cached_latest(tmp_path) != "2.0.0-rc.1":
         assert time.monotonic() < deadline
         time.sleep(0.01)
     _, envelope, _ = run(app, ["hello"], terminal=True)
@@ -278,7 +286,7 @@ def test_a_stale_cache_is_refreshed_in_the_background_for_the_next_run(tmp_path:
     assert meta_of(envelope)["update_available"] == "2.0.0"
     assert checker.done.wait(5)
     deadline = time.monotonic() + 5
-    while json.loads((tmp_path / "update.json").read_text())["latest"] != "3.0.0":
+    while cached_latest(tmp_path) != "3.0.0":
         assert time.monotonic() < deadline
         time.sleep(0.01)
     _, envelope, _ = run(app, ["hello"], terminal=True)
