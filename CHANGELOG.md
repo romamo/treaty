@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc7] - 2026-09-30
+
+The seventh 1.0 release candidate: 2 fixes.
+
 ### Fixed
 
 - The audit counts a distribution's other top-level packages as first-party only when the
@@ -867,7 +871,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc6...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc7...HEAD
+[1.0.0rc7]: https://github.com/romamo/treaty/compare/v1.0.0rc6...v1.0.0rc7
 [1.0.0rc6]: https://github.com/romamo/treaty/compare/v1.0.0rc5...v1.0.0rc6
 [1.0.0rc5]: https://github.com/romamo/treaty/compare/v1.0.0rc4...v1.0.0rc5
 [1.0.0rc4]: https://github.com/romamo/treaty/compare/v1.0.0rc3...v1.0.0rc4
