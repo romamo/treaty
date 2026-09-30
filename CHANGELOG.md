@@ -65,6 +65,15 @@ Apps built on treaty keep their own, structured schema changelog with
   (`Component does not exist: crm-backend`). A hyphenated first word such as `db-migrate`
   is no longer capitalized, and a message ending in a number or version (`upgrade to
   1.4.0`) no longer gets a period (#64)
+- Output security no longer masks SSH public keys as credentials. A field named for a
+  public key (`public_key`, `publicKey`, `ssh-pub-key`) is not a credential name, and a
+  value in a public key format is left alone under any credential name, typed or nested
+  in a `dict[str, object]`: an OpenSSH public key line, a PEM `PUBLIC KEY` or
+  `CERTIFICATE`, an RFC 4716 SSH2 public key, or an age recipient. Each format is matched
+  whole and its body decoded, so private keys, `AGE-SECRET-KEY-1...`, and a value that
+  only starts like a public key stay masked, as does a `public_key` holding private
+  material; `Out(high_entropy=True)` still masks any value. Log redaction is unchanged:
+  REQ-F-034 still writes a name containing `key` as `[REDACTED]` (#66)
 
 ## [1.0.0rc5] - 2026-09-30
 
