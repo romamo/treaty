@@ -904,6 +904,9 @@ def _check_patterned(field: FieldInfo, target: Classified, value: object) -> obj
             field.check_text(value)
         field.check_pattern(value)
     base = check_json_base(target, value, field.flag)
+    if isinstance(base, str) and not isinstance(value, str):
+        # A Decimal sent as a number is checked as the text it becomes, as a string is
+        field.check_text(base)
     if isinstance(base, (int, float)) and not isinstance(base, bool):
         try:
             token = str(base)  # the number's own text, as argv checks it: 2.0 is 2 on both

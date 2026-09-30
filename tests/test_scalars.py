@@ -504,6 +504,53 @@ def test_decimal_default_must_be_finite() -> None:
         def pay_bad(args: Bad, ctx: Ctx) -> None: ...
 
 
+def test_decimal_default_is_the_value_an_argument_would_parse_to() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Args:
+        zero: Decimal = Flag(default=Decimal("-0.00"), description="Zero")
+        splits: tuple[Decimal, ...] = Flag(
+            default=(Decimal("-0"), Decimal("1E+2")), description="S"
+        )
+
+    @dataclass(frozen=True, slots=True)
+    class Seen:
+        zero: str
+        splits: list[str]
+
+    app = App("payctl", version="1.0.0")
+
+    @app.command("pay", description="Pay", danger_level="safe", exit_codes=())
+    def pay_default(args: Args, ctx: Ctx) -> Seen:
+        return Seen(repr(args.zero), [repr(s) for s in args.splits])
+
+    out = io.StringIO()
+    assert app.run(["pay"], stdout=out, stderr=io.StringIO(), env={}) == 0
+    data = json.loads(out.getvalue())["data"]
+    assert data == {"zero": "Decimal('0.00')", "splits": ["Decimal('0')", "Decimal('100')"]}
+    assert app.manifest()["commands"]["pay"]["flags"]["zero"]["default"] == "0.00"
+
+
+def test_decimal_json_number_counts_against_max_bytes() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Args:
+        amount: Decimal = Flag(description="Amount", max_bytes=6)
+
+    app = App("payctl", version="1.0.0")
+
+    @app.command(
+        "pay", description="Pay", danger_level="safe", supports_raw_payload=True, exit_codes=()
+    )
+    def pay_small(args: Args, ctx: Ctx) -> None: ...
+
+    for payload in ('{"amount": "123456789.50"}', '{"amount": 123456789.50}'):
+        out = io.StringIO()
+        argv = ["pay", "--raw-payload", payload]
+        assert app.run(argv, stdout=out, stderr=io.StringIO(), env={}) == 2
+        assert json.loads(out.getvalue())["error"]["code"] == "FIELD_TOO_LARGE"
+    env = app.call("pay", {"amount": Decimal("123456789.50")}, env={})
+    assert env.error is not None and env.error.code == "FIELD_TOO_LARGE"
+
+
 def test_an_app_registered_decimal_replaces_the_built_in() -> None:
     app = App("payctl", version="1.0.0")
     app.scalar(Decimal, base=float, parse=lambda v: Decimal(str(v)), serialize=float)

@@ -506,8 +506,11 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
             raise RegistrationError(
                 f"{where}: default {default!r} is not a {target.scalar.cls.__qualname__}"
             )
-        if target.scalar is DECIMAL and target.scalar.violation(format(default, "f")):
-            raise RegistrationError(f"{where}: default {default!r} is not a finite decimal")
+        if target.scalar is DECIMAL:
+            text = format(default, "f")
+            if target.scalar.violation(text):
+                raise RegistrationError(f"{where}: default {default!r} is not a finite decimal")
+            return target.scalar.parse(text)  # what a parsed argument would be: -0 is 0
         return default
     match target.flag_type:
         case FlagType.ARRAY:
