@@ -4,10 +4,16 @@ name: Release bot
 # commit, runs CI on it, lands it on main, tags it, and starts publish.yml, whose own CI and
 # release-check jobs still gate the upload. In the policy's dry-run mode it stops after
 # showing the release commit it would make.
+#
+# A push to main starts it after a batch of merges: the settle job waits the policy's
+# quiet_minutes, and each newer push cancels that wait, so a run of merges gives one release.
+# A run started by hand (or by github-pr-triage after its last merge) doesn't wait.
 
 on:
+  push:
+    branches: [main]
   schedule:
-    - cron: "0 6 * * 1" # Mondays, 06:00 UTC
+    - cron: "0 6 * * 1" # Mondays, 06:00 UTC: a backstop in case a batch's run was lost
   workflow_dispatch:
     inputs:
       mode:
@@ -19,16 +25,43 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-bot
-  cancel-in-progress: false
-
 env:
   BOT_NAME: github-actions[bot]
   BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
 
 jobs:
+  # The only job a newer run may cancel: it holds no state, and cancelling it stops this
+  # run before anything is written
+  settle:
+    concurrency:
+      group: release-bot-settle
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'push'
+        with:
+          ref: main
+          sparse-checkout: .github
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: github.event_name == 'push'
+        with:
+          python-version: "3.14"
+
+      - name: Wait for the batch of merges to end
+        if: github.event_name == 'push'
+        run: |
+          minutes="$(uv run --no-project python .github/scripts/release_prepare.py quiet)"
+          echo "Waiting ${minutes} min for more pushes to main; a newer push cancels this run"
+          sleep "$((minutes * 60))"
+
+  # From here on nothing is cancelled: a newer run queues behind this one
   prepare:
+    needs: settle
+    concurrency:
+      group: release-bot
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write # pushes the release/v* branch in release mode
@@ -84,6 +117,11 @@ jobs:
         env:
           VERSION: ${{ steps.plan.outputs.version }}
         run: |
+          if git ls-remote --exit-code --heads origin "release/v$VERSION" >/dev/null; then
+            # another run is releasing this version; leaving sha empty stops this run here
+            echo "::notice::release/v$VERSION exists: another run is releasing $VERSION"
+            exit 0
+          fi
           git add -A
           git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q -m "Release $VERSION"
           git push origin "HEAD:refs/heads/release/v$VERSION"
@@ -98,14 +136,20 @@ jobs:
 
   ci:
     needs: prepare
-    if: needs.prepare.outputs.action == 'release' && needs.prepare.outputs.mode == 'release'
+    if: needs.prepare.outputs.sha != ''
+    concurrency:
+      group: release-bot-ci
+      cancel-in-progress: false
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
 
   land:
     needs: [prepare, ci]
-    if: needs.prepare.outputs.action == 'release' && needs.prepare.outputs.mode == 'release'
+    if: needs.prepare.outputs.sha != ''
+    concurrency:
+      group: release-bot
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write # the push to main and the tag
@@ -121,15 +165,20 @@ jobs:
           fetch-depth: 0
 
       - name: Land on main, only if main has not moved
+        id: land
         run: |
           git fetch -q origin main "release/v$VERSION"
           if [ "$(git rev-parse origin/main)" != "$BASE" ]; then
-            echo "::error::main moved since the plan ($BASE); the next run plans again"
-            exit 1
+            # a newer push came in: its own run releases this batch and the new commits
+            echo "::notice::main moved since the plan ($BASE); the newer push's run releases"
+            echo "landed=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           git push origin "$SHA:refs/heads/main"
+          echo "landed=true" >> "$GITHUB_OUTPUT"
 
       - name: Tag and publish
+        if: steps.land.outputs.landed == 'true'
         run: |
           git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
             tag -a "v$VERSION" -m "treaty $VERSION" "$SHA"

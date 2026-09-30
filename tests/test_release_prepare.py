@@ -13,7 +13,8 @@ SCRIPTS = Path(__file__).resolve().parent.parent / ".github" / "scripts"
 BASE = "https://github.com/romamo/treaty/compare"
 POLICY = """\
 mode = "{mode}"
-min_days_between = 7
+min_days_between = {days}
+quiet_minutes = {quiet}
 
 [bump]
 major = ["Breaking"]
@@ -49,6 +50,8 @@ def repo(
     unreleased: str = "### Added\n\n- A flag\n\n### Fixed\n\n- A crash\n- A leak\n\n",
     mode: str = "release",
     date: str = "2026-09-30",
+    days: int = 7,
+    quiet: str = "30",
 ) -> Path:
     files = {
         "pyproject.toml": f'[project]\nname = "treaty"\nversion = "{version}"\n',
@@ -58,7 +61,7 @@ def repo(
         "CHANGELOG.md": changelog(version, unreleased, date),
         "AGENTS.md": f"<!-- cli-version: {ToolVersion.of_release(version)} -->\n# AGENTS.md\n",
         "plan.md": f"- [ ] Soak the release candidate (rc5, {date}) with both consumers\n",
-        ".github/release-policy.toml": POLICY.format(mode=mode),
+        ".github/release-policy.toml": POLICY.format(mode=mode, days=days, quiet=quiet),
     }
     for name, text in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -220,3 +223,19 @@ def test_a_newline_in_the_reason_cannot_add_github_outputs() -> None:
 
     lines = github_output({"action": "skip", "reason": "blocked by #1 x\naction=release"})
     assert lines == "action=skip\nreason=blocked by #1 x action=release\n"
+
+
+def test_with_no_minimum_wait_a_batch_releases_the_same_day(tmp_path: Path) -> None:
+    decision = plan(repo(tmp_path, days=0), "2026-09-30")
+    assert decision["action"] == "release" and decision["version"] == "1.0.0rc6"
+
+
+def test_quiet_prints_the_policys_quiet_minutes(tmp_path: Path) -> None:
+    proc = run(repo(tmp_path, quiet="45"), "quiet")
+    assert proc.returncode == 0 and proc.stdout == "45\n"
+
+
+@pytest.mark.parametrize("quiet", ["-1", "301", "true", '"30"'])
+def test_a_quiet_window_outside_0_to_300_minutes_is_refused(tmp_path: Path, quiet: str) -> None:
+    proc = run(repo(tmp_path, quiet=quiet), "quiet")
+    assert proc.returncode == 2 and "quiet_minutes must be an integer in 0..300" in proc.stderr
