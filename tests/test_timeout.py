@@ -1,5 +1,6 @@
 import io
 import json
+import threading
 import time
 from dataclasses import dataclass
 
@@ -7,7 +8,7 @@ import pytest
 from conftest import spec_validator
 
 from treaty import App, Ctx, Flag, NoArgs, Timeout
-from treaty._timeout import TimeoutExpired, call_with_timeout
+from treaty._timeout import Heartbeat, TimeoutExpired, call_with_timeout
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +111,34 @@ def test_call_with_timeout_reraises_handler_exception() -> None:
         call_with_timeout(boom, Timeout(1))
     with pytest.raises(TimeoutExpired):
         call_with_timeout(lambda: time.sleep(1), Timeout(0.01))
+
+
+def test_a_late_wake_skips_the_missed_heartbeats_rather_than_bursting() -> None:
+    # Issue #56: a wait that wakes several intervals late ticked once per missed
+    # interval in the same instant; the clock jumps 5.5 intervals to stall the wait
+    interval = 0.05
+    offset = [0.0]
+    read = threading.Event()
+
+    def clock() -> float:
+        read.set()
+        return time.monotonic() + offset[0]
+
+    def handler() -> None:
+        read.wait()  # the waiting thread has read its start time
+        offset[0] += 5.5 * interval
+        time.sleep(3 * interval)
+
+    beats: list[float] = []
+    call_with_timeout(
+        handler,
+        Timeout(None),
+        heartbeats=[Heartbeat(interval, lambda: beats.append(clock()))],
+        clock=clock,
+    )
+    assert beats
+    gaps = [b - a for a, b in zip(beats, beats[1:], strict=False)]
+    assert all(gap >= interval / 2 for gap in gaps), gaps
 
 
 def test_handler_exception_becomes_crash_envelope_with_traceback() -> None:

@@ -82,6 +82,12 @@ Apps built on treaty keep their own, structured schema changelog with
   environment, so the categories treaty does not name (time, collation, money) stay C
   through `LANG=C`. Windows children get `LC_ALL=C` and `LC_NUMERIC=C` as before, and
   `preserve_locale=True` is unchanged (#62)
+- Heartbeats no longer come in a burst after a stall: when the waiting thread woke
+  several intervals late, a JSON heartbeat line (`--heartbeat-ms`) or a
+  `--heartbeat-interval` progress line was written once per missed interval, all with
+  the same `elapsed_ms`. The next beat is now due one interval after the last one
+  ticked, so missed beats are skipped and two beats are never closer than the interval
+  (#56)
 
 ## [1.0.0rc5] - 2026-09-30
 
