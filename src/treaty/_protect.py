@@ -6,7 +6,9 @@ tagged ``_source: external`` and ``_trusted: false`` unless ``--no-injection-pro
 (REQ-F-035, REQ-O-023). The spec's JWT and base64 patterns also match versions, host
 names, git SHAs, and paths, so a match counts only when it decodes: a JWT header is a
 JSON object with ``alg``; base64 is not all hex, mixes cases and digits, and has the
-entropy of random bytes.
+entropy of random bytes. A public key in a known format (OpenSSH, PEM public key or
+certificate, age recipient) is meant to be shared and is left alone under a credential's
+name, unless the field declares ``Out(high_entropy=True)``.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import datetime as dt
 import json
 import math
 import re
+import struct
 import typing
 from collections import Counter
 from collections.abc import Mapping
@@ -26,7 +29,7 @@ from enum import Enum
 
 from ._errors import RegistrationError
 from ._out import data_path, is_binary, out_spec
-from ._redact import secret_field
+from ._redact import public_key_name, secret_field
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
 SOURCE_KEY = "_source"
@@ -43,6 +46,34 @@ _HEX = re.compile(r"[0-9a-fA-F]+")
 # Bits per character: random base64 of 30 bytes or more is above it, prose and paths below
 _MIN_ENTROPY = 4.3
 _MAX_SUB = 64
+# Public key formats, each anchored: a type, then a body that must decode to that type
+_OPENSSH_TYPES = frozenset(
+    {
+        "ssh-ed25519",
+        "ssh-ed448",
+        "ssh-rsa",
+        "ssh-dss",
+        "ecdsa-sha2-nistp256",
+        "ecdsa-sha2-nistp384",
+        "ecdsa-sha2-nistp521",
+        "sk-ssh-ed25519@openssh.com",
+        "sk-ecdsa-sha2-nistp256@openssh.com",
+    }
+)
+# ``<type> <base64 blob>`` and an optional one-line comment such as ``user@host``
+_OPENSSH = re.compile(r"(\S+) (AAAA[A-Za-z0-9+/]+={0,2})(?: [\x20-\x7e]{0,128})?\r?\n?")
+# PEM (RFC 7468) public keys and certificates, and RFC 4716 SSH2 public keys
+_PEM = re.compile(
+    r"(?:-----BEGIN (PUBLIC KEY|CERTIFICATE)-----|---- BEGIN (SSH2 PUBLIC KEY) ----)\r?\n"
+    r"(.*?)\r?\n(?:-----END \1-----|---- END \2 ----)(?:\r?\n)*",
+    re.DOTALL,
+)
+# RFC 4716 headers of an SSH2 key, as ``Comment: "user@host"``; a trailing \ continues one
+_SSH2_HEADER = re.compile(r"[\x21-\x39\x3b-\x7e]{1,64}: [^\r\n]{0,1024}")
+_AGE_RECIPIENT = re.compile(r"age1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}")
+# Private material is never a public key, whatever it starts with
+_PRIVATE = re.compile(r"PRIVATE KEY|PRIVATE-LINES|AGE-SECRET-KEY-", re.IGNORECASE)
+_MAX_PUBLIC = 65536
 MASKED_PATHS_SHOWN = 20
 """Paths a masking warning lists: it is not cut to the byte cap like ``data``"""
 
@@ -154,13 +185,111 @@ class _Walk:
 
 
 def _by_name(key: object, value: object, inherited: bool | None) -> bool | None:
-    """A credential-named key masks its text, not a nested object's every string"""
+    """A credential-named key masks its text, not a nested object's every string. Text
+    that is all public keys is left alone under any name, and a ``public_key`` holding
+    private material is masked as any credential."""
     if inherited is not None:
         return inherited
-    textual = isinstance(value, str) or (
-        isinstance(value, list) and all(isinstance(v, str) for v in value)
-    )
-    return True if textual and isinstance(key, str) and secret_field(key) else None
+    if isinstance(value, str):
+        texts = [value]
+    elif isinstance(value, list) and all(isinstance(v, str) for v in value):
+        texts = value
+    else:
+        return None
+    if not isinstance(key, str):
+        return None
+    if public_key_name(key):
+        return True if any(_PRIVATE.search(t) for t in texts) else None
+    return True if secret_field(key) and not all(public_key(t) for t in texts) else None
+
+
+def _ssh_blob_type(body: str) -> str | None:
+    """The key type an SSH wire-format blob opens with: a length-prefixed name followed
+    by key material"""
+    try:
+        blob = base64.b64decode(body, validate=True)
+    except binascii.Error:
+        return None
+    if len(blob) < 4:
+        return None
+    (size,) = struct.unpack(">I", blob[:4])
+    name = blob[4 : 4 + size]
+    if size == 0 or len(name) != size or len(blob) == 4 + size:
+        return None
+    return name.decode("ascii", "replace")
+
+
+def _pem_public(label: str, body: str) -> bool:
+    lines = body.splitlines()
+    if label == "SSH2 PUBLIC KEY":
+        while lines and _SSH2_HEADER.fullmatch(lines[0]):
+            header = lines.pop(0)
+            while header.endswith("\\") and lines:
+                header = lines.pop(0)
+        return _ssh_blob_type("".join(line.strip() for line in lines)) in _OPENSSH_TYPES
+    try:
+        der = base64.b64decode("".join(line.strip() for line in lines), validate=True)
+    except binascii.Error:
+        return False
+    return _der_public(der)
+
+
+def _der_children(der: bytes) -> list[tuple[int, bytes]] | None:
+    """The tag and content of each TLV in ``der``, which they must fill exactly"""
+    out: list[tuple[int, bytes]] = []
+    at = 0
+    while at < len(der):
+        if at + 2 > len(der):
+            return None
+        tag, size = der[at], der[at + 1]
+        at += 2
+        if size & 0x80:
+            count = size & 0x7F
+            if count == 0 or count > 4 or at + count > len(der):
+                return None
+            size = int.from_bytes(der[at : at + count])
+            at += count
+        if at + size > len(der):
+            return None
+        out.append((tag, der[at : at + size]))
+        at += size
+    return out
+
+
+def _der_public(der: bytes) -> bool:
+    """One SEQUENCE that opens with a SEQUENCE and closes with a BIT STRING: a
+    SubjectPublicKeyInfo (algorithm, key) or a certificate (TBSCertificate, algorithm,
+    signature). A private key opens with an INTEGER version, and an encrypted one closes
+    with an OCTET STRING, so one under a public label is refused."""
+    top = _der_children(der)
+    if top is None or len(top) != 1 or top[0][0] != 0x30:
+        return False
+    inner = _der_children(top[0][1])
+    return inner is not None and len(inner) >= 2 and inner[0][0] == 0x30 and inner[-1][0] == 0x03
+
+
+def public_key(value: str) -> bool:
+    """A value in a public key format: an OpenSSH public key line, a PEM public key,
+    certificate, or SSH2 public key, or an age recipient. Each is matched whole and its
+    body decoded, so a private key or a token that merely starts like one stays masked."""
+    if len(value) > _MAX_PUBLIC or _PRIVATE.search(value):
+        return False
+    if _AGE_RECIPIENT.fullmatch(value):
+        return True
+    ssh = _OPENSSH.fullmatch(value)
+    if ssh is not None:
+        kind, body = ssh.groups()
+        return kind in _OPENSSH_TYPES and _ssh_blob_type(body) == kind
+    # Contiguous blocks that make up the whole value: nothing before, between, or after.
+    # Each block is matched where the last one ended, so an unclosed header stops the scan
+    # at once; searching from every header to a missing footer is quadratic.
+    at = 0
+    while at < len(value):
+        block = _PEM.match(value, at)
+        if block is None or not _pem_public(block.group(1) or block.group(2), block.group(3)):
+            return False
+        at = block.end()
+    return at > 0
 
 
 def key_summary(value: str) -> str:

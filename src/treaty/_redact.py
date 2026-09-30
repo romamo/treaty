@@ -38,6 +38,7 @@ _SECRET_WORDS = frozenset(
         "apikey",
     }
 )
+_PUBLIC_WORDS = frozenset({"public", "pub"})
 _WORD = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
 
 
@@ -48,12 +49,27 @@ def secret_name(name: str) -> bool:
 
 def secret_field(name: str) -> bool:
     """An output field whose name says it holds a credential: its last word is one, as in
-    ``access_token``, ``client_secret``, or ``api_key`` (``key`` counts after another word).
-    ``token_count``, ``author``, and a bare ``key`` of a key/value listing do not."""
-    words = [w.lower() for w in _WORD.findall(name)]
+    ``access_token``, ``client_secret``, or ``api_key`` (``key`` counts after another word,
+    unless that word is ``public`` or ``pub``). ``token_count``, ``author``, ``public_key``,
+    and a bare ``key`` of a key/value listing do not."""
+    words = _words(name)
     if not words:
         return False
-    return words[-1] in _SECRET_WORDS or (words[-1] == "key" and len(words) > 1)
+    if words[-1] == "key":
+        return len(words) > 1 and not public_key_name(name)
+    return words[-1] in _SECRET_WORDS
+
+
+def public_key_name(name: str) -> bool:
+    """A field named for a public key, which is meant to be shared: ``public_key``,
+    ``publicKey``, ``ssh-pub-key``. Only the word right before ``key`` counts, so
+    ``pub_sub_key`` and ``public_repo_deploy_key`` stay credential names."""
+    words = _words(name)
+    return len(words) > 1 and words[-1] == "key" and words[-2] in _PUBLIC_WORDS
+
+
+def _words(name: str) -> list[str]:
+    return [w.lower() for w in _WORD.findall(name)]
 
 
 # Context fields treaty's own errors fill with names, never values: a profile's differing

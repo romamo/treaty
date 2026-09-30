@@ -6,6 +6,7 @@ import io
 import json
 import os
 import random
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ from treaty import (
     RegistrationError,
 )
 from treaty._audit import audit
-from treaty._protect import base64_summary, jwt_summary, key_summary
+from treaty._protect import base64_summary, jwt_summary, key_summary, protect, public_key
 from treaty._redact import REDACTED, scrub, secret_field, secret_name
 
 
@@ -501,3 +502,190 @@ def test_a_batch_item_keeps_its_fields_masking_declarations() -> None:
     code, envelope, _ = run(batch_app(command_external=False), ["fetch-all"])
     assert code == 0
     assert [r["digest"] for r in envelope["data"]["results"]] == [BLOB, BLOB]
+
+
+# --- Public keys are not credentials (#66) -------------------------------------------------
+
+ED25519 = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBFBgbcr0+ROps7sgSno3HuPOf3+4HqqCF7Xp6liHY/y admin@host"
+)
+AGE_RECIPIENT = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p"
+
+
+def ssh_blob(kind: str) -> str:
+    """An SSH wire-format public key: a length-prefixed type name, then key material"""
+    raw = len(kind).to_bytes(4) + kind.encode() + (32).to_bytes(4) + bytes(range(32))
+    return base64.b64encode(raw).decode()
+
+
+def der(tag: int, *children: bytes) -> bytes:
+    body = b"".join(children)
+    assert len(body) < 0x80
+    return bytes([tag, len(body)]) + body
+
+
+def pem(label: str, raw: bytes) -> str:
+    return f"-----BEGIN {label}-----\n{base64.b64encode(raw).decode()}\n-----END {label}-----\n"
+
+
+ALGORITHM = der(0x30, der(0x06, b"\x2b\x65\x70"))  # the Ed25519 OID
+SPKI = der(0x30, ALGORITHM, der(0x03, b"\x00" + bytes(range(32))))
+CERTIFICATE = der(0x30, der(0x30, der(0x02, b"\x01"), ALGORITHM), ALGORITHM, der(0x03, b"\x00\x01"))
+PKCS8 = der(0x30, der(0x02, b"\x00"), ALGORITHM, der(0x04, bytes(range(34))))
+ENCRYPTED_PKCS8 = der(0x30, ALGORITHM, der(0x04, bytes(range(48))))
+SSH2 = (
+    "---- BEGIN SSH2 PUBLIC KEY ----\n"
+    'Comment: "256-bit ED25519, converted by admin@host from \\\n'
+    'OpenSSH"\n'
+    f"{ssh_blob('ssh-ed25519')}\n"
+    "---- END SSH2 PUBLIC KEY ----\n"
+)
+OPENSSH_PRIVATE = pem("OPENSSH PRIVATE KEY", b"openssh-key-v1\x00" + bytes(range(64)))
+AGE_SECRET = "AGE-SECRET-KEY-1" + "QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L" + "Q" * 26
+
+PUBLIC_VALUES = {
+    "ssh-ed25519": ED25519,
+    "ssh-rsa": f"ssh-rsa {ssh_blob('ssh-rsa')}",
+    "ssh-dss-empty-comment": f"ssh-dss {ssh_blob('ssh-dss')} ",
+    "ecdsa-newline": f"ecdsa-sha2-nistp384 {ssh_blob('ecdsa-sha2-nistp384')} ci@runner\n",
+    "sk-ssh-ed25519": f"sk-ssh-ed25519@openssh.com {ssh_blob('sk-ssh-ed25519@openssh.com')}",
+    "sk-ecdsa": "sk-ecdsa-sha2-nistp256@openssh.com "
+    + ssh_blob("sk-ecdsa-sha2-nistp256@openssh.com"),
+    "pem-public-key": pem("PUBLIC KEY", SPKI),
+    "pem-certificate": pem("CERTIFICATE", CERTIFICATE),
+    "certificate-chain": pem("CERTIFICATE", CERTIFICATE) + pem("CERTIFICATE", CERTIFICATE),
+    "ssh2": SSH2,
+    "age-recipient": AGE_RECIPIENT,
+}
+
+NOT_PUBLIC_VALUES = {
+    "openssh-private": OPENSSH_PRIVATE,
+    "pkcs8-private": pem("PRIVATE KEY", PKCS8),
+    "rsa-private": pem("RSA PRIVATE KEY", PKCS8),
+    "encrypted-private": pem("ENCRYPTED PRIVATE KEY", ENCRYPTED_PKCS8),
+    "age-secret": AGE_SECRET,
+    # Malicious or mangled: a public prefix with something else behind it
+    "prefix-then-private": f"ssh-rsa {ssh_blob('ssh-rsa')}\n{OPENSSH_PRIVATE}",
+    "prefix-then-token": "ssh-rsa ghp_abc123456789abcdef",
+    "type-mismatch": f"ssh-ed25519 {ssh_blob('ssh-rsa')}",
+    "unknown-type": f"ssh-foo {ssh_blob('ssh-foo')}",
+    "comment-with-private-marker": f"{ED25519} AGE-SECRET-KEY-1QPZRY9X8GF2TVDW0S3JN",
+    "private-key-labelled-certificate": pem("CERTIFICATE", PKCS8),
+    "encrypted-key-labelled-public": pem("PUBLIC KEY", ENCRYPTED_PKCS8),
+    "certificate-then-private": pem("CERTIFICATE", CERTIFICATE) + pem("PRIVATE KEY", PKCS8),
+    "certificate-then-text": pem("CERTIFICATE", CERTIFICATE) + "ghp_abc123456789abcdef",
+    "age-recipient-too-short": AGE_RECIPIENT[:-1],
+}
+
+
+@dataclass(frozen=True, slots=True)
+class SshKey:
+    owner: str
+    public_key: str
+    deploy_key: str
+    pinned: str = Out(high_entropy=True)
+
+
+def keys_app(value: str) -> App:
+    app = App("keyctl", version="1.0.0")
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx) -> SshKey:
+        return SshKey("admin", value, value, value)
+
+    @app.command("inventory", description="Inventory", danger_level="safe", exit_codes=())
+    def inventory(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {
+            "all": {
+                "vars": {
+                    "cloudfall_ssh_public_keys": [{"name": "admin", "publicKey": value}],
+                    "deploy_key": value,
+                    "api_token": "ghp_abc123456789abcdef",
+                }
+            }
+        }
+
+    return app
+
+
+def test_a_typed_public_key_field_is_not_masked() -> None:
+    _, env, _ = run(keys_app(ED25519), ["show"])
+    assert env["data"]["public_key"] == ED25519 and env["data"]["deploy_key"] == ED25519
+    # Out(high_entropy=True) still masks whatever the value (REQ-F-058)
+    assert env["data"]["pinned"] == "[KEY: ssh-ed25...]"
+    warning = next(w for w in env["warnings"] if w["code"] == "HIGH_ENTROPY_MASKED")
+    assert warning["context"]["paths"] == ["data.pinned"]
+
+
+def test_a_public_key_nested_in_an_untyped_dict_is_not_masked_beside_a_secret() -> None:
+    _, env, _ = run(keys_app(ED25519), ["inventory"])
+    found = env["data"]["all"]["vars"]
+    assert found["cloudfall_ssh_public_keys"] == [{"name": "admin", "publicKey": ED25519}]
+    assert found["deploy_key"] == ED25519
+    assert found["api_token"] == "[KEY: ghp_abc1...]"
+
+
+@pytest.mark.parametrize("value", PUBLIC_VALUES.values(), ids=PUBLIC_VALUES.keys())
+def test_a_public_key_value_is_left_alone_under_a_credential_name(value: str) -> None:
+    assert public_key(value)
+    _, env, _ = run(keys_app(value), ["inventory"])
+    assert env["data"]["all"]["vars"]["deploy_key"] == value
+
+
+@pytest.mark.parametrize("value", NOT_PUBLIC_VALUES.values(), ids=NOT_PUBLIC_VALUES.keys())
+def test_private_or_mixed_material_stays_masked_whatever_the_name(value: str) -> None:
+    assert not public_key(value)
+    _, env, _ = run(keys_app(value), ["show"])
+    assert env["data"]["deploy_key"].startswith("[KEY: ")
+    if "PRIVATE KEY" in value or "AGE-SECRET-KEY-" in value:
+        assert env["data"]["public_key"].startswith("[KEY: ")
+    _, env, _ = run(keys_app(value), ["inventory"])
+    assert env["data"]["all"]["vars"]["deploy_key"].startswith("[KEY: ")
+
+
+def test_a_public_key_name_holding_private_material_is_masked() -> None:
+    for value in (OPENSSH_PRIVATE, AGE_SECRET, pem("PRIVATE KEY", PKCS8)):
+        _, env, _ = run(keys_app(value), ["show"])
+        assert env["data"]["public_key"].startswith("[KEY: ")
+        _, env, _ = run(keys_app(value), ["inventory"])
+        key = env["data"]["all"]["vars"]["cloudfall_ssh_public_keys"][0]["publicKey"]
+        assert key.startswith("[KEY: ")
+
+
+def test_a_name_for_a_public_key_is_not_a_credential_name() -> None:
+    for name in ("public_key", "publicKey", "PublicKey", "PUBLIC_KEY", "ssh-pub-key", "pubkey"):
+        assert not secret_field(name), name
+    assert secret_field("public_key_token") and secret_field("private_key")
+    assert secret_field("deploy_key") and not secret_field("ssh_public_keys")
+
+
+def test_a_public_key_field_is_not_marked_masked_in_the_schema_or_the_audit() -> None:
+    app = keys_app(ED25519)
+    _, env, _ = run(app, ["show", "--schema"])
+    props = env["data"]["output_schema"]["properties"]
+    assert "x-high-entropy" not in props["public_key"] and props["deploy_key"]["x-high-entropy"]
+    found = next(r.findings for r in audit(app, "x:app", limit=100).rules if r.id == "high-entropy")
+    assert [f.message.split()[2] for f in found] == ["deploy_key"]
+
+
+def test_public_before_another_word_does_not_exempt_a_credential_name() -> None:
+    # Only the word right before key names a public key: these hold secrets
+    for name in ("pub_sub_key", "public_repo_deploy_key", "non_public_api_key"):
+        assert secret_field(name), name
+        out = protect({name: "sk_live_abc123456789abcdef"}, object, unmask=False)
+        assert out.masked == (f"data.{name}",), name
+
+
+def test_unclosed_pem_headers_are_refused_in_linear_time() -> None:
+    # A lazy scan from each header to a missing footer was quadratic: ~2 s at 64 KiB
+    header = "-----BEGIN PUBLIC KEY-----\n"
+    value = header * (65536 // len(header))
+    started = time.perf_counter()
+    for _ in range(10):
+        assert not public_key(value)
+    assert time.perf_counter() - started < 1.0
+
+
+def test_logs_still_redact_a_public_key_by_its_name() -> None:
+    """REQ-F-034 redacts every name containing key in logs; only output masking changed"""
+    assert scrub("public_key", ED25519) == REDACTED
