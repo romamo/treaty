@@ -119,17 +119,28 @@ UTF8_CTYPE = "C.UTF-8"
 
 
 @functools.cache
-def locale_available(name: str) -> bool:
+def locale_available(name: str, library: str | None = None) -> bool:
     """Whether the C library can load ``name`` for LC_CTYPE. ``newlocale`` builds a
     separate locale object, freed at once, so the process's own locale never changes
-    and no other thread sees a switch, as ``locale.setlocale`` would cause"""
+    and no other thread sees a switch, as ``locale.setlocale`` would cause.
+
+    ``library`` is the C library to open, the running process's by default. A Python
+    without ``ctypes``, or whose C library cannot be opened, such as a static build,
+    gets ``False``, so children get ``C``: the probe runs for every command, and must
+    not fail one that starts no child"""
     if sys.platform == "win32":
         return False
-    import ctypes
+    try:
+        import ctypes
+    except ImportError:
+        return False
     import locale
 
-    libc = ctypes.CDLL(None)
-    if not hasattr(libc, "newlocale"):
+    try:
+        libc = ctypes.CDLL(library)
+    except OSError:
+        return False
+    if not (hasattr(libc, "newlocale") and hasattr(libc, "freelocale")):
         return False
     libc.newlocale.restype = ctypes.c_void_p
     libc.newlocale.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)

@@ -231,6 +231,12 @@ def test_probing_for_c_utf8_leaves_the_process_locale_alone() -> None:
     assert locale.setlocale(locale.LC_ALL) == before
 
 
+@pytest.mark.skipif(WINDOWS, reason="Windows has no newlocale; children get LC_ALL=C")
+def test_a_c_library_that_cannot_be_opened_falls_back_to_c(tmp_path: Path) -> None:
+    # A static Python's dlopen fails: every command probes, so this must not raise
+    assert not locale_available("C.UTF-8", str(tmp_path / "no-such-libc.so"))
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_git_error_messages_are_in_english_regardless_of_the_system_locale(
     tmp_path: Path,
