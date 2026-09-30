@@ -96,6 +96,12 @@ Apps built on treaty keep their own, structured schema changelog with
   library, and treaty are still not followed, and with no installed distribution the
   handler's package alone is first-party. The `Scope:` line and the report's `scope`
   name the packages followed (#67)
+- Security: a handler that outlives its timeout no longer leaks its secret into a later
+  run. It keeps running on its worker thread after its run answered `TIMEOUT` (or was
+  cancelled), and what it printed then reached the stderr and `THIRD_PARTY_STDOUT`
+  warning of whichever run held `sys.stdout` unredacted, because its run's secrets were
+  released when the run returned. They now stay registered until the handler's thread
+  ends; a thread that never ends keeps them for the life of the process (#104)
 
 ## [1.0.0rc5] - 2026-09-30
 

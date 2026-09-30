@@ -20,6 +20,7 @@ import pytest
 from conftest import needs_posix_permissions, spec_validator
 
 from treaty import App, Arg, AuditLog, Ctx, Exit, Flag, NoArgs, RegistrationError
+from treaty._app import _RECORDS
 from treaty._audit import audit
 from treaty._cli import cli
 
@@ -531,6 +532,64 @@ def test_concurrent_runs_redact_each_others_secrets_in_printed_text() -> None:
         assert not [t for t in tokens if t in out or t in err], (out, err)
         printed += err.count("token is [REDACTED]")
     assert printed == runs  # every print reached some run's stderr, redacted
+
+
+@pytest.mark.parametrize("verbosity", ["--verbose", "--debug"])
+def test_a_timed_out_handler_that_prints_later_leaks_no_secret_into_the_next_run(
+    verbosity: str,
+) -> None:
+    """A handler that outlives its timeout keeps running on its worker thread after its
+    run returned: what it prints then reaches the stderr and ``THIRD_PARTY_STDOUT``
+    warning of whichever run holds ``sys.stdout``, still redacted of its own run's
+    secrets while the thread lives, and those are released once it ends (#104)"""
+    go, printed, holding = threading.Event(), threading.Event(), threading.Event()
+    workers: list[threading.Thread] = []
+    app = App("libctl", version="1.0.0")
+
+    @app.command(
+        "slow", description="Print a secret late", timeout=0.05, danger_level="safe", exit_codes=()
+    )
+    def slow(args: Login, ctx: Ctx) -> dict[str, bool]:
+        workers.append(threading.current_thread())
+        go.wait(timeout=10)  # released only after this run answered TIMEOUT
+        print(f"token is {args.api_token}")
+        printed.set()
+        return {"ok": True}
+
+    @app.command("hold", description="Hold sys.stdout", danger_level="safe", exit_codes=())
+    def hold(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        holding.set()
+        printed.wait(timeout=10)
+        return {"ok": True}
+
+    token = "sk-live-abandoned0000000001"
+    code, out, _ = run(
+        app,
+        ["slow", "--format", "json"],
+        {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"},
+    )
+    assert envelope_of(out)["error"]["code"] == "TIMEOUT", out
+    later: list[tuple[int, str, str]] = []
+    second = threading.Thread(
+        target=lambda: later.append(
+            run(app, ["hold", verbosity, "--format", "json"], {"LIBCTL_AUDIT_LOG": "off"})
+        )
+    )
+    second.start()
+    assert holding.wait(timeout=10)
+    go.set()
+    second.join(timeout=30)
+    assert printed.is_set()
+    [(code, out, err)] = later
+    assert code == 0, err
+    assert token not in out and token not in err, (out, err)
+    [warning] = envelope_of(out)["warnings"]
+    assert warning["code"] == "THIRD_PARTY_STDOUT"
+    assert warning["context"]["text"] == "token is [REDACTED]"
+    [worker] = workers
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert _RECORDS.redact(token) == token  # released with the thread that printed it
 
 
 # REQ-F-060: --debug attributes stray stdout

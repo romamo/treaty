@@ -2103,12 +2103,18 @@ class _Records(logging.Handler):
     record twice, and with a handler always on the root, no record falls through to
     ``logging.lastResort``, which would write it to ``sys.stderr`` unredacted. The
     innermost run may be another thread's, as with concurrent ``App.call``s, so every
-    attached run's secrets are redacted from a record, not only the receiving run's"""
+    attached run's secrets are redacted from a record, not only the receiving run's. So are
+    the secrets of every handler thread still alive, whose run may have returned: a
+    handler that outlived its timeout still prints"""
 
     def __init__(self) -> None:
         super().__init__(logging.NOTSET)
         self._runs: list[tuple[Callable[[logging.LogRecord], None], Callable[[str], str], int]] = []
         """Each run's writer and redactor with the root level it found, innermost last"""
+        self._workers: list[tuple[threading.Thread, Callable[[str], str]]] = []
+        """Each handler thread with its invocation's redactor, until the thread ends"""
+        self._redactors: tuple[Callable[[str], str], ...] = ()
+        """The attached runs' and live handler threads' redactors, rebuilt on a change"""
         self._guard = threading.Lock()
 
     def attach(
@@ -2124,6 +2130,7 @@ class _Records(logging.Handler):
             if not self._runs:
                 root.addHandler(self)
             self._runs.append((write, redact, root.level))
+            self._changed()
             if lowest is not None and lowest < root.level:
                 root.setLevel(lowest)
 
@@ -2138,8 +2145,17 @@ class _Records(logging.Handler):
                 self._runs[index] = (*self._runs[index][:2], level)
             else:
                 root.setLevel(level)
+            self._changed()
             if not self._runs:
                 root.removeHandler(self)
+
+    def hold(self, worker: threading.Thread, redact: Callable[[str], str]) -> None:
+        """Redact with ``redact`` until ``worker`` ends, even after its run detached: a
+        handler abandoned at its timeout or on a signal may print long after (#104). A
+        thread that never ends keeps its secrets here for the life of the process."""
+        with self._guard:
+            self._workers.append((worker, redact))
+            self._changed()
 
     def emit(self, record: logging.LogRecord) -> None:
         with self._guard:
@@ -2148,12 +2164,21 @@ class _Records(logging.Handler):
             write(record)
 
     def redact(self, text: str) -> str:
-        """``text`` with the secrets of every attached run replaced"""
+        """``text`` with the secrets of every attached run and live handler thread
+        replaced"""
         with self._guard:
-            redactors = [r for _, r, _ in self._runs]
+            if any(not worker.is_alive() for worker, _ in self._workers):
+                self._changed()
+            redactors = self._redactors
         for redact in redactors:
             text = redact(text)
         return text
+
+    def _changed(self) -> None:
+        """Release the ended handler threads' secrets and rebuild the redactors; the
+        caller holds the guard"""
+        self._workers = [(w, r) for w, r in self._workers if w.is_alive()]
+        self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r in self._workers))
 
 
 _RECORDS = _Records()
@@ -2388,6 +2413,8 @@ class _Run:
         """How the run answers, for the lines ``--debug`` writes"""
         self._logging = False
         """Whether the root logger routes records to this run (``attach_logging``)"""
+        self._redaction: tuple[tuple[object, ...], Callable[[str], str]] | None = None
+        """``_redact_now``'s redactor, with the invocation state it was built from"""
         self.current: Command | None = None
         """The command being answered, for ``meta.command`` and ``meta.schema_version``"""
         self.pinned: SchemaVersion | None = None
@@ -2429,7 +2456,9 @@ class _Run:
     def guard_streams(self) -> Iterator[None]:
         """Point ``sys.stdout`` at stderr for the run, and, off a terminal, ``sys.stdin`` at
         a reader that refuses ``input()`` (REQ-F-047). Process-wide, not a context-local
-        redirect, because handlers run on worker threads; one run owns the process."""
+        redirect, because handlers run on worker threads. Runs on several threads may
+        overlap: ``sys.stdout`` is then the last one's, and what it catches is redacted
+        of every attached run's and live handler thread's secrets."""
         global _guarded, _unguarded
         self.stray = _StrayStdout(self.err, self._redact_everywhere)
         with _guard_lock:
@@ -2941,7 +2970,28 @@ class _Run:
 
     def _redact_now(self, text: str) -> str:
         """``text`` with the secret values of the invocation running now replaced"""
-        return self._redactor(self.current, self.args)(text) if self.current else text
+        current = self.current
+        if current is None:
+            return text
+        key = (current, self.args, self.token, self.settings)
+        cached = self._redaction
+        if cached is None or any(a is not b for a, b in zip(cached[0], key, strict=True)):
+            # Built once per invocation, not on every printed line or log record
+            cached = self._redaction = (key, self._redactor(current, self.args))
+        return cached[1](text)
+
+    @staticmethod
+    def _held(
+        redact: Callable[[str], str], keep: Callable[[Pending], None]
+    ) -> Callable[[Pending], None]:
+        """``keep``, and the handler's worker redacted with ``redact``, the invocation's
+        secrets, for as long as it runs, even after the run returned (#104)"""
+
+        def started(pending: Pending) -> None:
+            _RECORDS.hold(pending.worker, redact)
+            keep(pending)
+
+        return started
 
     def _log_record(self, record: logging.LogRecord) -> None:
         level = _record_level(record.levelno)
@@ -3728,7 +3778,7 @@ class _Run:
                     if replay is not None
                     else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
                     timeout,
-                    running.append,
+                    self._held(self._redactor(command, args), running.append),
                     self.cancellation.armed,
                     heartbeats=self._heartbeats(command, invocation, mode, started),
                 )
@@ -3973,12 +4023,14 @@ class _Run:
         def latest(pending: Pending) -> None:
             running[:] = [pending]  # only the current worker matters; a stream may be endless
 
+        secret_free = self._redactor(command, args)
+
         try:
             self.cancellation.check()
             produced = call_with_timeout(
                 lambda: _invoke(self.app, command, args, ctx, self.provided()),
                 remaining(),
-                running.append,
+                self._held(secret_free, running.append),
                 self.cancellation.armed,
                 stream_context,
             )
@@ -3997,7 +4049,7 @@ class _Run:
                 event = call_with_timeout(
                     lambda: next(produced, _END),
                     remaining(),
-                    latest,
+                    self._held(secret_free, latest),
                     self.cancellation.armed,
                     stream_context,
                 )
