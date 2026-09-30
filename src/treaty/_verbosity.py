@@ -25,8 +25,8 @@ VERBOSE_SHORT = "v"
 _SHORT_VERBOSE = re.compile(rf"-{VERBOSE_SHORT}+")
 
 TRACE = logging.getLogger("treaty")
-"""The framework's own debug trace; ``--debug`` routes it, and every other logger's
-records, through the run's redacting stderr writer"""
+"""The framework's own debug trace, written under ``--debug``; it and every other
+logger's records go through the run's redacting stderr writer, each at its own level"""
 TRACE_FIELDS = "treaty_fields"
 """The ``LogRecord`` attribute ``trace`` puts its fields under"""
 

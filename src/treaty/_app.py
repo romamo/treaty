@@ -236,7 +236,15 @@ from ._values import (
     Scope,
     ToolVersion,
 )
-from ._verbosity import TRACE_FIELDS, VERBOSE_SHORT, Level, Verbosity, resolve_verbosity, trace
+from ._verbosity import (
+    TRACE,
+    TRACE_FIELDS,
+    VERBOSE_SHORT,
+    Level,
+    Verbosity,
+    resolve_verbosity,
+    trace,
+)
 from ._walk import DEFAULT_MAX_DEPTH, Traversal, TraversalStopped
 
 CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
@@ -1525,7 +1533,11 @@ class App:
                 deferred = exc
         if deferred is not None and path not in {p.value for p in PURE_PATHS}:
             return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
-        envelope = run.settle(self._call(run, path, arguments, environ))
+        run.attach_logging()
+        try:
+            envelope = run.settle(self._call(run, path, arguments, environ))
+        finally:
+            run.detach_logging()
         return cap_envelope(envelope, cap, Rerun(argv=None, app_name=self.name, page=run.page))
 
     def _call(
@@ -1660,7 +1672,7 @@ class App:
             # The reader of stdout went away, on any path: help, schema, errors, results
             return run.output_closed()
         finally:
-            run.detach_trace()
+            run.detach_logging()
 
     def _route(
         self,
@@ -1685,7 +1697,7 @@ class App:
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
         run.mode = mode
-        run.attach_trace()
+        run.attach_logging()
         trace(
             "run",
             format=mode.value,
@@ -2069,18 +2081,89 @@ def _unchanged(text: str) -> str:
     return text
 
 
-class _TraceHandler(logging.Handler):
-    """Log records of the framework and of libraries, as ``--debug`` lines on stderr"""
+class _Records(logging.Handler):
+    """The root logger's handler while a run is in progress: every log record, the
+    framework's trace and libraries' alike, goes to the innermost run's stderr at its own
+    level. One handler for every run, so a nested run or ``App.call`` never writes a
+    record twice, and with a handler always on the root, no record falls through to
+    ``logging.lastResort``, which would write it to ``sys.stderr`` unredacted. The
+    innermost run may be another thread's, as with concurrent ``App.call``s, so every
+    attached run's secrets are redacted from a record, not only the receiving run's"""
 
-    def __init__(self, write: Callable[[str, Mapping[str, object]], None]) -> None:
-        super().__init__(logging.DEBUG)
-        self._write = write
+    def __init__(self) -> None:
+        super().__init__(logging.NOTSET)
+        self._runs: list[tuple[Callable[[logging.LogRecord], None], Callable[[str], str], int]] = []
+        """Each run's writer and redactor with the root level it found, innermost last"""
+        self._guard = threading.Lock()
+
+    def attach(
+        self,
+        write: Callable[[logging.LogRecord], None],
+        redact: Callable[[str], str],
+        lowest: int | None,
+    ) -> None:
+        """Route records to ``write`` until ``detach``, the root lowered to ``lowest``, the
+        least level the run shows, when it stands above it"""
+        root = logging.getLogger()
+        with self._guard:
+            if not self._runs:
+                root.addHandler(self)
+            self._runs.append((write, redact, root.level))
+            if lowest is not None and lowest < root.level:
+                root.setLevel(lowest)
+
+    def detach(self, write: Callable[[logging.LogRecord], None]) -> None:
+        """The level ``write``'s run found is restored, or, when a later run is still
+        attached, handed to it to restore"""
+        root = logging.getLogger()
+        with self._guard:
+            index = next(i for i, (w, _, _) in enumerate(self._runs) if w == write)
+            *_, level = self._runs.pop(index)
+            if index < len(self._runs):
+                self._runs[index] = (*self._runs[index][:2], level)
+            else:
+                root.setLevel(level)
+            if not self._runs:
+                root.removeHandler(self)
 
     def emit(self, record: logging.LogRecord) -> None:
-        fields = dict(getattr(record, TRACE_FIELDS, {}))
-        if record.name != "treaty":
-            fields["logger"] = record.name
-        self._write(record.getMessage(), fields)
+        with self._guard:
+            write = self._runs[-1][0] if self._runs else None
+        if write is not None:
+            write(record)
+
+    def redact(self, text: str) -> str:
+        """``text`` with the secrets of every attached run replaced"""
+        with self._guard:
+            redactors = [r for _, r, _ in self._runs]
+        for redact in redactors:
+            text = redact(text)
+        return text
+
+
+_RECORDS = _Records()
+
+
+def _record_level(levelno: int) -> Level:
+    """The stderr level of a log record: a warning shows as ``ctx.warn`` lines do, an
+    info record as ``ctx.log``, a debug record only under ``--debug``"""
+    if levelno >= logging.ERROR:
+        return Level.ERROR
+    if levelno >= logging.WARNING:
+        return Level.WARN
+    if levelno >= logging.INFO:
+        return Level.INFO
+    return Level.DEBUG
+
+
+def _lowest_shown(verbosity: Verbosity) -> int | None:
+    """The least log level a run at ``verbosity`` writes; None under ``--quiet``"""
+    shown = [
+        n
+        for n in (logging.DEBUG, logging.INFO, logging.WARNING)
+        if verbosity >= _record_level(n).shown_from
+    ]
+    return min(shown, default=None)
 
 
 def _warned(envelope: Envelope, code: str, message: str, command: Command) -> Envelope:
@@ -2288,7 +2371,8 @@ class _Run:
         """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
-        self._tracing: tuple[_TraceHandler, int] | None = None
+        self._logging = False
+        """Whether the root logger routes records to this run (``attach_logging``)"""
         self.current: Command | None = None
         """The command being answered, for ``meta.command`` and ``meta.schema_version``"""
         self.pinned: SchemaVersion | None = None
@@ -2823,33 +2907,45 @@ class _Run:
         self.err.write(line + "\n", level)
         self.err.flush()
 
-    def attach_trace(self) -> None:
-        """``--debug``: the framework's trace and every library's log records, such as
-        urllib3's and httpx's requests, on stderr through the redacting writer until
-        ``detach_trace`` (REQ-O-008)"""
-        if self.err.verbosity < Verbosity.DEBUG or self._tracing is not None:
+    def attach_logging(self) -> None:
+        """Every log record on stderr through the redacting writer until
+        ``detach_logging``, at its own level: the framework's trace and libraries' debug
+        records, such as urllib3's and httpx's requests, under ``--debug``, info records
+        where ``ctx.log`` shows, warnings and errors unless ``--quiet`` (REQ-O-008)"""
+        if self._logging:
             return
-        root = logging.getLogger()
-        self._tracing = (_TraceHandler(self._trace_line), root.level)
-        root.addHandler(self._tracing[0])
-        root.setLevel(logging.DEBUG)
+        self._logging = True
+        _RECORDS.attach(self._log_record, self._redact_now, _lowest_shown(self.err.verbosity))
 
-    def detach_trace(self) -> None:
-        if self._tracing is None:
+    def detach_logging(self) -> None:
+        if not self._logging:
             return
-        handler, level = self._tracing
-        self._tracing = None
-        root = logging.getLogger()
-        root.removeHandler(handler)
-        root.setLevel(level)
+        self._logging = False
+        _RECORDS.detach(self._log_record)
 
     def _redact_now(self, text: str) -> str:
         """``text`` with the secret values of the invocation running now replaced"""
         return self._redactor(self.current, self.args)(text) if self.current else text
 
-    def _trace_line(self, message: str, fields: Mapping[str, object]) -> None:
-        redact = self._redactor(self.current, self.args) if self.current else _unchanged
-        self._log_line(Level.DEBUG, message, fields, redact, self.mode)
+    def _log_record(self, record: logging.LogRecord) -> None:
+        level = _record_level(record.levelno)
+        if not self.err.shows(level):
+            return
+        fields = dict(getattr(record, TRACE_FIELDS, {}))
+        if record.name != TRACE.name:
+            fields["logger"] = record.name
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError) as exc:
+            # A library's call whose arguments do not fit its format, which the stdlib
+            # handlers report rather than raise into the call: its template, then
+            message = str(record.msg)
+            fields["format_error"] = type(exc).__name__
+        # This run's own secrets too: a record can arrive as the run detaches
+        self._log_line(level, message, fields, self._redact_everywhere, self.mode)
+
+    def _redact_everywhere(self, text: str) -> str:
+        return _RECORDS.redact(self._redact_now(text))
 
     # Envelope construction
 

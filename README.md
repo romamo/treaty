@@ -403,13 +403,21 @@ and fields named like credentials (`token`, `password`, `API_KEY`, `DB_PASS`,
 | Off a terminal, or under `CI` | Errors and warnings only: tracebacks, `log_error`, deprecation lines |
 | A terminal | Also info and progress, and stray `print()` text |
 | `--verbose` | Info and progress anywhere, even under `CI` |
-| `--debug` | Also `ctx.debug` and the framework's trace: config resolution, each `ctx.http` request (headers redacted), each child's argv and exit, locks, the audit log; records of any `logging` logger, such as urllib3's, go through the same redaction; a stray `print()` is attributed to its file and line |
+| `--debug` | Also `ctx.debug` and the framework's trace: config resolution, each `ctx.http` request (headers redacted), each child's argv and exit, locks, the audit log; debug records of any `logging` logger, such as urllib3's; a stray `print()` is attributed to its file and line |
 | `--quiet` | Nothing, not even errors: the envelope carries them |
 
 `-v` is short for `--verbose`, and `-vv` or `-v -v` for `--debug`, in any position. Unlike
 `-h`, they yield: a command that declares `Flag(short="v")` keeps `-v` for its own flag, on
 that command only, where the long forms still work. The manifest keeps them out of the root
 `flags` shorts, so no command's own `-v` collides there.
+
+Records of Python's `logging` module, a library's included, go the same way by their own
+level: a WARNING or ERROR record is written as a `warn` or `error` line wherever
+`log_error` is, INFO where `ctx.log` is, and DEBUG under `--debug`, each redacted, with
+the logger's name in `fields.logger`. A handler sits on the root logger for the whole run,
+`App.call` included, and the root's level is lowered for the run when it would hide what
+the run shows, then restored; so no record falls through to `logging.lastResort`, which
+writes to `sys.stderr` unredacted.
 
 The three flags are exclusive (two exit `2`). Stray `print()` text off a terminal is
 dropped, and still reported in `THIRD_PARTY_STDOUT`. The `log-not-print` audit rule flags

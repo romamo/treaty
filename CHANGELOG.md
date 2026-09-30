@@ -121,6 +121,17 @@ Apps built on treaty keep their own, structured schema changelog with
   `RATE_LIMITED` with `app.exit_code("RATE_LIMITED", 11, ..., suggestion=...)`, which
   registration refuses, so the advice could never clear. Framework codes are skipped: they
   carry a generic suggestion, and a raise gives its own with `suggestion=` (#30)
+- Records of Python's `logging` module reached stderr only under `--debug`, all labelled
+  `debug`, so a library's INFO progress never showed under `--verbose`. A handler now sits
+  on the root logger for the whole run, `App.call` and nested runs included, and routes
+  each record by its level: DEBUG under `--debug`, INFO where `ctx.log` shows, WARNING and
+  up as `warn` and `error` lines unless `--quiet`, redacted, with `fields.logger` and the
+  record's level in the line. The root's level is lowered for the run when it would hide
+  a shown level, then restored. Before, at default verbosity a library WARNING had no
+  handler and fell through to `logging.lastResort`, which wrote it to `sys.stderr` raw,
+  secrets included and even under `--quiet`. A record goes to the innermost run, which
+  may be another thread's `App.call`, so the secrets of every attached run are redacted
+  from it (#31)
 - Audit rules that read handler source followed only helpers of the handler's own module,
   and `no-chdir`, `env-prefix`, and the other behaviour heuristics none at all, so I/O kept
   in a helper module passed clean (#14). Every source rule now follows the handler into its

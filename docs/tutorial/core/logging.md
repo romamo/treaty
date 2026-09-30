@@ -77,8 +77,10 @@ the app, as the `entry.py` of `treaty init` does.
 
 Off a terminal each line is one JSON object with `level`, `message`, and `fields`, so an
 agent that asks for `--verbose` can parse its own stderr too; at a terminal it is
-`message key=value`. Under `--debug`, records of Python's `logging` module, such as
-`urllib3`'s, are written too, through the same redaction.
+`message key=value`. Records of Python's `logging` module, such as `urllib3`'s, are
+written too, through the same redaction and by their own level: a warning or an error
+where `ctx.log_error` is, an info record where `ctx.log` is, a debug record with
+`--debug`.
 
 ## Step 2: Let the caller pick the level
 
