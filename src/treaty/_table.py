@@ -8,6 +8,7 @@ import io
 import json
 
 from ._command import Renderer
+from ._envelope import strip_escapes, visible
 
 
 def table(delimiter: str) -> Renderer:
@@ -16,7 +17,9 @@ def table(delimiter: str) -> Renderer:
     values are compact JSON; ``null`` is an empty cell. A tab delimiter writes TSV, which
     has no quoting: a backslash, tab, CR, or LF in a cell is written as a backslash
     escape, as in a Python string literal. Any other delimiter quotes like the ``csv``
-    module. ``tsv`` is built in; offer CSV with ``app.format(Format.CSV, render=table(","))``.
+    module. A cell loses its terminal escapes, as in the JSON envelope (REQ-F-007), and
+    shows any other control as its escape, a header too. ``tsv`` is built in; offer CSV
+    with ``app.format(Format.CSV, render=table(","))``.
     """
     if len(delimiter) != 1:
         raise ValueError("a table delimiter is one character")
@@ -32,19 +35,22 @@ def table(delimiter: str) -> Renderer:
             return "".join("\t".join(map(_escape, line)) + "\n" for line in lines)
         out = io.StringIO()
         writer = csv.writer(out, delimiter=delimiter, lineterminator="\n")
-        writer.writerow(header)
+        writer.writerow([visible(key, _CSV_KEEP) for key in header])
         for row in rows:
-            writer.writerow([_cell(row.get(key)) for key in header])
+            writer.writerow([visible(_cell(row.get(key)), _CSV_KEEP) for key in header])
         return out.getvalue()
 
     return render
 
 
 _TSV_ESCAPES = str.maketrans({"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r"})
+# A quoted CSV cell may hold a CRLF line break
+_CSV_KEEP = "\r"
 
 
 def _escape(cell: str) -> str:
-    return cell.translate(_TSV_ESCAPES)
+    # The backslashes first: the escapes visible() writes are not doubled
+    return visible(cell.translate(_TSV_ESCAPES))
 
 
 def _cell(value: object) -> str:
@@ -54,4 +60,4 @@ def _cell(value: object) -> str:
         return "true" if value else "false"
     if isinstance(value, (dict, list)):
         return json.dumps(value, separators=(",", ":"), sort_keys=True)
-    return str(value)
+    return strip_escapes(str(value))

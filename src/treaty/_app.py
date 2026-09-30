@@ -102,6 +102,8 @@ from ._envelope import (
     WarningDetail,
     clean,
     json_safe,
+    terminal_text,
+    visible,
     write_envelope,
 )
 from ._errors import (
@@ -2034,7 +2036,8 @@ def _rendered(render: Renderer, data: object) -> str:
 
 
 def _traceback(exc: BaseException) -> str:
-    return "".join(traceback.format_exception(exc))
+    """For stderr: an exception's message may carry a value with terminal escapes"""
+    return visible("".join(traceback.format_exception(exc)))
 
 
 def _closed_pipe(exc: OSError) -> bool:
@@ -2886,7 +2889,7 @@ class _Run:
             if level is Level.PROGRESS:
                 # The status --heartbeat-interval repeats (REQ-O-012), one plain line
                 status = self._redactor(command, args)(message)
-                self.status = " ".join(str(clean(status)).split())[:STATUS_CHARS]
+                self.status = visible(" ".join(str(clean(status)).split()))[:STATUS_CHARS]
             if self.err.shows(level):
                 # Built per call, inside the handler: a secret scalar's serialize= is user code
                 self._log_line(level, message, fields, self._redactor(command, args), mode)
@@ -2912,8 +2915,7 @@ class _Run:
             pairs = (f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in safe.items())
             prefix = "" if level is Level.INFO else f"{level.value}: "
             line = prefix + " ".join((redact(message), *pairs)) + self._trace_suffix()
-            if not color_allowed(self.env, self.tty):
-                line = str(clean(line))
+            line = terminal_text(line, color=color_allowed(self.env, self.tty))
         self.err.write(line + "\n", level)
         self.err.flush()
 
@@ -4411,7 +4413,7 @@ class _Run:
         where = f"{command.path} finished after its response was written"
         if outcome.exc is not None:
             self.err.write(f"{where}, but failed:\n")
-            self.err.write(redact("".join(traceback.format_exception(outcome.exc))))
+            self.err.write(redact(_traceback(outcome.exc)))
             return
         # Serialized as the response would have been, so the replay matches it
         batch_problem: str | None = None
@@ -4604,6 +4606,7 @@ class _Run:
         elif mode is Format.JSON:
             text = _json_text(data)
         else:
+            data = clean(data)  # values as the JSON envelope has them (REQ-F-007)
             try:
                 text = _rendered(render, data) if render is not None else render_plain(data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
@@ -4697,37 +4700,43 @@ class _Run:
             cursor = pagination["next_cursor"]
             if mode is Format.ID:
                 # The ids stay pipeable, and scripts read this line
-                self.err.write(f"next: --cursor {cursor}\n", Level.WARN)
+                self.err.write(f"next: --cursor {visible(str(cursor))}\n", Level.WARN)
             else:
                 total = pagination.get("total")
                 returned = pagination.get("returned")
                 shown = f"{returned} of {total}" if total is not None else f"{returned}"
                 self.err.write(
-                    f"{shown} shown; next page: --cursor {cursor}, or --limit 0 for all\n",
+                    f"{shown} shown; next page: --cursor {visible(str(cursor))}, "
+                    "or --limit 0 for all\n",
                     Level.WARN,
                 )
-        if envelope.data is not None and render is not None:
+        # REQ-F-007: data values lose their escapes, as in the JSON envelope; a renderer's
+        # own text keeps only its colors, and those only where the run may color
+        data = clean(envelope.data)
+        if data is not None and render is not None:
             try:
-                text = _rendered(render, envelope.data)
+                text = _rendered(render, data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
-                self.err.write(self._redact_now("".join(traceback.format_exception(exc))))
+                self.err.write(self._redact_now(_traceback(exc)))
                 self.err.write(f"{self.app.name}: HANDLER_CRASHED: the {mode} renderer failed\n")
                 code = FrameworkCode.GENERAL_ERROR.value
             else:
                 # Outside the renderer's try: a closed stdout is not a renderer bug
-                self.out.write(text)
-        elif envelope.data is not None:
-            self.out.write(fallback(envelope.data))
+                color = color_allowed(self.env, self.tty)
+                self.out.write(terminal_text(text, color=color, keep="\r"))
+        elif data is not None:
+            self.out.write(fallback(data))
         if envelope.error is not None:
+            # Error lines show a control as its escape: what a bad value held is the
+            # diagnosis, and the terminal acts on none of it
             error = envelope.error
-            self.err.write(
-                f"{self.app.name}: {error.code}: {error.message}{self._trace_suffix()}\n"
-            )
+            first = f"{self.app.name}: {error.code}: {error.message}{self._trace_suffix()}"
+            self.err.write(visible(first) + "\n")
             errors = envelope.error.errors or ()
             if len(errors) > 1:
                 for item in errors:
                     where = f"{item['field']}: " if "field" in item else ""
-                    self.err.write(f"  - {where}{item['message']}\n")
+                    self.err.write(visible(f"  - {where}{item['message']}") + "\n")
             else:
                 # REQ-F-034: a context key named like a credential prints [REDACTED],
                 # except treaty's own fields that hold names
@@ -4735,9 +4744,9 @@ class _Run:
                     printed: object = (
                         value if (error.code, key) in NAME_CONTEXT else scrub(key, value)
                     )
-                    self.err.write(f"  {key}: {printed}\n")
+                    self.err.write(visible(f"  {key}: {printed}") + "\n")
             if envelope.error.suggestion is not None:
-                self.err.write(f"hint: {envelope.error.suggestion}\n")
+                self.err.write(visible(f"hint: {envelope.error.suggestion}") + "\n")
         self.out.flush()
         self.delivered = True
         self.err.flush()

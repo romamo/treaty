@@ -48,6 +48,16 @@ Apps built on treaty keep their own, structured schema changelog with
   another run's stderr and `THIRD_PARTY_STDOUT` warning unredacted: only the receiving
   run's secrets were replaced. Printed text is now redacted of every attached run's
   secrets as it is written, as library log records already were (#92)
+- Text for a person no longer passes terminal escapes through (security). A data value in
+  plain output, a TSV or CSV cell, and the data a custom renderer receives lose their
+  escapes as in the JSON envelope, so a value can no longer set the window title, forge
+  an OSC 8 link, write the clipboard (OSC 52), or move the cursor. Plain keys, stderr
+  error lines (the message, context, error items, and hint), tracebacks, and pagination
+  cursors show a control as its escape (`\x1b`, `\x07`, `\r`) instead. A custom
+  renderer's own text keeps its colors (SGR) only where the run may color, and `ctx.log`
+  lines on a color terminal keep colors but lose every other escape. The 8-bit C1 forms
+  (`\x9b` CSI, `\x9d` OSC) are stripped from this text too, and a lone C1 control is shown
+  as its escape; the JSON envelope, which is ASCII, keeps them as `\u` escapes (#72)
 
 ## [1.0.0rc5] - 2026-09-30
 
