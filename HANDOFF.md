@@ -35,7 +35,11 @@ the AGENTS.md `cli-version` comment in semver spelling (`1.0.0-rc.5`), a dated
 `CHANGELOG.md` section with its compare links, and the rc lines in `ROADMAP.md` and
 `plans/1.0/15-release-readiness.md`. Then push an annotated tag `vX` with the message
 `treaty X`. `publish.yml` runs the full CI on the tag before uploading, so a failing test
-blocks the upload.
+blocks the upload. Its `release-check` job blocks it too: the tagged commit must be on
+`main`, `pyproject.toml` must declare the tag's version, and the `CHANGELOG.md` must have
+the dated section, both compare links, and nothing left under Unreleased. No open issue may
+be labelled `release-blocker`. Run the same check before tagging:
+`uv run --no-project python .github/scripts/release_check.py --tag vX --check-blockers`.
 
 Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
 
