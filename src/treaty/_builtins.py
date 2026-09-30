@@ -37,10 +37,18 @@ from ._deps import (
     tool_check,
 )
 from ._effect import Affects
+from ._env import AUDIT_LOG, app_var
 from ._errors import CliExit, ParseError
 from ._flags import Arg, Flag
 from ._idempotency import state_dir
-from ._journal import AuditLog, entry_time, log_path, parse_since, read_entries
+from ._journal import (
+    command_matches,
+    command_words,
+    entry_time,
+    parse_since,
+    read_entries,
+    resolve,
+)
 from ._mode import Format
 from ._out import Out
 from ._redact import scrub
@@ -419,8 +427,8 @@ def _state_files(app: App, ctx: Ctx) -> list[dict[str, object]]:
         ("user config", user_config(app.name, ctx.env)),
         ("idempotency records", state_dir(app.name, app.state_dir, ctx.env)),
     ]
-    if app.audit_log is not None:
-        wanted.append(("audit log", log_path(app.audit_log, app.name, ctx.env)))
+    # Only while the log is on, as in meta.audit_log_path (REQ-O-030)
+    wanted.append(("audit log", resolve(app.audit_log, app.name, ctx.env).path))
     for command_path, effect, _, matches in declared(app, ctx.env.get("HOME")):
         if effect.kind in (SideEffectType.CREDENTIAL, SideEffectType.CONFIG):
             purpose = f"{effect.type} of {command_path.value}"
@@ -680,7 +688,7 @@ def _read_tools(path: Path) -> dict[str, dict[str, object]]:
 
 
 AUDIT_LOG_PATH = CommandPath("audit-log")
-AUDIT_LOG_OFF = "AUDIT_LOG_OFF"
+AUDIT_LOG_DISABLED = "AUDIT_LOG_DISABLED"
 AUDIT_LINES_UNREADABLE = "AUDIT_LINES_UNREADABLE"
 
 
@@ -688,11 +696,13 @@ AUDIT_LINES_UNREADABLE = "AUDIT_LINES_UNREADABLE"
 class AuditLogArgs:
     since: str | None = Flag(
         default=None,
-        description="Only entries from this long ago, such as 30m, 1h, or 2d, or since this "
-        "ISO 8601 time",
+        description="Only entries from this long ago, such as 30s, 15m, 1h, or 7d, or since "
+        "this ISO 8601 time with a UTC offset",
     )
     command: str | None = Flag(
-        default=None, description="Only entries of this command, such as deploy.rollback"
+        default=None,
+        description="Only entries of this command path or the commands under it: config "
+        "matches config set but not configure",
     )
     trace_id: str | None = Flag(default=None, description="Only entries with this trace ID")
     limit: int | None = Flag(
@@ -709,12 +719,14 @@ class AuditLogArgs:
             )
 
 
-def register_audit_log(app: App, settings: AuditLog) -> CommandPath:
+def register_audit_log(app: App) -> CommandPath:
+    """On every app, since the operator can turn the log on for any of them (REQ-O-030)"""
+
     @app.command(
         AUDIT_LOG_PATH.value,
-        description="Query the audit log: one entry per invocation, oldest first, with its "
-        "parameters (secrets redacted), exit code, duration, and trace, request, and "
-        "session ids",
+        description="Query the opt-in audit log: one entry per invocation, oldest first, with "
+        "its arguments (secrets redacted), exit code, duration, warning codes, and request, "
+        "trace, and session ids; exit 4 with AUDIT_LOG_DISABLED while the log is off",
         danger_level="safe",
         exit_codes=(),
         streaming=True,
@@ -724,24 +736,34 @@ def register_audit_log(app: App, settings: AuditLog) -> CommandPath:
         ],
     )
     def audit_log(args: AuditLogArgs, ctx: Ctx) -> Iterator[dict[str, object]]:
-        path = log_path(settings, app.name, ctx.env)
+        setting = resolve(app.audit_log, app.name, ctx.env)
+        path = setting.path
+        variable = app_var(app.name, AUDIT_LOG.key)
         if path is None:
+            fix = (
+                f"Set {variable} to an absolute path, or set XDG_STATE_HOME or HOME"
+                if setting.enabled
+                else f"Set {variable}=1 for future invocations; invocations made while the "
+                "log was disabled were not recorded"
+            )
             raise CliExit(
                 ExitCodeName("PRECONDITION"),
-                "the audit log is off for this run",
-                code=AUDIT_LOG_OFF,
-                fix_required="unset the tool's AUDIT_LOG variable, or set it to a path, "
-                "or set HOME or XDG_DATA_HOME",
+                "The audit log is not enabled for this tool"
+                if not setting.enabled
+                else "The audit log has no home directory to live in",
+                code=AUDIT_LOG_DISABLED,
+                context={"variable": variable},
+                fix_required=fix,
             )
         since = None if args.since is None else parse_since(args.since, dt.datetime.now(dt.UTC))
-        wanted = None if args.command is None else ".".join(args.command.split())
+        wanted = None if args.command is None else command_words(args.command)
         kept: deque[dict[str, object]] = deque(maxlen=args.limit)
         unreadable = 0
         for entry in read_entries(path):
             if entry is None:
                 unreadable += 1
                 continue
-            if wanted is not None and entry.get("command") != wanted:
+            if wanted is not None and not command_matches(entry.get("command"), wanted):
                 continue
             if args.trace_id is not None and entry.get("trace_id") != args.trace_id:
                 continue

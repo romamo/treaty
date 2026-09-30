@@ -185,7 +185,7 @@ the server the way a client does and make calls:
         env={
             "PYTHONPATH": str(ROOT),
             "TODO_STATE_DIR": str(tmp_path / "state"),
-            "TODO_AUDIT_LOG": "off",
+            "TODO_AUDIT_LOG": "0",
         },
     )
 ```

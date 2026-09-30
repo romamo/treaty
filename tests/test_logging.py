@@ -1,5 +1,5 @@
-"""Verbosity, --warnings-as-errors, and the audit log (REQ-F-038, REQ-O-008, REQ-O-025,
-REQ-F-026, REQ-F-042, REQ-O-030, REQ-F-034, REQ-O-023, REQ-F-025, REQ-F-060)"""
+"""Verbosity, --warnings-as-errors, and the opt-in audit log (REQ-F-038, REQ-O-008,
+REQ-O-025, REQ-O-030, REQ-F-034, REQ-O-023, REQ-F-025, REQ-F-060)"""
 
 import datetime as dt
 import io
@@ -21,8 +21,10 @@ from conftest import needs_posix_permissions, spec_validator
 
 from treaty import App, Arg, AuditLog, Ctx, Exit, Flag, NoArgs, RegistrationError
 from treaty._app import _RECORDS
+from treaty._atomic import exclusive
 from treaty._audit import audit
 from treaty._cli import cli
+from treaty._journal import Journal
 
 BASE = "logctl"
 
@@ -117,17 +119,18 @@ def envelope_of(out: str) -> dict[str, Any]:
 
 
 def logged(tmp_path: Path, argv: list[str], **env: str) -> tuple[int, dict[str, Any]]:
-    """Run with the audit log under ``tmp_path``; the envelope"""
+    """Run with the audit log turned on under ``tmp_path``; the envelope"""
     code, out, _ = run(make_app(), [*argv, "--format", "json"], data_env(tmp_path, **env))
     return code, envelope_of(out)
 
 
 def data_env(tmp_path: Path, **env: str) -> dict[str, str]:
-    return {"XDG_DATA_HOME": str(tmp_path / "data"), **env}
+    """The operator turned the log on; its default home is under ``tmp_path``"""
+    return {"XDG_STATE_HOME": str(tmp_path / "state"), "LOGCTL_AUDIT_LOG": "1", **env}
 
 
 def log_file(tmp_path: Path) -> Path:
-    return tmp_path / "data" / BASE / "audit.jsonl"
+    return tmp_path / "state" / BASE / "audit.jsonl"
 
 
 def entries(tmp_path: Path) -> list[dict[str, Any]]:
@@ -348,7 +351,7 @@ def library_app() -> App:
     @app.command("nested", description="Call another app", danger_level="safe", exit_codes=())
     def nested(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
         LIB.info("before")
-        inner = library_app().call("levels", {}, env={"LIBCTL_AUDIT_LOG": "off"})
+        inner = library_app().call("levels", {}, env={})
         LIB.info("after")
         return {"ok": inner.ok}
 
@@ -376,7 +379,7 @@ def test_library_log_records_are_shown_by_their_own_level(
 ) -> None:
     root = logging.getLogger()
     before = root.level
-    env = {"LIBCTL_AUDIT_LOG": "off"}
+    env: dict[str, str] = {}
     code, _, err = run(library_app(), ["levels", *flags, "--format", "json"], env, isatty=isatty)
     assert code == 0
     every = {
@@ -391,7 +394,7 @@ def test_library_log_records_are_shown_by_their_own_level(
 
 
 def test_a_library_warning_reads_as_a_warn_line_in_plain_output() -> None:
-    _, _, err = run(library_app(), ["levels", "--format", "plain"], {"LIBCTL_AUDIT_LOG": "off"})
+    _, _, err = run(library_app(), ["levels", "--format", "plain"], {})
     assert err.splitlines() == [
         "warn: slow response logger=somelib",
         "error: gave up logger=somelib",
@@ -399,7 +402,7 @@ def test_a_library_warning_reads_as_a_warn_line_in_plain_output() -> None:
 
 
 def test_a_secret_in_a_library_log_message_is_redacted() -> None:
-    env = {"LIBCTL_API_TOKEN": TOKEN, "LIBCTL_AUDIT_LOG": "off"}
+    env = {"LIBCTL_API_TOKEN": TOKEN}
     code, _, err = run(library_app(), ["leak", "--format", "json"], env)
     assert code == 0 and TOKEN not in err
     assert library_lines(err) == [("warn", "auth failed for [REDACTED]")]
@@ -410,9 +413,7 @@ def test_app_call_and_a_nested_run_route_records_once_and_restore_the_root_logge
 ) -> None:
     root = logging.getLogger()
     before = root.level
-    code, _, err = run(
-        library_app(), ["nested", "--verbose", "--format", "json"], {"LIBCTL_AUDIT_LOG": "off"}
-    )
+    code, _, err = run(library_app(), ["nested", "--verbose", "--format", "json"], {})
     assert code == 0
     # The outer run shows its own records; the inner App.call's go to its stderr, once
     assert library_lines(err) == [("info", "before"), ("info", "after")]
@@ -447,7 +448,6 @@ def test_a_library_warning_never_falls_through_to_logging_last_resort(
         "PATH": os.environ["PATH"],
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
         "LIBCTL_API_TOKEN": TOKEN,
-        "LIBCTL_AUDIT_LOG": "off",
     }
     proc = subprocess.run(
         [sys.executable, "-c", script],
@@ -484,7 +484,7 @@ def test_concurrent_calls_redact_each_others_secrets_in_library_records(
     oks: list[bool] = []
 
     def call(token: str) -> None:
-        env = {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"}
+        env = {"LIBCTL_API_TOKEN": token}
         oks.append(app.call("leak", {}, env=env).ok)
 
     threads = [threading.Thread(target=call, args=(t,)) for t in tokens]
@@ -517,7 +517,7 @@ def test_concurrent_runs_redact_each_others_secrets_in_printed_text() -> None:
     results: dict[str, tuple[int, str, str]] = {}
 
     def one(token: str) -> None:
-        env = {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"}
+        env = {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "0"}
         results[token] = run(app, ["leak", "--verbose", "--format", "json"], env)
 
     threads = [threading.Thread(target=one, args=(t,)) for t in tokens]
@@ -566,13 +566,13 @@ def test_a_timed_out_handler_that_prints_later_leaks_no_secret_into_the_next_run
     code, out, _ = run(
         app,
         ["slow", "--format", "json"],
-        {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"},
+        {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "0"},
     )
     assert envelope_of(out)["error"]["code"] == "TIMEOUT", out
     later: list[tuple[int, str, str]] = []
     second = threading.Thread(
         target=lambda: later.append(
-            run(app, ["hold", verbosity, "--format", "json"], {"LIBCTL_AUDIT_LOG": "off"})
+            run(app, ["hold", verbosity, "--format", "json"], {"LIBCTL_AUDIT_LOG": "0"})
         )
     )
     second.start()
@@ -655,25 +655,112 @@ def test_warnings_as_errors_applies_to_a_stream_terminal_and_to_exec_lines() -> 
     ]
 
 
-# REQ-F-026: the audit log
+# REQ-O-030: the audit log is off until the app or the operator turns it on
 
 
-def test_after_any_command_invocation_the_audit_log_contains_a_new_entry(tmp_path: Path) -> None:
-    logged(tmp_path, ["warn"])
-    logged(tmp_path, ["warn", "--n", "1"])
-    found = entries(tmp_path)
-    assert [e["command"] for e in found] == ["warn", "warn"]
-    assert found[1]["parameters"] == {"n": 1} and found[1]["warnings"] == ["SOMETHING_ODD"]
-    assert set(found[0]) >= {
-        "timestamp",
-        "command",
-        "parameters",
-        "exit_code",
-        "duration_ms",
-        "trace_id",
-        "request_id",
-        "operator",
-    }
+def test_the_audit_log_is_off_by_default_and_creates_nothing(tmp_path: Path) -> None:
+    env = {"XDG_STATE_HOME": str(tmp_path / "state"), "HOME": str(tmp_path / "home")}
+    app = make_app()
+    _, out, _ = run(app, ["warn"], env)
+    assert "audit_log_path" not in json.loads(out)["meta"]
+    assert not (tmp_path / "state").exists() and not (tmp_path / "home").exists()
+    commands = app.manifest()["commands"]
+    assert isinstance(commands, dict)
+    assert all("filesystem_side_effects" not in c for c in commands.values())
+
+
+def test_audit_log_1_appends_one_entry_to_the_default_path(tmp_path: Path) -> None:
+    _, envelope = logged(tmp_path, ["warn"])
+    assert envelope["meta"]["audit_log_path"] == str(log_file(tmp_path))
+    assert [e["command"] for e in entries(tmp_path)] == ["warn"]
+
+
+def test_the_default_path_is_the_xdg_state_home_else_local_state(tmp_path: Path) -> None:
+    home = {"HOME": str(tmp_path / "home"), "LOGCTL_AUDIT_LOG": "1"}
+    _, out, _ = run(make_app(), ["warn"], home)
+    expected = tmp_path / "home" / ".local" / "state" / BASE / "audit.jsonl"
+    assert json.loads(out)["meta"]["audit_log_path"] == str(expected) and expected.exists()
+    relative = {**home, "XDG_STATE_HOME": "state"}  # ignored, as the XDG spec says
+    _, out, _ = run(make_app(), ["warn"], relative)
+    assert json.loads(out)["meta"]["audit_log_path"] == str(expected)
+
+
+def test_audit_log_0_turns_off_a_log_the_app_turned_on(tmp_path: Path) -> None:
+    app = make_app(audit_log=AuditLog(path=tmp_path / "log" / "audit.jsonl"))
+    _, out, _ = run(app, ["warn"])
+    assert json.loads(out)["meta"]["audit_log_path"] == str(tmp_path / "log" / "audit.jsonl")
+    (tmp_path / "log" / "audit.jsonl").unlink()
+    _, out, _ = run(app, ["warn"], {"LOGCTL_AUDIT_LOG": "0"})
+    assert "audit_log_path" not in json.loads(out)["meta"]
+    assert not (tmp_path / "log" / "audit.jsonl").exists()
+
+
+def test_the_app_turns_it_on_at_the_default_path(tmp_path: Path) -> None:
+    app = make_app(audit_log=AuditLog())
+    _, out, _ = run(app, ["warn"], {"XDG_STATE_HOME": str(tmp_path / "state")})
+    assert json.loads(out)["meta"]["audit_log_path"] == str(log_file(tmp_path))
+    assert log_file(tmp_path).exists()
+
+
+def test_the_operators_path_wins_over_the_apps_and_1_keeps_the_apps(tmp_path: Path) -> None:
+    mine = tmp_path / "app" / "audit.jsonl"
+    app = make_app(audit_log=AuditLog(path=mine))
+    _, out, _ = run(app, ["warn"], {"LOGCTL_AUDIT_LOG": "1"})
+    assert json.loads(out)["meta"]["audit_log_path"] == str(mine) and mine.exists()
+    elsewhere = tmp_path / "a" / "audit.jsonl"
+    _, out, _ = run(app, ["warn"], {"LOGCTL_AUDIT_LOG": str(elsewhere)})
+    assert json.loads(out)["meta"]["audit_log_path"] == str(elsewhere) and elsewhere.exists()
+    assert len(mine.read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("value", ["true", "yes", "", "logs/audit.jsonl", "2", "on", "off", "OFF"])
+def test_any_other_audit_log_value_exits_2_and_writes_nothing(tmp_path: Path, value: str) -> None:
+    code, envelope = logged(tmp_path, ["warn"], LOGCTL_AUDIT_LOG=value)
+    assert code == 2 and envelope["error"]["code"] == "INVALID_AUDIT_LOG_SETTING"
+    assert envelope["error"]["context"]["variable"] == "LOGCTL_AUDIT_LOG"
+    assert "1, 0, or an absolute file path" in envelope["error"]["message"]
+    assert not (tmp_path / "state").exists()
+
+
+def test_a_bad_audit_log_value_fails_everything_but_help_and_version(tmp_path: Path) -> None:
+    for argv in (["manifest"], ["warn", "--schema"], ["audit-log"], ["status"]):
+        code, envelope = logged(tmp_path, argv, LOGCTL_AUDIT_LOG="true")
+        assert code == 2 and envelope["error"]["code"] == "INVALID_AUDIT_LOG_SETTING", argv
+    for argv in (["--version"], ["--help"], ["warn", "--help"]):
+        assert logged(tmp_path, argv, LOGCTL_AUDIT_LOG="true")[0] == 0, argv
+    envelope = make_app().call("warn", {}, env={"LOGCTL_AUDIT_LOG": "true"})
+    assert envelope.error is not None and envelope.error.code == "INVALID_AUDIT_LOG_SETTING"
+
+
+def test_a_bad_audit_log_value_keeps_the_trace_id_in_meta(tmp_path: Path) -> None:
+    code, envelope = logged(tmp_path, ["warn"], LOGCTL_AUDIT_LOG="off", TOOL_TRACE_ID="t-1")
+    assert code == 2 and envelope["error"]["code"] == "INVALID_AUDIT_LOG_SETTING"
+    assert envelope["meta"]["trace_id"] == "t-1"
+
+
+def test_while_on_the_manifest_lists_the_log_as_a_log_side_effect(tmp_path: Path) -> None:
+    code, envelope = logged(tmp_path, ["manifest"])
+    assert code == 0
+    commands = envelope["data"]["commands"]
+    effect = {"path": str(log_file(tmp_path)), "type": "log"}
+    assert commands["warn"]["filesystem_side_effects"] == [effect]
+    assert commands["cleanup"]["filesystem_side_effects"] == [effect]
+    for unlogged in ("manifest", "version", "completion", "audit-log"):
+        assert "filesystem_side_effects" not in commands[unlogged]
+    spec_validator("manifest-response").validate(envelope["data"])
+
+
+def test_every_entry_validates_against_the_spec_schema(tmp_path: Path) -> None:
+    logged(tmp_path, ["warn", "--n", "1"], TOOL_TRACE_ID="span-7", LOGCTL_SESSION="s-1")
+    logged(tmp_path, ["missing"])
+    logged(tmp_path, ["login", "--api-token-from-env", "TOK"], TOK="sk-live-98765")
+    validator = spec_validator("audit-log-entry")
+    for entry in entries(tmp_path):
+        validator.validate(entry)
+    first = entries(tmp_path)[0]
+    assert first["args"] == {"n": 1} and first["warnings"] == ["SOMETHING_ODD"]
+    assert first["trace_id"] == "span-7" and first["session_id"] == "s-1"
+    assert "trace_id" not in entries(tmp_path)[1] and "session_id" not in entries(tmp_path)[1]
 
 
 def test_the_entry_for_a_command_invoked_with_a_secret_argument_omits_the_secret(
@@ -682,60 +769,82 @@ def test_the_entry_for_a_command_invoked_with_a_secret_argument_omits_the_secret
     code, _ = logged(tmp_path, ["login", "--api-token-from-env", "TOK"], TOK="sk-live-98765")
     assert code == 0
     assert "sk-live-98765" not in log_file(tmp_path).read_text()
-    assert entries(tmp_path)[0]["parameters"] == {"api_token": "[REDACTED]", "user": "me"}
+    assert entries(tmp_path)[0]["args"] == {"api_token": "[REDACTED]", "user": "me"}
+    assert "hunter2" not in log_file(tmp_path).read_text()  # data is never logged
 
 
 def test_the_audit_log_is_valid_jsonl(tmp_path: Path) -> None:
-    for argv in (["warn"], ["missing"], ["login", "--api-token-from-env", "T"], ["nope"]):
+    for argv in (["warn"], ["missing"], ["login", "--api-token-from-env", "T"]):
         logged(tmp_path, argv, T="token-value")
     lines = log_file(tmp_path).read_bytes().split(b"\n")
-    assert lines[-1] == b"" and len(lines) == 5
+    assert lines[-1] == b"" and len(lines) == 4
     assert all(isinstance(json.loads(line), dict) for line in lines[:-1])
 
 
-def test_the_audit_log_is_written_even_when_the_command_exits_non_zero(tmp_path: Path) -> None:
-    assert logged(tmp_path, ["missing"])[0] == 79
-    assert logged(tmp_path, ["warn", "--n", "x"])[0] == 2
-    failed, bad_args = entries(tmp_path)
-    assert failed["exit_code"] == 79 and failed["error_code"] == "GONE"
-    assert bad_args["exit_code"] == 2 and bad_args["parameters"] == {}  # never raw argv
+def test_failures_validation_and_refusals_are_logged(tmp_path: Path) -> None:
+    for argv in (
+        ["missing"],
+        ["warn", "--n", "x"],
+        ["warn", "--validate-only"],
+        ["cleanup", "--dry-run"],
+        ["cleanup"],  # destructive, refused without --confirm-destructive
+        ["cleanup", "--confirm-destructive"],
+    ):
+        logged(tmp_path, argv)
+    found = entries(tmp_path)
+    assert [(e["command"], e["exit_code"]) for e in found] == [
+        ("missing", 79),
+        ("warn", 2),
+        ("warn", 0),
+        ("cleanup", 0),
+        ("cleanup", 2),
+        ("cleanup", 0),
+    ]
+    assert found[1]["args"] == {}  # never raw argv
+    assert found[2]["args"] == {"n": 0, "validate_only": True}
+    assert found[3]["args"]["dry_run"] is True
+    assert "confirm_destructive" not in found[4]["args"]
+    assert found[5]["args"]["confirm_destructive"] is True
 
 
-def test_meta_audit_log_path_names_the_log_file(tmp_path: Path) -> None:
-    _, envelope = logged(tmp_path, ["warn"])
-    assert envelope["meta"]["audit_log_path"] == str(log_file(tmp_path))
-    home = {"HOME": str(tmp_path / "home")}
-    _, out, _ = run(make_app(), ["warn"], home)
-    expected = tmp_path / "home" / ".local" / "share" / BASE / "audit.jsonl"
-    assert json.loads(out)["meta"]["audit_log_path"] == str(expected) and expected.exists()
-
-
-def test_help_and_schema_are_not_logged(tmp_path: Path) -> None:
-    for argv in (["warn", "--help"], ["warn", "--schema"], ["--help"]):
+def test_invocations_that_do_no_work_or_resolve_no_command_are_not_logged(
+    tmp_path: Path,
+) -> None:
+    for argv in (
+        ["nope"],
+        ["warn", "--help"],
+        ["warn", "--schema"],
+        ["--help"],
+        ["--version"],
+        ["version"],
+        ["manifest"],
+        ["completion", "bash"],
+        ["audit-log"],
+    ):
         logged(tmp_path, argv)
     assert not log_file(tmp_path).exists()
 
 
-def test_the_audit_log_variable_turns_it_off_or_moves_it(tmp_path: Path) -> None:
-    _, envelope = logged(tmp_path, ["warn"], LOGCTL_AUDIT_LOG="off")
-    assert "audit_log_path" not in envelope["meta"] and not log_file(tmp_path).exists()
-    elsewhere = tmp_path / "custom" / "audit.jsonl"
-    _, envelope = logged(tmp_path, ["warn"], LOGCTL_AUDIT_LOG=str(elsewhere))
-    assert envelope["meta"]["audit_log_path"] == str(elsewhere) and elsewhere.exists()
+def test_an_entry_over_16_kib_truncates_the_largest_arguments(tmp_path: Path) -> None:
+    app = make_app()
 
+    @dataclass(frozen=True, slots=True)
+    class Big:
+        body: str = Flag(description="Body", max_bytes=60_000_000)
+        note: str = Flag(default="short", description="Note")
 
-def test_a_relative_audit_log_variable_exits_2_before_anything_runs(tmp_path: Path) -> None:
-    code, envelope = logged(tmp_path, ["warn"], LOGCTL_AUDIT_LOG="audit.jsonl")
-    assert code == 2 and envelope["error"]["context"]["variable"] == "LOGCTL_AUDIT_LOG"
-    code, _ = logged(tmp_path, ["version"], LOGCTL_AUDIT_LOG="audit.jsonl")
-    assert code == 0  # REQ-F-068: the pure built-ins still answer
+    @app.command("big", description="Big", danger_level="safe", exit_codes=())
+    def big(args: Big, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(args.body)}
 
-
-def test_audit_log_none_keeps_no_log_and_no_builtin(tmp_path: Path) -> None:
-    app = make_app(audit_log=None)
-    _, out, _ = run(app, ["warn"], data_env(tmp_path))
-    assert "audit_log_path" not in json.loads(out)["meta"] and not log_file(tmp_path).exists()
-    assert "audit-log" not in app.manifest()["commands"]  # type: ignore[operator]
+    body = "x" * (50 * 2**20)
+    code, _, _ = run(app, ["big", "--body", body], data_env(tmp_path))
+    assert code == 0
+    line = log_file(tmp_path).read_bytes()
+    assert len(line) <= 16 * 1024 and line.endswith(b"\n")
+    entry = json.loads(line)
+    assert entry["truncated"] is True and entry["args"] == {"body": "[TRUNCATED]", "note": "short"}
+    spec_validator("audit-log-entry").validate(entry)
 
 
 @needs_posix_permissions
@@ -746,29 +855,55 @@ def test_an_unwritable_audit_log_warns_and_never_fails_the_command(tmp_path: Pat
     assert code == 0
     assert [w["code"] for w in envelope["warnings"]] == ["AUDIT_LOG_UNAVAILABLE"]
     assert envelope["warnings"][0]["context"]["path"] == str(blocker / "audit.jsonl")
+    env = data_env(tmp_path, LOGCTL_AUDIT_LOG=str(blocker / "audit.jsonl"))
+    code, out, err = run(make_app(), ["warn", "--format", "plain"], env)
+    assert code == 0 and "AUDIT_LOG_UNAVAILABLE" not in out
+    warning = json.loads(err.splitlines()[-1])
+    assert warning["code"] == "AUDIT_LOG_UNAVAILABLE" and set(warning) == {
+        "code",
+        "message",
+        "context",
+    }
 
 
 @needs_posix_permissions
-def test_the_audit_log_is_readable_by_its_owner_only(tmp_path: Path) -> None:
-    logged(tmp_path, ["warn"])
+def test_the_log_and_its_directories_are_owner_only_whatever_the_umask(tmp_path: Path) -> None:
+    previous = os.umask(0o022)
+    try:
+        logged(tmp_path, ["warn"])
+    finally:
+        os.umask(previous)
     assert stat.S_IMODE(log_file(tmp_path).stat().st_mode) == 0o600
     assert stat.S_IMODE(log_file(tmp_path).parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE((tmp_path / "state").stat().st_mode) == 0o700
+
+
+@needs_posix_permissions
+def test_an_existing_log_and_directory_keep_their_modes(tmp_path: Path) -> None:
+    folder = tmp_path / "state" / BASE
+    folder.mkdir(parents=True, mode=0o755)
+    os.chmod(folder, 0o755)
+    log_file(tmp_path).write_text("")
+    os.chmod(log_file(tmp_path), 0o640)
+    logged(tmp_path, ["warn"])
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o755
+    assert stat.S_IMODE(log_file(tmp_path).stat().st_mode) == 0o640
 
 
 def test_app_call_appends_an_entry_too(tmp_path: Path) -> None:
     envelope = make_app().call("warn", {"n": 1}, env=data_env(tmp_path))
     assert envelope.extra_meta["audit_log_path"] == str(log_file(tmp_path))
-    assert entries(tmp_path)[0]["parameters"] == {"n": 1}
+    assert entries(tmp_path)[0]["args"] == {"n": 1}
 
 
-# REQ-F-025: audit entries carry the trace; REQ-O-030's operator is the session
-
-
-def test_audit_log_entries_include_the_trace_id(tmp_path: Path) -> None:
-    logged(tmp_path, ["warn"], TOOL_TRACE_ID="span-7", LOGCTL_SESSION="agent-1")
-    entry = entries(tmp_path)[0]
-    assert entry["trace_id"] == "span-7" and entry["operator"] == "agent-1"
-    assert len(entry["request_id"]) == 12
+def test_status_lists_the_log_only_while_it_is_on_and_cleanup_keeps_it(tmp_path: Path) -> None:
+    _, envelope = logged(tmp_path, ["status", "--show-state-files"])
+    purposes = {f["purpose"]: f["path"] for f in envelope["data"]["state_files"]}
+    assert purposes["audit log"] == str(log_file(tmp_path).resolve())
+    code, _ = logged(tmp_path, ["cleanup", "--confirm-destructive"])
+    assert code == 0 and log_file(tmp_path).exists()
+    _, envelope = logged(tmp_path, ["status", "--show-state-files"], LOGCTL_AUDIT_LOG="0")
+    assert "audit log" not in {f["purpose"] for f in envelope["data"]["state_files"]}
 
 
 # REQ-F-034: redaction in the audit log
@@ -776,36 +911,12 @@ def test_audit_log_entries_include_the_trace_id(tmp_path: Path) -> None:
 
 def test_an_argument_api_token_appears_as_redacted_in_the_audit_log(tmp_path: Path) -> None:
     logged(tmp_path, ["login", "--api-token-from-env", "TOK"], TOK="abc123-value")
-    assert entries(tmp_path)[0]["parameters"]["api_token"] == "[REDACTED]"
-
-
-def test_a_response_field_password_appears_as_redacted_in_the_audit_log(tmp_path: Path) -> None:
-    logged(tmp_path, ["login", "--api-token-from-env", "TOK"], TOK="abc123-value")
-    assert entries(tmp_path)[0]["data"]["PassWord"] == "[REDACTED]"
-    assert "hunter2" not in log_file(tmp_path).read_text()
+    assert entries(tmp_path)[0]["args"]["api_token"] == "[REDACTED]"
 
 
 def test_the_actual_command_execution_is_not_affected_by_redaction(tmp_path: Path) -> None:
     _, envelope = logged(tmp_path, ["login", "--api-token-from-env", "TOK"], TOK="abc123-value")
     assert envelope["data"]["length"] == len("abc123-value")
-
-
-def test_redaction_applies_to_field_names_matched_case_insensitively(tmp_path: Path) -> None:
-    logged(tmp_path, ["login", "--api-token-from-env", "TOK"], TOK="abc123-value")
-    data = entries(tmp_path)[0]["data"]
-    assert data == {"length": 12, "PassWord": "[REDACTED]", "user": "me"}
-
-
-def test_large_data_is_left_out_of_the_entry_by_size(tmp_path: Path) -> None:
-    app = make_app()
-
-    @app.command("big", description="Big", danger_level="safe", exit_codes=())
-    def big(args: NoArgs, ctx: Ctx) -> dict[str, str]:
-        return {"text": "x" * 5000}
-
-    run(app, ["big"], data_env(tmp_path))
-    entry = entries(tmp_path)[0]
-    assert entry["data"] is None and entry["data_bytes"] > 5000
 
 
 # audit=False: a value kept out of the audit log, not out of the command
@@ -842,7 +953,7 @@ def note_app() -> App:
     return app
 
 
-OMITTED_PARAMETERS = {"to": "[OMITTED]", "body": "[OMITTED]", "subject": "hi"}
+OMITTED_ARGS = {"to": "[OMITTED]", "body": "[OMITTED]", "subject": "hi"}
 
 
 def note_entry(tmp_path: Path) -> dict[str, Any]:
@@ -860,7 +971,7 @@ def test_an_audit_false_argument_is_omitted_from_the_log_but_reaches_the_handler
     data = envelope_of(out)["data"]
     assert data == {"ref": "note:hi", "chars": 23, "effect": "created"}
     entry = note_entry(tmp_path)
-    assert entry["parameters"] == {**OMITTED_PARAMETERS, "password": "[REDACTED]"}
+    assert entry["args"] == {**OMITTED_ARGS, "password": "[REDACTED]"}
 
 
 def test_audit_false_is_omitted_on_exec_raw_payload_and_app_call(tmp_path: Path) -> None:
@@ -884,7 +995,7 @@ def test_audit_false_is_omitted_on_exec_raw_payload_and_app_call(tmp_path: Path)
             )
             data = envelope.data
         assert data["chars"] == 23, route
-        assert note_entry(home)["parameters"] == {**OMITTED_PARAMETERS, "password": "[REDACTED]"}
+        assert note_entry(home)["args"] == {**OMITTED_ARGS, "password": "[REDACTED]"}
 
 
 def test_the_manifest_and_schemas_mark_audit_false_fields() -> None:
@@ -916,40 +1027,46 @@ def test_use_of_no_injection_protection_is_recorded_in_the_audit_log_with_a_warn
     tmp_path: Path,
 ) -> None:
     logged(tmp_path, ["warn", "--no-injection-protection"])
-    assert entries(tmp_path)[0]["warnings"] == ["INJECTION_PROTECTION_DISABLED"]
+    entry = entries(tmp_path)[0]
+    assert entry["warnings"] == ["INJECTION_PROTECTION_DISABLED"]
+    assert entry["args"]["no_injection_protection"] is True
 
 
-# REQ-F-042: rotation and retention
+# Bounds: rotation and retention
 
 
 def small(tmp_path: Path, **kw: int) -> App:
     return make_app(audit_log=AuditLog(path=tmp_path / "log" / "audit.jsonl", **kw))
 
 
+def test_the_default_bounds_are_10_mib_5_rotated_files_and_30_days() -> None:
+    bounds = AuditLog()
+    assert (bounds.max_bytes, bounds.keep, bounds.max_age_days) == (10 * 2**20, 5, 30)
+    assert bounds.max_bytes * (bounds.keep + 1) <= 60 * 2**20
+
+
 def test_a_log_file_that_exceeds_the_size_limit_is_rotated_and_a_new_file_started(
     tmp_path: Path,
 ) -> None:
-    app = small(tmp_path, max_bytes=600)
+    app = small(tmp_path, max_bytes=400)
     for _ in range(3):
         run(app, ["warn"])
     live, first = tmp_path / "log" / "audit.jsonl", tmp_path / "log" / "audit.1.jsonl"
     assert first.exists() and live.exists()
-    assert first.stat().st_size <= 600 and live.stat().st_size <= 600
+    assert first.stat().st_size <= 400 and live.stat().st_size <= 400
 
 
 def test_rotated_files_beyond_the_retention_count_are_deleted_automatically(
     tmp_path: Path,
 ) -> None:
-    app = small(tmp_path, max_bytes=300, keep=2)
+    app = small(tmp_path, max_bytes=200, keep=2)
     for _ in range(8):
         run(app, ["warn"])
     names = sorted(p.name for p in (tmp_path / "log").glob("audit*.jsonl"))
     assert names == ["audit.1.jsonl", "audit.2.jsonl", "audit.jsonl"]
 
 
-def test_log_files_older_than_the_maximum_age_are_deleted_on_framework_startup(
-    tmp_path: Path,
-) -> None:
+def test_rotated_files_older_than_the_maximum_age_are_deleted(tmp_path: Path) -> None:
     folder = tmp_path / "log"
     folder.mkdir()
     old, recent = folder / "audit.2.jsonl", folder / "audit.1.jsonl"
@@ -961,7 +1078,44 @@ def test_log_files_older_than_the_maximum_age_are_deleted_on_framework_startup(
     assert not old.exists() and recent.exists()
 
 
-def test_disk_usage_from_framework_logs_is_bounded_even_across_unlimited_invocations(
+def test_pruning_waits_for_a_concurrent_rotation_and_keeps_the_file_it_moved_in(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "log"
+    folder.mkdir()
+    slot = folder / "audit.1.jsonl"
+    slot.write_text('{"old":true}\n')
+    month_ago = (dt.datetime.now() - dt.timedelta(days=31)).timestamp()
+    os.utime(slot, (month_ago, month_ago))
+    journal = Journal(folder / "audit.jsonl", AuditLog(max_age_days=30))
+    entry = {"timestamp": "2026-01-01T00:00:00.000Z", "command": "warn"}
+    appending = threading.Thread(target=journal.append, args=(entry,))
+    with exclusive(journal.lock_path):  # another run is rotating
+        appending.start()
+        appending.join(timeout=0.5)
+        # The append waits for the lock rather than pruning the slot mid-rotation
+        assert appending.is_alive() and slot.exists()
+        slot.write_text('{"moved":true}\n')  # the rotation moves a fresh file into it
+    appending.join()
+    assert json.loads(slot.read_text()) == {"moved": True}
+
+
+def test_an_active_file_whose_first_entry_is_too_old_is_rotated_on_the_next_write(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "log"
+    folder.mkdir()
+    live = folder / "audit.jsonl"
+    stale = {"timestamp": "2020-01-01T00:00:00.000Z", "command": "warn"}
+    live.write_text(json.dumps(stale) + "\n")  # written just now, but its entry is old
+    run(small(tmp_path, max_age_days=30), ["warn"])
+    assert json.loads((folder / "audit.1.jsonl").read_text()) == stale
+    assert [json.loads(line)["command"] for line in live.read_text().splitlines()] == ["warn"]
+    run(small(tmp_path, max_age_days=30), ["warn"])
+    assert not (folder / "audit.2.jsonl").exists()  # the new first entry is recent
+
+
+def test_disk_usage_from_the_audit_log_is_bounded_even_across_unlimited_invocations(
     tmp_path: Path,
 ) -> None:
     app = small(tmp_path, max_bytes=1000, keep=2)
@@ -994,7 +1148,7 @@ def events(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def old_entry(tmp_path: Path, **fields: object) -> None:
     path = log_file(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    entry = {"timestamp": "2020-01-01T00:00:00.000Z", "command": "warn", "trace_id": None}
+    entry = {"timestamp": "2099-01-01T00:00:00.000Z", "command": "warn"}
     with path.open("a") as handle:
         handle.write(json.dumps(entry | fields) + "\n")
 
@@ -1002,12 +1156,25 @@ def old_entry(tmp_path: Path, **fields: object) -> None:
 def test_audit_log_since_1h_format_jsonl_returns_invocations_of_the_past_hour_one_per_line(
     tmp_path: Path,
 ) -> None:
-    old_entry(tmp_path)
     logged(tmp_path, ["warn"])
     logged(tmp_path, ["missing"])
-    code, lines = query(tmp_path, ["--since", "1h"])
-    assert code == 0 and [e["command"] for e in events(lines)] == ["warn", "missing"]
-    assert lines[-1]["meta"]["end"] is True and lines[-1]["meta"]["total"] == 2
+    # Queried entries are read from the file whatever it holds: one from long ago
+    with log_file(tmp_path).open("r+") as handle:
+        lines = handle.read().splitlines()
+        handle.seek(0)
+        old = json.dumps({"timestamp": "2020-01-01T00:00:00.000Z", "command": "warn"})
+        handle.write("\n".join([old, *lines]) + "\n")
+    code, found = query(tmp_path, ["--since", "1h"])
+    assert code == 0 and [e["command"] for e in events(found)] == ["warn", "missing"]
+    assert found[-1]["meta"]["end"] is True and found[-1]["meta"]["total"] == 2
+
+
+def test_audit_log_since_takes_an_iso_time_with_an_offset(tmp_path: Path) -> None:
+    old_entry(tmp_path, timestamp="2026-03-17T13:59:59Z", n=1)
+    old_entry(tmp_path, timestamp="2026-03-17T14:00:00Z", n=2)
+    old_entry(tmp_path, timestamp="2026-03-17T15:30:00+02:00", n=3)
+    _, found = query(tmp_path, ["--since", "2026-03-17T14:00:00Z"])
+    assert [e["n"] for e in events(found)] == [2]
 
 
 def test_audit_log_trace_id_returns_only_entries_with_that_trace_id(tmp_path: Path) -> None:
@@ -1023,23 +1190,32 @@ def test_audit_log_trace_id_returns_only_entries_with_that_trace_id(tmp_path: Pa
 
 def test_secret_field_values_are_redacted_in_all_audit_log_query_results(tmp_path: Path) -> None:
     logged(tmp_path, ["login", "--api-token-from-env", "TOK"], TOK="abc123-value")
-    old_entry(tmp_path, timestamp="2099-01-01T00:00:00Z", parameters={"password": "plain"})
+    old_entry(tmp_path, args={"password": "plain"})
     code, out, _ = run(make_app(), ["audit-log", "--format", "jsonl"], data_env(tmp_path))
     assert code == 0 and "abc123-value" not in out and "plain" not in out
     found = events([json.loads(line) for line in out.splitlines()])
-    assert found[0]["parameters"]["api_token"] == "[REDACTED]"
-    assert found[1]["parameters"] == {"password": "[REDACTED]"}
+    assert found[0]["args"]["api_token"] == "[REDACTED]"
+    assert found[1]["args"] == {"password": "[REDACTED]"}
 
 
-def test_limit_100_returns_at_most_100_entries(tmp_path: Path) -> None:
+def test_limit_100_returns_the_newest_100_oldest_first(tmp_path: Path) -> None:
     for n in range(120):
-        old_entry(tmp_path, timestamp=f"2099-01-01T00:00:{n % 60:02d}Z", n=n)
+        old_entry(tmp_path, timestamp=f"2099-01-01T00:{n // 60:02d}:{n % 60:02d}Z", n=n)
     _, lines = query(tmp_path, ["--limit", "100"])
     found = events(lines)
-    assert len(found) == 100 and found[-1]["n"] == 119  # the newest, oldest first
+    assert [e["n"] for e in found] == list(range(20, 120))
 
 
-def test_audit_log_filters_by_command_and_skips_unreadable_lines(tmp_path: Path) -> None:
+def test_audit_log_command_matches_whole_words_of_the_path(tmp_path: Path) -> None:
+    for command in ("config.set", "config.get", "configure", "warn"):
+        old_entry(tmp_path, command=command)
+    for wanted in ("config", "config set", "config.set"):
+        _, lines = query(tmp_path, ["--command", wanted])
+        expected = ["config.set", "config.get"] if wanted == "config" else ["config.set"]
+        assert [e["command"] for e in events(lines)] == expected, wanted
+
+
+def test_audit_log_skips_unreadable_lines_with_a_warning(tmp_path: Path) -> None:
     logged(tmp_path, ["warn"])
     logged(tmp_path, ["missing"])
     with log_file(tmp_path).open("a") as handle:
@@ -1049,30 +1225,45 @@ def test_audit_log_filters_by_command_and_skips_unreadable_lines(tmp_path: Path)
     assert lines[-1]["warnings"][0]["code"] == "AUDIT_LINES_UNREADABLE"
 
 
-def test_audit_log_rejects_a_bad_since_or_limit_before_running(tmp_path: Path) -> None:
-    for argv in (["--since", "yesterday"], ["--limit", "0"]):
-        code, lines = query(tmp_path, argv)
-        assert code == 2 and lines[-1]["error"]["phase"] == "validation"
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--since", "yesterday"],
+        ["--since", "1w"],
+        ["--since", "0h"],
+        ["--since", "2026-03-17T14:00:00"],
+        ["--limit", "0"],
+    ],
+)
+def test_audit_log_rejects_a_bad_since_or_limit_before_running(
+    tmp_path: Path, argv: list[str]
+) -> None:
+    code, lines = query(tmp_path, argv)
+    assert code == 2 and lines[-1]["error"]["phase"] == "validation"
 
 
 def test_audit_log_reads_rotated_files_oldest_first(tmp_path: Path) -> None:
-    app = make_app(audit_log=AuditLog(path=tmp_path / "log" / "audit.jsonl", max_bytes=600))
+    app = make_app(audit_log=AuditLog(path=tmp_path / "log" / "audit.jsonl", max_bytes=400))
     for n in range(4):
         run(app, ["warn", "--n", str(n)])
     assert (tmp_path / "log" / "audit.1.jsonl").exists()
     _, out, _ = run(app, ["audit-log", "--command", "warn"])
-    ns = [e["parameters"]["n"] for e in events([json.loads(line) for line in out.splitlines()])]
+    ns = [e["args"]["n"] for e in events([json.loads(line) for line in out.splitlines()])]
     assert ns == [0, 1, 2, 3]
 
 
-def test_audit_log_off_exits_4(tmp_path: Path) -> None:
+def test_audit_log_while_the_log_is_disabled_exits_4(tmp_path: Path) -> None:
     code, lines = query(tmp_path, [])
     assert code == 0
-    code, out, _ = run(make_app(), ["audit-log"], {"LOGCTL_AUDIT_LOG": "off"})
-    assert code == 4 and json.loads(out.splitlines()[-1])["error"]["code"] == "AUDIT_LOG_OFF"
+    for env in ({}, {"LOGCTL_AUDIT_LOG": "0"}):
+        code, out, _ = run(make_app(), ["audit-log"], env)
+        error = json.loads(out.splitlines()[-1])["error"]
+        assert code == 4 and error["code"] == "AUDIT_LOG_DISABLED"
+        assert "LOGCTL_AUDIT_LOG=1" in error["fix_required"]
 
 
-def test_audit_log_yields_to_an_app_command_of_that_name() -> None:
+def test_audit_log_is_on_every_app_and_yields_to_an_app_command_of_that_name() -> None:
+    assert "audit-log" in make_app().manifest()["commands"]  # type: ignore[operator]
     app = make_app()
 
     @app.command("audit-log", description="Mine", danger_level="safe", exit_codes=())
@@ -1083,8 +1274,8 @@ def test_audit_log_yields_to_an_app_command_of_that_name() -> None:
     assert "audit-log" in [p.value for p in app.shadowed_builtins]
 
 
-def test_the_treaty_cli_has_no_audit_log_builtin() -> None:
-    assert "audit-log" not in cli.manifest()["commands"]  # type: ignore[operator]
+def test_the_treaty_cli_has_the_audit_log_builtin_too() -> None:
+    assert "audit-log" in cli.manifest()["commands"]  # type: ignore[operator]
 
 
 # The linter
@@ -1095,10 +1286,3 @@ def test_a_handler_that_prints_is_flagged_by_log_not_print() -> None:
     rule = next(r for r in report.rules if r.id == "log-not-print")
     assert [f.command for f in rule.findings] == ["chatty"]
     assert "ctx.log(" in rule.findings[0].fix
-
-
-def test_the_audit_log_variable_off_wins_over_an_explicit_path(tmp_path: Path) -> None:
-    app = small(tmp_path)
-    _, out, _ = run(app, ["warn"], {"LOGCTL_AUDIT_LOG": "off"})
-    assert "audit_log_path" not in json.loads(out)["meta"]
-    assert not (tmp_path / "log").exists()

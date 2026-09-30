@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from importlib.metadata import version
 
 from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
@@ -485,17 +485,31 @@ def build_manifest(
     *,
     builtins: frozenset[CommandPath],
     dependencies: Sequence[Mapping[str, str]] = (),
+    audit_log_path: str | None = None,
+    unlogged: Collection[CommandPath] = (),
 ) -> dict[str, object]:
     """The manifest tree with the shared exit-code table hoisted to the root, each of
     ``builtins`` marked ``builtin: true`` (REQ-O-041); the app's
     declared ``dependencies`` too, when it has any (REQ-O-031). ``framework_version`` is
-    treaty's own version; the app's is ``meta.tool_version`` of the response"""
+    treaty's own version; the app's is ``meta.tool_version`` of the response. While the
+    audit log is on, ``audit_log_path`` is a ``log`` side effect of every command it
+    records, those not ``unlogged`` (REQ-O-030)"""
     shared = shared_exit_codes(exits)
     flags = global_flag_entries(formats, app_name)
     entries = {
         path.value: command_entry(cmd, exits, commands, builtin=path in builtins, shared=shared)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
+    if audit_log_path is not None:
+        for path in commands:
+            if path not in unlogged:
+                entry = entries[path.value]
+                declared = entry.get("filesystem_side_effects")
+                effects = declared if isinstance(declared, list) else []
+                entry["filesystem_side_effects"] = [
+                    *effects,
+                    {"path": audit_log_path, "type": "log"},
+                ]
     # Everything an agent caches: a new global flag or shared code must change the etag
     shape: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,

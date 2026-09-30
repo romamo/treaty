@@ -10,7 +10,7 @@ import pytest
 from todo.cli import app
 
 # The whole environment of each call: the audit log off, so a test run never lands in yours
-QUIET = {"TODO_AUDIT_LOG": "off"}
+QUIET = {"TODO_AUDIT_LOG": "0"}
 
 
 @pytest.fixture

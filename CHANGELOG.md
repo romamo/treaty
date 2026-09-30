@@ -10,10 +10,47 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- The audit log is off by default, as the spec's REQ-O-030 now says (it retired REQ-F-026,
+  which had it on): a run of an app that configured nothing creates no file or directory,
+  and `meta.audit_log_path` is absent. `App(audit_log=None)` is the default;
+  `App(audit_log=treaty.AuditLog())` turns it on. `<APP>_AUDIT_LOG` wins over the app:
+  `1` turns it on, `0` off, an absolute path on at that path. Any other value, an empty one
+  included, exits 2 with `INVALID_AUDIT_LOG_SETTING` for every invocation except `--help`
+  and `--version`, where `manifest` and `--schema` answered before. That includes `off`,
+  which earlier releases documented: write `0` instead. An `AuditLog(path=...)` no longer
+  beats the operator's path (#71)
+- The default audit log path is `$XDG_STATE_HOME/<app>/audit.jsonl`, else
+  `~/.local/state/<app>/audit.jsonl`. A log written by an earlier release under
+  `$XDG_DATA_HOME/<app>/` (`~/.local/share/<app>/`) is neither moved nor read; delete it,
+  or point `<APP>_AUDIT_LOG` at it (#71)
+- `AuditLog` defaults to 10 MiB per file, 5 rotated files, and 30 days, O-030's own bounds:
+  at most 60 MiB per tool where it was 600 MiB. This settles #53. The active file also
+  rotates once its first entry is older than `max_age_days`, and rotated files that old are
+  deleted before every append rather than once per process (#71)
+- An audit entry matches the spec's `audit-log-entry.json`: `parameters` is `args`, with
+  `validate_only`, `confirm_destructive`, and `no_injection_protection` added when given;
+  `operator` is `session_id` (still read from `<APP>_SESSION`), present only when set, as
+  `trace_id` is; `timestamp` is when the run started; `error_code`, `data`, and
+  `data_bytes` are gone. A line is at most 16 KiB: the largest `args` values become
+  `[TRUNCATED]` and `truncated` is `true`, where strings were cut at 1,024 characters (#71)
+- Only invocations that resolve to a command are logged: an unknown command, `--version`,
+  `version`, `manifest`, `completion`, and `audit-log` itself no longer append an entry
+  (#71)
+- `audit-log` is on every app, the treaty CLI included, since the operator can turn the log
+  on for any of them. While the log is off it exits 4 with `AUDIT_LOG_DISABLED` (was
+  `AUDIT_LOG_OFF`). `--since` takes a positive duration or an ISO 8601 time with a UTC
+  offset (`0h` and a time without an offset exit 2), and `--command config` also matches
+  `config set` and `config get`, but not `configure` (#71)
+- While the log is on, the manifest lists its path as a `log` side effect of every command
+  it records; the log's files are created `0600` and new directories `0700` whatever the
+  umask (#71)
+
 ### Added
 
 - `Flag(audit=False)` and `Arg(audit=False)` keep an argument's key in the audit log's
-  `parameters` with the value `[OMITTED]`, for a value that is no secret but should not be
+  `args` with the value `[OMITTED]`, for a value that is no secret but should not be
   kept, such as a message body. It still works on argv, in `exec`, `--raw-payload`, MCP, and
   `app.call`; the manifest adds "(omitted from the audit log)" to its description and the
   args schema marks it `"x-audited": false`. With `secret=True` the `[REDACTED]` wins.

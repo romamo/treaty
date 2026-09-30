@@ -429,12 +429,12 @@ def test_two_concurrent_invocations_with_different_config_paths_share_no_mutable
     for session in sessions:
         session.mkdir()
     procs = [
-        # The audit log is the one file every run shares by design (REQ-F-026)
+        # An audit log the operator turned on is the one file every run shares (REQ-O-030)
         spawn(
             ["config", "set", f"r{n}", "--config", str(s / "config.toml")],
             s,
             HOME=str(home),
-            CONFIGCTL_AUDIT_LOG="off",
+            CONFIGCTL_AUDIT_LOG="0",
         )
         for n, s in enumerate(sessions)
     ]
@@ -562,7 +562,7 @@ def test_first_invocation_of_a_non_init_command_is_identical_to_the_hundredth(
     home = {
         "HOME": str(tmp_path),
         "XDG_CONFIG_HOME": str(tmp_path / "cfg"),
-        "CONFIGCTL_AUDIT_LOG": "off",  # the audit log is written on every run by design
+        "CONFIGCTL_AUDIT_LOG": "0",  # even if the shell running the tests turned it on
     }
     runs = [configctl(["show", "--stable-output"], home) for _ in range(3)]
     assert runs[0] == runs[1] == runs[2] and runs[0][0] == 0
@@ -749,7 +749,7 @@ def test_a_setting_declared_secret_is_redacted_and_a_path_setting_follows_cwd(
     def where(args: NoArgs, ctx: Ctx, settings: Settings) -> dict[str, str]:
         return {"migrations": str(settings.migrations)}
 
-    env = {"DBX_DATABASE": "sqlite://admin:s3cret@db", "DBX_AUDIT_LOG": "off"}
+    env = {"DBX_DATABASE": "sqlite://admin:s3cret@db", "DBX_AUDIT_LOG": "0"}
     out = io.StringIO()
     app.run(
         ["where", "--show-config", "--format", "json"], stdout=out, stderr=io.StringIO(), env=env
@@ -783,7 +783,7 @@ def test_settings_resolve_path_tuples_and_refuse_flag_options_they_ignore(tmp_pa
         return {"extra": [str(p) for p in settings.extra]}
 
     out = io.StringIO()
-    env = {"TPX_EXTRA": "e1,e2", "TPX_AUDIT_LOG": "off"}
+    env = {"TPX_EXTRA": "e1,e2", "TPX_AUDIT_LOG": "0"}
     app.run(["where", "--cwd", str(tmp_path)], stdout=out, stderr=io.StringIO(), env=env)
     assert json.loads(out.getvalue())["data"] == {
         "extra": [str(tmp_path / "e1"), str(tmp_path / "e2")]
@@ -838,7 +838,7 @@ def query_app() -> App:
 def run_query(argv: list[str], **env: str) -> tuple[int, dict[str, Any]]:
     out = io.StringIO()
     code = query_app().run(
-        argv, stdout=out, stderr=io.StringIO(), env={"QCTL_AUDIT_LOG": "off", **env}
+        argv, stdout=out, stderr=io.StringIO(), env={"QCTL_AUDIT_LOG": "0", **env}
     )
     return code, json.loads(out.getvalue())
 
@@ -906,7 +906,7 @@ def test_an_audit_reports_a_settings_field_of_an_unregistered_class(tmp_path: Pa
     proc = subprocess.run(
         [sys.executable, "-c", "from treaty._cli import main; main()", "audit", "unregctl:app"],
         cwd=tmp_path,
-        env=process_env(TREATY_AUDIT_LOG="off"),
+        env=process_env(TREATY_AUDIT_LOG="0"),
         capture_output=True,
         text=True,
         timeout=60,
@@ -938,7 +938,7 @@ def test_a_secret_scalar_setting_is_redacted_from_a_refusal_quoting_its_text() -
         return {}
 
     out = io.StringIO()
-    env = {"TOKCTL_AUDIT_LOG": "off", "TOKCTL_API_TOKEN": "7654321"}
+    env = {"TOKCTL_AUDIT_LOG": "0", "TOKCTL_API_TOKEN": "7654321"}
     code = app.run(["show", "--no-config"], stdout=out, stderr=io.StringIO(), env=env)
     assert code == 2
     assert "7654321" not in out.getvalue()

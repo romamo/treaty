@@ -66,7 +66,9 @@ CONTEXT = EnvVar("context", "Named context of the config files to apply")
 INSTANCE_ID = EnvVar("instance_id", "Instance namespace for the user config file and state")
 SESSION = EnvVar("session", "Agent session id: repeats of a mutating call in it are deduplicated")
 NO_UPDATE = EnvVar("no_update", "Any value turns the update check off, as --no-update-check does")
-AUDIT_LOG = EnvVar("audit_log", "Audit log file, an absolute path; off turns the log off")
+AUDIT_LOG = EnvVar(
+    "audit_log", "Audit log, off by default: 1 on, 0 off, or an absolute path to log there"
+)
 
 KNOWN: tuple[EnvVar, ...] = (
     FORMAT,

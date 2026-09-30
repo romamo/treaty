@@ -52,6 +52,7 @@ from ._auth import (
 )
 from ._batch import Batch, ItemError
 from ._builtins import (
+    AUDIT_LOG_PATH,
     register_audit_log,
     register_changelog,
     register_cleanup,
@@ -84,6 +85,7 @@ from ._command import (
     Shim,
     build_command,
 )
+from ._completion import COMPLETION_PATH
 from ._config import ConfigFile, ConfigScope, local_config, user_config
 from ._context import Ctx, LogSink
 from ._declare import UNSUPPORTED_PLATFORM, Background, SideEffect, Subprocess, supports
@@ -133,7 +135,13 @@ from ._idempotency import (
 from ._init import INIT_COMMAND, Init, Initialized, run_init
 from ._init import required as init_required
 from ._jobs import Job, JobStore, with_links
-from ._journal import AUDIT_LOG_UNAVAILABLE, DEFAULT_AUDIT_LOG, AuditLog, Journal, log_path
+from ._journal import (
+    AUDIT_LOG_UNAVAILABLE,
+    INVALID_AUDIT_LOG_SETTING,
+    AuditLog,
+    Journal,
+    resolve,
+)
 from ._lifecycle import Teardown
 from ._locks import LockHeld, Locks
 from ._manifest import (
@@ -368,7 +376,7 @@ class App:
         dependencies: Sequence[Dependency] = (),
         checks: Sequence[CheckFn] = (),
         update_check: UpdateCheck | None = None,
-        audit_log: AuditLog | None = DEFAULT_AUDIT_LOG,
+        audit_log: AuditLog | None = None,
         schema_changelog: str | Path | None = None,
     ) -> None:
         """``version`` is semver, or a PEP 440 release such as ``importlib.metadata.version``
@@ -392,9 +400,10 @@ class App:
         release: for a person at a terminal, ``meta.update_available`` names it when it is
         newer, read from a cache a daemon thread refreshes daily, so no run waits on it.
         Never under CI, off a terminal, with ``<APP>_NO_UPDATE``, or ``--no-update-check``
-        (REQ-F-029, REQ-O-020). ``audit_log`` is where every invocation is recorded, a
-        ``treaty.AuditLog``; None keeps no log and drops the ``audit-log`` built-in
-        (REQ-F-026, REQ-O-030). ``schema_changelog`` is the JSON file ``treaty
+        (REQ-F-029, REQ-O-020). ``audit_log``, a ``treaty.AuditLog``, turns on the audit
+        log of every invocation and bounds it; None leaves it off unless the operator sets
+        ``<APP>_AUDIT_LOG``, which wins either way. ``audit-log`` queries it on every app
+        (REQ-O-030). ``schema_changelog`` is the JSON file ``treaty
         changelog-add`` writes, shipped with the package; it adds the ``changelog``
         built-in (REQ-O-029).
 
@@ -1146,7 +1155,7 @@ class App:
             ],
         )
         def manifest(args: ManifestArgs, ctx: Ctx) -> dict[str, object]:
-            built = self.manifest()
+            built = self._manifest(resolve(self.audit_log, self.name, ctx.env).path)
             if args.etag is not None and args.etag == built["etag"]:
                 raise NotModified
             return built
@@ -1170,8 +1179,7 @@ class App:
         self._yielding.add(register_completion(self))
         if self.schema_changelog is not None:
             self._yielding.add(register_changelog(self, self.changelog))
-        if self.audit_log is not None:
-            self._yielding.add(register_audit_log(self, self.audit_log))
+        self._yielding.add(register_audit_log(self))
 
         if self.init is not None:
             setup = self.init
@@ -1483,6 +1491,11 @@ class App:
         return self._settings
 
     def manifest(self) -> dict[str, object]:
+        return self._manifest(None)
+
+    def _manifest(self, audit_log_path: Path | None) -> dict[str, object]:
+        """The manifest; ``audit_log_path`` is the run's audit log while it is on, a
+        ``log`` side effect of each command it records (REQ-O-030)"""
         self._check_fixes()
         return build_manifest(
             self._commands,
@@ -1491,6 +1504,8 @@ class App:
             self.name,
             builtins=self._builtins,
             dependencies=[d.to_json() for d in self.dependencies],
+            audit_log_path=None if audit_log_path is None else str(audit_log_path),
+            unlogged=UNLOGGED & self._builtins,
         )
 
     def environment(self) -> list[tuple[str, str]]:
@@ -1552,7 +1567,7 @@ class App:
                 run.load_settings(config_options(self.name, environ))
             except ParseError as exc:
                 deferred = exc
-        if deferred is not None and path not in {p.value for p in PURE_PATHS}:
+        if deferred is not None and not _answers_over(deferred, path):
             return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
         run.attach_logging()
         try:
@@ -1793,6 +1808,10 @@ class App:
                 pinned = command.pin(globals_.schema_version)
             except ParseError as exc:
                 return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
+        schema_flag = globals_.output_schema or globals_.schema
+        if schema_flag and config_error is not None and _audit_setting(config_error):
+            # REQ-O-030: only --help and --version answer over a bad <APP>_AUDIT_LOG
+            return run.emit(mode, run.arg_error(config_error))
         if globals_.output_schema:
             return run.output_schema(mode, command, pinned)
         if globals_.schema:
@@ -1801,7 +1820,7 @@ class App:
             return run.help_root(mode, route.prefix)
         if globals_.help:
             return run.help_command(mode, command)
-        if config_error is not None and command.path not in PURE_PATHS:
+        if config_error is not None and not _answers_over(config_error, command.path.value):
             return run.emit(mode, run.arg_error(config_error, meta=_mode_meta(command)))
         # Installed before the arguments are read: --flag - waits on stdin (REQ-O-006)
         with cancellation_handlers(out) as cancellation:
@@ -1955,8 +1974,23 @@ CLEANUP_FAILED = "CLEANUP_FAILED"
 STATUS_CHARS = 200
 """Longest ``ctx.progress`` status a ``--heartbeat-interval`` line repeats"""
 WARNINGS_AS_ERRORS = "WARNINGS_AS_ERRORS"
-AUDIT_DATA_BYTES = 4096
-"""Larger ``data`` is left out of the audit entry, which keeps its size instead"""
+UNLOGGED = frozenset({MANIFEST_PATH, VERSION_PATH, COMPLETION_PATH, AUDIT_LOG_PATH})
+"""Built-ins that do no work, so the audit log leaves them out (REQ-O-030)"""
+
+
+def _audit_setting(error: ParseError) -> bool:
+    return error.code == INVALID_AUDIT_LOG_SETTING
+
+
+def _answers_over(error: ParseError, path: str) -> bool:
+    """Whether the command at ``path`` answers despite ``error`` in the run's environment:
+    the pure built-ins over a bad ``TOOL_TRACE_ID`` or config layer (REQ-F-068), only
+    ``version`` over a bad ``<APP>_AUDIT_LOG`` (REQ-O-030)"""
+    if _audit_setting(error):
+        return path == VERSION_PATH.value
+    return path in {p.value for p in PURE_PATHS}
+
+
 CWD_CHANGED = "CWD_CHANGED"
 SESSION_HOOK = "session temp dir"
 EVENT_LOOP_HOOK = "event loop"
@@ -2465,17 +2499,21 @@ class _Run:
         self.cwd = logical_cwd(env)
         self.trace_id: str | None = None
         self.env_error: ParseError | None = None
-        """An unusable ``TOOL_TRACE_ID`` or ``<APP>_AUDIT_LOG``, answered with exit 2
+        """An unusable ``<APP>_AUDIT_LOG`` or ``TOOL_TRACE_ID``, answered with exit 2
         before anything runs"""
         self.journal: Journal | None = None
-        """The audit log this run appends each answered invocation to (REQ-F-026)"""
+        """The audit log this run appends each resolved invocation to, while it is on
+        (REQ-O-030)"""
         try:
+            # The trace id first: the answer to a bad <APP>_AUDIT_LOG still carries it
             self.trace_id = read_trace_id(env)
-            if app.audit_log is not None:
-                where = log_path(app.audit_log, app.name, env)
-                self.journal = None if where is None else Journal(where, app.audit_log)
+            audit = resolve(app.audit_log, app.name, env)
+            if audit.path is not None:
+                self.journal = Journal(audit.path, audit.bounds)
         except ParseError as exc:
             self.env_error = exc
+        self.invocation: Invocation | None = None
+        """The framework flags of the command that runs now, for its audit entry"""
         self.args: object = None
         """The parsed arguments of the command that runs now, for its audit entry"""
         self.warnings_as_errors = False
@@ -2629,7 +2667,7 @@ class _Run:
 
     def settle(self, envelope: Envelope) -> Envelope:
         """The last step before an invocation's answer is written or returned:
-        ``--warnings-as-errors`` (REQ-O-025), then its audit log entry (REQ-F-026)"""
+        ``--warnings-as-errors`` (REQ-O-025), then its audit log entry (REQ-O-030)"""
         if self.warnings_as_errors and envelope.ok and envelope.warnings:
             count = len(envelope.warnings)
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
@@ -2647,7 +2685,7 @@ class _Run:
                 ),
             )
         journal = self.journal
-        if journal is None:
+        if journal is None or not self._logged():
             return envelope
         try:
             journal.append(self._audit_entry(envelope))
@@ -2662,11 +2700,20 @@ class _Run:
         trace("audit entry written", path=str(journal.path))
         return envelope
 
+    def _logged(self) -> bool:
+        """Whether the invocation answered now gets an audit entry: one that resolved to a
+        command, other than the built-ins that do no work (REQ-O-030)"""
+        command = self.current
+        if command is None:
+            return False  # its arguments cannot be redacted without a schema
+        return not (command.path in UNLOGGED and command.path in self.app.builtins)
+
     def _audit_entry(self, envelope: Envelope) -> dict[str, object]:
-        """One audit log line: ``parameters`` are the parsed arguments, never raw argv,
-        with secret fields, the login token, and credential-named keys ``[REDACTED]``
-        (REQ-F-026, REQ-F-034) and fields declared ``audit=False`` ``[OMITTED]``; ``data``
-        is kept when short, redacted the same way"""
+        """One audit log line (``audit-log-entry.json``): ``args`` are the parsed
+        arguments, never raw argv, with secret fields, the login token, and
+        credential-named keys ``[REDACTED]`` (REQ-O-030, REQ-F-034), fields declared
+        ``audit=False`` ``[OMITTED]``, plus the framework flags that changed what the
+        invocation did"""
         command, args = self.current, self.args
         redact = _unchanged if command is None else self._redactor(command, args)
         parameters: dict[str, object] = {}
@@ -2677,27 +2724,29 @@ class _Run:
                     continue
                 value = to_jsonable(getattr(args, f.name), self.app.scalars, base=self.cwd)
                 parameters[f.name] = scrub(f.name, value, redact)
-        data = scrub("", envelope.data, redact)
-        size = len(json.dumps(data, separators=(",", ":")))
-        error = envelope.error
+        invocation = self.invocation
+        if invocation is not None and invocation.validate_only:
+            parameters["validate_only"] = True
+        if invocation is not None and invocation.confirmed:
+            parameters["confirm_destructive"] = True
+        if self.unprotected:
+            parameters["no_injection_protection"] = True
         entry: dict[str, object] = {
-            "timestamp": utc_timestamp(),
+            "timestamp": self.timestamp,
             "command": envelope.meta.command,
-            "parameters": parameters,
+            "args": parameters,
             "exit_code": envelope.exit_code,
             # --stable-output reports 0; the log keeps the real time
             "duration_ms": int((time.perf_counter() - self.started) * 1000)
             if self.stable
             else envelope.meta.duration_ms,
-            "trace_id": self.trace_id,
             "request_id": self.request_id,
-            "operator": self.env.get(app_var(self.app.name, SESSION.key)) or None,
-            "error_code": None if error is None else error.code,
             "warnings": [w.code for w in envelope.warnings],
-            "data": data if size <= AUDIT_DATA_BYTES else None,
         }
-        if size > AUDIT_DATA_BYTES:
-            entry["data_bytes"] = size
+        if self.trace_id is not None:
+            entry["trace_id"] = self.trace_id
+        if session := self.env.get(app_var(self.app.name, SESSION.key)):
+            entry["session_id"] = session
         return entry
 
     def _ctx(
@@ -3111,7 +3160,7 @@ class _Run:
         if self.update_available is not None:
             extra["update_available"] = self.update_available
         if self.journal is not None:
-            extra["audit_log_path"] = str(self.journal.path)  # REQ-F-026
+            extra["audit_log_path"] = str(self.journal.path)  # REQ-O-030
         if self.cache is not None:
             extra["cache_used"] = self.cache.used
         if self.session is not None and self.session.made is not None:
@@ -3234,7 +3283,7 @@ class _Run:
     ) -> Envelope:
         """Run one handler, replaying the stored result when its idempotency key was seen;
         the store keeps the raw result, so a replay with ``--unmask`` still has it"""
-        self.args = invocation.args
+        self.args, self.invocation = invocation.args, invocation
         return self._present(command, self._answer(command, invocation, mode, meta=meta))
 
     def _present(self, command: Command, envelope: Envelope) -> Envelope:
@@ -4068,7 +4117,7 @@ class _Run:
         caller that sees nothing until the stream ends. A failure after some events keeps
         their count in ``meta.seq`` and marks the response ``partial``.
         """
-        self.args = invocation.args
+        self.args, self.invocation = invocation.args, invocation
         self._pin(command, invocation)
         if invocation.validate_only:
             yield self._present(command, self.validated(meta))
@@ -4829,7 +4878,12 @@ class _Run:
                 rest = "" if after is None else f"; next: --token-offset {after}"
                 self.err.write(f"cut to --token-limit {self.budget.limit}{rest}\n", Level.WARN)
         if settle:
+            before = len(envelope.warnings)
             envelope = self.settle(envelope)
+            for warning in envelope.warnings[before:]:
+                # No envelope carries it here: one WarningDetail line on stderr (REQ-O-030)
+                line = json.dumps(warning.to_json(), separators=(",", ":"))
+                self.err.write(line + "\n", Level.WARN)
         code = envelope.exit_code
         pagination = envelope.extra_meta.get("pagination")
         if isinstance(pagination, dict) and pagination.get("has_more"):
@@ -4998,7 +5052,7 @@ class _Run:
                         break
         # What follows answers the plan, not its last line
         self.current, self.pinned, self.retrier, self.warnings = plan_command, None, None, []
-        self.args = None
+        self.args, self.invocation = None, None
         self.stable = self.stable_all
         if (received := self.cancellation.received) is not None:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
@@ -5176,6 +5230,7 @@ class _Run:
             # One command per line
             self.warnings, self.token, self.config_file = [], None, None
             self.current, self.pinned, self.retrier, self.args = None, None, None, None
+            self.invocation = None
             self.session, self.processes, self.cache = None, None, None
             self.stable = self.stable_all
             started = time.perf_counter()

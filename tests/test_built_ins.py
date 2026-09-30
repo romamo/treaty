@@ -406,7 +406,9 @@ def test_tool_status_show_state_files_returns_paths_and_summaries_of_all_global_
     (home / ".config" / "fx").mkdir(parents=True)
     (home / ".config" / "fx" / "config.toml").write_bytes(b"region = 'eu'\n")  # 14 bytes
     code, envelope = run(
-        effects_app(tmp_path), ["status", "--show-state-files"], {"HOME": str(home)}
+        effects_app(tmp_path),
+        ["status", "--show-state-files"],
+        {"HOME": str(home), "FX_AUDIT_LOG": "1"},  # the audit log is listed while it is on
     )
     assert code == 0
     files = {f["purpose"]: f for f in data_of(envelope)["state_files"]}  # type: ignore[union-attr]

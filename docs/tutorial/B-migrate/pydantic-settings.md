@@ -45,8 +45,8 @@ example, a command for each market CLI, and an empty scratch directory:
 <!-- check -->
 ```bash
 todo() { uv run examples/tutorial/todo_treaty.py "$@"; }
-prices() { PRICES_AUDIT_LOG=off uv run python -m examples.tutorial.market_prices "$@"; }
-funds() { FUNDS_AUDIT_LOG=off uv run python -m examples.tutorial.market_funds "$@"; }
+prices() { uv run python -m examples.tutorial.market_prices "$@"; }
+funds() { uv run python -m examples.tutorial.market_funds "$@"; }
 rm -rf tmp/tutorial && mkdir -p tmp/tutorial
 ```
 

@@ -190,7 +190,9 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `<APP>_AUDIT_LOG`, `meta.audit_log_path`), the `audit-log` built-in, and the audit rule
   `log-not-print`. Behavior changes: off a terminal or under `CI`, `ctx.log` and stray
   `print()` text no longer reach stderr; every app writes an audit log under
-  `XDG_DATA_HOME` unless `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`
+  `XDG_DATA_HOME` unless `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`. Since superseded:
+  the audit log is opt-in (REQ-O-030), under `XDG_STATE_HOME`, 10 MiB × 5 rotated files
+  (#71)
 - 1.0 plan, output selection and streaming flags (`plans/1.0/12-output-selection.md`):
   `--fields`, `--stream` (a `STREAMING_NOT_SUPPORTED` warning on commands that cannot
   stream; `meta.pagination` on a stream's summary line), `--format id` with

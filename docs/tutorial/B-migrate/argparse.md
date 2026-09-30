@@ -441,7 +441,7 @@ Tests call commands in-process with `app.call()`, the same path `exec` and MCP u
 the envelope back. No subprocess, no parsing of printed text:
 
 ```python
-env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")}, env={"TODO_AUDIT_LOG": "off"})
+env = app.call("done", {"id": 9, "db": str(tmp_path / "todo.json")}, env={"TODO_AUDIT_LOG": "0"})
 assert env.exit_code == 5 and env.error.code == "NOT_FOUND"
 ```
 

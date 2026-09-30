@@ -62,9 +62,9 @@ Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
 - Finish the cloudfall port and port a second, read-heavy CLI (pagination, streaming).
   Gaps they find go into another release candidate
 - Soak one release candidate with both consumers for two weeks with no API change
-- Name the spec version treaty conforms to. CI pins `SPEC_REF` to `91dedd2`, 36 commits
-  past the spec's `v1.7.0` and in no release; either the spec tags a release that
-  contains it, or 1.0 names the commit
+- Name the spec version treaty conforms to. CI pins `SPEC_REF` to `5e6f0d8`, the spec's
+  1.9.0 release commit (for REQ-O-030's `audit-log-entry.json`, #71); either the spec tags
+  it `v1.9.0`, or 1.0 names the commit
 - Run `benchmark/` against the release candidate for the release notes, and check
   `docs/tutorial/` against the frozen API
 - At the tag: classifier `5 - Production/Stable`; update `COMPLIANCE.md`, `README.md`,
@@ -387,8 +387,8 @@ Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
   REQ-F-034's list plus `cookie` and a `pass` segment) for inputs, settings, logs, and
   stderr, where over-redaction is harmless; `secret_field` (the last word) for masking
   output, where it is not (`author`, `token_count`)
-- **Yielding built-ins** (13-D1): `doctor`, `cleanup`, and `audit-log` (unless
-  `App(audit_log=None)`, as the treaty CLI passes) (`_builtins.py`) are registered on every app and listed in `App._yielding`; `_yield_to` drops one when an app command,
+- **Yielding built-ins** (13-D1): `doctor`, `cleanup`, and `audit-log` (`_builtins.py`)
+  are registered on every app and listed in `App._yielding`; `_yield_to` drops one when an app command,
   group, or redirect takes its path, and `shadowed_builtins` feeds the `builtin-shadowed`
   audit rule. `manifest`, `version`, and `exec` stay reserved. Workstream 13 adds its
   built-ins the same way
@@ -420,9 +420,11 @@ Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
   the audit entry, called by `_write` and `_emit_text` (not for stream events or help,
   `settle=False`) and by `App.call`. `_write` returns the exit code it wrote, since settling
   can change it. `self.args` holds the parsed args for the entry; `exec` resets it per line
-- **The audit log is `_journal.py`** (`_audit.py` is the linter): the run resolves the path
-  once (`env_error` holds a bad `<APP>_AUDIT_LOG`, like a bad `TOOL_TRACE_ID`); the test
-  suite points `XDG_DATA_HOME` at a temp dir in `conftest.pytest_configure`
+- **The audit log is `_journal.py`** (`_audit.py` is the linter), opt-in (REQ-O-030):
+  `resolve()` reads `<APP>_AUDIT_LOG` over `App(audit_log=)` once per run (`env_error`
+  holds a bad value with code `INVALID_AUDIT_LOG_SETTING`, which only `--help` and
+  `--version` answer over; `_answers_over`). `_Run._logged` skips unresolved invocations and
+  the `UNLOGGED` built-ins; `encoded()` caps an entry at 16 KiB
 - **Output selection is `_select.py`** (12): `--fields` projects at the end of
   `_Run._present`, per envelope, with `self.fields` set in `_pin` like `stable` (an exec
   line's `fields` wins over argv's). The token budget (`TokenBudget.apply`) runs in
@@ -488,7 +490,7 @@ src/treaty/
   _tools.py      ToolEntry, tool_entries(), tool_list(): MCP tools as plain data, no App import
   _redact.py     SECRET_NAME, secret_field(), scrub(): what a secret name is (REQ-F-034)
   _verbosity.py  Verbosity, Level, resolve_verbosity(), trace(): stderr levels (11)
-  _journal.py    AuditLog, Journal, log_path(), read_entries(): the audit log (11)
+  _journal.py    AuditLog, Journal, resolve(), read_entries(): the opt-in audit log (11)
   _protect.py    protect(), tagged(): masking and trust tags of data (REQ-F-058, F-035)
   _mcp.py        the `treaty-mcp` console script: stdio server over App.call, --list-tools
   _cap.py        OutputCap, cap_envelope(): byte cap with per-field truncation; StdinCap

@@ -206,7 +206,7 @@ def test_an_app_that_fails_to_register_is_a_precondition_not_a_treaty_crash(
     proc = subprocess.run(
         [sys.executable, "-c", "from treaty._cli import main; main()", "audit", "badctl:app"],
         cwd=tmp_path,
-        env={**BASE_ENV, "TREATY_AUDIT_LOG": "off"},
+        env={**BASE_ENV, "TREATY_AUDIT_LOG": "0"},
         capture_output=True,
         text=True,
         timeout=60,
