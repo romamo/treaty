@@ -229,20 +229,30 @@ def test_a_late_wake_skips_the_missed_heartbeats_rather_than_bursting() -> None:
     offset = [0.0]
     read = threading.Event()
 
+    beats: list[float] = []
+    beat = threading.Event()
+
     def clock() -> float:
+        now = time.monotonic() + offset[0]
         read.set()
-        return time.monotonic() + offset[0]
+        return now
+
+    def tick() -> None:
+        beats.append(clock())
+        beat.set()
 
     def handler() -> None:
         read.wait()  # the waiting thread has read its start time
         offset[0] += 5.5 * interval
+        # Issue #121: wait for the late wake itself, not a fixed sleep a loaded runner
+        # can outlast; then long enough for a burst, if one came back, to show
+        assert beat.wait(5), "the waiting thread never woke to send a heartbeat"
         time.sleep(3 * interval)
 
-    beats: list[float] = []
     call_with_timeout(
         handler,
         Timeout(None),
-        heartbeats=[Heartbeat(interval, lambda: beats.append(clock()))],
+        heartbeats=[Heartbeat(interval, tick)],
         clock=clock,
     )
     assert beats
