@@ -25,8 +25,34 @@ jobs:
     with:
       ref: refs/tags/${{ inputs.tag || github.ref_name }}
 
+  # The rules a tag must meet before anything is built: the tagged commit is on main, the
+  # version matches, the CHANGELOG has the dated section and its links, nothing is left
+  # under Unreleased, and no open issue is labelled release-blocker
+  release-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Check the tag is ready to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          uv run --no-project python .github/scripts/release_check.py
+          --tag "$TAG" --main origin/main --check-blockers
+
   build:
-    needs: ci
+    needs: [ci, release-check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
