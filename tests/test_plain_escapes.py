@@ -259,6 +259,12 @@ def printing_app() -> App:
         print("pwned\x9c title \x1b]0;never ended")  # released when the run ends
         return {}
 
+    @app.command("progress", description="Progress", danger_level="safe", exit_codes=())
+    def progress(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        print("50%\r", end="")
+        print("100%\t\x07done")
+        return {}
+
     @app.command("leak", description="Print a secret", danger_level="safe", exit_codes=())
     def leak(args: Login, ctx: Ctx) -> dict[str, str]:
         print(f"token {args.token[:3]}\x1b[0m{args.token[3:]}")
@@ -283,6 +289,13 @@ def test_printed_osc_52_off_a_color_terminal_has_no_escape() -> None:
     assert err == "ok copied\n"
     _, err = run_printing(["print", "--format", "plain", "--verbose"])
     assert err == "ok copied\n"
+
+
+def test_a_printed_progress_line_keeps_its_carriage_return_tab_and_newline() -> None:
+    # The bell is still shown as its escape; ctx.log lines still show a CR as \r
+    for env in ({}, {"NO_COLOR": "1"}):
+        _, err = run_printing(["progress"], isatty=True, env=env)
+        assert err == "50%\r100%\t\\x07done\n"
 
 
 def test_an_escape_printed_in_two_writes_is_cleaned_whole() -> None:

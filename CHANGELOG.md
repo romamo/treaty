@@ -70,7 +70,8 @@ Apps built on treaty keep their own, structured schema changelog with
 - Text a handler or a library prints no longer passes terminal escapes to stderr
   (security). It reaches stderr, and the `--debug` `stdout write` line, as a `ctx.log`
   line does: colors (SGR) only where the run may color, every other escape, 7-bit or C1,
-  gone, and other controls, a carriage return among them, shown as their escapes. An
+  gone, and other controls shown as their escapes. Tab, newline, and carriage return stay
+  as printed on stderr, so a progress line drawn with `\r` still rewrites itself. An
   escape printed across two writes, such as an OSC 52 whose payload comes in the next
   `print()`, is held until it ends and cleaned whole. A secret that an escape splits
   (`hun\x1b[0mter2`) is redacted once the escape is gone, on stderr and in the

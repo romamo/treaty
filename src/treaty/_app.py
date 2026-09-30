@@ -2036,14 +2036,16 @@ class _StrayStdout(io.TextIOBase):
         return written
 
     def _show(self, text: str, where: str) -> None:
-        """``text`` on stderr as a ``ctx.log`` line has it: colors only where the run may
-        color, every other escape gone, other controls shown as escapes (REQ-F-007, #105).
+        """``text`` on stderr as a ``ctx.log`` line has it, but for a carriage return: colors
+        only where the run may color, every other escape gone, other controls shown as
+        escapes (REQ-F-007, #105).
         Redacted before and after: a secret an escape splits, such as
         ``hun\\x1b[0mter2``, is whole once the escapes are gone"""
         if not text:
             return
-        shown = terminal_text(text, color=self._color)
-        bare = terminal_text(text, color=False) if self._color else shown
+        # A carriage return stays: a progress line printed with "\r" rewrites itself
+        shown = terminal_text(text, color=self._color, keep="\r", rewrite=True)
+        bare = terminal_text(text, color=False, keep="\r", rewrite=True) if self._color else shown
         if self._redact(bare) != bare:
             shown = self._redact(bare)
         if self._err.verbosity >= Verbosity.DEBUG:
