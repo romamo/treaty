@@ -32,6 +32,11 @@ Apps built on treaty keep their own, structured schema changelog with
   MCP `inputSchema`, and `exec`'s `_opts`. `--proxy` and `--no-proxy` stay on
   `has_network_io=True` commands. A command with a field of its own named `timeout`
   keeps it: the framework's flag yields there, as `-v` yields to a `short="v"` (#69)
+- The tutorial has a chapter for migrating a pydantic-settings CLI,
+  `docs/tutorial/B-migrate/pydantic-settings.md`: `CliSubCommand` to commands and groups,
+  `cli_cmd()` to handlers, `Field` to `Flag`, `model_validator` to `__post_init__` and
+  `requires=`, `BaseSettings` to `App(settings=)`, and argument models shared by several
+  CLIs as `kw_only` base dataclasses (#102)
 
 ### Fixed
 
