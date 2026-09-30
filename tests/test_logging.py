@@ -711,7 +711,7 @@ def test_the_operators_path_wins_over_the_apps_and_1_keeps_the_apps(tmp_path: Pa
     assert len(mine.read_text().splitlines()) == 1
 
 
-@pytest.mark.parametrize("value", ["true", "yes", "", "logs/audit.jsonl", "2", "on"])
+@pytest.mark.parametrize("value", ["true", "yes", "", "logs/audit.jsonl", "2", "on", "off", "OFF"])
 def test_any_other_audit_log_value_exits_2_and_writes_nothing(tmp_path: Path, value: str) -> None:
     code, envelope = logged(tmp_path, ["warn"], LOGCTL_AUDIT_LOG=value)
     assert code == 2 and envelope["error"]["code"] == "INVALID_AUDIT_LOG_SETTING"
@@ -728,16 +728,6 @@ def test_a_bad_audit_log_value_fails_everything_but_help_and_version(tmp_path: P
         assert logged(tmp_path, argv, LOGCTL_AUDIT_LOG="true")[0] == 0, argv
     envelope = make_app().call("warn", {}, env={"LOGCTL_AUDIT_LOG": "true"})
     assert envelope.error is not None and envelope.error.code == "INVALID_AUDIT_LOG_SETTING"
-
-
-def test_audit_log_off_still_turns_it_off_with_a_deprecation_warning(tmp_path: Path) -> None:
-    app = make_app(audit_log=AuditLog(path=tmp_path / "log" / "audit.jsonl"))
-    _, out, err = run(app, ["warn"], {"LOGCTL_AUDIT_LOG": "off"})
-    envelope = json.loads(out)
-    assert "audit_log_path" not in envelope["meta"] and not (tmp_path / "log").exists()
-    assert [w["code"] for w in envelope["warnings"]] == ["DEPRECATED_SETTING"]
-    assert envelope["warnings"][0]["context"]["replacement"] == "0"
-    assert '"code":"DEPRECATED_SETTING"' in err
 
 
 def test_while_on_the_manifest_lists_the_log_as_a_log_side_effect(tmp_path: Path) -> None:

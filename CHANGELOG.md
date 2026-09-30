@@ -18,9 +18,9 @@ Apps built on treaty keep their own, structured schema changelog with
   `App(audit_log=treaty.AuditLog())` turns it on. `<APP>_AUDIT_LOG` wins over the app:
   `1` turns it on, `0` off, an absolute path on at that path. Any other value, an empty one
   included, exits 2 with `INVALID_AUDIT_LOG_SETTING` for every invocation except `--help`
-  and `--version`, where `manifest` and `--schema` answered before. `off` still works as
-  `0`, with a `DEPRECATED_SETTING` warning; an `AuditLog(path=...)` no longer beats the
-  operator's path (#71)
+  and `--version`, where `manifest` and `--schema` answered before. That includes `off`,
+  which earlier releases documented: write `0` instead. An `AuditLog(path=...)` no longer
+  beats the operator's path (#71)
 - The default audit log path is `$XDG_STATE_HOME/<app>/audit.jsonl`, else
   `~/.local/state/<app>/audit.jsonl`. A log written by an earlier release under
   `$XDG_DATA_HOME/<app>/` (`~/.local/share/<app>/`) is neither moved nor read; delete it,

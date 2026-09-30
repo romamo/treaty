@@ -475,7 +475,7 @@ an agent runtime, with `<APP>_AUDIT_LOG`, which wins over the app:
 | an absolute path | on, at that path |
 
 Any other value exits `2` with `INVALID_AUDIT_LOG_SETTING` for every invocation except
-`--help` and `--version`. `off` still works as `0`, with a `DEPRECATED_SETTING` warning.
+`--help` and `--version`; the message names the accepted values.
 The default path is `$XDG_STATE_HOME/<app>/audit.jsonl`, else
 `~/.local/state/<app>/audit.jsonl`.
 

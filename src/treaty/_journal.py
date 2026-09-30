@@ -38,9 +38,6 @@ INVALID_AUDIT_LOG_SETTING = "INVALID_AUDIT_LOG_SETTING"
 FILE_NAME = "audit.jsonl"
 ON = "1"
 OFF = "0"
-LEGACY_OFF = "off"
-"""Accepted as ``0`` with a ``DEPRECATED_SETTING`` warning; 1.0 release candidates up to
-rc5 documented it"""
 MAX_ENTRY_BYTES = 16 * 1024
 """The longest line, newline included: larger ``args`` values are ``[TRUNCATED]``"""
 TRUNCATED = "[TRUNCATED]"
@@ -90,8 +87,6 @@ class Setting:
     path: Path | None
     """The file; None when the log is off, or on with no home to put it in"""
     bounds: AuditLog
-    legacy_off: bool = False
-    """``<APP>_AUDIT_LOG=off``, the deprecated spelling of ``0``"""
 
 
 def resolve(settings: AuditLog | None, app_name: str, env: Mapping[str, str]) -> Setting:
@@ -104,8 +99,6 @@ def resolve(settings: AuditLog | None, app_name: str, env: Mapping[str, str]) ->
         enabled = settings is not None
     elif raw == OFF:
         return Setting(False, None, bounds)
-    elif raw.lower() == LEGACY_OFF:
-        return Setting(False, None, bounds, legacy_off=True)
     elif raw == ON:
         enabled = True
     elif Path(raw).is_absolute():

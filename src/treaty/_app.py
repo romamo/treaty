@@ -93,7 +93,7 @@ from ._deprecation import Deprecated
 from ._deps import CheckFn, Dependency, check_checks, check_dependencies
 from ._dispatch import DispatchRequest, parse_dispatch_line
 from ._effect import affects_summary, effect_problem, is_preview
-from ._env import AUDIT_LOG, KNOWN, SESSION, STATE_DIR, app_var
+from ._env import KNOWN, SESSION, STATE_DIR, app_var
 from ._envelope import (
     ENVELOPE_SCHEMA_VERSION,
     Envelope,
@@ -1734,7 +1734,6 @@ class App:
             return run.emit(Format.JSON, run.arg_error(exc))
         run.mode = mode
         run.attach_logging()
-        run.standing_notice()
         trace(
             "run",
             format=mode.value,
@@ -1977,7 +1976,6 @@ STATUS_CHARS = 200
 WARNINGS_AS_ERRORS = "WARNINGS_AS_ERRORS"
 UNLOGGED = frozenset({MANIFEST_PATH, VERSION_PATH, COMPLETION_PATH, AUDIT_LOG_PATH})
 """Built-ins that do no work, so the audit log leaves them out (REQ-O-030)"""
-DEPRECATED_SETTING = "DEPRECATED_SETTING"
 
 
 def _audit_setting(error: ParseError) -> bool:
@@ -1991,16 +1989,6 @@ def _answers_over(error: ParseError, path: str) -> bool:
     if _audit_setting(error):
         return path == VERSION_PATH.value
     return path in {p.value for p in PURE_PATHS}
-
-
-def legacy_off_warning(app_name: str) -> WarningDetail:
-    """``<APP>_AUDIT_LOG=off``: still the log off, as ``0`` is"""
-    variable = app_var(app_name, AUDIT_LOG.key)
-    return WarningDetail(
-        DEPRECATED_SETTING,
-        f"{variable}=off is deprecated since 1.0.0rc6; use {variable}=0 instead",
-        context={"variable": variable, "since": "1.0.0rc6", "replacement": "0"},
-    )
 
 
 CWD_CHANGED = "CWD_CHANGED"
@@ -2516,14 +2504,10 @@ class _Run:
         self.journal: Journal | None = None
         """The audit log this run appends each resolved invocation to, while it is on
         (REQ-O-030)"""
-        self.standing: tuple[WarningDetail, ...] = ()
-        """Warnings about the run's environment, on every envelope it answers"""
         try:
             audit = resolve(app.audit_log, app.name, env)
             if audit.path is not None:
                 self.journal = Journal(audit.path, audit.bounds)
-            if audit.legacy_off:
-                self.standing = (legacy_off_warning(app.name),)
             self.trace_id = read_trace_id(env)
         except ParseError as exc:
             self.env_error = exc
@@ -2610,16 +2594,6 @@ class _Run:
                     # A run nested in another's handler: give back what it found. A run
                     # that another swapped over leaves the streams to the last one out.
                     sys.stdout, sys.stdin = saved
-
-    def standing_notice(self) -> None:
-        """Each warning about the run's environment on stderr, one structured line, as a
-        deprecated flag's is (REQ-F-075)"""
-        for warning in self.standing:
-            line = {"level": "warn", "code": warning.code, "message": warning.message}
-            self.err.write(
-                json.dumps(line | dict(warning.context), separators=(",", ":")) + "\n", Level.WARN
-            )
-        self.err.flush()
 
     def unprotected_record(self) -> None:
         """REQ-O-023: the use of ``--no-injection-protection`` on stderr, one structured
@@ -3218,7 +3192,7 @@ class _Run:
                 project_root=None if root is None else str(root),
                 retries=0 if self.retrier is None or self.stable else self.retrier.count,
             ),
-            warnings=(*self.standing, *self.warnings),
+            warnings=tuple(self.warnings),
             extra_meta={**extra, **(meta or {})},
         )
 
