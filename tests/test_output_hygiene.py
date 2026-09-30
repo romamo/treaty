@@ -153,9 +153,11 @@ def test_null_bytes_and_lone_surrogates_become_replacement_characters() -> None:
     out.encode("utf-8")  # strict: no surrogate is left to fail here
 
 
-def test_plain_mode_keeps_the_text_as_returned() -> None:
+def test_plain_mode_cleans_values_like_the_json_envelope() -> None:
+    # #72: plain goes to a person's terminal, so a value's escapes go as in JSON
     code, out, _ = run(["colored", "--format", "plain"])
-    assert code == 0 and "text: \x1b[31mred\x1b[0m\n" in out
+    assert code == 0 and "text: red\n" in out and "progress: 50%\\r100%\n" in out
+    assert "raw: a�b�\n" in out
 
 
 def test_escape_sequences_are_stripped_from_error_messages() -> None:

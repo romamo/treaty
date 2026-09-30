@@ -50,6 +50,47 @@ _WORD = re.compile(r"[^\W\d_]+(?:['-][^\W\d_]+)*[,:;]?")
 _ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?")
 # REQ-F-016: a null byte or a lone surrogate is not valid UTF-8 text
 _INVALID = re.compile(r"[\x00\ud800-\udfff]")
+# The 8-bit forms of the escapes, which some terminals obey: \x9d opens an OSC and \x9b a
+# CSI. A lone C1 control, such as NEL, is left for visible() to show
+_C1 = re.compile(r"\x9d[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?|\x9b[0-?]*[ -/]*[@-~]")
+# SGR, the one escape that only colors text
+_SGR = re.compile(r"\x1b\[[0-9;:]*m")
+# Controls a terminal still acts on once the escapes are gone: a bell, a backspace that
+# overprints, a carriage return that rewrites the line. Tab and newline are text
+_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def strip_escapes(text: str) -> str:
+    """``text`` without terminal escapes, 7-bit or C1 (REQ-F-007)"""
+    return _C1.sub("", _ESCAPES.sub("", text))
+
+
+def visible(text: str, keep: str = "") -> str:
+    """``text`` with every control character but tab, newline, and those in ``keep``
+    written as its escape (``\\x1b``, ``\\r``), as ``repr`` writes it: a line for a person
+    shows what a value held, and the terminal acts on none of it. A carriage return in
+    ``keep`` stays only as part of a CRLF: a lone one rewrites the line"""
+
+    def shown(match: re.Match[str]) -> str:
+        char = match[0]
+        if char in keep and (char != "\r" or text.startswith("\n", match.end())):
+            return char
+        return "\\r" if char == "\r" else f"\\x{ord(char):02x}"
+
+    return _CONTROLS.sub(shown, text)
+
+
+def terminal_text(text: str, *, color: bool, keep: str = "") -> str:
+    """Text a person's terminal shows, from code that may style it: colors (SGR) stay when
+    the run may color and every other escape goes, since only a color is presentation;
+    other controls are shown as escapes, as in ``visible``"""
+    if not color:
+        return visible(strip_escapes(text), keep)
+    colors = _SGR.findall(text)
+    parts = [strip_escapes(part) for part in _SGR.split(text)]
+    # Each part is free of ESC now, so the only ESC left starts a kept color
+    joined = "".join(p + c for p, c in zip(parts, [*colors, ""], strict=True))
+    return visible(joined, keep + "\x1b")
 
 
 def clean(value: object) -> object:
@@ -57,6 +98,7 @@ def clean(value: object) -> object:
     encoded: whatever a handler or a library returned, the envelope stays plain text. Keys
     are left alone, so two keys never collapse into one"""
     if isinstance(value, str):
+        # The C1 forms stay: the envelope is ASCII JSON, so they are \u escapes on the wire
         return _INVALID.sub("\ufffd", _ESCAPES.sub("", value))
     if isinstance(value, dict):
         return {k: clean(v) for k, v in value.items()}
