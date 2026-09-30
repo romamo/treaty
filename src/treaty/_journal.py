@@ -209,6 +209,8 @@ class Journal:
     def __init__(self, path: Path, settings: AuditLog) -> None:
         self.path = path
         self.settings = settings
+        self.lock_path = path.with_name(path.name + ".lock")
+        """Held while files are rotated or pruned, so concurrent runs take turns"""
 
     def append(self, entry: Mapping[str, object]) -> None:
         line = encoded(entry)
@@ -277,7 +279,7 @@ class Journal:
         have rotated already. On Windows a file another run has open cannot move: the
         rotation then waits for the next append, and the shifts done so far stand, oldest
         first, so no entry is lost."""
-        with exclusive(self.path.with_name(self.path.name + ".lock")):
+        with exclusive(self.lock_path):
             size = self._size()
             full = size + incoming > self.settings.max_bytes
             if size == 0 or not (full or self._first_entry_expired(now)):
@@ -297,15 +299,20 @@ class Journal:
                     raise
 
     def _prune(self, now: float) -> None:
-        """Delete the rotated files not written for ``max_age_days``"""
+        """Delete the rotated files not written for ``max_age_days``; under the rotation
+        lock, since another run's rotation may rename a newer file into a slot between
+        its stat and its unlink"""
+        if not _numbered(self.path):
+            return  # nothing rotated yet: no lock to take
         cutoff = now - self.settings.max_age_days * _DAY
-        for _, old in _numbered(self.path):
-            try:
-                stale = old.stat().st_mtime < cutoff
-            except FileNotFoundError:
-                continue  # another run rotated or pruned it since the listing
-            if stale:
-                old.unlink(missing_ok=True)
+        with exclusive(self.lock_path):
+            for _, old in _numbered(self.path):
+                try:
+                    stale = old.stat().st_mtime < cutoff
+                except FileNotFoundError:
+                    continue  # pruned by a run that held the lock before this one
+                if stale:
+                    old.unlink(missing_ok=True)
 
 
 _DURATION = re.compile(r"([1-9]\d*)([smhd])")

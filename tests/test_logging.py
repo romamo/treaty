@@ -21,8 +21,10 @@ from conftest import needs_posix_permissions, spec_validator
 
 from treaty import App, Arg, AuditLog, Ctx, Exit, Flag, NoArgs, RegistrationError
 from treaty._app import _RECORDS
+from treaty._atomic import exclusive
 from treaty._audit import audit
 from treaty._cli import cli
+from treaty._journal import Journal
 
 BASE = "logctl"
 
@@ -1074,6 +1076,28 @@ def test_rotated_files_older_than_the_maximum_age_are_deleted(tmp_path: Path) ->
     os.utime(old, (month_ago, month_ago))
     run(small(tmp_path, max_age_days=30), ["warn"])
     assert not old.exists() and recent.exists()
+
+
+def test_pruning_waits_for_a_concurrent_rotation_and_keeps_the_file_it_moved_in(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "log"
+    folder.mkdir()
+    slot = folder / "audit.1.jsonl"
+    slot.write_text('{"old":true}\n')
+    month_ago = (dt.datetime.now() - dt.timedelta(days=31)).timestamp()
+    os.utime(slot, (month_ago, month_ago))
+    journal = Journal(folder / "audit.jsonl", AuditLog(max_age_days=30))
+    entry = {"timestamp": "2026-01-01T00:00:00.000Z", "command": "warn"}
+    appending = threading.Thread(target=journal.append, args=(entry,))
+    with exclusive(journal.lock_path):  # another run is rotating
+        appending.start()
+        appending.join(timeout=0.5)
+        # The append waits for the lock rather than pruning the slot mid-rotation
+        assert appending.is_alive() and slot.exists()
+        slot.write_text('{"moved":true}\n')  # the rotation moves a fresh file into it
+    appending.join()
+    assert json.loads(slot.read_text()) == {"moved": True}
 
 
 def test_an_active_file_whose_first_entry_is_too_old_is_rotated_on_the_next_write(
