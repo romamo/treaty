@@ -6,6 +6,7 @@ import dataclasses
 import keyword
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -55,6 +56,8 @@ class FlagSpec:
     """Still accepted, with a ``DEPRECATED_FLAG`` warning naming the replacement (REQ-F-075)"""
     audit: bool = True
     """False writes the value as ``[OMITTED]`` in the audit log; it is still a plain value"""
+    dry_run: bool = False
+    """The command's dry-run switch under its own name, such as a wrapped tool's ``--check``"""
 
     def __post_init__(self) -> None:
         if not self.description:
@@ -104,6 +107,7 @@ def Flag(
     from_stdin: bool = False,
     deprecated: Deprecated | None = None,
     audit: bool = True,
+    dry_run: bool = False,
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
@@ -119,6 +123,8 @@ def Flag(
     with a warning on every run that passes it.
     ``audit=False`` writes the value as ``[OMITTED]`` in the audit log, such as a message
     body too private to keep; unlike ``secret``, argv and error messages still carry it.
+    ``dry_run=True`` on a boolean makes it the command's dry run in place of a field
+    named ``dry_run``, so a wrapper keeps the tool's own ``--check`` or ``--noop``.
     """
     spec = FlagSpec(
         description,
@@ -131,6 +137,7 @@ def Flag(
         from_stdin=from_stdin,
         deprecated=deprecated,
         audit=audit,
+        dry_run=dry_run,
     )
     return _field(spec, default)
 
@@ -619,6 +626,31 @@ def _check_positionals(cls: type, positionals: list[FieldInfo]) -> None:
         )
 
 
+def dry_run_field(fields: Sequence[FieldInfo]) -> FieldInfo | None:
+    """The command's dry-run switch: the field marked ``Flag(dry_run=True)``, else a
+    boolean field named ``dry_run``"""
+    marked = next((f for f in fields if f.spec.dry_run), None)
+    if marked is not None:
+        return marked
+    return next(
+        (f for f in fields if f.name == "dry_run" and f.flag_type is FlagType.BOOLEAN), None
+    )
+
+
+def _check_dry_run(cls: type, infos: Sequence[FieldInfo]) -> None:
+    """One dry-run switch per command: one marked field, and no ``dry_run`` field beside it"""
+    marked = [i.name for i in infos if i.spec.dry_run]
+    if len(marked) > 1:
+        raise RegistrationError(
+            f"{cls.__qualname__}: dry_run=True on {marked}; a command has one dry-run switch"
+        )
+    if marked and marked[0] != "dry_run" and any(i.name == "dry_run" for i in infos):
+        raise RegistrationError(
+            f"{cls.__qualname__}: {marked[0]} is marked dry_run=True, but a field named "
+            "dry_run is also declared; drop one or rename dry_run"
+        )
+
+
 def flag_name(field_name: str) -> str:
     """``dry_run`` is ``--dry-run``; ``for_``, spelled so for Python, is ``--for``"""
     if field_name.endswith("_") and keyword.iskeyword(field_name[:-1]):
@@ -710,7 +742,13 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
                 f"{cls.__qualname__}.{f.name}: from_stdin=True is for value fields; a boolean "
                 "takes no value, and a secret comes from --x-from-env or --x-from-file"
             )
+        if spec.dry_run and info.flag_type is not FlagType.BOOLEAN:
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: dry_run=True marks a boolean flag as the "
+                f"dry run; this field is a {info.flag_type.value}"
+            )
         infos.append(info)
+    _check_dry_run(cls, infos)
     stdin_fields = [i.name for i in infos if i.spec.from_stdin]
     if len(stdin_fields) > 1:
         raise RegistrationError(

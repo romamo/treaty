@@ -45,10 +45,17 @@ def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
         if tokens and tokens[0] == app.name:
             tokens = tokens[1:]
         # Globals may come before the path (tool --format json show x); drop them first
-        tokens = list(_without_globals(tuple(t for t in tokens if t not in PREVIEW_FLAGS)))
+        preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
+        tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
         if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
             return tuple(tokens)
     return None
+
+
+def _dry_run_flag(command: Command) -> str:
+    """The flag that previews the command: ``--dry-run``, or its ``Flag(dry_run=True)``"""
+    field = command.dry_run_field
+    return "--dry-run" if field is None else f"--{field.flag}"
 
 
 def probes_for(app: App) -> list[Probe]:
@@ -78,7 +85,7 @@ def probes_for(app: App) -> list[Probe]:
             # its confirmation: nothing refuses, so it is probed as the read its default is
             probes.append(Probe(label, argv, "read"))
         elif command.danger_level is DangerLevel.DESTRUCTIVE:
-            probes.append(Probe(label, argv, "destructive", dry_run_flag="--dry-run"))
+            probes.append(Probe(label, argv, "destructive", dry_run_flag=_dry_run_flag(command)))
         elif command.danger_level is DangerLevel.SAFE:
             probes.append(Probe(label, argv, "read"))
     probes.append(Probe("version", ("version",), "read"))
@@ -108,7 +115,7 @@ def _without_globals(argv: tuple[str, ...]) -> tuple[str, ...]:
 
 def argument_order_for(app: App) -> dict[str, object] | None:
     """The first example whose tokens after its positionals start with an option, so the kit
-    can move ``--format`` around it (REQ-F-079); destructive ones are run with ``--dry-run``"""
+    can move ``--format`` around it (REQ-F-079); destructive ones are run with their dry-run flag"""
     for command in user_commands(app):
         if command.danger_level is DangerLevel.MUTATING or command.streaming:
             continue
@@ -120,7 +127,7 @@ def argument_order_for(app: App) -> dict[str, object] | None:
             head += 1
         local = list(argv[head:])
         if command.danger_level is DangerLevel.DESTRUCTIVE:
-            local.append("--dry-run")
+            local.append(_dry_run_flag(command))
             if len(local) < 2:
                 # Still a preview: the handler sees dry_run=True; the kit needs two tokens
                 local.append("--confirm-destructive")

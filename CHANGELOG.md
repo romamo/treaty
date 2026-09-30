@@ -58,6 +58,13 @@ Apps built on treaty keep their own, structured schema changelog with
   `--help` now lists every rule of a command under Rules, and an MCP tool's description
   ends with them. Registration refuses a group of fewer than two flags, a repeated or
   unknown flag, and an always-required one (#99)
+- `Flag(dry_run=True)` marks a boolean field as the command's dry-run switch, so a
+  command that wraps another tool keeps its own `--check` or `--noop` instead of renaming
+  it `--dry-run`. `would_*` effects, `meta.dry_run`, the destructive-command rule
+  (REQ-C-004), the `--confirm-destructive` preview, `exec --dry-run`, the conformance
+  profile, and generated skills all follow the marked field. Two marked fields, a marked
+  field that is not a `bool`, or a marked field beside one named `dry_run` raise
+  `RegistrationError`; an unmarked `dry_run` field works as before (#63)
 
 ### Fixed
 

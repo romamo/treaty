@@ -71,8 +71,10 @@ def _frontmatter(fields: Mapping[str, object]) -> str:
 def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) -> list[str]:
     rails = [f"Danger level: {command.danger_level.value}"]
     if command.danger_level is DangerLevel.DESTRUCTIVE:
+        switch = command.dry_run_field
+        flag = "--dry-run" if switch is None else f"--{switch.flag}"
         rails.append(
-            "Destructive: run with --dry-run first and read data.would_affect; apply only "
+            f"Destructive: run with {flag} first and read data.would_affect; apply only "
             "with --confirm-destructive, which nothing else implies"
         )
     elif command.danger_level is DangerLevel.MUTATING:

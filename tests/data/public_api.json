@@ -451,7 +451,7 @@
     },
     "Flag": {
       "kind": "function",
-      "signature": "(*, description: 'str', default: 'Any' = <dataclasses._MISSING_TYPE object>, short: 'str | None' = None, pattern: 'str | None' = None, secret: 'bool | None' = None, multiline: 'bool' = False, max_bytes: 'int | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, deprecated: 'Deprecated | None' = None, audit: 'bool' = True) -> 'Any'"
+      "signature": "(*, description: 'str', default: 'Any' = <dataclasses._MISSING_TYPE object>, short: 'str | None' = None, pattern: 'str | None' = None, secret: 'bool | None' = None, multiline: 'bool' = False, max_bytes: 'int | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, deprecated: 'Deprecated | None' = None, audit: 'bool' = True, dry_run: 'bool' = False) -> 'Any'"
     },
     "Format": {
       "kind": "enum",
@@ -946,7 +946,8 @@
       "pattern_type",
       "from_stdin",
       "deprecated",
-      "audit"
+      "audit",
+      "dry_run"
     ],
     "Group.command": [
       "name",

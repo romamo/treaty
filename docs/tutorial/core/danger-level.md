@@ -152,6 +152,15 @@ field that a dry run fills in. Without `--confirm-destructive`, treaty runs the 
 dry run and exits 2 with `CONFIRMATION_REQUIRED`, the preview in `data`. The manifest marks
 the command `requires_confirmation: true`, and MCP clients see the destructive hint.
 
+A command that wraps another tool may already have a name for its dry run, such as
+Ansible's `--check` or Puppet's `--noop`. Mark that boolean with `Flag(dry_run=True)`
+instead of adding `dry_run`: it becomes the switch the gate turns on and the flag the
+preview reads, and a `mutating` command may then return `would_*` effects with it on:
+
+```python
+noop: bool = Flag(default=False, dry_run=True, description="Show the changes, apply none")
+```
+
 A `destructive` command is also never offered as a fix: a `fix_command` that runs one is
 refused, since a fix must be safe to run twice, so an agent following a suggestion never
 deletes anything by accident.
