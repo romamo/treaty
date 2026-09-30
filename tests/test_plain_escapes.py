@@ -115,6 +115,26 @@ def test_csv_cells_lose_escapes_and_keep_line_breaks() -> None:
     assert text == 'a,h\\x1b]0;pwned\\x07\n"xclick\r\ny\\x07",1\n'
 
 
+def test_a_lone_carriage_return_is_shown_in_csv_and_custom_renderer_text() -> None:
+    # A lone CR rewrites the line ("FAILED" reads as "OK"); only a CRLF is a line break
+    assert table(",")([{"a": "FAILED\rOK    "}]) == "a\nFAILED\\rOK    \n"
+    app = App("probe", version="1.0.0")
+
+    @app.command(
+        "show",
+        description="Show",
+        danger_level="safe",
+        exit_codes=(),
+        renderers={Format.PLAIN: lambda d: f"status: {d['s']}\r\n"},
+    )
+    def show(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"s": "FAILED\rOK    "}
+
+    out = io.StringIO()
+    app.run(["show", "--format", "plain"], stdout=out, stderr=io.StringIO(), env={})
+    assert out.getvalue() == "status: FAILED\\rOK    \r\n"
+
+
 def test_a_custom_renderer_gets_clean_data_and_keeps_only_color_on_a_terminal() -> None:
     out, _ = run(["styled"], isatty=True)
     assert out == "\x1b[1mclickRED\x1b[0m\\x07\n"
@@ -194,7 +214,8 @@ def test_plain_strips_c1_escapes_and_shows_lone_c1_controls(value: str, shown: s
 
 def test_visible_and_terminal_text() -> None:
     assert visible("a\x1bb\r\t\n") == "a\\x1bb\\r\t\n"
-    assert visible("a\rb", "\r") == "a\rb"
+    assert visible("a\r\nb", "\r") == "a\r\nb"
+    assert visible("a\rb", "\r") == "a\\rb"  # a lone CR rewrites the line
     assert terminal_text(f"\x1b[31mx\x1b[0m{CURSOR}", color=True) == "\x1b[31mx\x1b[0m"
     assert terminal_text(f"\x1b[31mx\x1b[0m{CURSOR}", color=False) == "x"
 

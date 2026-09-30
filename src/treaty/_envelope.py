@@ -68,11 +68,12 @@ def strip_escapes(text: str) -> str:
 def visible(text: str, keep: str = "") -> str:
     """``text`` with every control character but tab, newline, and those in ``keep``
     written as its escape (``\\x1b``, ``\\r``), as ``repr`` writes it: a line for a person
-    shows what a value held, and the terminal acts on none of it"""
+    shows what a value held, and the terminal acts on none of it. A carriage return in
+    ``keep`` stays only as part of a CRLF: a lone one rewrites the line"""
 
     def shown(match: re.Match[str]) -> str:
         char = match[0]
-        if char in keep:
+        if char in keep and (char != "\r" or text.startswith("\n", match.end())):
             return char
         return "\\r" if char == "\r" else f"\\x{ord(char):02x}"
 
