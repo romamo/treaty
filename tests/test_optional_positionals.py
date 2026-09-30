@@ -9,7 +9,7 @@ from typing import Any, Literal
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, Ctx, Excludes, Flag, ParseError, RegistrationError
+from treaty import App, Arg, Ctx, Flag, RegistrationError, RequiresOne
 from treaty._audit import audit
 from treaty._command import Command
 from treaty._manifest import payload_schema
@@ -41,14 +41,6 @@ class ResolveArgs:
     query: str | None = Arg(default=None, description="Instrument query or identifier")
     figi: str | None = Flag(default=None, description="Resolve by FIGI instead")
 
-    def __post_init__(self) -> None:
-        if self.query is None and self.figi is None:
-            raise ParseError(
-                "pass a query or --figi",
-                context={"field": "query"},
-                suggestion="resolve AAPL, or resolve --figi BBG000B9XRY4",
-            )
-
 
 def registry() -> App:
     app = App("reg", version="1.0.0", description="Instrument registry")
@@ -59,7 +51,7 @@ def registry() -> App:
         danger_level="safe",
         exit_codes=(),
         supports_raw_payload=True,
-        requires=[Excludes("query", prohibited=("figi",))],
+        requires=[RequiresOne(("query", "figi"))],
     )
     def resolve(args: ResolveArgs, ctx: Ctx) -> dict[str, str | None]:
         return {"query": args.query, "figi": args.figi}
@@ -92,8 +84,8 @@ def test_an_extra_argument_after_an_optional_positional_is_still_an_error() -> N
 @pytest.mark.parametrize(
     ("argv", "message"),
     [
-        ([], "Pass a query or --figi"),
-        (["AAPL", "--figi", "BBG000B9XRY4"], "figi"),
+        ([], "Pass exactly one of --query or --figi"),
+        (["AAPL", "--figi", "BBG000B9XRY4"], "--query and --figi are mutually exclusive"),
     ],
 )
 def test_exactly_one_of_the_positional_and_the_flag(argv: list[str], message: str) -> None:
