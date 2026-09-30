@@ -1975,19 +1975,33 @@ _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 # Shorter values would redact every digit or letter they share with a traceback
 MIN_REDACTED = 4
 
+# An escape a write() ends inside of, 7-bit or C1: print() may write one in two parts, and
+# the second part, cleaned on its own, would reach stderr as text (#105)
+_OPEN_ESCAPE = re.compile(
+    r"(?:\x1b(?:\][^\x07\x1b]*\x1b?|\[[0-?]*[ -/]*)?|\x9d[^\x07\x1b\x9c]*\x1b?|\x9b[0-?]*[ -/]*)\Z"
+)
+HELD_CAP = 4096
+"""Characters of an unfinished escape held for the next write; past them it is cleaned as
+it stands, and the rest of it arrives as text"""
+
 
 class _StrayStdout(io.TextIOBase):
     """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
     to stderr, and the next envelope reports how much (REQ-F-006)"""
 
-    def __init__(self, err: _Stderr, redact: Callable[[str], str]) -> None:
+    def __init__(self, err: _Stderr, redact: Callable[[str], str], *, color: bool) -> None:
         super().__init__()
         self._err = err
         self._redact = redact
         """Every attached run's secret values out of what reaches stderr: a handler on
         another thread may print here while its own run is in progress"""
+        self._color = color
+        """Colors (SGR) stay on stderr, as on a ``ctx.log`` line; every other escape goes"""
         self._bytes = 0
         self._text = ""
+        self._held = ""
+        """The unfinished escape the last write ended with, until the next completes it"""
+        self._held_at = ""
 
     def writable(self) -> bool:
         return True
@@ -2007,17 +2021,44 @@ class _StrayStdout(io.TextIOBase):
         # Redacted as it arrives: the text may be another run's, whose secrets are only
         # known while that run is attached, not when this run's envelope is written
         text = self._redact(text)
-        if self._err.verbosity >= Verbosity.DEBUG:
-            if text.strip():
-                # REQ-F-060: under --debug, the line that printed it
-                caller = sys._getframe(1)
-                where = f"{caller.f_code.co_filename}:{caller.f_lineno}"
-                trace("stdout write", source=where, text=text.rstrip("\r\n"))
-        else:
-            self._err.write(text, Level.INFO)  # 11-D5: off a terminal, dropped
+        # As printed: the envelope cleans the warning's copy as it cleans its other text
         if len(self._text) < TEXT_CAP:
             self._text += text[: TEXT_CAP - len(self._text)]
+        caller = sys._getframe(1)
+        where = self._held_at or f"{caller.f_code.co_filename}:{caller.f_lineno}"
+        text = self._held + text
+        unfinished = _OPEN_ESCAPE.search(text)
+        cut = len(text)
+        if unfinished is not None and len(text) - unfinished.start() <= HELD_CAP:
+            cut = unfinished.start()
+        self._held, self._held_at = text[cut:], where if cut < len(text) else ""
+        self._show(text[:cut], where)
         return written
+
+    def _show(self, text: str, where: str) -> None:
+        """``text`` on stderr as a ``ctx.log`` line has it: colors only where the run may
+        color, every other escape gone, other controls shown as escapes (REQ-F-007, #105).
+        Redacted before and after: a secret an escape splits, such as
+        ``hun\\x1b[0mter2``, is whole once the escapes are gone"""
+        if not text:
+            return
+        shown = terminal_text(text, color=self._color)
+        bare = terminal_text(text, color=False) if self._color else shown
+        if self._redact(bare) != bare:
+            shown = self._redact(bare)
+        if self._err.verbosity >= Verbosity.DEBUG:
+            if shown.strip():
+                # REQ-F-060: under --debug, the line that printed it
+                trace("stdout write", source=where, text=shown.rstrip("\r\n"))
+        else:
+            self._err.write(shown, Level.INFO)  # 11-D5: off a terminal, dropped
+
+    def release(self) -> None:
+        """An unfinished escape still held, cleaned as it stands: the run is writing an
+        envelope, or is over"""
+        held, where = self._held, self._held_at
+        self._held = self._held_at = ""
+        self._show(held, where)
 
     def flush(self) -> None:
         if getattr(self._err.stream, "closed", False):
@@ -2029,6 +2070,7 @@ class _StrayStdout(io.TextIOBase):
     def take(self) -> tuple[str, int]:
         """The text, cut to ``TEXT_CAP`` characters, and the bytes written since the last
         call"""
+        self.release()
         taken = (self._text, self._bytes)
         self._text, self._bytes = "", 0
         return taken
@@ -2472,7 +2514,10 @@ class _Run:
         overlap: ``sys.stdout`` is then the last one's, and what it catches is redacted
         of every attached run's and live handler thread's secrets."""
         global _guarded, _unguarded
-        self.stray = _StrayStdout(self.err, self._redact_everywhere)
+        stray = _StrayStdout(
+            self.err, self._redact_everywhere, color=color_allowed(self.env, self.tty)
+        )
+        self.stray = stray
         with _guard_lock:
             if not _guarded:
                 _unguarded = (sys.stdout, sys.stdin)
@@ -2486,6 +2531,7 @@ class _Run:
         try:
             yield
         finally:
+            stray.release()
             with _guard_lock:
                 _guarded -= 1
                 if not _guarded:
@@ -2523,10 +2569,13 @@ class _Run:
         # REQ-F-060: JSON printed by mistake is not reported, so it is never seen twice
         text = prose(text)
         if written and text.strip():
+            # Redacted as printed, and again clean, as the envelope has it: a secret an
+            # escape splits is whole then (#105)
+            shown = self._redact_everywhere(str(clean(self._redact_everywhere(text))))
             warning = WarningDetail(
                 "THIRD_PARTY_STDOUT",
                 "Third-party code wrote to stdout; the text is in this warning instead",
-                context={"text": self._redact_everywhere(text.rstrip("\r\n")), "bytes": written},
+                context={"text": shown.rstrip("\r\n"), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         if self.budget is not None:
