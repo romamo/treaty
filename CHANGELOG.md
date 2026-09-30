@@ -10,6 +10,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc6] - 2026-09-30
+
+The sixth 1.0 release candidate: 7 breaking changes, 12 additions, and 13 fixes. Not
+additive over rc5: see Breaking.
+
 ### Breaking
 
 - The audit log is off by default, as the spec's REQ-O-030 now says (it retired REQ-F-026,
@@ -843,7 +848,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc5...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc6...HEAD
+[1.0.0rc6]: https://github.com/romamo/treaty/compare/v1.0.0rc5...v1.0.0rc6
 [1.0.0rc5]: https://github.com/romamo/treaty/compare/v1.0.0rc4...v1.0.0rc5
 [1.0.0rc4]: https://github.com/romamo/treaty/compare/v1.0.0rc3...v1.0.0rc4
 [1.0.0rc3]: https://github.com/romamo/treaty/compare/v1.0.0rc2...v1.0.0rc3
