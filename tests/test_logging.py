@@ -321,7 +321,7 @@ def test_debug_routes_library_log_records_and_restores_the_root_logger() -> None
     assert "debug: pool size 4 logger=somelib" in err.splitlines()
     root = logging.getLogger()
     assert root.level == before
-    assert not [h for h in root.handlers if type(h).__name__ == "_Records"]
+    assert not records_left_on_root()
     _, _, err = run(make_app(), ["lib", "--verbose"])
     assert "pool size" not in err
 
@@ -358,6 +358,14 @@ def library_app() -> App:
     return app
 
 
+def records_left_on_root() -> bool:
+    """Whether the framework's handler stayed on the root logger with no run attached and
+    no held handler thread alive to keep it there: one an earlier test abandoned, still
+    sleeping, keeps it on the root until it ends (#118)"""
+    on_root = any(h is _RECORDS for h in logging.getLogger().handlers)
+    return on_root and not any(worker.is_alive() for worker, _ in _RECORDS._workers)
+
+
 def library_lines(err: str) -> list[tuple[str, str]]:
     """(level, message) of each stderr line the library's logger wrote"""
     records = map(json.loads, err.splitlines())
@@ -390,7 +398,7 @@ def test_library_log_records_are_shown_by_their_own_level(
     }
     assert library_lines(err) == [(level, every[level]) for level in levels]
     assert root.level == before
-    assert not [h for h in root.handlers if type(h).__name__ == "_Records"]
+    assert not records_left_on_root()
 
 
 def test_a_library_warning_reads_as_a_warn_line_in_plain_output() -> None:
@@ -420,7 +428,7 @@ def test_app_call_and_a_nested_run_route_records_once_and_restore_the_root_logge
     inner = capsys.readouterr().err
     assert library_lines(inner) == [("warn", "slow response"), ("error", "gave up")]
     assert root.level == before
-    assert not [h for h in root.handlers if type(h).__name__ == "_Records"]
+    assert not records_left_on_root()
 
 
 @pytest.mark.parametrize(("flags", "lines"), [([], 1), (["--quiet"], 0)])
@@ -462,6 +470,64 @@ def test_a_library_warning_never_falls_through_to_logging_last_resort(
     assert len(proc.stderr.splitlines()) == lines, proc.stderr
     if lines:
         assert library_lines(proc.stderr) == [("warn", "auth failed for [REDACTED]")]
+
+
+@pytest.mark.parametrize("host_handler", [False, True])
+def test_a_handler_that_logs_after_its_app_call_returned_leaks_no_secret(
+    host_handler: bool,
+) -> None:
+    """A handler abandoned at its timeout that logs after ``App.call`` returned: with no
+    run attached, the record is written where ``logging.lastResort`` would write it,
+    redacted of the handler's secrets, and not at all when the host's own handler takes
+    it; the root logger is left as it was once the thread ends (#118). A subprocess,
+    since pytest's own capture handlers sit on the root logger"""
+    script = (
+        "import logging, threading\n"
+        "from dataclasses import dataclass\n"
+        "from treaty import App, Ctx, Flag\n"
+        "@dataclass(frozen=True, slots=True)\n"
+        "class Login:\n"
+        "    api_token: str = Flag(description='API token', secret=True)\n"
+        "taken = []\n"
+        "class Host(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        taken.append(record.name)\n"
+        f"if {host_handler!r}:\n"
+        "    logging.getLogger().addHandler(Host())\n"
+        "before = list(logging.getLogger().handlers)\n"
+        "go, logged, workers = threading.Event(), threading.Event(), []\n"
+        "app = App('libctl', version='1.0.0')\n"
+        "@app.command('slow', description='Log late', timeout=0.05, danger_level='safe',\n"
+        "             exit_codes=())\n"
+        "def slow(args: Login, ctx: Ctx) -> dict[str, bool]:\n"
+        "    workers.append(threading.current_thread())\n"
+        "    go.wait(timeout=10)  # released only after the call answered TIMEOUT\n"
+        "    logging.getLogger('somelib').warning('auth failed for %s', args.api_token)\n"
+        "    logged.set()\n"
+        "    return {'ok': True}\n"
+        f"env = {{'LIBCTL_API_TOKEN': {TOKEN!r}, 'LIBCTL_AUDIT_LOG': '0'}}\n"
+        "print(app.call('slow', {}, env=env).error.code)\n"
+        "go.set()\n"
+        "assert logged.wait(timeout=10)\n"
+        "workers[0].join(timeout=10)\n"
+        "assert not workers[0].is_alive()\n"
+        "print(logging.getLogger().handlers == before, taken)\n"
+    )
+    env = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert TOKEN not in proc.stderr and TOKEN not in proc.stdout
+    taken = ["somelib"] if host_handler else []
+    assert proc.stdout.splitlines() == ["TIMEOUT", f"True {taken}"], proc.stdout
+    written = [] if host_handler else ["auth failed for [REDACTED]"]
+    assert proc.stderr.splitlines() == written, proc.stderr
 
 
 def test_concurrent_calls_redact_each_others_secrets_in_library_records(

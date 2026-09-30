@@ -2201,7 +2201,9 @@ class _Records(logging.Handler):
     innermost run may be another thread's, as with concurrent ``App.call``s, so every
     attached run's secrets are redacted from a record, not only the receiving run's. So are
     the secrets of every handler thread still alive, whose run may have returned: a
-    handler that outlived its timeout still prints"""
+    handler that outlived its timeout still prints and logs. The handler stays on the root
+    while such a thread lives, and with no run attached writes a record where
+    ``logging.lastResort`` would, redacted (#118)"""
 
     def __init__(self) -> None:
         super().__init__(logging.NOTSET)
@@ -2224,6 +2226,7 @@ class _Records(logging.Handler):
         root = logging.getLogger()
         with self._guard:
             if not self._runs:
+                # Already there while a held thread lives; adding is idempotent
                 root.addHandler(self)
             self._runs.append((write, redact, root.level))
             self._changed()
@@ -2242,15 +2245,21 @@ class _Records(logging.Handler):
             else:
                 root.setLevel(level)
             self._changed()
-            if not self._runs:
-                root.removeHandler(self)
 
     def hold(self, worker: threading.Thread, redact: Callable[[str], str]) -> None:
         """Redact with ``redact`` until ``worker`` ends, even after its run detached: a
-        handler abandoned at its timeout or on a signal may print long after (#104). A
-        thread that never ends keeps its secrets here for the life of the process."""
+        handler abandoned at its timeout or on a signal may print or log long after (#104,
+        #118). A thread that never ends keeps its secrets, and this handler on the root
+        logger, for the life of the process."""
         with self._guard:
             self._workers.append((worker, redact))
+            self._changed()
+
+    def forget(self, worker: threading.Thread) -> None:
+        """Forget ``worker``, called on it as its handler ends, and leave the root logger
+        once no run is attached and no other held thread lives"""
+        with self._guard:
+            self._workers = [(w, r) for w, r in self._workers if w is not worker]
             self._changed()
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -2258,6 +2267,42 @@ class _Records(logging.Handler):
             write = self._runs[-1][0] if self._runs else None
         if write is not None:
             write(record)
+        else:
+            self._last_resort(record)
+
+    def _last_resort(self, record: logging.LogRecord) -> None:
+        """A record logged with no run attached, by a held thread or the host, written
+        as ``logging.lastResort`` would have been, when no other handler takes it, with
+        the held threads' secrets redacted"""
+        resort = logging.lastResort
+        if resort is None or record.levelno < resort.level or self._handled_elsewhere(record):
+            return
+        stream = sys.stderr
+        if stream is None:
+            return
+        try:
+            message = record.getMessage()
+        except TypeError, ValueError:
+            # Arguments that do not fit the format: the template, as a run's line has it,
+            # rather than logging's error report, which prints the arguments raw
+            message = str(record.msg)
+        shown = logging.makeLogRecord(record.__dict__)
+        shown.msg, shown.args = message, None
+        stream.write(self.redact(resort.format(shown)) + "\n")
+        stream.flush()
+
+    def _handled_elsewhere(self, record: logging.LogRecord) -> bool:
+        """Whether a handler besides this one sits on the record's way to the root, as
+        ``Logger.callHandlers`` counts them: then ``logging.lastResort`` would stay quiet"""
+        logger = logging.Logger.manager.loggerDict.get(record.name)
+        current: logging.Logger | None = (
+            logger if isinstance(logger, logging.Logger) else logging.getLogger()
+        )
+        while current is not None:
+            if any(handler is not self for handler in current.handlers):
+                return True
+            current = current.parent if current.propagate else None
+        return False
 
     def redact(self, text: str) -> str:
         """``text`` with the secrets of every attached run and live handler thread
@@ -2271,10 +2316,13 @@ class _Records(logging.Handler):
         return text
 
     def _changed(self) -> None:
-        """Release the ended handler threads' secrets and rebuild the redactors; the
-        caller holds the guard"""
+        """Release the ended handler threads' secrets, rebuild the redactors, and leave
+        the root logger once no run is attached and no held thread lives; the caller holds
+        the guard"""
         self._workers = [(w, r) for w, r in self._workers if w.is_alive()]
         self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r in self._workers))
+        if not self._runs and not self._workers:
+            logging.getLogger().removeHandler(self)
 
 
 _RECORDS = _Records()
@@ -3911,6 +3959,7 @@ class _Run:
                     self._held(self._redactor(command, args), running.append),
                     self.cancellation.armed,
                     heartbeats=self._heartbeats(command, invocation, mode, started),
+                    ended=_RECORDS.forget,
                 )
             finally:
                 self._restore_cwd(before)
@@ -4167,6 +4216,7 @@ class _Run:
                 self._held(secret_free, running.append),
                 self.cancellation.armed,
                 stream_context,
+                ended=_RECORDS.forget,
             )
             if isinstance(produced, Iterable) and not isinstance(produced, (str, bytes, Mapping)):
                 # Registration accepts Iterable[T]: a returned list streams its items
@@ -4186,6 +4236,7 @@ class _Run:
                     self._held(secret_free, latest),
                     self.cancellation.armed,
                     stream_context,
+                    ended=_RECORDS.forget,
                 )
                 if event is _END:
                     self.in_flight = None  # the handler finished; its teardown follows here
