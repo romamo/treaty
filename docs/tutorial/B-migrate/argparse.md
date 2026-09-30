@@ -503,7 +503,7 @@ command.
 | `subprocess.run([...])` | `ctx.run([...])`, with `check=False` if you read `returncode`, declared with `subprocess=` ([Run other programs](../core/programs.md)) |
 | a helper that `os.chdir`s into the project so relative paths land there | `project_root=(".git",)` on the command and paths joined onto `ctx.project_root`; the `no-chdir` audit rule finds the `chdir`, also in a first-party helper the handler calls |
 | long in-process work (Ansible runs, migrations) | `timeout=` on the command; without it the 60 s default applies ([Run long work](../core/long-running.md#step-1-set-the-time-limit)) |
-| `-v`/`--verbose` printing progress | `ctx.log(...)`, shown under the framework's `--verbose`; a `-v` short is gone |
+| `-v`/`--verbose` printing progress | `ctx.log(...)`, shown under the framework's `--verbose` or its `-v`; drop the app's own `-v` flag |
 | `input("Sure?")`, `--yes` | `danger_level="destructive"`, `dry_run`, `--confirm-destructive` |
 | `--yes` meaning "apply; without it, print the plan and exit 0" | `safe_default=True`: the command previews and exits 0, and `--live` applies it ([Preview by default](../core/danger-level.md#preview-by-default)) |
 | a hand-written MCP server declaring the same operations again | `treaty-mcp module:app` serves every command as a tool ([Serve commands over MCP](../ship/mcp.md)) |
