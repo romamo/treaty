@@ -333,7 +333,8 @@ def _danger_level(app: App) -> Iterator[Finding]:
                 Severity.WARNING,
                 c.path.value,
                 "name suggests a destructive operation but danger_level is safe",
-                'danger_level="destructive" and add dry_run: bool = Flag(default=False, ...)',
+                'danger_level="destructive" and add dry_run: bool = Flag(default=False, ...), '
+                "or mark the command's own boolean flag Flag(dry_run=True)",
             )
         elif verb in _MUTATING_VERBS:
             yield Finding(

@@ -216,7 +216,7 @@ as `safe` and the audit says:
 $ uv run treaty audit myapp.cli:app --format plain
 ...
   1. (warning) danger-level [purge]: name suggests a destructive operation but danger_level is safe
-     fix: danger_level="destructive" and add dry_run: bool = Flag(default=False, ...)
+     fix: danger_level="destructive" and add dry_run: bool = Flag(default=False, ...), or mark the command's own boolean flag Flag(dry_run=True)
 ```
 
 It is a warning, so `--strict` fails on it, and it matters more than most: a `safe`
