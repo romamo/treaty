@@ -28,15 +28,12 @@ starts a process, or creates a file that must go away however the run ends.
 
 ## Running the checks
 
-Run the **Check** commands from the root of a treaty checkout, in order. `SLOWCTL_AUDIT_LOG=off`
-keeps these runs out of slowctl's audit log, the record of every run that
-[Log without touching stdout](logging.md#step-4-read-the-audit-log) describes:
+Run the **Check** commands from the root of a treaty checkout, in order:
 
 <!-- check -->
 ```bash
 slowctl() { uv run examples/slowctl.py "$@"; }
 rm -rf tmp/tutorial && mkdir -p tmp/tutorial
-export SLOWCTL_AUDIT_LOG=off
 ```
 
 Each check exits non-zero when it fails: JSON output goes through `jq -e`, which exits 1 when

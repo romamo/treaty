@@ -102,7 +102,7 @@ def _unchanged(text: str) -> str:
 def scrub(key: str, value: object, redact: Callable[[str], str] = _unchanged) -> object:
     """A JSON value on its way to a log or stderr: ``[REDACTED]`` under a secret name at
     any depth, and ``redact`` applied to every other string. The single entry point the
-    audit log (REQ-F-026) must call."""
+    audit log (REQ-O-030) must call."""
     if secret_name(key):
         return REDACTED
     if isinstance(value, dict):

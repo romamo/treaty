@@ -35,6 +35,7 @@ which serves any treaty app's commands as MCP tools over stdio.
 
 - `treaty agents-md`: Write AGENTS.md from the registry: the cli-version comment and the generated sections between the treaty markers; text outside the markers is kept
 - `treaty audit`: Check an App's registrations against the spec and suggest the next step
+- `treaty audit-log`: Query the opt-in audit log: one entry per invocation, oldest first, with its arguments (secrets redacted), exit code, duration, warning codes, and request, trace, and session ids; exit 4 with AUDIT_LOG_DISABLED while the log is off
 - `treaty changelog-add`: Record the manifest changes since the last snapshot in the app's schema changelog, then update the snapshot
 - `treaty check-docs`: Check agent docs against the app: the declared version, AGENTS.md's sections, and every command, flag, and variable they name against --help
 - `treaty cleanup`: Remove the temp, cache, and log paths the tool's commands declare in filesystem_side_effects, its caches, and the output files commands handed out
@@ -59,7 +60,7 @@ which serves any treaty app's commands as MCP tools over stdio.
 
 ## Environment Variables
 
-- `TREATY_AUDIT_LOG` (string, optional): Audit log file, an absolute path; off turns the log off
+- `TREATY_AUDIT_LOG` (string, optional): Audit log, off by default: 1 on, 0 off, or an absolute path to log there
 - `TREATY_CONFIG` (string, optional): Config file to read instead of the project and user files
 - `TREATY_CONTEXT` (string, optional): Named context of the config files to apply
 - `TREATY_FORMAT` (string, optional): Default --format when the flag is not passed

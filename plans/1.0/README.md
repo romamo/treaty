@@ -148,6 +148,7 @@ adds its keywords to the same spec.
 
 X3 and X4 landed with 11: the audit log calls `_redact.scrub` on every entry, so F-034 is
 Done; it is on by default, off with `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`.
+X4 was reversed by #71: the spec's REQ-O-030 makes the audit log opt-in.
 
 X2 and X5 landed with 10: `ctx.http` fills `error.network_context`, and its retries go
 through the command's `retry=` budget into `meta.retries` and `error.retries_exhausted`.

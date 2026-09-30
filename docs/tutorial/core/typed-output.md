@@ -192,7 +192,7 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
         ("purge", {"confirm_destructive": True, "db": db}),
     ]
     for name, args in calls:
-        env = app.call(name, args, env={"TODO_AUDIT_LOG": "off"})
+        env = app.call(name, args, env={"TODO_AUDIT_LOG": "0"})
         assert env.ok, env.error
         jsonschema.validate(env.data, commands[name]["output_schema"])
 ```
@@ -208,7 +208,7 @@ In your own project the test is the same with your app in it: import it (`from t
 import app` in a project `treaty init` made), use it where the test says
 `todo_exit_codes.app`, and list one call per command with arguments that work against a
 scratch directory, as `calls` does above. Keep the `env=` on each call, with your app's own
-variable, `<APP>_AUDIT_LOG` (`TODO_AUDIT_LOG` for `todo`), set to `off`, so the test never
+variable, `<APP>_AUDIT_LOG` (`TODO_AUDIT_LOG` for `todo`), set to `0`, so the test never
 writes your real audit log.
 
 **Check:** the test passes for `todo`

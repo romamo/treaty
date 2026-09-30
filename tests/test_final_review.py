@@ -356,7 +356,7 @@ def test_mcp_validate_with_a_missing_file_exits_with_its_declared_not_found(
     assert code != 1
 
 
-# F-026: the audit log read while other runs rotate it
+# REQ-O-030: the audit log read while other runs rotate it
 
 
 def test_reading_the_audit_log_during_rotation_never_fails(tmp_path: Path) -> None:

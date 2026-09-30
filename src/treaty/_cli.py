@@ -46,14 +46,9 @@ from ._profile import (
 )
 from ._scaffold import ProjectName, render
 
-# The treaty CLI keeps no audit log: `treaty audit` is the linter, and a second
-# `audit-log` beside it would only confuse
-cli = App(
-    "treaty",
-    version=__version__,
-    description="Build and audit agent-ready CLIs",
-    audit_log=None,
-)
+# `treaty audit` is the linter; `treaty audit-log` queries the opt-in audit log, which
+# TREATY_AUDIT_LOG=1 turns on, as on every app (REQ-O-030)
+cli = App("treaty", version=__version__, description="Build and audit agent-ready CLIs")
 cli.exit_code(
     "CONFORMANCE_FAILED",
     80,

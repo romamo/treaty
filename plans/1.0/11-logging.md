@@ -137,8 +137,8 @@ applies `_scrub` again for lines written before a secret field was declared.
 
 | ID | Question | Recommendation |
 |----|----------|----------------|
-| 11-D1 | Audit log on by default (F-026 is automatic) or opt-in (a file in every user's home) | On by default with `<APP>_AUDIT_LOG=off` and `audit_log=None`; the test suite sets `XDG_DATA_HOME` to a temp dir |
-| 11-D2 | Entry key `args` (F-026) or `parameters` (O-030) | `parameters`, the name the query command's contract uses; note F-026's name in COMPLIANCE |
+| 11-D1 | Audit log on by default (F-026 is automatic) or opt-in (a file in every user's home) | On by default with `<APP>_AUDIT_LOG=off` and `audit_log=None`; the test suite sets `XDG_DATA_HOME` to a temp dir. Revised (#71): the spec retired F-026 into the opt-in REQ-O-030, so the log is off by default; `AuditLog()` or `<APP>_AUDIT_LOG=1` turns it on under `XDG_STATE_HOME` |
+| 11-D2 | Entry key `args` (F-026) or `parameters` (O-030) | `parameters`, the name the query command's contract uses; note F-026's name in COMPLIANCE. Revised (#71): `args`, as the spec's `audit-log-entry.json` names it |
 | 11-D3 | `WARNINGS_AS_ERRORS` with `data: null` (spec wire) or `data` kept | Keep `data`: on a mutating command it carries the `effect` that already happened |
 | 11-D4 | `audit-log` as a stream (one entry per line) or a paginated list | Stream, to meet "one per line"; `--cursor` is not needed for a local file |
 | 11-D5 | Drop stray `print()` text off a TTY | Yes, at INFO; `THIRD_PARTY_STDOUT` still counts the bytes in the envelope |

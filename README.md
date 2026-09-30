@@ -463,40 +463,64 @@ line and a stream's terminal envelope are checked (REQ-O-025).
 
 ## Audit log
 
-Every invocation, successful or not, appends one line to `audit.jsonl`: `timestamp`,
-`command`, `parameters` (the parsed arguments, never raw argv), `exit_code`,
-`duration_ms`, `trace_id`, `request_id`, `operator` (`<APP>_SESSION`), `error_code`,
-`warnings` (the codes, so `--no-injection-protection` is on record), and `data` when it is
-under 4 KiB (REQ-F-026). Secret fields, the login token, and every key named like a
-credential are `[REDACTED]` at any depth (REQ-F-034). `--help` and the schemas are not
-invocations and are not logged.
+The audit log is off by default, and nothing is created for it until it is turned on
+(REQ-O-030). The app turns it on with `App(audit_log=treaty.AuditLog())`; the operator, or
+an agent runtime, with `<APP>_AUDIT_LOG`, which wins over the app:
+
+| `<APP>_AUDIT_LOG` | Effect |
+|---|---|
+| unset | on only when the app passed an `AuditLog` |
+| `1` | on, at `AuditLog.path`, else the default path |
+| `0` | off, even when the app turned it on |
+| an absolute path | on, at that path |
+
+Any other value exits `2` with `INVALID_AUDIT_LOG_SETTING` for every invocation except
+`--help` and `--version`. `off` still works as `0`, with a `DEPRECATED_SETTING` warning.
+The default path is `$XDG_STATE_HOME/<app>/audit.jsonl`, else
+`~/.local/state/<app>/audit.jsonl`.
+
+While the log is on, every invocation that resolves to a command appends one line to
+`audit.jsonl`, whatever its outcome: argument errors, `--validate-only`, `--dry-run`, and
+a destructive command refused without `--confirm-destructive` included. An unknown
+command, `--help`, `--version`, `completion`, `manifest`, `--schema`, and `audit-log`
+itself are not logged. Each line matches the spec's `audit-log-entry.json`: `timestamp`,
+`command`, `args` (the parsed arguments, never raw argv, plus `validate_only`,
+`confirm_destructive`, and `no_injection_protection` when given), `exit_code`,
+`duration_ms`, `request_id`, `warnings` (the codes), and `trace_id` and `session_id`
+(`<APP>_SESSION`) when set. Secret fields, the login token, and every key named like a
+credential are `[REDACTED]` at any depth (REQ-F-034). A line never exceeds 16 KiB: the
+largest `args` values become `[TRUNCATED]` and `truncated` is `true`.
 
 A value that is no secret but should not be kept, such as a message body, is declared
-`Flag(audit=False)` or `Arg(audit=False)`: its key stays in `parameters` with the value
+`Flag(audit=False)` or `Arg(audit=False)`: its key stays in `args` with the value
 `[OMITTED]`. Unlike `secret=True` it is still passed on argv and echoed in errors, and
 `exec`, `--raw-payload`, MCP, and `app.call` take it as before; with `secret=True` too, the
 secret's `[REDACTED]` wins. The manifest adds "(omitted from the audit log)" to such an
 argument's description, and the args schema marks the property `"x-audited": false`. The
-audit log is the only record that keeps parameters: idempotency records hold a hash of the
+audit log is the only record that keeps arguments: idempotency records hold a hash of the
 arguments and the `data` a repeat replays, so they are not masked, and `--debug` traces
-carry no parameters. `meta.audit_log_path` names the file; a log that cannot be written
-adds `AUDIT_LOG_UNAVAILABLE` and never fails the command.
+carry no arguments.
 
-The file is `App(audit_log=treaty.AuditLog(path=...))`, else `<APP>_AUDIT_LOG`, else
-`$XDG_DATA_HOME/<app>/audit.jsonl`, else `~/.local/share/<app>/audit.jsonl`;
-`<APP>_AUDIT_LOG=off` turns it off for a run and `App(audit_log=None)` for the app. It is
-`0600` in a `0700` directory, one `write` per line. Past `max_bytes` (100 MiB) it rotates to
-`audit.1.jsonl`, keeping `keep` (5) rotated files, and the first append of a process
-deletes files older than `max_age_days` (30), so it never holds more than
-`(keep + 1) * max_bytes` (REQ-F-042).
+`meta.audit_log_path` names the file on every response, and the manifest lists it as a
+`log` side effect of each logged command; neither appears while the log is off. A log that
+cannot be written adds `AUDIT_LOG_UNAVAILABLE` and never fails the command. The file is
+created `0600` and its new directories `0700` whatever the umask, and each line is one
+`write`. Past `max_bytes` (10 MiB), or once its first entry is older than `max_age_days`
+(30), it rotates to `audit.1.jsonl`, keeping `keep` (5) rotated files; rotated files older
+than `max_age_days` are deleted before each append, so it never holds more than
+`(keep + 1) * max_bytes`, 60 MiB by default, plus one entry. `cleanup` never removes it.
 
 ```bash
+DEPLOYCTL_AUDIT_LOG=1 deployctl deploy --env prod     # turn it on for one run
 deployctl audit-log --since 1h --format jsonl        # one entry per line
 deployctl audit-log --trace-id abc123 --limit 100    # the newest 100 of one trace
 ```
 
-`audit-log` streams entries oldest first, filtered by `--since` (`30m`, `1h`, `2d`, or ISO
-8601), `--command`, and `--trace-id`, redacting them again as it reads (REQ-O-030).
+`audit-log` is on every app, since the operator can turn the log on for any of them. It
+streams entries oldest first, filtered by `--since` (`30s`, `15m`, `1h`, `7d`, or ISO 8601
+with a UTC offset), `--command` (`config` matches `config set` but not `configure`), and
+`--trace-id`, redacting them again as it reads. While the log is off it exits `4` with
+`AUDIT_LOG_DISABLED`, so "nothing was recorded" never reads as "nothing happened".
 
 In JSON mode every string value is cleaned before it is written: ANSI escape sequences
 are removed, and null bytes and lone surrogates become U+FFFD (REQ-F-007, REQ-F-016).

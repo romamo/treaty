@@ -258,7 +258,7 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
         env[key] = value  # VAR=value before the command sets it for the call
         words = words[1:]
     # The audit's own settings win: its log stays off and its answer stays JSON
-    env[app_var(app.name, AUDIT_LOG.key)] = "off"
+    env[app_var(app.name, AUDIT_LOG.key)] = "0"
     env.pop(app_var(app.name, FORMAT.key), None)
     for wrapper in _WRAPPERS:
         if tuple(words[: len(wrapper)]) == wrapper:

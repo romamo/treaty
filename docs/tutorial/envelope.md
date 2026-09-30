@@ -32,7 +32,6 @@ rm -rf tmp/tutorial && mkdir -p tmp/tutorial
   },
   "error": null,
   "meta": {
-    "audit_log_path": "/home/me/.local/share/todo/audit.jsonl",
     "command": "add",
     "config_sources": [],
     "cwd": "/home/me/project",
@@ -208,7 +207,7 @@ These are on every run:
 | --- | --- |
 | `exit_code` | the process's exit code |
 | `command` | the command as the manifest names it, such as `add` or `deploy.rollback` |
-| `request_id` | an id for this run, also in the audit log |
+| `request_id` | an id for this run, also in the audit log when it is on |
 | `timestamp`, `duration_ms` | when the run started, in UTC, and how long it took |
 | `tool_version` | the app's version, as `--version` reports it |
 | `schema_version` | the `MAJOR.MINOR` version of this command's output contract |
@@ -216,12 +215,12 @@ These are on every run:
 | `timeout_ms` | the time limit the run had |
 | `headless` | `true` when there is no person or display to open a window for |
 | `config_sources`, `effective_config_hash` | the config files read, highest first, and a hash of the settings they produced |
-| `audit_log_path` | the audit log this run was written to; absent when `TODO_AUDIT_LOG=off` turns the log off |
 
 Others appear only when they apply: `pagination` on a list command (`returned`, `total`,
 `has_more`, `next_cursor`, `truncated`), `idempotency_hit` when a repeated idempotency key
 returned the first result, `validation_only` under `--validate-only`, `trace_id` when
-`TOOL_TRACE_ID` is set, `retries` when the command retried. None of them is ever `null`:
+`TOOL_TRACE_ID` is set, `retries` when the command retried, `audit_log_path` while the
+opt-in audit log is on (`TODO_AUDIT_LOG=1`). None of them is ever `null`:
 a key that does not apply is left out. Inside `pagination`, `next_cursor` is `null` on the
 last page.
 

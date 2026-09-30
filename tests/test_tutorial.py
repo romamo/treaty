@@ -109,8 +109,8 @@ def test_a_chapters_checks_pass_in_order(page: Path) -> None:
     script = "\n".join(m["code"] for m in _CHECK.finditer(page.read_text()))
     env = {
         **os.environ,
-        "TODO_AUDIT_LOG": "off",
-        "TREATY_AUDIT_LOG": "off",
+        "TODO_AUDIT_LOG": "0",
+        "TREATY_AUDIT_LOG": "0",
         "TREATY_SPEC_DIR": str(SPEC_DIR),
     }
     result = subprocess.run(
@@ -337,7 +337,7 @@ def test_every_result_matches_its_output_schema(tmp_path: Path) -> None:
         ("purge", {"confirm_destructive": True, "db": db}),
     ]
     for name, args in calls:
-        env = app.call(name, args, env={"TODO_AUDIT_LOG": "off"})
+        env = app.call(name, args, env={"TODO_AUDIT_LOG": "0"})
         assert env.ok, env.error
         jsonschema.validate(env.data, commands[name]["output_schema"])
 
@@ -737,7 +737,7 @@ def test_todo_over_mcp(tmp_path: Path) -> None:
         env={
             "PYTHONPATH": str(ROOT),
             "TODO_STATE_DIR": str(tmp_path / "state"),
-            "TODO_AUDIT_LOG": "off",
+            "TODO_AUDIT_LOG": "0",
         },
     )
 

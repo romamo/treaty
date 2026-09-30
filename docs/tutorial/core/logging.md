@@ -1,7 +1,8 @@
 # Log without touching stdout
 
 **Goal:** a command says what it is doing on stderr, at a level the caller chooses, never
-on stdout and never with a secret in it, and every run leaves a record in the audit log
+on stdout and never with a secret in it, and with the audit log on, every run leaves a
+record in it
 
 **You need:** a treaty app, such as `todo` at the end of [Read settings and secrets](config.md);
 this chapter clears the audit rule `log-not-print`
@@ -20,8 +21,8 @@ whose `import` logs each feed it imports.
 ## Running the checks
 
 Run the **Check** commands from the root of a treaty checkout, in order. `todo` runs the
-example; the audit log goes to a scratch directory, and a feed that refuses the connection
-stands in for a real one:
+example; `TODO_AUDIT_LOG` turns the audit log on in a scratch directory, and a feed that
+refuses the connection stands in for a real one:
 
 <!-- check -->
 ```bash
@@ -148,15 +149,20 @@ uv run pytest -q tests/test_tutorial.py -k "logs_what or stray_print or token_re
 
 ## Step 4: Read the audit log
 
-Every run, successful or not, adds one line to the audit log: the command, its parsed
-parameters with secrets redacted, the exit code, the duration, the request and trace ids,
-and `data` when it is small. It is how you find out, after the fact, what an agent ran.
+The audit log is off until someone turns it on: the app with
+`App(audit_log=treaty.AuditLog())`, or whoever runs it with `TODO_AUDIT_LOG=1`, or an
+absolute path to put it there. `TODO_AUDIT_LOG=0` turns it off even when the app turned it
+on, since the person running the tool decides. While it is on, every run of a command,
+successful or not, adds one line: the command, its parsed arguments with secrets redacted,
+the exit code, the duration, the warning codes, and the request and trace ids. It is how
+you find out, after the fact, what an agent ran.
 
-The file is `$XDG_DATA_HOME/todo/audit.jsonl`, else `~/.local/share/todo/audit.jsonl`;
-`TODO_AUDIT_LOG` names another file, and `TODO_AUDIT_LOG=off` turns it off for a run. It
-rotates at 100 MiB and drops files older than 30 days. `meta.audit_log_path` names it on
-every response, and the `audit-log` built-in reads it back, filtered by `--since`,
-`--command`, or `--trace-id`, one envelope per entry.
+The default file is `$XDG_STATE_HOME/todo/audit.jsonl`, else
+`~/.local/state/todo/audit.jsonl`. It rotates at 10 MiB, keeps 5 rotated files, and drops
+entries older than 30 days. `meta.audit_log_path` names it on every response while it is
+on, and the `audit-log` built-in reads it back, filtered by `--since`, `--command`, or
+`--trace-id`, one envelope per entry; while it is off, `audit-log` exits 4 with
+`AUDIT_LOG_DISABLED`.
 
 **Check:** an `add` run is in the audit log under its request id; the refused `import` runs
 are there too, exit 12 among them; an `import` with a token is logged, and the token is not
