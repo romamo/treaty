@@ -730,6 +730,12 @@ def test_a_bad_audit_log_value_fails_everything_but_help_and_version(tmp_path: P
     assert envelope.error is not None and envelope.error.code == "INVALID_AUDIT_LOG_SETTING"
 
 
+def test_a_bad_audit_log_value_keeps_the_trace_id_in_meta(tmp_path: Path) -> None:
+    code, envelope = logged(tmp_path, ["warn"], LOGCTL_AUDIT_LOG="off", TOOL_TRACE_ID="t-1")
+    assert code == 2 and envelope["error"]["code"] == "INVALID_AUDIT_LOG_SETTING"
+    assert envelope["meta"]["trace_id"] == "t-1"
+
+
 def test_while_on_the_manifest_lists_the_log_as_a_log_side_effect(tmp_path: Path) -> None:
     code, envelope = logged(tmp_path, ["manifest"])
     assert code == 0

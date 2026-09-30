@@ -2505,10 +2505,11 @@ class _Run:
         """The audit log this run appends each resolved invocation to, while it is on
         (REQ-O-030)"""
         try:
+            # The trace id first: the answer to a bad <APP>_AUDIT_LOG still carries it
+            self.trace_id = read_trace_id(env)
             audit = resolve(app.audit_log, app.name, env)
             if audit.path is not None:
                 self.journal = Journal(audit.path, audit.bounds)
-            self.trace_id = read_trace_id(env)
         except ParseError as exc:
             self.env_error = exc
         self.invocation: Invocation | None = None
