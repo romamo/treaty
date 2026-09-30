@@ -588,7 +588,7 @@ def build_command(
         args_type=args_type,
         output_type=output_type,
         output_schema=output_schema,
-        args_schema=_with_max_bytes(schema_for(args_type, scalars), fields),
+        args_schema=_with_field_keys(schema_for(args_type, scalars), fields),
         fields=fields,
         description=description,
         danger_level=danger_level,
@@ -817,17 +817,20 @@ def _check_strict(path: CommandPath, fields: Sequence[FieldInfo]) -> None:
         )
 
 
-def _with_max_bytes(schema: JsonSchema, fields: Sequence[FieldInfo]) -> JsonSchema:
-    """``Flag(max_bytes=)`` as ``x-max-bytes`` on the property, or on its items"""
+def _with_field_keys(schema: JsonSchema, fields: Sequence[FieldInfo]) -> JsonSchema:
+    """``Flag(max_bytes=)`` as ``x-max-bytes`` on the property, or on its items, and
+    ``audit=False`` as ``x-audited: false`` on the property"""
     properties = dict(schema["properties"])
     for f in fields:
-        if f.spec.max_bytes is None:
+        if f.spec.max_bytes is None and f.spec.audit:
             continue
         prop = dict(properties[f.name])
-        if f.flag_type is FlagType.ARRAY:
+        if f.spec.max_bytes is not None and f.flag_type is FlagType.ARRAY:
             prop["items"] = {**prop["items"], "x-max-bytes": f.spec.max_bytes}
-        else:
+        elif f.spec.max_bytes is not None:
             prop["x-max-bytes"] = f.spec.max_bytes
+        if not f.spec.audit:
+            prop["x-audited"] = False
         properties[f.name] = prop
     return {**schema, "properties": properties}
 

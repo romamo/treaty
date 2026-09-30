@@ -150,7 +150,7 @@
     },
     "Arg": {
       "kind": "function",
-      "signature": "(*, description: 'str', pattern: 'str | None' = None, secret: 'bool | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, multiline: 'bool' = False) -> 'Any'"
+      "signature": "(*, description: 'str', pattern: 'str | None' = None, secret: 'bool | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, multiline: 'bool' = False, audit: 'bool' = True) -> 'Any'"
     },
     "AuditLog": {
       "fields": [
@@ -451,7 +451,7 @@
     },
     "Flag": {
       "kind": "function",
-      "signature": "(*, description: 'str', default: 'Any' = <dataclasses._MISSING_TYPE object>, short: 'str | None' = None, pattern: 'str | None' = None, secret: 'bool | None' = None, multiline: 'bool' = False, max_bytes: 'int | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, deprecated: 'Deprecated | None' = None) -> 'Any'"
+      "signature": "(*, description: 'str', default: 'Any' = <dataclasses._MISSING_TYPE object>, short: 'str | None' = None, pattern: 'str | None' = None, secret: 'bool | None' = None, multiline: 'bool' = False, max_bytes: 'int | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, deprecated: 'Deprecated | None' = None, audit: 'bool' = True) -> 'Any'"
     },
     "Format": {
       "kind": "enum",
@@ -912,7 +912,8 @@
       "secret",
       "pattern_type",
       "from_stdin",
-      "multiline"
+      "multiline",
+      "audit"
     ],
     "Deprecated": [
       "since",
@@ -929,7 +930,8 @@
       "max_bytes",
       "pattern_type",
       "from_stdin",
-      "deprecated"
+      "deprecated",
+      "audit"
     ],
     "Group.command": [
       "name",

@@ -12,6 +12,8 @@ import re
 from collections.abc import Callable
 
 REDACTED = "[REDACTED]"
+OMITTED = "[OMITTED]"
+"""A field declared ``audit=False``, as the audit log writes it"""
 
 # REQ-F-034's six substrings plus cookie and a pass segment: API_KEY, *_TOKEN, DB_PASS,
 # Authorization, Cookie, X-Api-Key, AUTH_URL, ...

@@ -188,7 +188,7 @@ from ._protect import (
     protect_batch,
     tagged,
 )
-from ._redact import NAME_CONTEXT, REDACTED, redacted, scrub
+from ._redact import NAME_CONTEXT, OMITTED, REDACTED, redacted, scrub
 from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
@@ -2543,14 +2543,15 @@ class _Run:
     def _audit_entry(self, envelope: Envelope) -> dict[str, object]:
         """One audit log line: ``parameters`` are the parsed arguments, never raw argv,
         with secret fields, the login token, and credential-named keys ``[REDACTED]``
-        (REQ-F-026, REQ-F-034); ``data`` is kept when short, redacted the same way"""
+        (REQ-F-026, REQ-F-034) and fields declared ``audit=False`` ``[OMITTED]``; ``data``
+        is kept when short, redacted the same way"""
         command, args = self.current, self.args
         redact = _unchanged if command is None else self._redactor(command, args)
         parameters: dict[str, object] = {}
         if command is not None and args is not None:
             for f in command.fields:
-                if f.secret:
-                    parameters[f.name] = REDACTED
+                if f.secret or not f.spec.audit:
+                    parameters[f.name] = REDACTED if f.secret else OMITTED
                     continue
                 value = to_jsonable(getattr(args, f.name), self.app.scalars, base=self.cwd)
                 parameters[f.name] = scrub(f.name, value, redact)

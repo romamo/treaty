@@ -114,9 +114,9 @@ that no app or example called.
 same keywords.
 
 `Flag`: `description`, `default`, `short`, `pattern`, `secret`, `multiline`, `max_bytes`,
-`pattern_type`, `from_stdin`, `deprecated`. `Arg`: `description`, `pattern`, `secret`,
-`pattern_type`, `from_stdin`, `multiline`. `Out`: `default`, `default_factory`, `sort_key`, `ordered`,
-`volatile`, `high_entropy`, `external`. All keep.
+`pattern_type`, `from_stdin`, `deprecated`, `audit`. `Arg`: `description`, `pattern`,
+`secret`, `pattern_type`, `from_stdin`, `multiline`, `audit`. `Out`: `default`,
+`default_factory`, `sort_key`, `ordered`, `volatile`, `high_entropy`, `external`. All keep.
 
 ## `Ctx`
 
