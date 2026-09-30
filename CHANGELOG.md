@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- Parallel runs on Windows no longer fail now and then while one writes a file another
+  reads: replacing the config file or the update-check and `ctx.cache` files while
+  another process has it open, or reading it while it is being replaced, raised
+  `PermissionError` and the run exited 1 or 2. On Windows treaty retries such a sharing
+  violation for up to 2 seconds, then raises it, so a real permission problem still
+  fails (#55)
+
 ## [1.0.0rc5] - 2026-09-30
 
 The fifth 1.0 release candidate: fixes to rc4's `stable-order` warning and `Decimal`

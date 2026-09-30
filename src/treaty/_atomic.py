@@ -4,6 +4,10 @@
 the target, so a reader sees the old file or the new one, never a mix (REQ-F-070). The
 locks are advisory, whole-file, and exclusive: ``fcntl.flock`` on POSIX, ``msvcrt`` on
 Windows.
+
+On Windows a file another process has open cannot be replaced, and a file being replaced
+cannot be opened: both raise ``PermissionError``. ``retry_sharing_violation`` retries such
+an operation for a moment there, so parallel runs reading and writing one file don't fail.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ import stat
 import sys
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
@@ -56,6 +60,36 @@ else:
         fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+SHARING_RETRY_SECONDS = 2.0
+"""How long a Windows sharing violation is retried before the PermissionError stands"""
+_SHARING_POLL_SECONDS = 0.02
+
+
+def retry_sharing_violation[T](
+    operation: Callable[[], T],
+    *,
+    retry: bool = sys.platform == "win32",
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    limit: float = SHARING_RETRY_SECONDS,
+) -> T:
+    """``operation()``, retried on ``PermissionError`` for up to ``limit`` seconds when
+    ``retry`` is set, on Windows by default: another process replacing or holding the
+    file is gone in milliseconds. After the deadline the error is raised, so a real
+    permission problem still fails. Elsewhere the error is never a sharing violation and
+    is raised at once."""
+    if not retry:
+        return operation()
+    deadline = clock() + limit
+    while True:
+        try:
+            return operation()
+        except PermissionError:
+            if clock() >= deadline:
+                raise
+        sleep(_SHARING_POLL_SECONDS)
+
+
 def write_atomic(path: Path, text: str, *, new_mode: int = 0o600) -> None:
     """Replace ``path`` with ``text``: a new file gets ``new_mode``, owner-only by default,
     and an existing one keeps its mode. Any failure before the rename leaves the old file
@@ -73,7 +107,8 @@ def write_atomic(path: Path, text: str, *, new_mode: int = 0o600) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        # A reader holding the target open on Windows blocks the rename for a moment
+        retry_sharing_violation(lambda: os.replace(tmp, path))
         replaced = True
     finally:
         if not replaced:

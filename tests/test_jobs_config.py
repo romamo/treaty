@@ -14,7 +14,7 @@ from conftest import spec_validator
 
 from examples.deployctl import app as deployctl
 from treaty import App, Arg, Ctx, Flag, Job, NoArgs, RegistrationError
-from treaty._atomic import write_atomic
+from treaty._atomic import retry_sharing_violation, write_atomic
 from treaty._audit import audit
 from treaty._config import user_config
 
@@ -300,6 +300,76 @@ def test_write_atomic_replaces_the_target_of_a_symlink(tmp_path: Path) -> None:
     write_atomic(link, "b")
     assert link.is_symlink() and target.read_text() == "b"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["c.toml", "dotfiles"]
+
+
+class FlakyOp:
+    """Raises ``PermissionError`` for its first ``failures`` calls, then returns ``"ok"``"""
+
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+
+    def __call__(self) -> str:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise PermissionError(13, "sharing violation")
+        return "ok"
+
+
+class FakeClock:
+    """A clock that moves only when ``sleep`` is called"""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def test_a_sharing_violation_is_retried_until_the_operation_succeeds() -> None:
+    op, clock = FlakyOp(failures=3), FakeClock()
+    assert retry_sharing_violation(op, retry=True, clock=clock, sleep=clock.sleep) == "ok"
+    assert op.calls == 4 and len(clock.sleeps) == 3
+
+
+def test_a_permission_error_past_the_deadline_is_raised() -> None:
+    op, clock = FlakyOp(failures=1_000), FakeClock()
+    with pytest.raises(PermissionError):
+        retry_sharing_violation(op, retry=True, clock=clock, sleep=clock.sleep, limit=1.0)
+    assert 1.0 <= clock.now < 1.1 and op.calls == len(clock.sleeps) + 1
+
+
+def test_without_retry_a_permission_error_is_raised_at_once() -> None:
+    op, clock = FlakyOp(failures=1), FakeClock()
+    with pytest.raises(PermissionError):
+        retry_sharing_violation(op, retry=False, clock=clock, sleep=clock.sleep)
+    assert op.calls == 1 and clock.sleeps == []
+
+
+def test_other_errors_are_never_retried() -> None:
+    clock = FakeClock()
+
+    def missing() -> str:
+        raise FileNotFoundError("gone")
+
+    with pytest.raises(FileNotFoundError):
+        retry_sharing_violation(missing, retry=True, clock=clock, sleep=clock.sleep)
+    assert clock.sleeps == []
+
+
+def test_sharing_violations_are_retried_only_on_windows_by_default() -> None:
+    op = FlakyOp(failures=1)
+    if sys.platform == "win32":
+        assert retry_sharing_violation(op) == "ok"
+    else:
+        with pytest.raises(PermissionError):
+            retry_sharing_violation(op)
+        assert op.calls == 1
 
 
 def test_a_relative_xdg_config_home_is_ignored(tmp_path: Path) -> None:

@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._atomic import retry_sharing_violation
 from ._errors import ParseError, RegistrationError
 from ._page import whole_number
 from ._session import private_dir, private_file
@@ -79,7 +80,7 @@ class Cache:
             age = time.time() - path.stat().st_mtime
             if age > self.ttl_seconds:
                 return None
-            data = path.read_bytes()
+            data = retry_sharing_violation(path.read_bytes)
         except FileNotFoundError:
             return None
         self.used = True
@@ -98,7 +99,7 @@ class Cache:
         private_dir(private_dir(self.directory.parent) / self.directory.name)
         partial = private_file(path.with_name(f".{path.name}.{uuid.uuid4().hex}"))
         partial.write_bytes(data)
-        os.replace(partial, path)
+        retry_sharing_violation(lambda: os.replace(partial, path))
 
     def _path(self, key: str) -> Path | None:
         if not isinstance(key, str):
