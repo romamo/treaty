@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 import webbrowser
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -33,6 +33,7 @@ from typing import IO, Any
 
 from ._atomic import exclusive, write_atomic
 from ._errors import CliExit, RegistrationError
+from ._redact import StreamRedactor
 from ._session import BACKGROUND_DIR, Session, SessionRoot, private_dir
 from ._signals import Cancelled, CancelSignal
 from ._timeout import Timeout
@@ -170,10 +171,14 @@ class Processes:
         cwd: Path | None = None,
         session: Session | None = None,
         echo: Callable[[str], None] | None = None,
+        secrets: Callable[[], Collection[str]] | None = None,
     ) -> None:
         self.env = dict(env)
         self.echo = echo
         """Where a streamed child's lines go, one call each: the run's ``ctx.log``"""
+        self.secrets = secrets
+        """The spellings a streamed child's lines are redacted of before ``echo``, read
+        when a stream starts; a line the stream splits is redacted across the split"""
         self.session = session
         """The run's temp directory, the children's ``TMPDIR`` and pid file (REQ-F-030)"""
         self.cwd = cwd
@@ -264,7 +269,8 @@ class Processes:
                     source = proc.stdout
                 if stream:
                     follow = _Follow(procs[-1])
-                    out, tail = follow.wait(end, self.echo, argvs[-1])
+                    secrets = () if self.secrets is None else self.secrets()
+                    out, tail = follow.wait(end, self.echo, argvs[-1], secrets)
                     procs[-1].wait(timeout=_left(end))
                 else:
                     raw, _ = procs[-1].communicate(timeout=_left(end))
@@ -531,6 +537,8 @@ class _Follow:
     def __init__(self, proc: subprocess.Popen[bytes]) -> None:
         # Bounded: a child that writes faster than the run's stderr takes waits on its pipe
         self._lines: queue.Queue[tuple[int, str | None]] = queue.Queue(QUEUED_LINES)
+        self._abandoned = threading.Event()
+        """Set once the run stops waiting: the readers then drop what they read"""
         pipes = (proc.stdout, proc.stderr)
         self._readers = [
             threading.Thread(target=self._read, args=(index, pipe), daemon=True)
@@ -544,19 +552,34 @@ class _Follow:
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         try:
             for chunk in iter(functools.partial(pipe.readline, LINE_BYTES), b""):
-                self._lines.put((index, decoder.decode(chunk)))
+                self._put(index, decoder.decode(chunk))
             if rest := decoder.decode(b"", final=True):
-                self._lines.put((index, rest))
+                self._put(index, rest)
         finally:
             pipe.close()
-            self._lines.put((index, None))
+            self._put(index, None)
+
+    def _put(self, index: int, text: str | None) -> None:
+        """Queue ``text``, waiting while the queue is full, until the run stops waiting:
+        from then on it is dropped, so a reader still draining a pipe that a detached
+        grandchild writes to never blocks it"""
+        while not self._abandoned.is_set():
+            with contextlib.suppress(queue.Full):
+                self._lines.put((index, text), timeout=0.05)
+                return
 
     def wait(
-        self, end: float | None, echo: Callable[[str], None] | None, argv: tuple[str, ...]
+        self,
+        end: float | None,
+        echo: Callable[[str], None] | None,
+        argv: tuple[str, ...],
+        secrets: Collection[str] = (),
     ) -> tuple[str, str]:
-        """Echo each line until both pipes close; the tails of stdout and stderr.
-        ``subprocess.TimeoutExpired`` once ``end`` passes, as ``communicate`` raises"""
+        """Echo each line until both pipes close, redacted of ``secrets``; the tails of
+        stdout and stderr. ``subprocess.TimeoutExpired`` once ``end`` passes, as
+        ``communicate`` raises"""
         tails = ["", ""]
+        redactors = [StreamRedactor(secrets), StreamRedactor(secrets)]
         open_pipes = len(self._readers)
         while open_pipes:
             left = _left(end)
@@ -568,20 +591,25 @@ class _Follow:
                 raise subprocess.TimeoutExpired(argv, 0) from None
             if text is None:
                 open_pipes -= 1
-                continue
-            tails[index] = (tails[index] + text)[-STDERR_TAIL:]
-            if echo is not None:
-                echo(text.removesuffix("\n").removesuffix("\r"))
+                shown = redactors[index].flush()
+            else:
+                tails[index] = (tails[index] + text)[-STDERR_TAIL:]
+                # A piece without its newline is a line LINE_BYTES split, or the last
+                shown = redactors[index].feed(text, ended=text.endswith("\n"))
+            if echo is not None and shown is not None:
+                echo(shown.removesuffix("\n").removesuffix("\r"))
         return tails[0], tails[1]
 
     def close(self) -> None:
         """Let the readers finish once the child is stopped: take what they still queue,
         so none blocks on a full queue, for up to ``GRACE_SECONDS``. A reader whose pipe a
-        grandchild outside the process group holds open is left to end with it"""
+        grandchild outside the process group holds open then drops what it reads, and
+        ends, closing the pipe, when the grandchild closes it or exits"""
         end = time.monotonic() + GRACE_SECONDS
         while any(r.is_alive() for r in self._readers) and time.monotonic() < end:
             with contextlib.suppress(queue.Empty):
                 self._lines.get(timeout=0.02)
+        self._abandoned.set()
 
 
 UNKNOWN_START = "-"

@@ -254,7 +254,10 @@ class Ctx:
         ``stream=True`` is for a long child: each line it writes, on stdout or stderr, is
         a ``ctx.log`` line as it arrives, redacted and shown where ``ctx.log`` is (a
         terminal, or ``--verbose``), and never on stdout. ``Completed.stdout`` and
-        ``stderr`` then keep only their last 4096 characters.
+        ``stderr`` then keep only their last 4096 characters. A grandchild that left the
+        child's process group, and so outlives a timeout, keeps a reader thread and the
+        pipe it inherited open until it closes the pipe or exits; what it writes after
+        the run stopped waiting is read and dropped, so it never blocks.
         """
         return self._processes.run(
             argv, input=input, cwd=cwd, env=env, timeout=timeout, check=check, stream=stream

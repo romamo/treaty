@@ -9,7 +9,7 @@ using the narrower ``secret_field`` so ``author`` and ``token_count`` stay reada
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 REDACTED = "[REDACTED]"
 OMITTED = "[OMITTED]"
@@ -112,3 +112,53 @@ def scrub(key: str, value: object, redact: Callable[[str], str] = _unchanged) ->
     if isinstance(value, str):
         return redact(value)
     return value
+
+
+class StreamRedactor:
+    """One streamed pipe's text, redacted as it arrives in pieces (``ctx.run(stream=True)``).
+
+    A line longer than the stream's split arrives as several pieces, and a secret can be
+    cut between two. Of a piece that does not end its line, the last ``longest - 1``
+    characters are held back and read with the next piece, so a secret that starts in
+    what is let through always ends in it too, and is replaced whole"""
+
+    def __init__(self, spellings: Collection[str]) -> None:
+        ordered = sorted({s for s in spellings if s}, key=len, reverse=True)
+        self._pattern = re.compile("|".join(map(re.escape, ordered))) if ordered else None
+        self._hold = len(ordered[0]) - 1 if ordered else 0
+        self._held = ""
+
+    def feed(self, text: str, *, ended: bool) -> str | None:
+        """The redacted text to echo now: all of it once ``ended``, else what can be let
+        through, or ``None`` while it is all held"""
+        buffer = self._held + text
+        cut = len(buffer) if ended else max(len(buffer) - self._hold, 0)
+        parts: list[str] = []
+        start = 0
+        if self._pattern is not None:
+            for match in self._pattern.finditer(buffer):
+                if match.start() >= cut:
+                    break
+                parts += (buffer[start : match.start()], REDACTED)
+                start = match.end()
+                cut = max(cut, start)  # a match begun before the cut is let through whole
+        parts.append(buffer[start:cut])
+        self._held = buffer[cut:]
+        let_through = "".join(parts)
+        return let_through if ended or let_through else None
+
+    def flush(self) -> str | None:
+        """What is still held when the pipe closes, redacted"""
+        return self.feed("", ended=True) if self._held else None
+
+
+def line_fragments(spellings: Collection[str], shortest: int) -> set[str]:
+    """Each line of a multi-line secret, at least ``shortest`` long: a streamed child's
+    output is echoed line by line, where the whole value never appears in one line"""
+    return {
+        line
+        for spelling in spellings
+        if "\n" in spelling
+        for line in spelling.splitlines()
+        if len(line) >= shortest
+    }

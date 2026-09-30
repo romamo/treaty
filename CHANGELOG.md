@@ -117,9 +117,10 @@ Apps built on treaty keep their own, structured schema changelog with
   is now `3.1`, the spec's ManifestResponse contract with the marker (#70)
 - `ctx.run(argv, stream=True)` shows a long child's output while it runs: each line it
   writes, on stdout or stderr, goes to the run's stderr as a `ctx.log` INFO line as it
-  arrives, redacted, so a terminal or `--verbose` shows it and stdout keeps only the
+  arrives, redacted (each line of a multi-line secret too, and a secret the 64 KiB split
+  of a long line cuts), so a terminal or `--verbose` shows it and stdout keeps only the
   envelope. Off a terminal, in `App.call`, and over MCP the lines are dropped, as
-  `ctx.log`'s are. `Completed.stdout` and `stderr` keep the last 4 KiB, as
+  `ctx.log`'s are. `Completed.stdout` and `stderr` keep the last 4096 characters, as
   `SUBPROCESS_FAILED`'s `context.stderr` does; timeouts, signals, the locale, `input=`,
   and `children.pids` are unchanged (#61)
 

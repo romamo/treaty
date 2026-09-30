@@ -20,7 +20,7 @@ from conftest import WINDOWS, needs_posix_signals, spec_validator
 from treaty import App, CliExit, Ctx, Flag, NoArgs, RegistrationError, Timeout
 from treaty._mode import is_headless, quiet_children
 from treaty._signals import Cancelled, CancelSignal
-from treaty._subprocess import Processes
+from treaty._subprocess import LINE_BYTES, Processes
 from treaty._values import CommandPath
 
 pytestmark = pytest.mark.skipif(WINDOWS, reason="the children are /bin/sh commands")
@@ -765,3 +765,50 @@ def test_the_command_deadline_stops_a_streamed_child(tmp_path: Path) -> None:
     assert code == 10 and error_of(env)["code"] == "TIMEOUT"
     assert time.monotonic() - started < 5
     assert_gone(int((tmp_path / "pid").read_text()))
+
+
+PEM = "-----BEGIN KEY-----\nMIIEsecret-line-one\nMIIEsecret-line-two\n-----END KEY-----"
+
+
+def test_each_line_of_a_multiline_secret_is_redacted_in_a_streamed_child() -> None:
+    printer = [sys.executable, "-c", "import os; print(os.environ['PEM'])"]
+    code, _, text = stream(printer, "--token-from-env", "PEM", "--verbose", PEM=PEM)
+    assert code == 0
+    assert not [line for line in PEM.splitlines() if line in text]
+    assert logged(text) == ["[REDACTED]"] * 4
+
+
+def test_a_secret_cut_by_the_line_split_is_redacted() -> None:
+    secret = "s3cret-value-xyz"
+    # The 64 KiB split falls inside the secret: its halves arrive as two chunks
+    write = f"import sys; sys.stdout.write('a' * {LINE_BYTES - 5} + {secret!r} + '\\n')"
+    code, _, text = stream(
+        [sys.executable, "-c", write], "--token-from-env", "TOK", "--verbose", TOK=secret
+    )
+    assert code == 0
+    assert secret[:5] not in text and secret[5:] not in text
+    assert "".join(logged(text)) == "a" * (LINE_BYTES - 5) + "[REDACTED]"
+
+
+@pytest.mark.skipif(WINDOWS, reason="needs setsid; Windows stops only the child")
+def test_a_detached_grandchild_is_not_blocked_by_a_timed_out_stream(tmp_path: Path) -> None:
+    done = tmp_path / "done"
+    # The grandchild leaves the process group, so the timeout does not stop it; after
+    # the run gives up it writes more lines than the queue and the pipe hold
+    grandchild = (
+        "import os, sys, time; os.setsid(); time.sleep(3); "
+        "[print('x' * 100) for _ in range(5000)]; sys.stdout.flush(); "
+        f"open({str(done)!r}, 'w').close()"
+    )
+    lines: list[str] = []
+    procs = Processes(BASE_ENV, deadline=None, headless=True, browser_open=False, echo=lines.append)
+    with pytest.raises(CliExit):
+        procs.run(
+            ["sh", "-c", '"$1" -c "$2" & echo hi; exec sleep 30', "_", sys.executable, grandchild],
+            timeout=Timeout(0.5),
+            stream=True,
+        )
+    deadline = time.monotonic() + 15
+    while not done.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert done.exists()
