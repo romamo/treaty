@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import needs_posix_permissions
+from conftest import needs_posix_permissions, spec_validator
 
-from treaty import App, AuditLog, Ctx, Exit, Flag, NoArgs, RegistrationError
+from treaty import App, Arg, AuditLog, Ctx, Exit, Flag, NoArgs, RegistrationError
 from treaty._audit import audit
 from treaty._cli import cli
 
@@ -711,6 +711,107 @@ def test_large_data_is_left_out_of_the_entry_by_size(tmp_path: Path) -> None:
     run(app, ["big"], data_env(tmp_path))
     entry = entries(tmp_path)[0]
     assert entry["data"] is None and entry["data_bytes"] > 5000
+
+
+# audit=False: a value kept out of the audit log, not out of the command
+
+
+@dataclass(frozen=True, slots=True)
+class Note:
+    to: str = Arg(description="Recipient", audit=False)
+    body: str = Flag(description="Message body", audit=False)
+    subject: str = Flag(default="hi", description="Subject")
+    password: str | None = Flag(default=None, description="Password", audit=False)
+
+
+@dataclass(frozen=True, slots=True)
+class Sent:
+    ref: str
+    chars: int
+    effect: str = "created"
+
+
+def note_app() -> App:
+    app = App(BASE, version="1.0.0")
+
+    @app.command(
+        "send",
+        description="Send a note",
+        danger_level="safe",
+        exit_codes=(),
+        supports_raw_payload=True,
+    )
+    def send(args: Note, ctx: Ctx) -> Sent:
+        return Sent(f"note:{args.subject}", len(args.to) + len(args.body))
+
+    return app
+
+
+OMITTED_PARAMETERS = {"to": "[OMITTED]", "body": "[OMITTED]", "subject": "hi"}
+
+
+def note_entry(tmp_path: Path) -> dict[str, Any]:
+    [entry] = entries(tmp_path)
+    assert "private" not in log_file(tmp_path).read_text()
+    return entry
+
+
+def test_an_audit_false_argument_is_omitted_from_the_log_but_reaches_the_handler(
+    tmp_path: Path,
+) -> None:
+    argv = ["send", "private-bob", "--body", "private text", "--format", "json"]
+    code, out, _ = run(note_app(), argv, data_env(tmp_path))
+    assert code == 0
+    data = envelope_of(out)["data"]
+    assert data == {"ref": "note:hi", "chars": 23, "effect": "created"}
+    entry = note_entry(tmp_path)
+    assert entry["parameters"] == {**OMITTED_PARAMETERS, "password": "[REDACTED]"}
+
+
+def test_audit_false_is_omitted_on_exec_raw_payload_and_app_call(tmp_path: Path) -> None:
+    line = {"_cmd": "send", "to": "private-bob", "body": "private text"}
+    for route in ("exec", "raw", "call"):
+        home = tmp_path / route
+        if route == "exec":
+            stdin = io.StringIO(json.dumps(line) + "\n")
+            out = io.StringIO()
+            note_app().run(
+                ["exec"], stdin=stdin, stdout=out, stderr=io.StringIO(), env=data_env(home)
+            )
+            data = json.loads(out.getvalue().splitlines()[0])["data"]
+        elif route == "raw":
+            payload = json.dumps({k: v for k, v in line.items() if k != "_cmd"})
+            _, out_text, _ = run(note_app(), ["send", "--raw-payload", payload], data_env(home))
+            data = envelope_of(out_text)["data"]
+        else:
+            envelope = note_app().call(
+                "send", {"to": "private-bob", "body": "private text"}, env=data_env(home)
+            )
+            data = envelope.data
+        assert data["chars"] == 23, route
+        assert note_entry(home)["parameters"] == {**OMITTED_PARAMETERS, "password": "[REDACTED]"}
+
+
+def test_the_manifest_and_schemas_mark_audit_false_fields() -> None:
+    app = note_app()
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    entry = manifest["commands"]["send"]  # type: ignore[index]
+    assert entry["flags"]["body"]["description"] == "Message body (omitted from the audit log)"
+    assert entry["flags"]["subject"]["description"] == "Subject"
+    assert entry["positionals"][0]["description"] == "Recipient (omitted from the audit log)"
+    assert "x-audited" not in json.dumps(entry["output_schema"])
+    _, out, _ = run(app, ["send", "--schema"])
+    schema = json.loads(out)["data"]
+    assert schema["raw_payload_schema"]["properties"]["body"]["x-audited"] is False
+    assert "x-audited" not in schema["raw_payload_schema"]["properties"]["subject"]
+
+
+def test_audit_is_a_boolean() -> None:
+    with pytest.raises(RegistrationError, match="audit is True or False"):
+        Flag(description="x", audit="no")  # type: ignore[arg-type]
+    with pytest.raises(RegistrationError, match="audit is True or False"):
+        Arg(description="x", audit=0)  # type: ignore[arg-type]
 
 
 # REQ-O-023: --no-injection-protection in the audit trail

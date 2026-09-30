@@ -32,6 +32,8 @@ from ._types import Classified, FlagType, classify, type_hints
 _META = "treaty"
 FLAG_META = _META
 """The field metadata key a Flag or Arg declaration is stored under"""
+UNAUDITED = "omitted from the audit log"
+"""How a manifest entry, which allows no extra keys, marks a field declared ``audit=False``"""
 # REQ-F-044: characters refused in text values, by their rejected_pattern name
 _CONTROL_CHARS = {"\n": "newline", "\r": "carriage_return", "\x00": "null_byte"}
 
@@ -51,10 +53,14 @@ class FlagSpec:
     """The literal ``-`` reads the value from stdin (REQ-O-006)"""
     deprecated: Deprecated | None = None
     """Still accepted, with a ``DEPRECATED_FLAG`` warning naming the replacement (REQ-F-075)"""
+    audit: bool = True
+    """False writes the value as ``[OMITTED]`` in the audit log; it is still a plain value"""
 
     def __post_init__(self) -> None:
         if not self.description:
             raise RegistrationError("every flag needs a description")
+        if not isinstance(self.audit, bool):
+            raise RegistrationError(f"audit is True or False, not {self.audit!r}")
         if self.pattern_type is not None and self.pattern_type not in PATTERN_TYPES:
             raise RegistrationError(
                 f"pattern_type={self.pattern_type!r} is not one of "
@@ -88,6 +94,7 @@ def Flag(
     pattern_type: str | None = None,
     from_stdin: bool = False,
     deprecated: Deprecated | None = None,
+    audit: bool = True,
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
@@ -101,6 +108,8 @@ def Flag(
     for an array, as in ``tool get --format id | tool delete --id -``.
     ``deprecated=Deprecated("1.4.0", replacement="new-flag")`` keeps the flag working
     with a warning on every run that passes it.
+    ``audit=False`` writes the value as ``[OMITTED]`` in the audit log, such as a message
+    body too private to keep; unlike ``secret``, argv and error messages still carry it.
     """
     spec = FlagSpec(
         description,
@@ -112,6 +121,7 @@ def Flag(
         pattern_type=pattern_type,
         from_stdin=from_stdin,
         deprecated=deprecated,
+        audit=audit,
     )
     if isinstance(default, (list, dict, set)):
         raise RegistrationError("mutable defaults are not allowed; use a tuple")
@@ -128,10 +138,11 @@ def Arg(
     pattern_type: str | None = None,
     from_stdin: bool = False,
     multiline: bool = False,
+    audit: bool = True,
 ) -> Any:
     """Declare a positional argument on an arguments dataclass; ``from_stdin=True`` makes
-    the literal ``-`` read it from stdin, and ``multiline`` lets it contain newlines, as
-    on ``Flag``"""
+    the literal ``-`` read it from stdin, ``multiline`` lets it contain newlines, and
+    ``audit=False`` keeps it out of the audit log, as on ``Flag``"""
     spec = FlagSpec(
         description,
         positional=True,
@@ -140,6 +151,7 @@ def Arg(
         pattern_type=pattern_type,
         from_stdin=from_stdin,
         multiline=multiline,
+        audit=audit,
     )
     return field(metadata={_META: spec})
 
@@ -302,6 +314,8 @@ class FieldInfo:
             description = f"{description} (at most {self.spec.max_bytes} bytes)"
         if self.spec.from_stdin:
             description = f"{description} (- reads it from stdin)"
+        if not self.spec.audit:
+            description = f"{description} ({UNAUDITED})"
         if (old := self.spec.deprecated) is not None:
             instead = "" if old.replacement is None else f"; use --{old.replacement}"
             description = f"{description} (deprecated since {old.since}{instead})"
@@ -339,7 +353,8 @@ class FieldInfo:
             "type": target.flag_type.value,
             "required": self.required,
             "description": self.spec.description
-            + (" (- reads it from stdin)" if self.spec.from_stdin else ""),
+            + (" (- reads it from stdin)" if self.spec.from_stdin else "")
+            + ("" if self.spec.audit else f" ({UNAUDITED})"),
         }
         if target.flag_type is FlagType.ENUM:
             entry["enum_values"] = list(target.enum_values)

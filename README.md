@@ -436,8 +436,18 @@ Every invocation, successful or not, appends one line to `audit.jsonl`: `timesta
 `warnings` (the codes, so `--no-injection-protection` is on record), and `data` when it is
 under 4 KiB (REQ-F-026). Secret fields, the login token, and every key named like a
 credential are `[REDACTED]` at any depth (REQ-F-034). `--help` and the schemas are not
-invocations and are not logged. `meta.audit_log_path` names the file; a log that cannot
-be written adds `AUDIT_LOG_UNAVAILABLE` and never fails the command.
+invocations and are not logged.
+
+A value that is no secret but should not be kept, such as a message body, is declared
+`Flag(audit=False)` or `Arg(audit=False)`: its key stays in `parameters` with the value
+`[OMITTED]`. Unlike `secret=True` it is still passed on argv and echoed in errors, and
+`exec`, `--raw-payload`, MCP, and `app.call` take it as before; with `secret=True` too, the
+secret's `[REDACTED]` wins. The manifest adds "(omitted from the audit log)" to such an
+argument's description, and the args schema marks the property `"x-audited": false`. The
+audit log is the only record that keeps parameters: idempotency records hold a hash of the
+arguments and the `data` a repeat replays, so they are not masked, and `--debug` traces
+carry no parameters. `meta.audit_log_path` names the file; a log that cannot be written
+adds `AUDIT_LOG_UNAVAILABLE` and never fails the command.
 
 The file is `App(audit_log=treaty.AuditLog(path=...))`, else `<APP>_AUDIT_LOG`, else
 `$XDG_DATA_HOME/<app>/audit.jsonl`, else `~/.local/share/<app>/audit.jsonl`;

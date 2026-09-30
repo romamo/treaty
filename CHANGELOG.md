@@ -10,6 +10,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `Flag(audit=False)` and `Arg(audit=False)` keep an argument's key in the audit log's
+  `parameters` with the value `[OMITTED]`, for a value that is no secret but should not be
+  kept, such as a message body. It still works on argv, in `exec`, `--raw-payload`, MCP, and
+  `app.call`; the manifest adds "(omitted from the audit log)" to its description and the
+  args schema marks it `"x-audited": false`. With `secret=True` the `[REDACTED]` wins.
+  Idempotency records, which hold a hash of the arguments and the `data` a repeat replays,
+  are not masked (#54)
+
 ### Fixed
 
 - Parallel runs on Windows no longer fail now and then while one writes a file another
