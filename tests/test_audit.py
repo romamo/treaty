@@ -32,6 +32,7 @@ def test_audit_finds_each_planted_problem(tmp_path) -> None:
     assert {f.command for f in by_rule["describe"].findings} == {"delete-item", "create-item"}
     assert [f.command for f in by_rule["danger-level"].findings] == ["delete-item"]
     assert "destructive" in by_rule["danger-level"].findings[0].fix
+    assert "Flag(dry_run=True)" in by_rule["danger-level"].findings[0].fix
     assert [f.command for f in by_rule["exit-codes"].findings] == []
     assert [f.command for f in by_rule["retryable"].findings] == ["create-item"]
     assert [f.command for f in by_rule["exit-code-suggestion"].findings] == ["create-item"]

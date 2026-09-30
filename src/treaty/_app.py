@@ -2352,14 +2352,23 @@ def _mode_meta(command: Command) -> dict[str, object]:
 def _previewing(command: Command, invocation: Invocation) -> bool:
     """A destructive command run without --confirm-destructive or --dry-run"""
     return command.danger_level is DangerLevel.DESTRUCTIVE and not (
-        invocation.confirmed or _dry_run_requested(invocation.args)
+        invocation.confirmed or _dry_run_requested(command, invocation.args)
     )
 
 
-def _dry_run_requested(args: object) -> bool:
-    """True when a destructive command's args carry dry_run=True (field guaranteed by REQ-C-004)"""
-    value = getattr(args, "dry_run", False)
+def _dry_run_requested(command: Command, args: object) -> bool:
+    """True when the command's dry-run switch is on: ``Flag(dry_run=True)`` or ``dry_run``,
+    which a destructive command always has (REQ-C-004)"""
+    field = command.dry_run_field
+    value = False if field is None else getattr(args, field.name)
     return isinstance(value, bool) and value
+
+
+def _as_dry_run(command: Command, args: object) -> object:
+    """``args`` with the command's dry-run switch turned on"""
+    field = command.dry_run_field
+    assert field is not None and dataclasses.is_dataclass(args) and not isinstance(args, type)
+    return dataclasses.replace(args, **{field.name: True})
 
 
 _END = object()
@@ -3344,13 +3353,12 @@ class _Run:
         if not command.safe_default:
             return self._keyed(command, invocation, mode, meta=meta)
         # REQ-O-048: a dry run unless --live; --dry-run still wins, as a preview is safe
-        dry_run = not invocation.live or _dry_run_requested(invocation.args)
+        dry_run = not invocation.live or _dry_run_requested(command, invocation.args)
         args = invocation.args
-        assert dataclasses.is_dataclass(args) and not isinstance(args, type)
         # --live is the explicit confirmation; --confirm-destructive is not also needed
         invocation = dataclasses.replace(
             invocation,
-            args=dataclasses.replace(args, dry_run=True) if dry_run else args,
+            args=_as_dry_run(command, args) if dry_run else args,
             confirmed=not dry_run,
         )
         envelope = self._keyed(command, invocation, mode, meta=meta)
@@ -3535,7 +3543,7 @@ class _Run:
         )
         if key is None and not session:
             return self._execute(command, invocation, mode, meta=meta)
-        if _previewing(command, invocation) or _dry_run_requested(invocation.args):
+        if _previewing(command, invocation) or _dry_run_requested(command, invocation.args):
             return self._execute(command, invocation, mode, meta=meta)
         started = time.perf_counter()
         timeout = self.app._effective_timeout(command, invocation.timeout)
@@ -3834,8 +3842,7 @@ class _Run:
         args = invocation.args
         preview_only = _previewing(command, invocation)
         if preview_only:
-            assert dataclasses.is_dataclass(args) and not isinstance(args, type)
-            args = dataclasses.replace(args, dry_run=True)
+            args = _as_dry_run(command, args)
         running: list[Pending] = []
         before = _process_cwd()
         try:
@@ -3899,7 +3906,7 @@ class _Run:
                 self.page = (command.path, position)
             if command.batch:
                 data, batch_problem = self._batch_data(
-                    command, args, result, _dry_run_requested(args)
+                    command, args, result, _dry_run_requested(command, args)
                 )
             else:
                 data = self._payload(self._shimmed(command, result), *self._output(command))
@@ -3918,7 +3925,7 @@ class _Run:
         if command.danger_level is not DangerLevel.SAFE:
             problem = batch_problem or effect_problem(
                 data,
-                preview=_dry_run_requested(args),
+                preview=_dry_run_requested(command, args),
                 destructive=command.danger_level is DangerLevel.DESTRUCTIVE,
             )
             if problem is not None:
@@ -5226,11 +5233,12 @@ class _Run:
                 )
             mapping[name] = value
         if dry_run and command.danger_level is not DangerLevel.SAFE:
-            if command.field_by_flag("dry-run") is None:
+            switch = command.dry_run_field
+            if switch is None:
                 raise ParseError(
                     f"line {line_no}: {command.path} is {command.danger_level.value} "
                     "but has no dry_run flag to honor --dry-run",
                     context={"line": line_no, "_cmd": command.path.value},
                 )
-            mapping["dry_run"] = True
+            mapping[switch.name] = True
         return self.rooted(command, build_from_mapping(command, mapping, self.env))

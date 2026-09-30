@@ -1123,7 +1123,8 @@ A `heartbeat=True` command also takes `--heartbeat-interval SECONDS`, which writ
 
 ## Destructive commands
 
-A command with `danger_level="destructive"` must declare a boolean `dry_run` field, and its
+A command with `danger_level="destructive"` must declare a boolean `dry_run` field, or mark
+its own boolean flag with `Flag(dry_run=True)` (a wrapped tool's `--check` or `--noop`), and its
 output type a `would_affect` field (`would_affect: Affects | None = None`). A dry run returns
 `treaty.Affects(summary, resources, count)` there: a line for a person and the identifiers
 for a program; a dry run without it exits `1` with `INVALID_EFFECT` (REQ-C-004). Without

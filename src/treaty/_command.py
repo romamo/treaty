@@ -30,7 +30,7 @@ from ._deps import Version, check_required_tools
 from ._effect import can_carry, with_replay_effect
 from ._env import SESSION, app_var
 from ._errors import ParseError, RegistrationError
-from ._flags import FieldInfo, inspect_fields
+from ._flags import FieldInfo, dry_run_field, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._mode import Format
 from ._out import NO_ORDER, OutSpec, check_order
@@ -305,6 +305,11 @@ class Command:
                 return f
         return None
 
+    @property
+    def dry_run_field(self) -> FieldInfo | None:
+        """The dry-run switch: the ``Flag(dry_run=True)`` field, else a boolean ``dry_run``"""
+        return dry_run_field(self.fields)
+
     def field_by_short(self, short: str) -> FieldInfo | None:
         for f in self.fields:
             if f.spec.short == short:
@@ -534,10 +539,10 @@ def build_command(
                 f"{danger_level.value} commands; read ctx.idempotency_key instead"
             )
     if danger_level is DangerLevel.DESTRUCTIVE:
-        dry_run = next((f for f in fields if f.name == "dry_run"), None)
-        if dry_run is None or dry_run.flag_type is not FlagType.BOOLEAN:
+        if dry_run_field(fields) is None:
             raise RegistrationError(
-                f"{path}: destructive commands must declare a boolean 'dry_run' flag (REQ-C-004)"
+                f"{path}: destructive commands must declare a boolean 'dry_run' flag, or mark "
+                "their own with Flag(dry_run=True) (REQ-C-004)"
             )
         if not can_carry(output_type, "would_affect"):
             raise RegistrationError(
