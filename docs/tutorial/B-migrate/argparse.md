@@ -89,7 +89,8 @@ now; the audit never sees an app that does not build:
 - **On every command**: `--verbose`, `--quiet`, `--debug`, `--config`, `--format`,
   `--fields`, `--cwd`, `-h`, and every global flag a command's `--help` lists, such as
   `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the
-  framework's `--verbose`, which has no `-v` short
+  framework's `-v` (`--verbose`) and `-vv` (`--debug`); a command that declares its own
+  `Flag(short="v")` keeps `-v` for that flag, on that command only
 - **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`. Drop your own:
   the handler reads the limit as `ctx.timeout.seconds`, and `timeout=5` on
   `@app.command` keeps an old default of 5 seconds, where treaty's is 60
@@ -521,7 +522,7 @@ Migration is a breaking change for callers. Put this list in your release notes:
   page ([Page long lists](../core/pagination.md))
 - A text flag refuses a line break unless the field declares `multiline=True`; give
   every field that takes free text, such as a body or a message, `multiline=True`
-- `-v` is gone; pass `--verbose`
+- A verbosity count stops at two: `-v` is `--verbose`, and `-vv`, `-vvv`, or more is `--debug`
 - `--config` and `--format` are now treaty's; the CLI's own options of those names are renamed (list the new names)
 - Completion scripts come from `todo completion`, generated from the manifest
 - A command that read a file or `-` for stdin takes the file as `--input-file PATH` and

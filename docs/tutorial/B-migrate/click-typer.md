@@ -102,7 +102,8 @@ now; the audit never sees an app that does not build:
 - **On every command**: `--verbose`, `--quiet`, `--debug`, `--config`, `--format`,
   `--fields`, `--cwd`, `-h`, and every global flag a command's `--help` lists, such as
   `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the
-  framework's `--verbose`, which has no `-v` short
+  framework's `-v` (`--verbose`) and `-vv` (`--debug`); a command that declares its own
+  `Flag(short="v")` keeps `-v` for that flag, on that command only
 - **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`. Drop your own:
   the handler reads the limit as `ctx.timeout.seconds`, and `timeout=5` on
   `@app.command` keeps an old default of 5 seconds, where treaty's is 60
@@ -644,7 +645,7 @@ command.
 | `hide_input=True`, `password_option` | `hide_input=True` | `secret=True`: `--x-from-env`, `--x-from-file`, or `TODO_X` |
 | `@click.pass_obj`, `ctx.obj` | `@app.callback()`, `ctx.obj` | a `kw_only` base dataclass, read by a resource |
 | `@click.version_option` | a `--version` callback | built in, from `App(version=...)` |
-| `count=True` (`-vvv`) | `count=True` | the framework's `--verbose` and `--debug` |
+| `count=True` (`-vvv`) | `count=True` | built in: `-v` (`--verbose`), `-vv` (`--debug`) |
 | `click.echo(...)` | `typer.echo(...)`, `rich.print` | return a dataclass; add a renderer for custom text |
 | `click.echo(..., err=True)` | `typer.echo(..., err=True)` | `ctx.log(...)` |
 | `click.progressbar` | `rich.progress` | `ctx.progress(...)` |
@@ -678,7 +679,7 @@ Migration is a breaking change for callers. Put this list in your release notes:
   `todo manifest`
 - Secret options (`--token`, `--password`) no longer take a value on the command line; use
   `--token-from-env VAR` or `--token-from-file PATH`
-- `-v` is gone; pass `--verbose`
+- A verbosity count stops at two: `-v` is `--verbose`, and `-vv`, `-vvv`, or more is `--debug`
 - `--config` and `--format` are now treaty's; the CLI's own options of those names are renamed (list the new names)
 - Completion scripts have to be generated again with `todo completion`
 
