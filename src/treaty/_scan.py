@@ -11,9 +11,12 @@ from __future__ import annotations
 import ast
 import collections
 import functools
+import importlib.metadata
 import importlib.util
 import inspect
+import json
 import os
+import pkgutil
 import subprocess
 import sys
 import sysconfig
@@ -411,6 +414,8 @@ def clear_caches() -> None:
     """Forget parsed sources and followed helpers, so a new audit sees the code as it is"""
     _cached_tree.cache_clear()
     _cached_reach.cache_clear()
+    _shipped.cache_clear()
+    _editable_roots.cache_clear()
 
 
 def _unwrapped(target: object) -> object:
@@ -446,10 +451,12 @@ class Reached:
 def reached_functions(fn: Callable[..., object]) -> tuple[Reached, ...]:
     """The handler and the first-party functions it calls, each once, the handler first
     and then by distance. A function of the handler's own module is followed however deep,
-    as a fetch() beside the handler runs as part of it; one in another module of the same
-    top-level package, or, for an app that is a top-level module, in a file under its
-    directory, within ``FOLLOW_DEPTH`` calls of the handler. treaty, the standard library,
-    and site-packages are never followed.
+    as a fetch() beside the handler runs as part of it; one in another first-party module
+    within ``FOLLOW_DEPTH`` calls of the handler. First-party is every top-level package of
+    the distribution that ships the handler's (``importlib.metadata`` maps it, for an
+    editable install too), else the handler's own top-level package, or, for an app that is
+    a top-level module no distribution ships, a file under its directory. treaty, the
+    standard library, and other distributions are never followed.
 
     A call is followed by name (``fetch(...)``), through modules and classes
     (``helpers.enter(...)``, ``Store.load(...)``) read without running their code, and
@@ -492,14 +499,30 @@ def _reach(fn: Callable[..., object]) -> tuple[Reached, ...]:
 
 @dataclass(frozen=True, slots=True)
 class _Home:
-    package: str | None
-    """The handler's top-level package, or None for a top-level module"""
+    packages: frozenset[str] | None
+    """The top-level packages that are first-party: every one of the distribution that
+    ships the handler's, else the handler's own; None for a top-level module that no
+    distribution ships, whose first-party code is the files under ``root``"""
     root: Path
     """The directory that holds the package, or the module when it has none"""
+
+    @property
+    def names(self) -> str:
+        """``apppkg, libpkg``, or ``files under /src/app`` for a top-level module"""
+        if self.packages is None:
+            return f"files under {self.root}"
+        return ", ".join(sorted(self.packages))
 
 
 _INSTALLED = frozenset({"site-packages", "dist-packages"})
 _STDLIB = Path(sysconfig.get_paths()["stdlib"]).resolve()
+
+
+def first_party(fn: Callable[..., object]) -> str | None:
+    """What the audit follows from the handler ``fn`` besides its own module: its
+    first-party packages, or the files under its directory; None for treaty's own"""
+    home = _home(fn)
+    return None if home is None else home.names
 
 
 def _home(fn: Callable[..., object]) -> _Home | None:
@@ -513,20 +536,81 @@ def _home(fn: Callable[..., object]) -> _Home | None:
         top = module.__name__.partition(".")[0]
         top_file = getattr(sys.modules.get(top), "__file__", None)
         if isinstance(top_file, str):
-            return _Home(top, Path(top_file).resolve().parent.parent)
-        # A namespace package has no single directory: its modules are known by name, and
-        # the handler's own portion of it names where a helper is
-        depth = module.__name__.count(".") + (path.stem == "__init__")
-        return _Home(top, path.parents[depth])
+            root = Path(top_file).resolve().parent.parent
+        else:
+            # A namespace package has no single directory: its modules are known by name,
+            # and the handler's own portion of it names where a helper is
+            root = path.parents[module.__name__.count(".") + (path.stem == "__init__")]
+        return _Home(_distribution_packages(top, root) or frozenset({top}), root)
+    if module.__name__ != "__main__":
+        return _Home(_distribution_packages(module.__name__, None), path.parent)
     return _Home(None, path.parent)
+
+
+def _distribution_packages(top: str, root: Path | None) -> frozenset[str] | None:
+    """Every top-level package of the one distribution that ships ``top``, which the
+    distribution's installed file list names. An editable install's list names only its
+    ``.pth`` file, so for one whose ``.pth`` puts ``root`` on ``sys.path``, the packages in
+    ``root``. None when no distribution, or several, ship ``top``"""
+    shipped = _shipped()
+    owners = shipped.get(top, ())
+    if len(owners) == 1:
+        return frozenset(name for name, dists in shipped.items() if owners[0] in dists) - {"treaty"}
+    if owners or root is None or root not in _editable_roots():
+        return None
+    beside = {m.name for m in pkgutil.iter_modules([str(root)]) if m.ispkg}
+    return frozenset(beside | {top}) - {"treaty"}
+
+
+@functools.lru_cache(maxsize=1)
+def _shipped() -> dict[str, tuple[str, ...]]:
+    """Each top-level package to the distributions that ship it, read once per audit"""
+    return {
+        name: tuple(dict.fromkeys(dists))
+        for name, dists in importlib.metadata.packages_distributions().items()
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def _editable_roots() -> frozenset[Path]:
+    """The directories the editable installs (PEP 610 ``dir_info.editable``) put on
+    ``sys.path`` through a ``.pth`` file; an install that hooks the import system
+    instead names none"""
+    found: set[Path] = set()
+    for dist in importlib.metadata.distributions():
+        if not _editable(dist.read_text("direct_url.json")):
+            continue
+        for file in dist.files or ():
+            if file.suffix != ".pth":
+                continue
+            pth = Path(str(dist.locate_file(file)))
+            if not pth.is_file():
+                continue
+            for line in pth.read_text(encoding="utf-8").splitlines():
+                entry = line.strip()
+                if entry and not entry.startswith(("#", "import ", "import\t")):
+                    found.add((pth.parent / entry).resolve())
+    return frozenset(found)
+
+
+def _editable(direct_url: str | None) -> bool:
+    """Whether a ``direct_url.json`` records an editable install"""
+    if direct_url is None:
+        return False
+    try:
+        record = json.loads(direct_url)
+    except json.JSONDecodeError:
+        return False  # a record this audit cannot read names no install it follows
+    info = record.get("dir_info") if isinstance(record, dict) else None
+    return isinstance(info, dict) and info.get("editable") is True
 
 
 def _first_party(fn: types.FunctionType, home: _Home) -> bool:
     top = (fn.__module__ or "").partition(".")[0]
     if top == "treaty":
         return False
-    if home.package is not None:
-        return top == home.package
+    if home.packages is not None:
+        return top in home.packages
     path = Path(fn.__code__.co_filename).resolve()
     return (
         path.is_relative_to(home.root)

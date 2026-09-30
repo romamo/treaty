@@ -40,6 +40,7 @@ from ._scan import (
     clear_caches,
     ctx_calls,
     direct_subprocess_calls,
+    first_party,
     reached_functions,
     resolve_name,
     source_tree,
@@ -103,13 +104,9 @@ class AuditReport:
     target: str
     rules: tuple[RuleResult, ...]
     next_steps: tuple[Finding, ...]
-    scope: str = (
-        "source rules read each handler, the functions of its module it calls, and those "
-        f"of its other first-party modules {FOLLOW_DEPTH} calls deep; calls on objects, "
-        "callbacks, and other packages are not followed, so a pass here is not a runtime "
-        "check"
-    )
-    """What the source-reading rules saw, so a clean report is not over-read"""
+    scope: str = ""
+    """What the source-reading rules saw, so a clean report is not over-read; ``audit``
+    names the first-party packages it followed"""
 
     @property
     def passed(self) -> int:
@@ -2786,7 +2783,22 @@ def audit(
         findings = tuple(rule.check(app))
         results.append(RuleResult(rule.id, rule.title, rule.severity.value, not findings, findings))
     pending = in_order(f for r in results for f in r.findings)
-    return AuditReport(target=target, rules=tuple(results), next_steps=pending[:limit])
+    return AuditReport(
+        target=target, rules=tuple(results), next_steps=pending[:limit], scope=_scope(app)
+    )
+
+
+def _scope(app: App) -> str:
+    """What the source rules read: each handler, its module, and the first-party code
+    they followed, named"""
+    homes = sorted({h for c in user_commands(app) if (h := first_party(c.handler)) is not None})
+    named = f" ({'; '.join(homes)})" if homes else ""
+    return (
+        "source rules read each handler, the functions of its module it calls, and those "
+        f"of its other first-party modules{named} {FOLLOW_DEPTH} calls deep; calls on "
+        "objects, callbacks, and other distributions are not followed, so a pass here is "
+        "not a runtime check"
+    )
 
 
 def in_order(findings: Iterable[Finding]) -> tuple[Finding, ...]:

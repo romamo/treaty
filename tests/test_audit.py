@@ -3,8 +3,11 @@ import io
 import json
 import os
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import fixture_audit_app
 import pytest
@@ -1765,9 +1768,133 @@ def test_an_unhashable_callable_is_followed_without_the_cache() -> None:
 def test_the_report_says_what_the_source_rules_read() -> None:
     code, out = run_cli(["audit", "fixture_follow_app:app"], isatty=False)
     scope = json.loads(out)["data"]["scope"]
-    assert code == 0 and "first-party modules 3 calls deep" in scope
+    here = Path(__file__).resolve().parent
+    assert code == 0 and f"first-party modules (files under {here}) 3 calls deep" in scope
     code, out = run_cli(["audit", "fixture_follow_app:app"], isatty=True)
     assert out.splitlines()[1] == f"Scope: {scope}"
+    code, out = run_cli(["audit", "fixture_follow_pkg.cli:app"], isatty=False)
+    assert (
+        "first-party modules (fixture_follow_pkg) 3 calls deep" in json.loads(out)["data"]["scope"]
+    )
+
+
+_TWO_PACKAGES = {
+    "apppkg/__init__.py": "",
+    "apppkg/cli.py": """\
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from libpkg.workdir import enter
+from otherlib import hop
+
+from treaty import App, Arg, Ctx
+
+app = App("apppkg", version="1.0.0")
+
+
+@dataclass(frozen=True, slots=True)
+class Args:
+    directory: Path = Arg(description="Where to go")
+
+
+@app.command("go", description="Go", danger_level="safe", exit_codes=(),
+             examples=[("Typical call", "apppkg go .")])
+def go(args: Args, _ctx: Ctx) -> dict[str, str]:
+    enter(args.directory)
+    return {"cwd": str(args.directory)}
+
+
+@app.command("hop", description="Hop", danger_level="safe", exit_codes=(),
+             examples=[("Typical call", "apppkg hop .")])
+def hop_command(args: Args, _ctx: Ctx) -> dict[str, str]:
+    hop(args.directory)
+    return {"cwd": str(args.directory)}
+""",
+    "libpkg/__init__.py": "",
+    "libpkg/workdir.py": "import os\n\n\ndef enter(directory):\n    os.chdir(directory)\n",
+}
+_OTHERLIB = {
+    "otherlib/__init__.py": "import os\n\n\ndef hop(directory):\n    os.chdir(directory)\n"
+}
+
+
+def _write(root: Path, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+
+
+def _dist_info(site: Path, name: str, record: list[str], **extra: str) -> None:
+    """``<name>-0.1.dist-info`` in ``site``: what an installer leaves, which
+    ``importlib.metadata`` reads from any ``sys.path`` entry"""
+    info = site / f"{name}-0.1.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text(f"Metadata-Version: 2.4\nName: {name}\nVersion: 0.1\n")
+    (info / "RECORD").write_text("".join(f"{r},,\n" for r in [*record, f"{info.name}/RECORD"]))
+    for file, text in extra.items():
+        (info / file).write_text(text)
+
+
+def _audit_in_child(*path: Path) -> dict[str, Any]:
+    """``treaty audit apppkg.cli:app`` in a fresh interpreter with ``path`` as its
+    PYTHONPATH, so the distributions there are the only ones it adds"""
+    proc = subprocess.run(
+        [sys.executable, "-c", "from treaty._cli import main; main()"]
+        + ["audit", "apppkg.cli:app", "--all", "--format", "json"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(map(str, path))},
+        cwd=path[0],
+        check=False,
+    )
+    data: dict[str, Any] = json.loads(proc.stdout)["data"]
+    return data
+
+
+def _chdir_findings(data: dict[str, Any]) -> dict[str, str]:
+    rule = next(r for r in data["rules"] if r["id"] == "no-chdir")
+    return {f["command"]: f["message"] for f in rule["findings"]}
+
+
+def _expect_both_packages_followed(data: dict[str, Any]) -> None:
+    found = _chdir_findings(data)
+    assert list(found) == ["go"]  # otherlib, another distribution's, is not followed
+    assert found["go"].endswith("; found via libpkg.workdir.enter (libpkg/workdir.py:4)")
+    assert "first-party modules (apppkg, libpkg) 3 calls deep" in data["scope"]
+
+
+def test_first_party_is_every_package_of_the_handlers_distribution(tmp_path: Path) -> None:
+    """Issue 67: a wheel that ships apppkg and libpkg is one first-party codebase, while
+    otherlib, installed beside it by another distribution, stays out"""
+    site = tmp_path / "site-packages"
+    _write(site, {**_TWO_PACKAGES, **_OTHERLIB})
+    _dist_info(site, "two", [n for n in _TWO_PACKAGES])
+    _dist_info(site, "otherlib", list(_OTHERLIB))
+    _expect_both_packages_followed(_audit_in_child(site))
+
+
+def test_first_party_covers_an_editable_install_of_the_distribution(tmp_path: Path) -> None:
+    """An editable install records only its .pth file, which names the checkout"""
+    project, site = tmp_path / "two", tmp_path / "site-packages"
+    _write(project, {**_TWO_PACKAGES, "tests/__init__.py": ""})
+    _write(site, {**_OTHERLIB, "two.pth": f"{project}\n"})
+    direct_url = json.dumps({"url": project.as_uri(), "dir_info": {"editable": True}})
+    _dist_info(site, "two", ["two.pth"], **{"direct_url.json": direct_url})
+    _dist_info(site, "otherlib", list(_OTHERLIB))
+    data = _audit_in_child(project, site)
+    assert list(_chdir_findings(data)) == ["go"]
+    assert "first-party modules (apppkg, libpkg, tests) 3 calls deep" in data["scope"]
+
+
+def test_without_a_distribution_only_the_handlers_package_is_first_party(
+    tmp_path: Path,
+) -> None:
+    """A checkout on sys.path that nothing installed keeps the handler's package only"""
+    _write(tmp_path, {**_TWO_PACKAGES, **_OTHERLIB})
+    data = _audit_in_child(tmp_path)
+    assert _chdir_findings(data) == {}
+    assert "first-party modules (apppkg) 3 calls deep" in data["scope"]
 
 
 @dataclass(frozen=True, slots=True)
