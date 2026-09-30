@@ -645,6 +645,20 @@
       "kind": "class",
       "methods": []
     },
+    "RequiresAny": {
+      "fields": [
+        "fields"
+      ],
+      "kind": "class",
+      "methods": []
+    },
+    "RequiresOne": {
+      "fields": [
+        "fields"
+      ],
+      "kind": "class",
+      "methods": []
+    },
     "Retry": {
       "fields": [
         "retries",

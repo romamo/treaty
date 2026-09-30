@@ -54,6 +54,10 @@ def tool_description(command: Command) -> str:
         text += f" Mutating; pass {IDEMPOTENCY_KEY} to make retries safe."
     if command.streaming:
         text += " Streams on the CLI; here every event is returned in data."
+    if command.requires:
+        # REQ-C-026: inputSchema has no top-level anyOf, which some MCP clients reject
+        rules = "; ".join(r.describe() for r in command.requires)
+        text += f" Rules: {rules}."
     return text
 
 

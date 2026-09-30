@@ -502,6 +502,8 @@ command.
 | `set_defaults(func=f)` | the decorated function is the handler |
 | root-parser options | a `kw_only` base dataclass, read by a resource |
 | mutually exclusive group | `requires=[Excludes("x", prohibited=("y",))]` on the command: exit 2 |
+| `required=True` mutually exclusive group | `requires=[RequiresOne(("x", "y"))]`: exactly one, exit 2 otherwise |
+| `parser.error()` when none of several options is given | `requires=[RequiresAny(("x", "y"))]`: exit 2 listing the flags |
 | `parser.error(msg)` | `raise ParseError(msg, context=...)` in the arguments' `__post_init__`: exit 2; from a handler it exits 1 |
 | `sys.exit(n)` | `raise Exit.NAME(msg, ...)`, declared in `exit_codes=` |
 | `print(...)` | return a dataclass; add a renderer for custom text |

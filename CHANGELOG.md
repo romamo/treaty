@@ -50,8 +50,21 @@ Apps built on treaty keep their own, structured schema changelog with
   `tuple[...]` without a default included, raises `RegistrationError`, as does a default
   that breaks the field's own type or pattern. The migration guides map
   `typer.Argument(None)`, click's `required=False`, and argparse's `nargs="?"` to it (#57)
+- `RequiresAny(("isin", "figi", "symbol"))` in `requires=` needs at least one of its
+  flags, and `RequiresOne` exactly one: phase 1 exits 2 (`ARG_ERROR`) listing them, on
+  argv, `exec`, `--raw-payload`, `App.call`, and MCP alike. A flag counts as given as for
+  the other rules. The manifest's `ConditionalRule` has no shape for them, so `--schema`
+  shows them as `requires_groups` and as `anyOf`/`oneOf` of the `raw_payload_schema`.
+  `--help` now lists every rule of a command under Rules, and an MCP tool's description
+  ends with them. Registration refuses a group of fewer than two flags, a repeated or
+  unknown flag, and an always-required one (#99)
 
 ### Fixed
+
+- The `conditional-rules` audit advice for a `__post_init__` that raises when none of
+  several fields is set (`not (self.a or self.b)`, `not any(...)`, or `self.a is None and
+  self.b is None`) suggests `RequiresAny` with those fields; it suggested `Excludes` on
+  the first two, which would refuse valid calls (#99)
 
 - Parallel runs on Windows no longer fail now and then while one writes a file another
   reads: replacing the config file or the update-check and `ctx.cache` files while

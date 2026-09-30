@@ -194,7 +194,7 @@ from ._protect import (
 from ._redact import NAME_CONTEXT, OMITTED, REDACTED, redacted, scrub
 from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
-from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
+from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen, RequiresAny, RequiresOne
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
 from ._schema import to_jsonable
 from ._select import (
@@ -652,7 +652,9 @@ class App:
         ordered: bool = False,
         fix_commands: Mapping[str, str] | None = None,
         refreshes_auth: bool = False,
-        requires: Sequence[RequiredWhen | Excludes | DefaultWhenAbsent] = (),
+        requires: Sequence[
+            RequiredWhen | Excludes | DefaultWhenAbsent | RequiresAny | RequiresOne
+        ] = (),
         option_placement: str = "any",
         introduced_in: str | None = None,
         deprecated: Deprecated | None = None,
@@ -705,7 +707,8 @@ class App:
         that renews expired credentials, named in ``CREDENTIALS_EXPIRED`` (REQ-F-063).
         ``requires=[RequiredWhen("format", "csv", then=("separator",)), Excludes("output",
         prohibited=("stdout",))]`` declares cross-field rules, checked before the args
-        ``__post_init__`` and listed in the manifest (REQ-C-026).
+        ``__post_init__`` and listed in the manifest (REQ-C-026); ``RequiresAny(("id", "name"))``
+        needs at least one of its flags, ``RequiresOne`` exactly one, shown in ``--schema``.
         ``option_placement="strict"`` is for a command that forwards the rest of argv to a
         child: options go before the first positional, and it and every token after it
         reach the positionals verbatim, the last a ``tuple[str, ...]`` (REQ-C-027).

@@ -4,6 +4,10 @@
 ``__post_init__`` would otherwise say only on a failing call. The rules are checked in
 phase 1 on the fields the caller supplied, before ``__post_init__`` runs, so a
 ``DefaultWhenAbsent`` default is what it sees.
+
+``RequiresAny`` and ``RequiresOne`` have no manifest ``ConditionalRule`` shape, so they
+appear in ``--schema`` as ``requires_groups`` and as ``anyOf``/``oneOf`` of the
+``raw_payload_schema``, in ``--help``, and in the MCP tool description.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ from enum import Enum
 
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, jsonable_default
+from ._schema import JsonSchema
 from ._types import FlagType
 
 
@@ -43,7 +48,22 @@ class DefaultWhenAbsent:
     default: object
 
 
-Rule = RequiredWhen | Excludes | DefaultWhenAbsent
+@dataclass(frozen=True, slots=True)
+class RequiresAny:
+    """At least one flag in ``fields`` is required"""
+
+    fields: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RequiresOne:
+    """Exactly one flag in ``fields`` is required: ``RequiresAny`` with the flags
+    mutually exclusive"""
+
+    fields: tuple[str, ...]
+
+
+Rule = RequiredWhen | Excludes | DefaultWhenAbsent | RequiresAny | RequiresOne
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +78,40 @@ class BoundRule:
     """The parsed ``value`` or ``default``"""
     json_value: object = None
 
+    @property
+    def group(self) -> bool:
+        """A ``RequiresAny`` or ``RequiresOne``: no manifest ``ConditionalRule`` shape"""
+        return isinstance(self.rule, (RequiresAny, RequiresOne))
+
+    @property
+    def flags(self) -> tuple[FieldInfo, ...]:
+        """Every field the rule names, the first one first"""
+        return (self.field, *self.others)
+
+    def describe(self) -> str:
+        """The rule as a sentence, for ``--help`` and the MCP tool description"""
+        names = [f"--{f.flag}" for f in self.others]
+        match self.rule:
+            case RequiredWhen():
+                return f"--{self.field.flag} {self.json_value} requires {_listed(names, 'and')}"
+            case Excludes():
+                return f"--{self.field.flag} excludes {_listed(names, 'and')}"
+            case DefaultWhenAbsent():
+                target = self.others[0].flag
+                return f"without --{self.field.flag}, --{target} defaults to {self.json_value}"
+            case RequiresAny():
+                return f"pass at least one of {_listed(self.flag_names, 'or')}"
+            case RequiresOne():
+                return f"pass exactly one of {_listed(self.flag_names, 'or')}"
+
+    @property
+    def flag_names(self) -> list[str]:
+        """``--flag`` for every field the rule names"""
+        return [f"--{f.flag}" for f in self.flags]
+
     def to_json(self) -> dict[str, object]:
-        """The manifest ``ConditionalRule``"""
+        """The manifest ``ConditionalRule``, or for a group ``{"any_of": [...]}`` or
+        ``{"one_of": [...]}``, which only ``--schema`` shows"""
         names = [f.flag for f in self.others]
         match self.rule:
             case RequiredWhen():
@@ -76,6 +128,34 @@ class BoundRule:
                     "target_flag": names[0],
                     "default": self.json_value,
                 }
+            case RequiresAny():
+                return {"any_of": [f.flag for f in self.flags]}
+            case RequiresOne():
+                return {"one_of": [f.flag for f in self.flags]}
+
+    def json_schema(self) -> JsonSchema:
+        """A group as JSON Schema over the payload keys: ``anyOf`` or ``oneOf`` of one
+        branch per flag, each true only when the caller gave that flag"""
+        assert self.group
+        branches = [_given_schema(f) for f in self.flags]
+        return {"anyOf" if isinstance(self.rule, RequiresAny) else "oneOf": branches}
+
+
+def _listed(names: Sequence[str], conjunction: str) -> str:
+    """``--a``, ``--a and --b``, ``--a, --b, or --c``"""
+    if len(names) < 3:
+        return f" {conjunction} ".join(names)
+    return f"{', '.join(names[:-1])}, {conjunction} {names[-1]}"
+
+
+def _given_schema(field: FieldInfo) -> JsonSchema:
+    """The payload carries ``field`` as given: a boolean when true, anything else when
+    not null, as ``_present`` decides"""
+    key = field.flag.replace("-", "_")
+    value: JsonSchema = (
+        {"const": True} if field.flag_type is FlagType.BOOLEAN else {"not": {"type": "null"}}
+    )
+    return {"required": [key], "properties": {key: value}}
 
 
 def bind_rules(
@@ -125,10 +205,22 @@ def bind_rules(
                 other = resolve(target, optional=True)
                 parsed, as_json = _typed(other, default, where)
                 bound.append(BoundRule(rule, field, (other,), parsed, as_json))
+            case RequiresAny(fields=group) | RequiresOne(fields=group):
+                kind = type(rule).__name__
+                flags = names(group, "fields")
+                if len(flags) < 2:
+                    raise RegistrationError(
+                        f"{where}: {kind} names {len(flags)} flag; it needs two or more, "
+                        "and a single one is a Flag without a default"
+                    )
+                if len(set(flags)) != len(flags):
+                    raise RegistrationError(f"{where}: {kind} names a flag twice: {flags}")
+                first, *rest = (resolve(n, optional=True) for n in flags)
+                bound.append(BoundRule(rule, first, tuple(rest)))
             case _:
                 raise RegistrationError(
-                    f"{where}: requires takes RequiredWhen, Excludes, or DefaultWhenAbsent, "
-                    f"not {rule!r}"
+                    f"{where}: requires takes RequiredWhen, Excludes, DefaultWhenAbsent, "
+                    f"RequiresAny, or RequiresOne, not {rule!r}"
                 )
         if any(o is bound[-1].field for o in bound[-1].others):
             raise RegistrationError(f"{where}: a rule on --{bound[-1].field.flag} names itself")
@@ -168,6 +260,9 @@ def check_rules(
     errors: list[ParseError] = []
     for bound in rules:
         field, rule = bound.field, bound.rule
+        if bound.group:
+            errors.extend(_check_group(bound, values, failed))
+            continue
         if field.flag in failed:
             continue
         match rule:
@@ -200,3 +295,24 @@ def check_rules(
                 if not _present(field, values) and target.name not in values:
                     values[target.name] = bound.value
     return errors
+
+
+def _check_group(
+    bound: BoundRule, values: Mapping[str, object], failed: set[str]
+) -> list[ParseError]:
+    """None given fails both kinds; two or more given fails ``RequiresOne``. A flag
+    whose own value failed counts as given: the caller meant to pass it"""
+    given = [f"--{f.flag}" for f in bound.flags if f.flag in failed or _present(f, values)]
+    context: dict[str, object] = {"flags": [f.flag for f in bound.flags], "rule": bound.to_json()}
+    if not given:
+        suggestion = f"add {_listed(bound.flag_names, 'or')}"
+        return [ParseError(bound.describe(), context=context, suggestion=suggestion)]
+    if isinstance(bound.rule, RequiresOne) and len(given) > 1:
+        return [
+            ParseError(
+                f"{_listed(given, 'and')} are mutually exclusive; {bound.describe()}",
+                context=context,
+                suggestion=f"keep one of {_listed(given, 'or')}",
+            )
+        ]
+    return []
