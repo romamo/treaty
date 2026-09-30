@@ -38,6 +38,12 @@ Apps built on treaty keep their own, structured schema changelog with
   suite run with `-W error` passes. The finalizer of the stand-in for `sys.stdout` that
   catches stray prints flushed stderr after pytest had closed its capture stream; the
   stand-in's flush now skips a stderr that is already closed (#65)
+- Security: a secret no longer leaks between concurrent runs through a handler's
+  `print()`. While runs overlap on threads, as the MCP server's tool calls do,
+  `sys.stdout` belongs to the last run that started, so one run's printed secret reached
+  another run's stderr and `THIRD_PARTY_STDOUT` warning unredacted: only the receiving
+  run's secrets were replaced. Printed text is now redacted of every attached run's
+  secrets as it is written, as library log records already were (#92)
 
 ## [1.0.0rc5] - 2026-09-30
 

@@ -1967,7 +1967,8 @@ class _StrayStdout(io.TextIOBase):
         super().__init__()
         self._err = err
         self._redact = redact
-        """The run's secret values out of what reaches stderr"""
+        """Every attached run's secret values out of what reaches stderr: a handler on
+        another thread may print here while its own run is in progress"""
         self._bytes = 0
         self._text = ""
 
@@ -1984,6 +1985,11 @@ class _StrayStdout(io.TextIOBase):
         return getattr(self._err.stream, "encoding", None) or "utf-8"
 
     def write(self, text: str, /) -> int:
+        written = len(text)
+        self._bytes += len(text.encode("utf-8", "surrogatepass"))
+        # Redacted as it arrives: the text may be another run's, whose secrets are only
+        # known while that run is attached, not when this run's envelope is written
+        text = self._redact(text)
         if self._err.verbosity >= Verbosity.DEBUG:
             if text.strip():
                 # REQ-F-060: under --debug, the line that printed it
@@ -1991,11 +1997,10 @@ class _StrayStdout(io.TextIOBase):
                 where = f"{caller.f_code.co_filename}:{caller.f_lineno}"
                 trace("stdout write", source=where, text=text.rstrip("\r\n"))
         else:
-            self._err.write(self._redact(text), Level.INFO)  # 11-D5: off a terminal, dropped
-        self._bytes += len(text.encode("utf-8", "surrogatepass"))
+            self._err.write(text, Level.INFO)  # 11-D5: off a terminal, dropped
         if len(self._text) < TEXT_CAP:
             self._text += text[: TEXT_CAP - len(self._text)]
-        return len(text)
+        return written
 
     def flush(self) -> None:
         if getattr(self._err.stream, "closed", False):
@@ -2420,7 +2425,7 @@ class _Run:
         a reader that refuses ``input()`` (REQ-F-047). Process-wide, not a context-local
         redirect, because handlers run on worker threads; one run owns the process."""
         global _guarded, _unguarded
-        self.stray = _StrayStdout(self.err, self._redact_now)
+        self.stray = _StrayStdout(self.err, self._redact_everywhere)
         with _guard_lock:
             if not _guarded:
                 _unguarded = (sys.stdout, sys.stdin)
@@ -2474,7 +2479,7 @@ class _Run:
             warning = WarningDetail(
                 "THIRD_PARTY_STDOUT",
                 "Third-party code wrote to stdout; the text is in this warning instead",
-                context={"text": self._redact_now(text.rstrip("\r\n")), "bytes": written},
+                context={"text": self._redact_everywhere(text.rstrip("\r\n")), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         if self.budget is not None:

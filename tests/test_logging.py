@@ -497,6 +497,42 @@ def test_concurrent_calls_redact_each_others_secrets_in_library_records(
     assert library_lines(err) == [("warn", "auth failed for [REDACTED]")] * 2
 
 
+def test_concurrent_runs_redact_each_others_secrets_in_printed_text() -> None:
+    """While runs overlap on threads, ``sys.stdout`` is the last run's, so a handler's
+    ``print()`` reaches another run's stderr and ``THIRD_PARTY_STDOUT`` warning: every
+    attached run's secrets are redacted from it, not only the receiving run's (#92)"""
+    runs = 4
+    together = threading.Barrier(runs)
+    app = App("libctl", version="1.0.0")
+
+    @app.command("leak", description="Print a secret", danger_level="safe", exit_codes=())
+    def leak(args: Login, ctx: Ctx) -> dict[str, bool]:
+        together.wait(timeout=10)  # every run has swapped sys.stdout before any prints
+        print(f"token is {args.api_token}")
+        together.wait(timeout=10)  # and none has restored it yet
+        return {"ok": True}
+
+    tokens = [f"sk-live-{n:020d}" for n in range(runs)]
+    results: dict[str, tuple[int, str, str]] = {}
+
+    def one(token: str) -> None:
+        env = {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"}
+        results[token] = run(app, ["leak", "--verbose", "--format", "json"], env)
+
+    threads = [threading.Thread(target=one, args=(t,)) for t in tokens]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert sorted(results) == tokens
+    printed = 0
+    for code, out, err in results.values():
+        assert code == 0, err
+        assert not [t for t in tokens if t in out or t in err], (out, err)
+        printed += err.count("token is [REDACTED]")
+    assert printed == runs  # every print reached some run's stderr, redacted
+
+
 # REQ-F-060: --debug attributes stray stdout
 
 
