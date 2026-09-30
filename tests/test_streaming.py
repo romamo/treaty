@@ -2,6 +2,8 @@
 
 import io
 import json
+import os
+import select
 import signal
 import subprocess
 import sys
@@ -252,6 +254,22 @@ def test_help_advertises_streaming() -> None:
 # Signals
 
 
+def read_lines(proc: subprocess.Popen[str], count: int, *, deadline: float) -> str:
+    """Read `count` or more stdout lines from the pipe, failing with stderr past the deadline"""
+    assert proc.stdout is not None and proc.stderr is not None
+    buffer = b""
+    while buffer.count(b"\n") < count:
+        remaining = deadline - time.monotonic()
+        ready, _, _ = select.select([proc.stdout], [], [], max(remaining, 0))
+        chunk = os.read(proc.stdout.fileno(), 4096) if ready else b""
+        if not chunk:
+            proc.kill()
+            _, err = proc.communicate()
+            pytest.fail(f"{count} lines never arrived; stdout {buffer!r}, stderr:\n{err}")
+        buffer += chunk
+    return buffer.decode()
+
+
 @needs_posix_signals
 def test_sigint_during_a_stream_ends_it_with_cancelled_after_the_events() -> None:
     proc = subprocess.Popen(
@@ -260,11 +278,12 @@ def test_sigint_during_a_stream_ends_it_with_cancelled_after_the_events() -> Non
         stderr=subprocess.PIPE,
         text=True,
     )
-    time.sleep(0.6)
+    # the listening event and a heartbeat: the handler runs, so treaty's SIGINT handler is in
+    head = read_lines(proc, 2, deadline=time.monotonic() + 10)
     proc.send_signal(signal.SIGINT)
     out, err = proc.communicate(timeout=5)
     assert proc.returncode == 130, err
-    lines = [json.loads(line) for line in out.splitlines()]
+    lines = [json.loads(line) for line in (head + out).splitlines()]
     assert lines[0]["data"]["event"] == "listening"
     assert len(lines) >= 3
     last = lines[-1]
