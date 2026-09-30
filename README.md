@@ -511,9 +511,10 @@ than `max_age_days` are deleted before each append, so it never holds more than
 `(keep + 1) * max_bytes`, 60 MiB by default, plus one entry. `cleanup` never removes it.
 
 ```bash
-DEPLOYCTL_AUDIT_LOG=1 deployctl deploy --env prod     # turn it on for one run
-deployctl audit-log --since 1h --format jsonl        # one entry per line
-deployctl audit-log --trace-id abc123 --limit 100    # the newest 100 of one trace
+export DEPLOYCTL_AUDIT_LOG=1                          # on for this shell's runs
+deployctl deploy --env prod                           # appends one entry
+deployctl audit-log --since 1h --format jsonl         # one entry per line
+deployctl audit-log --trace-id abc123 --limit 100     # the newest 100 of one trace
 ```
 
 `audit-log` is on every app, since the operator can turn the log on for any of them. It
