@@ -97,7 +97,9 @@ def inventory() -> dict[str, object]:
         "envelope": {
             "keys": _envelope_keys(),
             "meta": [f.name for f in dataclasses.fields(Meta)],
-            "error": [f.name for f in dataclasses.fields(ErrorDetail)],
+            "error": [
+                f.name for f in dataclasses.fields(ErrorDetail) if not f.name.startswith("_")
+            ],
             "warning": [f.name for f in dataclasses.fields(WarningDetail)],
             "fields": [f.name for f in dataclasses.fields(Envelope)],
         },

@@ -58,6 +58,13 @@ Apps built on treaty keep their own, structured schema changelog with
   lines on a color terminal keep colors but lose every other escape. The 8-bit C1 forms
   (`\x9b` CSI, `\x9d` OSC) are stripped from this text too, and a lone C1 control is shown
   as its escape; the JSON envelope, which is ASCII, keeps them as `\u` escapes (#72)
+- An error message keeps a program name and a trailing id verbatim: a first word with a
+  `-`, `_`, `.`, `/`, or digit, or naming a program the command declares in `subprocess=`
+  or `required_tools=`, keeps its case (`ansible-playbook exited 4`, `git refused the
+  push.`), and a last word with a `-`, `_`, `.`, `/`, `:`, or digit takes no period
+  (`Component does not exist: crm-backend`). A hyphenated first word such as `db-migrate`
+  is no longer capitalized, and a message ending in a number or version (`upgrade to
+  1.4.0`) no longer gets a period (#64)
 
 ## [1.0.0rc5] - 2026-09-30
 

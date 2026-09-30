@@ -4397,6 +4397,7 @@ class _Run:
                 conflict_id=exc.conflict_id,
                 network_context=None if network is None else network.network,
                 phase="execution",
+                _programs=command.programs,
             ),
             started=started,
             meta=meta,

@@ -599,4 +599,4 @@ def test_sigpipe_of_an_upstream_stage_is_not_a_failure() -> None:
 
 def test_a_program_name_keeps_its_case_in_the_message() -> None:
     code, env = run_argv("sh", "-c", "exit 3")
-    assert error_of(env)["message"] == "`sh` exited with 3."
+    assert error_of(env)["message"] == "`sh` exited with 3"

@@ -130,7 +130,7 @@ line. A tip that still uses the `--yes` of the argparse version reads:
 ```bash
 $ uv run treaty check-docs examples.tutorial.todo_exit_codes:app tmp/tutorial/drifted.md --format plain
 - /path/to/treaty/tmp/tutorial/drifted.md:77 flag --yes: not in todo purge --help
-treaty: DOCS_OUT_OF_DATE: 1 item in the docs disagrees with todo 1.0.0.
+treaty: DOCS_OUT_OF_DATE: 1 item in the docs disagrees with todo 1.0.0
   files: ['/path/to/treaty/tmp/tutorial/drifted.md']
 hint: run treaty agents-md examples.tutorial.todo_exit_codes:app, then fix what it does not write
 ```
