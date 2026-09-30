@@ -107,6 +107,13 @@ Apps built on treaty keep their own, structured schema changelog with
 - `-v` is short for `--verbose`, and `-vv` or `-v -v` for `--debug`, before or after the
   command path. A command that declares its own `short="v"` keeps `-v` for its flag on that
   command only; the `--verbose` and `--debug` descriptions in the manifest and help say so (#13)
+- Audit rule `timeout-budget` (#12), a warning: a `retry=Retry(...)` whose waits, at
+  their cap and full jitter, add up past the command's timeout, with a `timeout=` sized
+  to them; and a `heartbeat=True` command that inherits the app's default timeout
+- Audit rule `explicit-timeout` (#15), advice: a mutating or destructive command that
+  inherits `App(default_timeout=)`. Any `timeout=`, the default's own value or `None`
+  included, records the decision and silences it. `treaty init` scaffolds and treaty's
+  own mutating commands now declare theirs
 
 ### Fixed
 

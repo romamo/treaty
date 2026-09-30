@@ -13,6 +13,7 @@ import inspect
 import io
 import itertools
 import json
+import math
 import re
 import shlex
 import time
@@ -31,6 +32,7 @@ from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._out import out_spec
 from ._redact import secret_field
+from ._retry import budget_ms
 from ._scan import (
     FOLLOW_DEPTH,
     Reached,
@@ -2043,6 +2045,65 @@ def _retry_declared(app: App) -> Iterator[Finding]:
             )
 
 
+def _headroom(seconds: float) -> int:
+    """A ``timeout=`` for waits of ``seconds``: a fifth more for the attempts themselves,
+    up to a whole minute past a minute, else to 10 s"""
+    step = 60 if seconds * 1.2 >= 60 else 10
+    return math.ceil(seconds * 1.2 / step) * step
+
+
+def _timeout_budget(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        timeout = c.timeout if c.timeout is not None else app.default_timeout
+        if timeout.seconds is None or c.streaming:
+            continue
+        whose = "its" if c.timeout is not None else "the app's default"
+        if c.retry is not None:
+            waits = budget_ms(c.retry) / 1000
+            if waits > timeout.seconds:
+                yield Finding(
+                    "timeout-budget",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"retry=Retry(...) may wait {waits:g} s in all, over {whose} "
+                    f"{timeout.seconds:g} s timeout, so the run gives up before the last "
+                    f"retries with {c.retry.exhausted}, or ends in TIMEOUT if an attempt "
+                    "itself overruns",
+                    f"timeout={_headroom(waits)} on {c.path.value}, the retry waits and a "
+                    "fifth more for the attempts, or a smaller Retry(...)",
+                )
+        if c.heartbeat and c.timeout is None:
+            yield Finding(
+                "timeout-budget",
+                Severity.WARNING,
+                c.path.value,
+                f"heartbeat=True says the command runs long, but it inherits the app's "
+                f"{timeout.seconds:g} s default timeout",
+                f"timeout=<seconds it may take> on {c.path.value}, or timeout=None to run "
+                "unbounded",
+            )
+
+
+def _explicit_timeout(app: App) -> Iterator[Finding]:
+    default = app.default_timeout.seconds
+    if default is None:
+        return
+    for c in user_commands(app):
+        if c.danger_level is DangerLevel.SAFE or c.timeout is not None:
+            continue
+        if c.streaming or c.async_job:
+            continue  # an idle limit, or a job that returns at once
+        yield Finding(
+            "explicit-timeout",
+            Severity.ADVICE,
+            c.path.value,
+            f"a {c.danger_level.value} command inherits the app's {default:g} s default, "
+            "so a run that takes longer ends in TIMEOUT with its work half done",
+            f"timeout=<seconds it may really take> on {c.path.value}, or timeout=None to run "
+            f"unbounded; timeout={default:g} keeps the default as a decision",
+        )
+
+
 def unguarded_steps(handler: Callable[..., object]) -> list[str]:
     """``ctx.step(...)`` calls whose result no ``if`` tests, so a resumed run would still
     do the skipped steps' work"""
@@ -2511,6 +2572,18 @@ RULES: tuple[Rule, ...] = (
         "Retries go through ctx.retry",
         Severity.WARNING,
         _retry_declared,
+    ),
+    Rule(
+        "timeout-budget",
+        "Declared waits fit in the command's timeout",
+        Severity.WARNING,
+        _timeout_budget,
+    ),
+    Rule(
+        "explicit-timeout",
+        "Mutating commands declare their own timeout",
+        Severity.ADVICE,
+        _explicit_timeout,
     ),
     Rule(
         "settings-declared",

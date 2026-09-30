@@ -333,6 +333,7 @@ class SchemaLockOut:
     danger_level="mutating",
     exit_codes=["NOT_FOUND", "PRECONDITION"],
     examples=[("Record the contracts", "treaty schema-lock myapp.cli:app")],
+    timeout=60,
 )
 def schema_lock_command(args: SchemaLockArgs, ctx: Ctx) -> SchemaLockOut:
     """The schema-version audit rule compares the registry against this file (REQ-F-022)"""
@@ -376,6 +377,7 @@ class ChangelogAddOut:
     danger_level="mutating",
     exit_codes=["NOT_FOUND", "PRECONDITION"],
     examples=[("Record this release's schema changes", "treaty changelog-add myapp.cli:app")],
+    timeout=60,
 )
 def changelog_add_command(args: ChangelogAddArgs, ctx: Ctx) -> ChangelogAddOut:
     """The manifest snapshot ``<app>.manifest.json`` sits beside the changelog (REQ-O-029)"""
@@ -431,6 +433,7 @@ class AgentsMdOut:
     danger_level="mutating",
     exit_codes=["NOT_FOUND", "PRECONDITION"],
     examples=[("Write or refresh ./AGENTS.md", "treaty agents-md myapp.cli:app")],
+    timeout=60,
 )
 def agents_md_command(args: AgentsMdArgs, ctx: Ctx) -> AgentsMdOut:
     """REQ-O-043, REQ-O-044: ``treaty check-docs`` keeps the result current"""
@@ -588,6 +591,7 @@ def render_init(data: Any) -> str:
     danger_level="mutating",
     exit_codes=["CONFLICT"],
     examples=[("New project", "treaty init deployctl")],
+    timeout=60,
     renderers={Format.PLAIN: render_init},
 )
 def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
