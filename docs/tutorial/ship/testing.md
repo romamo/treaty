@@ -223,7 +223,9 @@ can move under `TYPE_CHECKING`: treaty never reads those annotations.
 
 **Check:** with the settings and `_ctx`, neither `RUF009` nor `ARG` fires on `todo` and
 its tests still pass; `todo` uses `Path` at runtime, so a small arguments class shows that
-`TC003` fires without the setting and not with it
+`TC003` fires without the setting and not with it. `todo` has no ruff of its own, so the
+check runs the treaty checkout's, a dev dependency there; in your project, `uv add --dev ruff`
+and run `uv run ruff check`
 
 <!-- check -->
 ```bash
@@ -239,7 +241,8 @@ extend-immutable-calls = ["treaty.Arg", "treaty.Flag", "treaty.Out"]
 runtime-evaluated-decorators = ["dataclasses.dataclass"]
 EOF
 sed -i.bak 's/ ctx: Ctx/ _ctx: Ctx/' src/todo/cli.py && rm src/todo/cli.py.bak
-uvx ruff check --select RUF009,ARG001,ARG003 src/todo/cli.py > /dev/null
+ruff() { uv run --project "$examples/../.." ruff "$@"; }
+ruff check --select RUF009,ARG001,ARG003 src/todo/cli.py > /dev/null
 uv run pytest -q > ../lint.out
 grep -q ' passed' ../lint.out
 cat > ../show_args.py <<'EOF'
@@ -253,10 +256,10 @@ from treaty import Flag
 class ShowArgs:
     path: Path = Flag(description="File to show")
 EOF
-uvx ruff check --isolated --target-version py314 --select TC003 ../show_args.py > /dev/null \
+ruff check --isolated --target-version py314 --select TC003 ../show_args.py > /dev/null \
   || flagged=yes
 test "$flagged" = yes
-uvx ruff check --config pyproject.toml --select TC003 ../show_args.py > /dev/null
+ruff check --config pyproject.toml --select TC003 ../show_args.py > /dev/null
 ```
 
 ## Next
