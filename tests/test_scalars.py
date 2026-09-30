@@ -462,14 +462,16 @@ def test_decimal_from_python_is_taken_and_a_float_is_refused() -> None:
     assert env.error.message == "'amount' expects a decimal as a string."
 
 
-def test_decimal_schema_is_the_same_for_arguments_and_output() -> None:
+def test_decimal_argument_schema_says_decimal_and_output_is_unchanged() -> None:
     code, env = pay(["pay", "--schema"])
     assert code == 0
-    decimal = {"type": "string", "pattern": r"^-?[0-9]+(\.[0-9]+)?$", "format": "decimal"}
+    output = {"type": "string", "pattern": r"^-?[0-9]+(\.[0-9]+)?$"}
+    decimal = {**output, "format": "decimal"}
     args = env["data"]["raw_payload_schema"]["properties"]
     assert {k: v for k, v in args["amount"].items() if k != "description"} == decimal
     assert args["splits"]["items"] == decimal
-    assert env["data"]["output_schema"]["properties"]["amount"] == decimal
+    # As before #39, so a schema lock of a Decimal output sees no change
+    assert env["data"]["output_schema"]["properties"]["amount"] == output
     manifest = pay_app().manifest()
     spec_validator("manifest-response").validate(manifest)
     flags = manifest["commands"]["pay"]["flags"]

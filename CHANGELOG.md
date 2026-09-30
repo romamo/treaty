@@ -18,10 +18,6 @@ Apps built on treaty keep their own, structured schema changelog with
   `"10.00"` before `"5.00"`. Declare `sort_key=` or `ordered=True` on the command, or
   `Out(sort_key=...)` or `Out(ordered=True)` on the field. Arrays inside untyped output
   stay advice (#38)
-- A `Decimal` output field's schema says `format: decimal`, as a `Decimal` argument's does.
-  A schema lock written before it differs by that keyword, so the `schema-version` rule
-  reports the command as a breaking change; the values written are the same, so run
-  `treaty schema-lock` again rather than raising `schema_version` (#39)
 
 ### Added
 
@@ -30,7 +26,8 @@ Apps built on treaty keep their own, structured schema changelog with
   `Decimal | None` and `tuple[Decimal, ...]` work too. An exponent, `NaN`, `Infinity`, or
   `1,5` exits 2 naming the flag, and `-0` is zero. `exec` lines and `--raw-payload` take a
   JSON string or a JSON number read from its source text; a float from an MCP client or
-  `app.call` is refused. An app's own `app.scalar(Decimal, ...)` replaces the built-in,
+  `app.call` is refused. Its argument schema says `format: decimal`; output schemas are
+  unchanged. An app's own `app.scalar(Decimal, ...)` replaces the built-in,
   for output schemas too (#39)
 
 ## [1.0.0rc3] - 2026-09-30

@@ -86,7 +86,7 @@ Each annotation becomes a schema type:
 | `list[X]`, `tuple[X, ...]` | `array` of X |
 | a nested dataclass | `object` with its own `properties` |
 | `datetime` | `string` with `format: date-time` |
-| `Decimal` | `string` with `format: decimal`, written fixed-point such as `"12.30"` |
+| `Decimal` | `string` with a fixed-point `pattern`, written such as `"12.30"` |
 | `Path` | `string`; written absolute, joined to the working directory |
 
 Every field of an output dataclass is written on every call, so the schema lists all of
