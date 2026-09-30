@@ -1212,19 +1212,89 @@ def _self_attrs(node: ast.AST) -> list[str]:
     return list(dict.fromkeys(names))
 
 
-def cross_field_checks(args_type: type) -> list[tuple[str, str, object]]:
-    """``(first, second, compared)`` for each ``if`` in the args ``__post_init__`` that
-    reads two fields and raises: ``compared`` is the constant ``first`` is compared
-    with (``self.first == "csv"``), or ``...`` when there is none"""
+def _self_field(node: ast.expr) -> str | None:
+    """``name`` for ``self.name``"""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    ):
+        return node.attr
+    return None
+
+
+def _presence(node: ast.expr, *, given: bool) -> str | None:
+    """The field ``node`` tests: ``self.f`` or ``self.f is not None`` when ``given``,
+    ``not self.f`` or ``self.f is None`` when not"""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return _presence(node.operand, given=not given)
+    if given and (name := _self_field(node)) is not None:
+        return name
+    if (
+        isinstance(node, ast.Compare)
+        and len(node.ops) == 1
+        and isinstance(node.ops[0], ast.IsNot if given else ast.Is)
+        and isinstance(node.comparators[0], ast.Constant)
+        and node.comparators[0].value is None
+    ):
+        return _self_field(node.left)
+    return None
+
+
+def _none_given(test: ast.expr) -> list[str] | None:
+    """The fields of a test true when none of them is given: ``not (self.a or self.b)``,
+    ``not any((self.a, self.b))``, or ``self.a is None and self.b is None``"""
+    operands: list[ast.expr]
+    given = True
+    match test:
+        case ast.UnaryOp(op=ast.Not(), operand=ast.BoolOp(op=ast.Or(), values=values)):
+            operands = values
+        case ast.UnaryOp(
+            op=ast.Not(),
+            operand=ast.Call(
+                func=ast.Name(id="any"), args=[ast.Tuple(elts=elts) | ast.List(elts=elts)]
+            ),
+        ):
+            operands = elts
+        case ast.BoolOp(op=ast.And(), values=values):
+            operands, given = values, False
+        case _:
+            return None
+    names = [_presence(o, given=given) for o in operands]
+    if len(names) < 2 or None in names:
+        return None
+    return list(dict.fromkeys(n for n in names if n is not None))
+
+
+def _raising_ifs(args_type: type) -> list[ast.If]:
+    """Each ``if`` in the args ``__post_init__`` whose body raises"""
     post_init = args_type.__dict__.get("__post_init__")
     tree = None if post_init is None else source_tree(post_init)
     if tree is None:
         return []
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and any(isinstance(n, ast.Raise) for b in node.body for n in ast.walk(b))
+    ]
+
+
+def any_of_checks(args_type: type) -> list[list[str]]:
+    """The fields of each raising ``if`` in the args ``__post_init__`` that fails when
+    none of them is given: a ``RequiresAny``"""
+    found = (_none_given(node.test) for node in _raising_ifs(args_type))
+    return [names for names in found if names is not None]
+
+
+def cross_field_checks(args_type: type) -> list[tuple[str, str, object]]:
+    """``(first, second, compared)`` for each ``if`` in the args ``__post_init__`` that
+    reads two fields and raises, other than an any-of check: ``compared`` is the
+    constant ``first`` is compared with (``self.first == "csv"``), or ``...`` when there
+    is none"""
     found: list[tuple[str, str, object]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If) or not any(
-            isinstance(n, ast.Raise) for b in node.body for n in ast.walk(b)
-        ):
+    for node in _raising_ifs(args_type):
+        if _none_given(node.test) is not None:
             continue
         attrs = _self_attrs(node.test)
         if len(attrs) < 2:
@@ -1247,6 +1317,20 @@ def _conditional_rules(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         declared = {r.field.name for r in c.requires}
         names = {f.name: f.flag for f in c.fields}
+        groups = {frozenset(f.name for f in r.flags) for r in c.requires if r.group}
+        for group in any_of_checks(c.args_type):
+            if frozenset(group) in groups or not all(n in names for n in group):
+                continue
+            flags = ", ".join(f'"{names[n]}"' for n in group)
+            yield Finding(
+                "conditional-rules",
+                Severity.ADVICE,
+                c.path.value,
+                f"__post_init__ requires at least one of {', '.join(group)}, which --schema cannot "
+                "show, so an agent learns the rule from a failing call (heuristic, REQ-C-026)",
+                f"requires=[treaty.RequiresAny(({flags}))], or RequiresOne if the flags are "
+                "also mutually exclusive; then drop the check from __post_init__",
+            )
         for first, second, compared in cross_field_checks(c.args_type):
             if first in declared or first not in names or second not in names:
                 continue

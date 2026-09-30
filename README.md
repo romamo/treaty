@@ -85,11 +85,21 @@ They are checked in phase 1 on what the caller passed, before `__post_init__`, o
 so an agent knows the combination before its first call. The `conditional-rules` audit
 rule spots a `__post_init__` that compares one field and raises about another.
 
+A command that takes its subject by one of several identifiers declares
+`RequiresAny(("isin", "figi", "symbol"))`: with none of them given it exits `2` listing
+the three. `RequiresOne(("json", "yaml"))` also refuses two. A flag counts as given as for
+the other rules: any value, the default included, except null, and a boolean only when
+true. The manifest's `ConditionalRule` has no shape for either, so they appear in
+`--schema` as `requires_groups` (`{"any_of": [...]}`, `{"one_of": [...]}`) and as
+`anyOf`/`oneOf` of the `raw_payload_schema`; `--help` lists every rule under Rules, and
+an MCP tool's description ends with them. The audit suggests `RequiresAny` for a
+`__post_init__` that raises when none of several fields is set.
+
 A positional with a default is optional: `Arg(default=None, ...)` makes the manifest's
 `PositionalEntry` say `required: false`, leaves it out of `--schema`'s `required`, and shows
 it as `[query]` in `--help`. Optional positionals may follow required ones, never precede
-them. A command that takes its subject as a positional or from a flag declares the "not
-both" half, which the manifest shows, and checks the "at least one" half in `__post_init__`:
+them. A command that takes its subject as a positional or from a flag names both in one
+`RequiresOne`:
 
 ```python
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -97,11 +107,7 @@ class Resolve:
     query: str | None = Arg(default=None, description="Instrument query or identifier")
     figi: str | None = Flag(default=None, description="Resolve by FIGI instead")
 
-    def __post_init__(self) -> None:
-        if self.query is None and self.figi is None:
-            raise ParseError("pass a query or --figi", context={"field": "query"})
-
-# @app.command("resolve", ..., requires=[Excludes("query", prohibited=("figi",))])
+# @app.command("resolve", ..., requires=[RequiresOne(("query", "figi"))])
 ```
 
 So `resolve AAPL`, `resolve --figi BBG000B9XRY4`, and `resolve -- --odd-name` run, while

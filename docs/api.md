@@ -41,7 +41,7 @@ review), **rename**, **remove**.
 | `CachePolicy` | keep | `cache=` |
 | `Check`, `Dependency`, `endpoint` | keep | `App(checks=)`, `App(dependencies=)` |
 | `Deprecated` | keep | `deprecated=` on a command or `Flag` |
-| `DefaultWhenAbsent`, `Excludes`, `RequiredWhen` | keep | `requires=` |
+| `DefaultWhenAbsent`, `Excludes`, `RequiredWhen`, `RequiresAny`, `RequiresOne` | keep | `requires=` |
 | `Retry`, `RetryStrategy` | keep | `retry=`, exit code retry hints |
 | `Rollback`, `StepName` | keep | `rollback=`, `steps=` |
 | `Timeout` | keep | `ctx.timeout` |

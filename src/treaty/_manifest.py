@@ -344,8 +344,9 @@ def command_entry(
         out["job_descriptor_schema"] = command.output_schema
     if command.config_write_scope is not None:
         out["config_write_scope"] = command.config_write_scope.value  # REQ-C-025
-    if command.requires:
-        out["requires"] = [r.to_json() for r in command.requires]  # REQ-C-026
+    conditional = [r.to_json() for r in command.requires if not r.group]
+    if conditional:
+        out["requires"] = conditional  # REQ-C-026; a group has no ConditionalRule shape
     if command.steps:
         out["steps"] = [s.value for s in command.steps]  # REQ-C-008
     if command.platform:
@@ -388,8 +389,16 @@ def command_schema(
         entry["resumable"] = True
     if command.rollback is not None:
         entry["rollback_available"] = True
+    groups = [r for r in command.requires if r.group]
+    if groups:
+        # REQ-C-026: RequiresAny and RequiresOne; not ConditionalRule shapes, so only here
+        entry["requires_groups"] = [r.to_json() for r in groups]
     if command.supports_raw_payload:
-        entry["raw_payload_schema"] = payload_schema(command)
+        raw = payload_schema(command)
+        if groups:
+            constraints = [r.json_schema() for r in groups]
+            raw.update(constraints[0] if len(constraints) == 1 else {"allOf": constraints})
+        entry["raw_payload_schema"] = raw
     if command.stdin_input:
         entry["stdin_input"] = True  # REQ-F-054; not a ManifestResponse key
     if command.heartbeat:

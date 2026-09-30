@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 import pytest
 from conftest import needs_posix_signals, spec_validator
+from jsonschema import Draft7Validator
 
 from treaty import (
     App,
@@ -24,9 +25,12 @@ from treaty import (
     ParseError,
     RegistrationError,
     RequiredWhen,
+    RequiresAny,
+    RequiresOne,
 )
 from treaty._audit import audit
 from treaty._cli import cli, read_baseline
+from treaty._mcp import call_tool, tool_entries
 
 
 def run(
@@ -437,6 +441,289 @@ def test_audit_suggests_requires_for_a_cross_field_post_init_check() -> None:
 
     [finding] = findings(app, "conditional-rules")
     assert 'RequiredWhen("layout", \'csv\', then=("separator",))' in finding.fix
+
+
+# REQ-C-026: RequiresAny and RequiresOne (#99)
+
+
+@dataclass(frozen=True, slots=True)
+class LookupArgs:
+    isin: str | None = Flag(default=None, description="Fetch using an ISIN")
+    figi: str | None = Flag(default=None, description="Fetch using a FIGI")
+    symbol: str | None = Flag(default=None, description="Fetch using a provider symbol")
+    exact: bool = Flag(default=False, description="Match exactly")
+    fuzzy: bool = Flag(default=False, description="Match loosely")
+    limit: int = Flag(default=5, description="Most matches")
+
+
+LOOKUP_RULES = [RequiresAny(("isin", "figi", "symbol")), RequiresOne(("exact", "fuzzy"))]
+
+
+def lookup_app(touched: list[str] | None = None, *, rules: list[object] | None = None) -> App:
+    app = App("lk", version="1.0.0")
+
+    @app.command(
+        "fetch",
+        description="Fetch an instrument",
+        danger_level="safe",
+        exit_codes=(),
+        requires=LOOKUP_RULES if rules is None else rules,  # type: ignore[arg-type]
+        supports_raw_payload=True,
+    )
+    def fetch(args: LookupArgs, ctx: Ctx) -> dict[str, object]:
+        if touched is not None:
+            touched.append("ran")
+        return {"isin": args.isin, "figi": args.figi}
+
+    return app
+
+
+def test_requires_any_with_none_given_exits_2_listing_the_flags_before_the_handler() -> None:
+    touched: list[str] = []
+    code, envelope = run(lookup_app(touched), ["fetch", "--exact"])
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "ARG_ERROR" and error["phase"] == "validation"
+    assert error["message"] == "Pass at least one of --isin, --figi, or --symbol"
+    assert error["context"] == {
+        "flags": ["isin", "figi", "symbol"],
+        "rule": {"any_of": ["isin", "figi", "symbol"]},
+    }
+    assert touched == []
+
+
+@pytest.mark.parametrize(
+    "given", [["--isin", "X"], ["--symbol", "S"], ["--isin", "X", "--figi", "Y"]]
+)
+def test_requires_any_passes_with_one_or_more_given(given: list[str]) -> None:
+    assert run(lookup_app(), ["fetch", "--fuzzy", *given])[0] == 0
+
+
+def test_requires_one_refuses_none_and_two_and_passes_one() -> None:
+    code, envelope = run(lookup_app(), ["fetch", "--isin", "X"])
+    assert code == 2 and envelope["error"]["message"] == "Pass exactly one of --exact or --fuzzy"
+    code, envelope = run(lookup_app(), ["fetch", "--isin", "X", "--exact", "--fuzzy"])
+    assert code == 2 and envelope["error"]["context"]["rule"] == {"one_of": ["exact", "fuzzy"]}
+    assert "mutually exclusive" in envelope["error"]["message"]
+    assert run(lookup_app(), ["fetch", "--isin", "X", "--exact"])[0] == 0
+
+
+def test_a_group_counts_presence_as_the_other_rules_do() -> None:
+    """A value equal to the default is given; null and a false boolean are not"""
+    app = lookup_app(rules=[RequiresAny(("isin", "limit", "exact"))])
+    assert run(app, ["fetch", "--limit", "5"])[0] == 0
+    assert app.call("fetch", {"limit": 5}, env={}).exit_code == 0
+    assert app.call("fetch", {"isin": None, "exact": False}, env={}).exit_code == 2
+    assert app.call("fetch", {"exact": True}, env={}).exit_code == 0
+
+
+def test_the_schema_shows_a_group_outside_the_manifest_requires() -> None:
+    code, envelope = run(lookup_app(), ["fetch", "--schema"])
+    data = envelope["data"]
+    assert code == 0 and "requires" not in data
+    assert data["requires_groups"] == [
+        {"any_of": ["isin", "figi", "symbol"]},
+        {"one_of": ["exact", "fuzzy"]},
+    ]
+    assert data["raw_payload_schema"]["allOf"] == [
+        {
+            "anyOf": [
+                {"required": [k], "properties": {k: {"not": {"type": "null"}}}}
+                for k in ("isin", "figi", "symbol")
+            ]
+        },
+        {
+            "oneOf": [
+                {"required": [k], "properties": {k: {"const": True}}} for k in ("exact", "fuzzy")
+            ]
+        },
+    ]
+    manifest = lookup_app().manifest()
+    assert "requires" not in manifest["commands"]["fetch"]
+    spec_validator("manifest-response").validate(manifest)
+
+
+def test_the_raw_payload_schema_decides_what_validation_decides() -> None:
+    raw = run(lookup_app(), ["fetch", "--schema"])[1]["data"]["raw_payload_schema"]
+    validator = Draft7Validator(raw)
+    for payload in (
+        {"exact": True},
+        {"isin": None, "exact": True},
+        {"isin": "X"},
+        {"isin": "X", "exact": True, "fuzzy": True},
+        {"isin": "X", "exact": True, "fuzzy": False},
+        {"figi": "Y", "symbol": "S", "fuzzy": True},
+    ):
+        valid = validator.is_valid(payload)
+        code = lookup_app().call("fetch", payload, env={}).exit_code
+        assert valid is (code == 0), payload
+        code, _ = run(lookup_app(), ["fetch", "--raw-payload", json.dumps(payload)])
+        assert valid is (code == 0), payload
+
+
+def test_exec_and_mcp_apply_a_group_in_phase_1() -> None:
+    app = lookup_app()
+    out = io.StringIO()
+    plan = '{"_cmd": "fetch", "exact": true}\n{"_cmd": "fetch", "isin": "X", "exact": true}\n'
+    code = app.run(
+        ["exec", "--ignore-errors"],
+        stdin=io.StringIO(plan),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    first, second = (json.loads(line) for line in out.getvalue().splitlines())
+    assert code == 1 and first["error"]["context"]["rule"] == {"any_of": ["isin", "figi", "symbol"]}
+    assert second["ok"] is True
+    entries = {e.name: e for e in tool_entries(app)}
+    entry = entries["fetch"]
+    assert "anyOf" not in entry.input_schema and "allOf" not in entry.input_schema
+    assert entry.description.endswith(
+        " Rules: pass at least one of --isin, --figi, or --symbol; "
+        "pass exactly one of --exact or --fuzzy."
+    )
+    refused = call_tool(app, entries, "fetch", {"exact": True})
+    assert refused.exit_code == 2 and refused.error is not None
+    assert refused.error.message == "Pass at least one of --isin, --figi, or --symbol"
+    assert call_tool(app, entries, "fetch", {"figi": "Y", "fuzzy": True}).exit_code == 0
+
+
+def test_help_lists_every_rule() -> None:
+    out = io.StringIO()
+    lookup_app().run(["fetch", "--help"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
+    assert (
+        "Rules\n  pass at least one of --isin, --figi, or --symbol\n"
+        "  pass exactly one of --exact or --fuzzy\n"
+    ) in out.getvalue()
+
+
+def test_help_spells_a_rules_boolean_and_number_values_as_argv_takes_them() -> None:
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class Export:
+        dry_run: bool = Flag(default=False, description="Plan only")
+        plan: str | None = Flag(default=None, description="Plan file")
+        batch: int | None = Flag(default=None, description="Batch size")
+        strict: bool = Flag(default=False, description="Refuse warnings")
+
+    app = App("ex", version="1.0.0", description="Export")
+
+    @app.command(
+        "export",
+        description="Export",
+        danger_level="safe",
+        exit_codes=(),
+        requires=[
+            RequiredWhen("dry-run", True, then=("plan",)),
+            DefaultWhenAbsent("batch", "strict", True),
+        ],
+    )
+    def export(args: Export, ctx: Ctx) -> None:
+        return None
+
+    out = io.StringIO()
+    app.run(["export", "--help"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
+    assert "Rules\n  --dry-run requires --plan\n  without --batch, --strict defaults to true\n" in (
+        out.getvalue()
+    )
+
+
+@pytest.mark.parametrize(
+    ("rule", "match"),
+    [
+        (RequiresAny(("isin",)), "needs two or more"),
+        (RequiresAny(()), "non-empty tuple"),
+        (RequiresAny("isin"), "non-empty tuple"),  # type: ignore[arg-type]
+        (RequiresAny(("isin", "isin")), "names a flag twice"),
+        (RequiresAny(("isin", "cusip")), "not a flag"),
+        (RequiresOne(("layout", "isin")), "not a flag"),
+    ],
+)
+def test_a_group_naming_too_few_unknown_or_repeated_flags_fails_registration(
+    rule: object, match: str
+) -> None:
+    with pytest.raises(RegistrationError, match=match):
+        lookup_app(rules=[rule])
+
+
+def test_a_group_naming_a_required_flag_fails_registration() -> None:
+    app = App("bad", version="1.0.0")
+    with pytest.raises(RegistrationError, match="always required"):
+        app.command(
+            "x",
+            description="X",
+            danger_level="safe",
+            exit_codes=(),
+            requires=[RequiresAny(("layout", "output"))],
+        )(export_handler)
+
+
+@dataclass(frozen=True, slots=True)
+class FetchArgs:
+    isin: str | None = Flag(default=None, description="Fetch using an ISIN")
+    figi: str | None = Flag(default=None, description="Fetch using a FIGI (FT Markets only)")
+    symbol: str | None = Flag(default=None, description="Fetch using a provider symbol")
+
+    def __post_init__(self) -> None:
+        if not (self.isin or self.figi or self.symbol):
+            raise ParseError("pass --isin, --figi, or --symbol")
+
+
+@dataclass(frozen=True, slots=True)
+class AnyNoneArgs:
+    isin: str | None = Flag(default=None, description="ISIN")
+    figi: str | None = Flag(default=None, description="FIGI")
+
+    def __post_init__(self) -> None:
+        if self.isin is None and self.figi is None:
+            raise ParseError("pass --isin or --figi")
+        if not any((self.isin is not None, self.figi)):
+            raise ParseError("pass --isin or --figi")
+
+
+@dataclass(frozen=True, slots=True)
+class BothSetArgs:
+    output: str | None = Flag(default=None, description="Output file")
+    stdout: bool = Flag(default=False, description="Write to stdout")
+
+    def __post_init__(self) -> None:
+        if self.output and self.stdout:
+            raise ParseError("pick one")
+
+
+def fetch_handler(args: FetchArgs, ctx: Ctx) -> dict[str, str]:
+    return {}
+
+
+def any_none_handler(args: AnyNoneArgs, ctx: Ctx) -> dict[str, str]:
+    return {}
+
+
+def both_set_handler(args: BothSetArgs, ctx: Ctx) -> dict[str, str]:
+    return {}
+
+
+def audited(handler: Callable[..., dict[str, str]], rules: list[Any] | None = None) -> list[Any]:
+    app = App("hc", version="1.0.0")
+    app.command("x", description="X", danger_level="safe", exit_codes=(), requires=rules or ())(
+        handler
+    )
+    return findings(app, "conditional-rules")
+
+
+def test_audit_suggests_requires_any_for_an_or_of_presence_checks() -> None:
+    [finding] = audited(fetch_handler)
+    assert 'requires=[treaty.RequiresAny(("isin", "figi", "symbol"))]' in finding.fix
+    assert "Excludes" not in finding.fix
+    assert audited(fetch_handler, [RequiresAny(("isin", "figi", "symbol"))]) == []
+
+
+def test_audit_reads_is_none_and_any_forms_and_keeps_excludes_for_both_set() -> None:
+    assert [f.fix.split("]")[0] for f in audited(any_none_handler)] == [
+        'requires=[treaty.RequiresAny(("isin", "figi"))',
+        'requires=[treaty.RequiresAny(("isin", "figi"))',
+    ]
+    [finding] = audited(both_set_handler)
+    assert 'Excludes("output", prohibited=("stdout",))' in finding.fix
 
 
 # REQ-C-027 and REQ-F-067

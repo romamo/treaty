@@ -130,6 +130,8 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
         rows.append((label, f.spec.description + (" (required)" if f.required else "")))
     rows.extend(_framework_rows(command))
     lines += _section("Flags", rows)
+    if command.requires:  # REQ-C-026
+        lines += ["Rules", *(f"  {r.describe()}" for r in command.requires), ""]
     lines += _section("Global flags", globals_)
     lines.append(f"Danger level: {command.danger_level.value}")
     if command.streaming:

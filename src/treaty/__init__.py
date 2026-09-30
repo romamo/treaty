@@ -32,7 +32,7 @@ from ._mode import Format
 from ._out import Binary, Out
 from ._page import Page, PageRequest
 from ._retry import Retry
-from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen
+from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen, RequiresAny, RequiresOne
 from ._scalars import ScalarSpec
 from ._stdout import intercept_stdout
 from ._steps import Rollback, StepName
@@ -94,6 +94,8 @@ __all__ = [
     "RegistrationError",
     "Renderer",
     "RequiredWhen",
+    "RequiresAny",
+    "RequiresOne",
     "Retry",
     "RetryStrategy",
     "Rollback",
