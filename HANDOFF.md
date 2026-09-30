@@ -1,6 +1,6 @@
 # Handoff
 
-Status as of 2026-09-27. Read this before touching the code.
+Status as of 2026-09-30. Read this before touching the code.
 
 ## What this is
 
@@ -14,12 +14,41 @@ The two do not share code.
 
 | Check | Result |
 |-------|--------|
-| `uv run pytest` | 1510 passed, 1 skipped |
+| `uv run pytest` | 2133 passed, 1 skipped |
 | `uv run mypy src` (strict) | clean |
-| `uv run ruff check src tests examples` | clean |
+| `uv run ruff check src tests examples` and `ruff format --check` | clean |
+| `uv run treaty check-docs treaty._cli:cli AGENTS.md` | no mismatches |
 | Spec conformance kit against `examples/deployctl.py` | 12 of 12, levels 1 to 3 |
 | Git | `main`, pushed to `origin` (github.com/romamo/treaty) |
-| PyPI | `treaty` is free; nothing published |
+| PyPI | `1.0.0rc5`, classifier `4 - Beta` |
+
+## Release
+
+`plans/1.0/` is built and merged. Five release candidates went out ahead of the consumer
+ports: rc1 and rc2 on 2026-09-28, rc3 to rc5 on 2026-09-30. rc3 and rc4 each have a
+Breaking section in `CHANGELOG.md`, and rc5's `stable-order` fix can fail a
+`treaty audit --strict` that rc4 passed, so the API has not yet held still through a
+release candidate.
+
+Cutting a release is one commit: `uv version X` (bumps `pyproject.toml` and `uv.lock`),
+the AGENTS.md `cli-version` comment in semver spelling (`1.0.0-rc.5`), a dated
+`CHANGELOG.md` section with its compare links, and the rc lines in `ROADMAP.md` and
+`plans/1.0/15-release-readiness.md`. Then push an annotated tag `vX` with the message
+`treaty X`. `publish.yml` runs the full CI on the tag before uploading, so a failing test
+blocks the upload.
+
+Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
+
+- Finish the cloudfall port and port a second, read-heavy CLI (pagination, streaming).
+  Gaps they find go into another release candidate
+- Soak one release candidate with both consumers for two weeks with no API change
+- Name the spec version treaty conforms to. CI pins `SPEC_REF` to `91dedd2`, 36 commits
+  past the spec's `v1.7.0` and in no release; either the spec tags a release that
+  contains it, or 1.0 names the commit
+- Run `benchmark/` against the release candidate for the release notes, and check
+  `docs/tutorial/` against the frozen API
+- At the tag: classifier `5 - Production/Stable`; update `COMPLIANCE.md`, `README.md`,
+  `ROADMAP.md`, and this file
 
 ## Decisions already made
 
@@ -483,6 +512,12 @@ src/treaty/
                  HeadlessBehavior, group kill
   _signals.py    SIGINT/SIGTERM handlers, Cancellation (armed windows, held signals)
   _timeout.py    Timeout VO, call_with_timeout()
+  _aio.py        async handlers and resources on one event loop per run (REQ-F-049)
+  _completion.py shell completion scripts generated from the manifest
+  _meta.py       what a run knows for meta: start time, cwd, trace id
+  _out.py        Out marker, Binary, and the sort order of data arrays (REQ-F-020)
+  _retry.py      Retry, ctx.retry, and meta.retries (REQ-F-078)
+  _suggest.py    did-you-mean for an unknown command
   _types.py      annotation classification shared by _flags and _schema
   _values.py     CommandPath, ExitCodeName, ExitCode, Scope, Etag, InstanceId
 examples/        deployctl.py (destructive, raw payload, async job, config write),
@@ -553,7 +588,7 @@ payload schema, and the help all iterate it. A new framework flag is one row plu
 - `ruff --fix` once rewrote a deliberate `getattr` into attribute access and broke mypy;
   check the diff after autofix
 - `tests/fixture_audit_app.py` is a deliberately flawed app; the audit tests count its
-  findings exactly, so adding a rule means updating `failed == 9` there
+  findings exactly, so adding a rule means updating `failed == 12` in `tests/test_audit.py`
 - Apps under test pass `env={}`, so no user config file is found; a project file needs a
   real process with its own `cwd` (see `tests/test_config_layer.py`), since the project
   file is found from `meta.cwd`
@@ -563,7 +598,8 @@ payload schema, and the help all iterate it. A new framework flag is one row plu
   found next to the profile, relative
 - `run_kit` strips `VIRTUAL_ENV` before calling `uv run --project <spec>`, or uv warns
   about the mismatched environment on stderr
-- `treaty init` needs `--treaty-source <checkout>` until the package is on PyPI
+- `treaty init` depends on treaty from PyPI; `--treaty-source <checkout>` pins a local
+  checkout to try unreleased changes
 - The `treaty` CLI owns command-specific exit codes 79 (`AUDIT_FAILED`) and 80
   (`CONFORMANCE_FAILED`); pick the next free code in 79..125 for new ones
 - Exit code entries reject descriptions over 120 characters or ending in a period; that is
