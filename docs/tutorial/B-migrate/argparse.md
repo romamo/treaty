@@ -488,6 +488,7 @@ command.
 | `ArgumentParser(prog, description)` | `App(name, version=..., description=...)` |
 | `add_subparsers()`, `add_parser("x")` | `@app.command("x", ...)`; nested with `app.group("x", description=...)` |
 | `add_argument("name")` | `name: str = Arg(description=...)` |
+| `add_argument("name", nargs="?")` | `name: str \| None = Arg(default=None, description=...)`, after the required ones |
 | `add_argument("--flag", default=v)` | `flag: T = Flag(default=v, description=...)` |
 | `required=True` | a `Flag` with no default |
 | `type=int`, `type=float`, `type=Decimal`, `type=Path` | the field's annotation |
