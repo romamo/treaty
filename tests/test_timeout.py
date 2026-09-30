@@ -147,7 +147,7 @@ def remaining_app(default_timeout: float | None) -> tuple[App, list[bool]]:
 
     @app.command("overrun", description="Sleeps past its limit", danger_level="safe", exit_codes=())
     def overrun(args: NoArgs, ctx: Ctx) -> dict[str, object]:
-        time.sleep(0.1)
+        time.sleep(0.5)  # ten times the limit, so a slow runner still times out first
         seen.append(ctx.expired)
         return {}
 
@@ -174,7 +174,7 @@ def test_ctx_expired_is_true_once_the_timeout_passes() -> None:
     app, seen = remaining_app(0.05)
     code, env = run_json(app, ["overrun"])
     assert code == 10 and env["error"]["code"] == "TIMEOUT"
-    deadline = time.monotonic() + 1.0
+    deadline = time.monotonic() + 5.0
     while not seen and time.monotonic() < deadline:
         time.sleep(0.01)
     assert seen == [True]  # the abandoned worker sees its deadline has passed
