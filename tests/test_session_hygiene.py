@@ -763,6 +763,18 @@ def test_an_in_process_run_under_capsys_leaves_no_unraisable_flush(tmp_path: Pat
     assert "Unraisable" not in proc.stdout + proc.stderr
 
 
+class FlushCounter(io.TextIOWrapper):
+    """A stderr that counts its flushes and, once closed, refuses them"""
+
+    def __init__(self) -> None:
+        super().__init__(io.BytesIO(), encoding="utf-8")
+        self.flushes = 0
+
+    def flush(self) -> None:
+        super().flush()
+        self.flushes += 1
+
+
 def test_a_stdout_stand_in_that_outlives_its_run_still_works() -> None:
     # Overlapping runs can restore a finished run's stand-in as sys.stdout: it stays open
     app = App("keepctl", version="1.0.0")
@@ -773,7 +785,8 @@ def test_a_stdout_stand_in_that_outlives_its_run_still_works() -> None:
         kept.append(sys.stdout)
         return {"ok": True}
 
-    first, second = io.StringIO(), io.StringIO()
+    # StringIO's flush tolerates a closed stream; a real stream's raises ValueError
+    first, second = FlushCounter(), FlushCounter()
     for err in (first, second):
         assert app.run(["go"], stdout=io.StringIO(), stderr=err, env={}, isatty=False) == 0
     old = kept[0]
@@ -781,7 +794,9 @@ def test_a_stdout_stand_in_that_outlives_its_run_still_works() -> None:
     assert old.isatty() is False
     assert old.write("late\n") == len("late\n")
     old.writelines(["later\n"])
+    flushed = first.flushes
     old.flush()
+    assert first.flushes == flushed + 1  # an open stderr is still flushed
     assert old.take() == ("late\nlater\n", len("late\nlater\n"))  # still counted
     first.close()
     old.flush()  # its stderr is gone: nothing to flush into, and no error
