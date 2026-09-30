@@ -794,5 +794,146 @@ def test_settings_resolve_path_tuples_and_refuse_flag_options_they_ignore(tmp_pa
     class Flagged:
         verbose: bool = Flag(default=False, description="Verbose", secret=True)
 
+    # A field's type is inspected once the app is in use, after app.scalar
+    flagged = App("flg", version="1.0.0", settings=Flagged)
     with pytest.raises(RegistrationError, match="boolean cannot hold a secret"):
-        App("flg", version="1.0.0", settings=Flagged)
+        flagged.manifest()
+
+
+# A settings field of a class app.scalar registers after App(settings=) (#29)
+
+
+@dataclass(frozen=True, slots=True)
+class QueryId:
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class QuerySettings:
+    query_id: QueryId | None = None
+    fallbacks: tuple[QueryId, ...] = ()
+
+
+def query_app() -> App:
+    app = App("qctl", version="1.0.0", settings=QuerySettings)
+    app.scalar(QueryId, parse=QueryId, pattern=r"\d+")
+
+    @app.command("show", description="Show the query", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx, settings: QuerySettings) -> dict[str, object]:
+        assert settings.query_id is None or isinstance(settings.query_id, QueryId)
+        return {
+            "query_id": None if settings.query_id is None else settings.query_id.value,
+            "fallbacks": [q.value for q in settings.fallbacks],
+        }
+
+    return app
+
+
+def run_query(argv: list[str], **env: str) -> tuple[int, dict[str, Any]]:
+    out = io.StringIO()
+    code = query_app().run(
+        argv, stdout=out, stderr=io.StringIO(), env={"QCTL_AUDIT_LOG": "off", **env}
+    )
+    return code, json.loads(out.getvalue())
+
+
+def test_a_scalar_setting_is_parsed_from_the_environment() -> None:
+    code, envelope = run_query(["show", "--no-config"], QCTL_QUERY_ID="42", QCTL_FALLBACKS="7,8")
+    assert code == 0, envelope
+    assert envelope["data"] == {"query_id": "42", "fallbacks": ["7", "8"]}
+
+
+def test_a_scalar_setting_is_parsed_from_a_config_file(tmp_path: Path) -> None:
+    config = tmp_path / "qctl.toml"
+    config.write_text('query_id = "42"\nfallbacks = ["7"]\n', encoding="utf-8")
+    code, envelope = run_query(["show", "--config", str(config)])
+    assert code == 0, envelope
+    assert envelope["data"] == {"query_id": "42", "fallbacks": ["7"]}
+    code, envelope = run_query(["show", "--config", str(config), "--show-config"])
+    assert envelope["data"]["effective_config"] == {"query_id": "42", "fallbacks": ["7"]}
+    assert envelope["data"]["sources"]["query_id"] == f"file:{config}"
+
+
+def test_a_bad_scalar_setting_is_config_invalid_naming_the_key_and_source(
+    tmp_path: Path,
+) -> None:
+    code, envelope = run_query(["show", "--no-config"], QCTL_QUERY_ID="abc")
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "CONFIG_INVALID", error
+    assert error["context"] == {"source": "QCTL_QUERY_ID", "key": "query_id"}
+    assert "does not match pattern" in error["message"]
+    config = tmp_path / "qctl.toml"
+    config.write_text('fallbacks = ["7", "x"]\n', encoding="utf-8")
+    code, envelope = run_query(["show", "--config", str(config)])
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "CONFIG_INVALID", error
+    assert error["context"] == {"path": str(config), "key": "fallbacks"}
+    assert "does not match pattern" in error["message"]
+
+
+def test_settings_field_types_are_inspected_on_first_use_after_app_scalar() -> None:
+    # Construction checks the shape only: the scalar is not registered yet
+    app = App("qctl", version="1.0.0", settings=QuerySettings)
+    # Used before app.scalar, the app names the field and the fix
+    with pytest.raises(RegistrationError, match="field 'query_id'.*app.scalar"):
+        app.manifest()
+    with pytest.raises(RegistrationError, match="field 'query_id'"):
+        app.run(["show"], stdout=io.StringIO(), stderr=io.StringIO(), env={})
+    # Registered later, the settings are inspected again on next use
+    app.scalar(QueryId, parse=QueryId, pattern=r"\d+")
+    assert app.settings is not None
+    assert [s.name for s in app.settings.fields] == ["query_id", "fallbacks"]
+    app.manifest()
+
+
+def test_an_audit_reports_a_settings_field_of_an_unregistered_class(tmp_path: Path) -> None:
+    (tmp_path / "unregctl.py").write_text(
+        "from dataclasses import dataclass\n"
+        "from treaty import App\n"
+        "class QueryId(str): ...\n"
+        "@dataclass(frozen=True)\n"
+        "class Settings:\n"
+        "    query_id: QueryId | None = None\n"
+        "app = App('unregctl', version='1.0.0', settings=Settings)\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", "from treaty._cli import main; main()", "audit", "unregctl:app"],
+        cwd=tmp_path,
+        env=process_env(TREATY_AUDIT_LOG="off"),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 4, proc.stdout + proc.stderr
+    error = json.loads(proc.stdout)["error"]
+    assert error["code"] == "APP_IMPORT_FAILED"
+    assert error["context"]["exception"] == "RegistrationError"
+    assert "query_id" in error["message"]
+
+
+@dataclass(frozen=True, slots=True)
+class TokenSettings:
+    api_token: QueryId | None = None
+
+    def __post_init__(self) -> None:
+        if self.api_token is not None and self.api_token.value.startswith("7"):
+            raise ValueError(f"token {self.api_token.value} is revoked")
+
+
+def test_a_secret_scalar_setting_is_redacted_from_a_refusal_quoting_its_text() -> None:
+    # The instance's str() is not the text it was parsed from: its serialized form is
+    app = App("tokctl", version="1.0.0", settings=TokenSettings)
+    app.scalar(QueryId, parse=QueryId, pattern=r"\d+")
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx, settings: TokenSettings) -> dict[str, object]:
+        return {}
+
+    out = io.StringIO()
+    env = {"TOKCTL_AUDIT_LOG": "off", "TOKCTL_API_TOKEN": "7654321"}
+    code = app.run(["show", "--no-config"], stdout=out, stderr=io.StringIO(), env=env)
+    assert code == 2
+    assert "7654321" not in out.getvalue()
+    assert "[REDACTED] is revoked" in json.loads(out.getvalue())["error"]["message"]

@@ -142,6 +142,7 @@
         "redirected_paths",
         "run",
         "scalar",
+        "settings",
         "shadowed_builtins",
         "suppress_update_notifier",
         "tokenizer"

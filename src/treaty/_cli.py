@@ -188,6 +188,21 @@ def load_app(target: str, cwd: Path) -> App:
         raise Exit.PRECONDITION(
             f"Target {target} is {type(obj).__name__}, not a treaty App", context={"target": target}
         )
+    try:
+        # What the app checks once in use, such as its settings' field types
+        obj._check_fixes()
+    except RegistrationError as exc:
+        raise Exit.PRECONDITION(
+            f"App {target} failed its registration checks: {type(exc).__name__}: {exc}",
+            code="APP_IMPORT_FAILED",
+            context={
+                "module": module_name,
+                "target": target,
+                "exception": type(exc).__qualname__,
+                "message": str(exc),
+            },
+            fix_required="fix the error in the app's module; the message names it",
+        ) from None
     return obj
 
 
