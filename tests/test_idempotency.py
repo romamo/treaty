@@ -213,7 +213,11 @@ def test_timed_out_handler_keeps_the_key_until_it_finishes(tmp_path: Path) -> No
     busy = app.call("create", {"name": "w", "idempotency_key": "k1"})
     assert busy.error is not None and busy.error.code == "IDEMPOTENCY_KEY_BUSY"
     assert len(started) == 1, "the retry ran the mutation beside the abandoned handler"
-    release.set()  # the abandoned handler finishes; the replay waits for its record
+    release.set()  # the abandoned handler finishes and records its result
+    # Its thread releases the key only after the save; a slow runner may take longer than
+    # the replay's own 0.2 s wait, so take the key here first, with a generous deadline
+    with claim(tmp_path, IdempotencyKey("k1"), wait_seconds=10) as slot:
+        assert slot.record is not None, "the abandoned handler's result was not recorded"
     replay = app.call("create", {"name": "w", "idempotency_key": "k1"})
     assert len(started) == 1
     assert replay.ok and isinstance(replay.data, dict) and replay.data["effect"] == "noop"
