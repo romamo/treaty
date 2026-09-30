@@ -133,8 +133,10 @@ A feed starts only when the time left is at least what the last one took. The on
 time for are not started, and say so with `NOT_STARTED`, marked retryable, since nothing
 happened to them. The run then ends with a result the agent can act on: what was imported,
 and what to send again. With three feeds that take a second each and `--timeout 2.8`, the
-first two are imported and the third is reported as not started; the tests check exactly
-that.
+first two are usually imported and the third is reported as not started. Whether the second
+starts depends on how long the first took, so the tests check what holds at any speed: the
+first feed is imported, the last is `NOT_STARTED` and retryable, and a separate test pins
+the rule itself.
 
 Each feed goes through `import_items`, the handler of `import`, called as a plain function:
 the batch adds nothing to how one feed is imported, only to how many are.
