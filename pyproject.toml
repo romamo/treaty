@@ -54,9 +54,14 @@ pythonpath = ["."]
 [tool.mypy]
 strict = true
 python_version = "3.14"
-# Tutorial files that are checked where they run: todo_typer.py in an environment with
-# typer, and new_cli/ inside a project that treaty init created, where todo.cli exists
-exclude = ['^examples/tutorial/todo_typer\.py$', '^examples/tutorial/new_cli/']
+# Tutorial files that are checked where they run: todo_typer.py and todo_pydantic.py in an
+# environment with typer or pydantic-settings, and new_cli/ inside a project that treaty
+# init created, where todo.cli exists
+exclude = [
+    '^examples/tutorial/todo_typer\.py$',
+    '^examples/tutorial/todo_pydantic\.py$',
+    '^examples/tutorial/new_cli/',
+]
 
 [tool.ruff]
 line-length = 100

@@ -5,8 +5,9 @@ uv run python -m examples.tutorial.market_funds lookup "world index" --currency 
 
 from dataclasses import dataclass
 
-from examples.tutorial.market_args import SearchArgs
 from treaty import App, Ctx
+
+from .market_args import SearchArgs
 
 app = App("funds", version="1.0.0", description="Quotes from the funds provider")
 

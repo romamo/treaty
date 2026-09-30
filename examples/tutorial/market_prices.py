@@ -6,8 +6,9 @@ uv run python -m examples.tutorial.market_prices history AAPL --days 5
 
 from dataclasses import dataclass
 
-from examples.tutorial.market_args import HISTORY_RULES, HistoryArgs, SearchArgs
 from treaty import App, Ctx, Flag
+
+from .market_args import HISTORY_RULES, HistoryArgs, SearchArgs
 
 app = App("prices", version="1.0.0", description="Quotes from the prices provider")
 
