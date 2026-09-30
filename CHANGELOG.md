@@ -115,6 +115,13 @@ Apps built on treaty keep their own, structured schema changelog with
   framework's without a hard-coded name list. An app command omits the key, which reads as
   `false`, including one that replaces a built-in's name. The manifest's `schema_version`
   is now `3.1`, the spec's ManifestResponse contract with the marker (#70)
+- `ctx.run(argv, stream=True)` shows a long child's output while it runs: each line it
+  writes, on stdout or stderr, goes to the run's stderr as a `ctx.log` INFO line as it
+  arrives, redacted, so a terminal or `--verbose` shows it and stdout keeps only the
+  envelope. Off a terminal, in `App.call`, and over MCP the lines are dropped, as
+  `ctx.log`'s are. `Completed.stdout` and `stderr` keep the last 4 KiB, as
+  `SUBPROCESS_FAILED`'s `context.stderr` does; timeouts, signals, the locale, `input=`,
+  and `children.pids` are unchanged (#61)
 
 ### Fixed
 

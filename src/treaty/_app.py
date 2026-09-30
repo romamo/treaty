@@ -2777,6 +2777,7 @@ class _Run:
         child_env.update(proxies.child_env())  # REQ-O-019: children go out the same way
         # REQ-O-033: --headless opens no browser even where one could be shown
         headless = self.headless or invocation.headless
+        log = self._log_sink(command, args, mode)
         # The run's env holds TOOL_TRACE_ID, so every child inherits it (REQ-F-025)
         self.processes = Processes(
             child_env,
@@ -2787,6 +2788,7 @@ class _Run:
             background=self.background_slot(command),
             cwd=self.cwd if self.cwd_given else None,
             session=self.session_for(),
+            echo=lambda line: log(Level.INFO, line, {}),  # ctx.run(stream=True)
         )
         if not supports(command.platform, sys.platform):
             self._warn(

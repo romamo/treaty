@@ -108,6 +108,15 @@ Every program `ctx.run` starts gets an environment that keeps it from waiting fo
 
 `env=` overrides single variables for one call.
 
+A long program, such as a deploy, shows nothing until it exits, since its output is
+captured. `stream=True` writes each line it prints to stderr as it arrives, as `ctx.log`
+lines, so a person at a terminal (or anyone with `--verbose`) watches it run, while stdout
+keeps only the envelope. `stdout` and `stderr` on the result then hold the last 4 KiB:
+
+```python
+done = ctx.run(["ansible-playbook", "site.yml"], stream=True)
+```
+
 ## Step 3: Keep free text out of the arguments
 
 `save` takes one flag of its own, the commit message, and returns the commit it made:

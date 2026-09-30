@@ -13,8 +13,11 @@ only the child itself is stopped: its grandchildren are not killed.
 
 from __future__ import annotations
 
+import codecs
 import contextlib
+import functools
 import os
+import queue
 import signal
 import subprocess
 import sys
@@ -22,7 +25,7 @@ import tempfile
 import threading
 import time
 import webbrowser
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -42,7 +45,12 @@ Argv = Sequence[str | os.PathLike[str]]
 GRACE_SECONDS = 2.0
 """How long a child has between SIGTERM and SIGKILL"""
 STDERR_TAIL = 4096
-"""Characters of a failed child's stderr kept in the error context"""
+"""Characters of a failed child's stderr kept in the error context, and of a streamed
+child's stdout and stderr kept in ``Completed``"""
+LINE_BYTES = 65536
+"""The longest line a streamed child's output is echoed in; a longer one is split"""
+QUEUED_LINES = 1024
+"""Lines a streamed child may be ahead of the run's stderr before its writes block"""
 BROWSER_OPEN = "browser_open"
 """The ``gui_operations`` entry that allows ``ctx.open_url``"""
 GUI_SKIPPED = "GUI_SKIPPED"
@@ -68,9 +76,10 @@ class Completed:
     returncode: int
     """Negative when a signal ended the child, as in ``subprocess``"""
     stdout: str
-    """The last stage's output"""
+    """The last stage's output; with ``stream=True``, its last ``STDERR_TAIL`` characters"""
     stderr: str
-    """Every stage's stderr, in stage order"""
+    """Every stage's stderr, in stage order; with ``stream=True``, its last
+    ``STDERR_TAIL`` characters"""
     duration_ms: int
     stage: int = 0
 
@@ -160,8 +169,11 @@ class Processes:
         background: BackgroundSlot | None = None,
         cwd: Path | None = None,
         session: Session | None = None,
+        echo: Callable[[str], None] | None = None,
     ) -> None:
         self.env = dict(env)
+        self.echo = echo
+        """Where a streamed child's lines go, one call each: the run's ``ctx.log``"""
         self.session = session
         """The run's temp directory, the children's ``TMPDIR`` and pid file (REQ-F-030)"""
         self.cwd = cwd
@@ -188,10 +200,13 @@ class Processes:
         env: Mapping[str, str] | None = None,
         timeout: Timeout | None = None,
         check: bool = True,
+        stream: bool = False,
     ) -> Completed:
         if isinstance(argv, (str, bytes)):
             raise shell_string_prohibited(argv)
-        return self.pipeline([argv], input=input, cwd=cwd, env=env, timeout=timeout, check=check)
+        return self._stages(
+            [argv], input=input, cwd=cwd, env=env, timeout=timeout, check=check, stream=stream
+        )
 
     def pipeline(
         self,
@@ -203,6 +218,20 @@ class Processes:
         timeout: Timeout | None = None,
         check: bool = True,
     ) -> Completed:
+        return self._stages(stages, input=input, cwd=cwd, env=env, timeout=timeout, check=check)
+
+    def _stages(
+        self,
+        stages: Sequence[Argv],
+        *,
+        input: str | None,
+        cwd: Path | None,
+        env: Mapping[str, str] | None,
+        timeout: Timeout | None,
+        check: bool,
+        stream: bool = False,
+    ) -> Completed:
+        """``stream`` is ``ctx.run``'s: one stage, its stdout and stderr read line by line"""
         if isinstance(stages, (str, bytes)):
             raise shell_string_prohibited(stages)
         argvs = [_argv(stage) for stage in stages]
@@ -213,8 +242,9 @@ class Processes:
         end = None if seconds is None else time.monotonic() + seconds
         started = time.perf_counter()
         procs: list[subprocess.Popen[bytes]] = []
+        follow: _Follow | None = None
         with contextlib.ExitStack() as files:
-            errs = [files.enter_context(tempfile.TemporaryFile()) for _ in argvs]
+            errs = [] if stream else [files.enter_context(tempfile.TemporaryFile()) for _ in argvs]
             source: IO[bytes] | int = subprocess.DEVNULL
             if input is not None:
                 source = files.enter_context(tempfile.TemporaryFile())
@@ -222,7 +252,8 @@ class Processes:
                 source.seek(0)
             try:
                 for index, argv in enumerate(argvs):
-                    proc = self._spawn(argv, index, source, errs[index], cwd, env)
+                    err = subprocess.PIPE if stream else errs[index]
+                    proc = self._spawn(argv, index, source, err, cwd, env)
                     procs.append(proc)
                     if index > 0:
                         # Only the next stage reads it, so SIGPIPE reaches the writer
@@ -231,7 +262,13 @@ class Processes:
                         previous.close()
                     assert proc.stdout is not None
                     source = proc.stdout
-                out, _ = procs[-1].communicate(timeout=_left(end))
+                if stream:
+                    follow = _Follow(procs[-1])
+                    out, tail = follow.wait(end, self.echo, argvs[-1])
+                    procs[-1].wait(timeout=_left(end))
+                else:
+                    raw, _ = procs[-1].communicate(timeout=_left(end))
+                    out = raw.decode("utf-8", "replace")
                 for proc in procs[:-1]:
                     proc.wait(timeout=_left(end, floor=0.1))
             except subprocess.TimeoutExpired:
@@ -255,19 +292,23 @@ class Processes:
                 self._stop(procs)
                 raise
             finally:
-                for proc in procs:
-                    if proc.stdout is not None:
-                        proc.stdout.close()
+                if follow is not None:
+                    follow.close()  # its readers own, and close, the child's pipes
+                else:
+                    for proc in procs:
+                        for pipe in (proc.stdout, proc.stderr):
+                            if pipe is not None:
+                                pipe.close()
                 with self._lock:
                     self._live.difference_update(procs)
                 self._track()
-            stderrs = [_read(err) for err in errs]
+            stderrs = [tail] if follow is not None else [_read(file) for file in errs]
         codes = [proc.returncode for proc in procs]
         stage = next((i for i in range(len(codes)) if _failed(codes, i)), len(codes) - 1)
         done = Completed(
             argv=argvs[stage],
             returncode=codes[stage],
-            stdout=out.decode("utf-8", "replace"),
+            stdout=out,
             stderr="".join(stderrs),
             duration_ms=int((time.perf_counter() - started) * 1000),
             stage=stage,
@@ -426,7 +467,7 @@ class Processes:
         argv: tuple[str, ...],
         index: int,
         stdin: IO[bytes] | int,
-        stderr: IO[bytes],
+        stderr: IO[bytes] | int,
         cwd: Path | None,
         env: Mapping[str, str] | None,
     ) -> subprocess.Popen[bytes]:
@@ -460,8 +501,9 @@ class Processes:
             # terminate() ran while Popen did: this child is not tracked, so stop it here
             _signal(proc, kill=True)
             proc.wait()
-            assert proc.stdout is not None
-            proc.stdout.close()
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
             raise self._refusal(argv)
         return proc
 
@@ -478,6 +520,68 @@ class Processes:
             if _alive(proc):
                 _signal(proc, kill=True)
             proc.wait()
+
+
+class _Follow:
+    """A streamed child's stdout and stderr: a reader thread per pipe queues each line,
+    and the thread that waits hands it to ``echo``, so every write to the run's stderr,
+    and the redaction before it, happens on the handler's thread as ``ctx.log``'s do.
+    Only the last ``STDERR_TAIL`` characters of each pipe are kept."""
+
+    def __init__(self, proc: subprocess.Popen[bytes]) -> None:
+        # Bounded: a child that writes faster than the run's stderr takes waits on its pipe
+        self._lines: queue.Queue[tuple[int, str | None]] = queue.Queue(QUEUED_LINES)
+        pipes = (proc.stdout, proc.stderr)
+        self._readers = [
+            threading.Thread(target=self._read, args=(index, pipe), daemon=True)
+            for index, pipe in enumerate(pipes)
+            if pipe is not None
+        ]
+        for reader in self._readers:
+            reader.start()
+
+    def _read(self, index: int, pipe: IO[bytes]) -> None:
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        try:
+            for chunk in iter(functools.partial(pipe.readline, LINE_BYTES), b""):
+                self._lines.put((index, decoder.decode(chunk)))
+            if rest := decoder.decode(b"", final=True):
+                self._lines.put((index, rest))
+        finally:
+            pipe.close()
+            self._lines.put((index, None))
+
+    def wait(
+        self, end: float | None, echo: Callable[[str], None] | None, argv: tuple[str, ...]
+    ) -> tuple[str, str]:
+        """Echo each line until both pipes close; the tails of stdout and stderr.
+        ``subprocess.TimeoutExpired`` once ``end`` passes, as ``communicate`` raises"""
+        tails = ["", ""]
+        open_pipes = len(self._readers)
+        while open_pipes:
+            left = _left(end)
+            if left == 0.0:
+                raise subprocess.TimeoutExpired(argv, 0)
+            try:
+                index, text = self._lines.get(timeout=left)
+            except queue.Empty:
+                raise subprocess.TimeoutExpired(argv, 0) from None
+            if text is None:
+                open_pipes -= 1
+                continue
+            tails[index] = (tails[index] + text)[-STDERR_TAIL:]
+            if echo is not None:
+                echo(text.removesuffix("\n").removesuffix("\r"))
+        return tails[0], tails[1]
+
+    def close(self) -> None:
+        """Let the readers finish once the child is stopped: take what they still queue,
+        so none blocks on a full queue, for up to ``GRACE_SECONDS``. A reader whose pipe a
+        grandchild outside the process group holds open is left to end with it"""
+        end = time.monotonic() + GRACE_SECONDS
+        while any(r.is_alive() for r in self._readers) and time.monotonic() < end:
+            with contextlib.suppress(queue.Empty):
+                self._lines.get(timeout=0.02)
 
 
 UNKNOWN_START = "-"
