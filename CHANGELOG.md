@@ -10,6 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- The audit rule `stable-order` warns about an array of objects nested in a list, tuple, or
+  dict, such as `dict[str, list[Line]]` or `list[list[Line]]`: treaty sorts it by each
+  item's JSON text, and neither `ordered=True` on the command nor `Out(ordered=True)` on
+  the field reaches it, yet `--strict` passed. Hold the array in a dataclass field that
+  declares its order
+- The `stable-order` fix names a `sort_key` only from the fields that can be one (a str,
+  int, Enum, or date); it no longer suggests a `Decimal` or `float` field, which fails
+  registration, and suggests `ordered=True` alone when no field can be a key
+
 ## [1.0.0rc4] - 2026-09-30
 
 The fourth 1.0 release candidate: built-in `Decimal` arguments, and a `stable-order` warning

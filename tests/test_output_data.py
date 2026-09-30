@@ -324,6 +324,77 @@ def test_declared_object_array_order_passes_strict(declare: dict[str, object]) -
     assert [line["amount"] for line in env["data"]["lines"]] == ["5.00", "10.00"]
 
 
+def nested_invoice_app(**declare: object) -> App:
+    """Invoice lines nested in a dict and in a list, where no declaration reaches them"""
+
+    @dataclass(frozen=True, slots=True)
+    class Invoices:
+        by_customer: dict[str, list[Line]] = Out(**declare)  # type: ignore[arg-type]
+        batches: list[list[Line]] = Out(**declare)  # type: ignore[arg-type]
+
+    app = App("billing", version="1.0.0")
+
+    @app.command("invoices", description="invoices", danger_level="safe", exit_codes=())
+    def invoices(args: NoArgs, ctx: Ctx) -> Invoices:
+        lines = [Line(1, "5.00"), Line(2, "10.00")]
+        return Invoices({"acme": lines}, [lines])
+
+    @app.command(
+        "by-customer", description="by customer", danger_level="safe", exit_codes=(), **declare
+    )
+    def by_customer(args: NoArgs, ctx: Ctx) -> dict[str, list[Line]]:
+        return {"acme": [Line(1, "5.00"), Line(2, "10.00")]}
+
+    return app
+
+
+@pytest.mark.parametrize("declare", [{}, {"ordered": True}])
+def test_nested_object_array_order_fails_strict(declare: dict[str, object]) -> None:
+    # ordered=True does not reach an array inside a dict or a list: it is still sorted
+    _, env = run(nested_invoice_app(**declare), ["invoices"])
+    assert [line["amount"] for line in env["data"]["by_customer"]["acme"]] == ["10.00", "5.00"]
+    assert [line["amount"] for line in env["data"]["batches"][0]] == ["10.00", "5.00"]
+    _, env = run(nested_invoice_app(**declare), ["by-customer"])
+    assert [line["amount"] for line in env["data"]["acme"]] == ["10.00", "5.00"]
+    found = findings(nested_invoice_app(**declare), "stable-order")
+    assert sorted((f.command, f.message.split(" nests")[0]) for f in found) == [
+        ("by-customer", "output"),
+        ("invoices", "output field batches"),
+        ("invoices", "output field by_customer"),
+    ]
+    assert all(f.severity in BLOCKING and "dict[str, Group]" in f.fix for f in found)
+
+
+def test_stable_order_fix_names_only_a_field_that_can_be_a_sort_key() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Priced:
+        amount: float
+        flag: bool
+
+    @dataclass(frozen=True, slots=True)
+    class Keyed:
+        amount: float
+        label: str
+
+    @dataclass(frozen=True, slots=True)
+    class Quote:
+        priced: list[Priced]
+        keyed: list[Keyed]
+
+    app = App("billing", version="1.0.0")
+
+    @app.command("quote", description="quote", danger_level="safe", exit_codes=())
+    def quote(args: NoArgs, ctx: Ctx) -> Quote:
+        return Quote([], [])
+
+    fixes = {f.message.split(" is")[0]: f.fix for f in findings(app, "stable-order")}
+    assert fixes["output field priced"] == (
+        "treaty.Out(ordered=True) to keep the handler's order; no field of "
+        f"{Priced.__qualname__} can be a sort_key"
+    )
+    assert fixes["output field keyed"].startswith('keyed: ... = treaty.Out(sort_key="label")')
+
+
 POSTINGS = [{"account": "Expenses:Food"}, {"account": "Assets:Cash"}]
 
 

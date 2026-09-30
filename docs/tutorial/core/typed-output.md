@@ -112,7 +112,9 @@ a field, or `Out(ordered=True)` to keep the order the handler built, for a ranki
 list whose order is the data. A command that returns the list itself takes the same
 `sort_key=` or `ordered=True`. The audit rule `stable-order` reports an array of objects
 with neither as a warning, so `treaty audit --strict` fails until it is declared. A list of
-scalars, such as `list[str]`, needs nothing: strings and numbers sort by value.
+scalars, such as `list[str]`, needs nothing: strings and numbers sort by value. An array
+nested in another list or a dict, such as `dict[str, list[Line]]`, cannot take a declared
+order, so the rule warns there too: hold it in a dataclass field that declares one.
 
 **Check:** `add`'s schema names every field of the result, and of the item inside it
 
