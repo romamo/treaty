@@ -1929,14 +1929,16 @@ def test_first_party_covers_an_editable_install_that_hooks_the_import_system(
     _expect_both_packages_followed(_audit_in_child(project, site))
 
 
-def test_a_malformed_direct_url_record_stops_the_audit_naming_the_distribution(
-    tmp_path: Path,
-) -> None:
-    """A direct_url.json the audit cannot parse is an error, not a silent non-editable"""
+def test_a_malformed_direct_url_record_of_the_owner_stops_the_audit(tmp_path: Path) -> None:
+    """The record of the distribution that ships the handler's package decides whether
+    the handler is that distribution's: one the audit cannot parse is an error, not a
+    silent non-editable"""
     project, site = tmp_path / "two", tmp_path / "site-packages"
     _write(project, _TWO_PACKAGES)
-    _write(site, {**_OTHERLIB, "two.pth": f"{project}\n"})
-    _dist_info(site, "two", ["two.pth"], **{"direct_url.json": "{not json"})
+    _write(site, {**_OTHERLIB, "__editable__.two.pth": "import __editable___two_finder\n"})
+    record = ["__editable__.two.pth", "__editable___two_finder.py"]
+    extra = {"direct_url.json": "{not json", "top_level.txt": "apppkg\nlibpkg\n"}
+    _dist_info(site, "two", record, **extra)
     proc = subprocess.run(
         [sys.executable, "-c", "from treaty._cli import main; main()"]
         + ["audit", "apppkg.cli:app", "--format", "json"],
@@ -1950,6 +1952,20 @@ def test_a_malformed_direct_url_record_stops_the_audit_naming_the_distribution(
     assert proc.returncode == 4 and error["code"] == "PRECONDITION"
     assert "direct_url.json of the installed distribution two" in error["message"]
     assert error["context"]["distribution"] == "two"
+
+
+def test_a_malformed_direct_url_record_of_another_distribution_is_skipped_and_named(
+    tmp_path: Path,
+) -> None:
+    """Looking for an editable install of a local checkout reads every distribution's
+    record: a broken, unrelated one is skipped, and the scope names it"""
+    local, site = tmp_path / "local", tmp_path / "site-packages"
+    _write(local, {**_TWO_PACKAGES, **_OTHERLIB})
+    _dist_info(site, "broken", [], **{"direct_url.json": "[]"})
+    data = _audit_in_child(local, site)
+    assert _chdir_findings(data) == {}
+    assert "first-party modules (apppkg) 3 calls deep" in data["scope"]
+    assert "direct_url.json is not a PEP 610 record (broken)" in data["scope"]
 
 
 @dataclass(frozen=True, slots=True)

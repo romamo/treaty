@@ -17,8 +17,10 @@ Apps built on treaty keep their own, structured schema changelog with
   project of its editable install. A local package that shadows an unrelated installed
   one of the same name keeps only its own package, so the source rules no longer follow
   helpers into the other distribution's packages. A `direct_url.json` that is not a
-  PEP 610 record now stops the audit with exit 4 and `PRECONDITION`, naming the
-  distribution, where it was taken as a non-editable install (#106)
+  PEP 610 record was taken as a non-editable install. Now the record of the distribution
+  that ships the handler's package stops the audit with exit 4 and `PRECONDITION`,
+  naming the distribution, and any other distribution's is skipped and named in the
+  report's `scope` (#106)
 
 ## [1.0.0rc6] - 2026-09-30
 

@@ -507,6 +507,10 @@ class _Home:
     distribution ships, whose first-party code is the files under ``root``"""
     root: Path
     """The directory that holds the package, or the module when it has none"""
+    unread: tuple[str, ...] = ()
+    """The installed distributions whose ``direct_url.json`` could not be read while
+    looking for an editable install that puts ``root`` on ``sys.path``: skipped, so an
+    editable install among them is not followed"""
 
     @property
     def names(self) -> str:
@@ -527,6 +531,13 @@ def first_party(fn: Callable[..., object]) -> str | None:
     return None if home is None else home.names
 
 
+def unread_records(fn: Callable[..., object]) -> tuple[str, ...]:
+    """The distributions the audit skipped for the handler ``fn`` because their
+    ``direct_url.json`` is not a PEP 610 record"""
+    home = _home(fn)
+    return () if home is None else home.unread
+
+
 def _home(fn: Callable[..., object]) -> _Home | None:
     """Where the handler's first-party code lives; None for treaty's own or when unknown"""
     module = sys.modules.get(getattr(fn, "__module__", None) or "")
@@ -543,29 +554,39 @@ def _home(fn: Callable[..., object]) -> _Home | None:
             # A namespace package has no single directory: its modules are known by name,
             # and the handler's own portion of it names where a helper is
             root = path.parents[module.__name__.count(".") + (path.stem == "__init__")]
-        return _Home(_distribution_packages(top, root, path) or frozenset({top}), root)
+        packages, unread = _distribution_packages(top, root, path)
+        return _Home(packages or frozenset({top}), root, unread)
     if module.__name__ != "__main__":
-        return _Home(_distribution_packages(module.__name__, None, path), path.parent)
+        packages, unread = _distribution_packages(module.__name__, None, path)
+        return _Home(packages, path.parent, unread)
     return _Home(None, path.parent)
 
 
-def _distribution_packages(top: str, root: Path | None, file: Path) -> frozenset[str] | None:
+def _distribution_packages(
+    top: str, root: Path | None, file: Path
+) -> tuple[frozenset[str] | None, tuple[str, ...]]:
     """Every top-level package of the one distribution that ships ``top``, which the
     distribution's installed file list names, when the handler's ``file`` is that
     distribution's: a local ``top`` that shadows an installed one is not it. An editable
     install's list names only its ``.pth`` file, so for one whose ``.pth`` puts ``root`` on
     ``sys.path``, the packages in ``root``. None when no distribution, or several, ship
-    ``top``, or when the one that does is not where the handler was loaded from"""
+    ``top``, or when the one that does is not where the handler was loaded from. With
+    them, the distributions skipped for an unreadable ``direct_url.json`` when no
+    editable install was found"""
     shipped = _shipped()
     owners = shipped.get(top, ())
     if len(owners) == 1:
         if not _ships(owners[0], file):
-            return None
-        return frozenset(name for name, dists in shipped.items() if owners[0] in dists) - {"treaty"}
-    if owners or root is None or root not in _editable_roots():
-        return None
+            return None, ()
+        packages = frozenset(name for name, dists in shipped.items() if owners[0] in dists)
+        return packages - {"treaty"}, ()
+    if owners or root is None:
+        return None, ()
+    editables = _editable_roots()
+    if root not in editables.roots:
+        return None, editables.unread
     beside = {m.name for m in pkgutil.iter_modules([str(root)]) if m.ispkg}
-    return frozenset(beside | {top}) - {"treaty"}
+    return frozenset(beside | {top}) - {"treaty"}, ()
 
 
 @functools.lru_cache(maxsize=1)
@@ -597,16 +618,32 @@ def _ships(name: str, file: Path) -> bool:
     return False
 
 
+@dataclass(frozen=True, slots=True)
+class _Editables:
+    roots: frozenset[Path]
+    """The directories the editable installs put on ``sys.path`` through a ``.pth``"""
+    unread: tuple[str, ...]
+    """The distributions skipped because their ``direct_url.json`` is not a PEP 610
+    record"""
+
+
 @functools.lru_cache(maxsize=1)
-def _editable_roots() -> frozenset[Path]:
+def _editable_roots() -> _Editables:
     """The directories the editable installs (PEP 610 ``dir_info.editable``) put on
     ``sys.path`` through a ``.pth`` file; an install that hooks the import system
-    instead names none"""
+    instead names none. Every installed distribution is read, so one whose record is
+    malformed is skipped and named rather than stopping the audit"""
     found: set[Path] = set()
+    unread: list[str] = []
     for dist in importlib.metadata.distributions():
-        if _editable_project(dist) is not None:
+        try:
+            project = _read_project(dist)
+        except _MalformedRecord:
+            unread.append(dist.metadata["Name"])
+            continue
+        if project is not None:
             found.update(_pth_roots(dist))
-    return frozenset(found)
+    return _Editables(frozenset(found), tuple(sorted(set(unread))))
 
 
 def _pth_roots(dist: importlib.metadata.Distribution) -> list[Path]:
@@ -625,10 +662,29 @@ def _pth_roots(dist: importlib.metadata.Distribution) -> list[Path]:
     return found
 
 
+class _MalformedRecord(ValueError):
+    """A ``direct_url.json`` that is not the record PEP 610 describes"""
+
+
 def _editable_project(dist: importlib.metadata.Distribution) -> Path | None:
     """The project directory of an editable install, which its ``direct_url.json``
-    (PEP 610) records; None for any other install. A record that is not valid JSON, or
-    not the object PEP 610 describes, stops the audit: it cannot tell what is installed"""
+    (PEP 610) records; None for any other install. A malformed record of the
+    distribution that ships the handler's package stops the audit: it cannot tell
+    whether the handler is that distribution's"""
+    try:
+        return _read_project(dist)
+    except _MalformedRecord as exc:
+        name = dist.metadata["Name"]
+        raise Exit.PRECONDITION(
+            f"the direct_url.json of the installed distribution {name} is not a PEP 610 "
+            f"record: {exc}",
+            context={"distribution": name},
+            fix_required=f"reinstall {name}, or uninstall it if the audit does not need it",
+        ) from None
+
+
+def _read_project(dist: importlib.metadata.Distribution) -> Path | None:
+    """``_editable_project``, raising ``_MalformedRecord`` for a malformed record"""
     direct_url = dist.read_text("direct_url.json")
     if direct_url is None:
         return None
@@ -648,13 +704,7 @@ def _editable_project(dist: importlib.metadata.Distribution) -> Path | None:
             raise TypeError("url is not a string")
         return Path.from_uri(url).resolve()
     except (ValueError, KeyError, TypeError) as exc:
-        name = dist.metadata["Name"]
-        raise Exit.PRECONDITION(
-            f"the direct_url.json of the installed distribution {name} is not a PEP 610 "
-            f"record: {exc}",
-            context={"distribution": name},
-            fix_required=f"reinstall {name}, or uninstall it if the audit does not need it",
-        ) from None
+        raise _MalformedRecord(str(exc)) from None
 
 
 def _first_party(fn: types.FunctionType, home: _Home) -> bool:
