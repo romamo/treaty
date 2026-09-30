@@ -15,16 +15,15 @@ import datetime as dt
 import json
 import os
 import re
-import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import IO
 
-from ._atomic import exclusive
+from ._atomic import exclusive, retry_sharing_violation
 from ._env import AUDIT_LOG, app_var
 from ._errors import ParseError, RegistrationError
 
@@ -36,22 +35,6 @@ MAX_STRING = 1024
 _DAY = 86_400
 _SHARING_VIOLATION = 32
 """Windows ``ERROR_SHARING_VIOLATION``: another run has the file open, so it cannot move"""
-_IN_USE_SECONDS = 1.0
-"""How long an open on Windows is retried while another run renames the file"""
-
-
-def _while_renamed[T](open_it: Callable[[], T]) -> T:
-    """``open_it()``, retried on Windows for a moment while it is refused with
-    ``PermissionError``: an open that meets a rotation's rename in progress is refused
-    until the rename finishes. A refusal that outlasts the rename is raised."""
-    deadline = time.monotonic() + _IN_USE_SECONDS
-    while True:
-        try:
-            return open_it()
-        except PermissionError:
-            if sys.platform != "win32" or time.monotonic() >= deadline:
-                raise
-            time.sleep(0.01)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +149,7 @@ class Journal:
         if self._size() + len(line) > self.settings.max_bytes:
             self._rotate(len(line))
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
-        fd = _while_renamed(lambda: os.open(self.path, flags, 0o600))
+        fd = retry_sharing_violation(lambda: os.open(self.path, flags, 0o600))
         try:
             os.write(fd, line)  # one write: a concurrent run never splits the line
         finally:
@@ -261,7 +244,7 @@ def read_entries(path: Path) -> Iterator[dict[str, object] | None]:
     full disk cut short"""
     for file in log_files(path):
         try:
-            handle: IO[str] = _while_renamed(
+            handle: IO[str] = retry_sharing_violation(
                 partial(open, file, encoding="utf-8", errors="replace")
             )
         except FileNotFoundError:
