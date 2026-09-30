@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, MutableMapping
+import functools
+import sys
+from collections.abc import Callable, Collection, Mapping, MutableMapping
 from enum import StrEnum
 
 from ._env import FORMAT, app_var
@@ -92,8 +94,86 @@ UPDATE_NOTIFIERS: Mapping[str, str] = {
     "GH_NO_UPDATE_NOTIFIER": "1",
 }
 """REQ-F-050: off a terminal or under CI, no child or library prints an update notice"""
-C_LOCALE: Mapping[str, str] = {"LC_ALL": "C", "LC_NUMERIC": "C"}
+C_LOCALE: Mapping[str, str] = {"LANG": "C", "LC_MESSAGES": "C", "LC_NUMERIC": "C"}
 """REQ-F-066: children answer in English with dot decimals, unless ``preserve_locale``"""
+WINDOWS_C_LOCALE: Mapping[str, str] = {"LC_ALL": "C", "LC_NUMERIC": "C"}
+"""Windows children take the locale from the user profile; ported tools that read the
+variables get the C locale, as before"""
+LOCALE_CATEGORIES = (
+    "LC_ALL",
+    "LC_ADDRESS",
+    "LC_COLLATE",
+    "LC_CTYPE",
+    "LC_IDENTIFICATION",
+    "LC_MEASUREMENT",
+    "LC_MESSAGES",
+    "LC_MONETARY",
+    "LC_NAME",
+    "LC_NUMERIC",
+    "LC_PAPER",
+    "LC_TELEPHONE",
+    "LC_TIME",
+)
+"""The POSIX and glibc locale variables; ``LC_TERMINAL`` and the like are not locales"""
+UTF8_CTYPE = "C.UTF-8"
+
+
+@functools.cache
+def locale_available(name: str, library: str | None = None) -> bool:
+    """Whether the C library can load ``name`` for LC_CTYPE. ``newlocale`` builds a
+    separate locale object, freed at once, so the process's own locale never changes
+    and no other thread sees a switch, as ``locale.setlocale`` would cause.
+
+    ``library`` is the C library to open, the running process's by default. A Python
+    without ``ctypes``, or whose C library cannot be opened, such as a static build,
+    gets ``False``, so children get ``C``: the probe runs for every command, and must
+    not fail one that starts no child"""
+    if sys.platform == "win32":
+        return False
+    try:
+        import ctypes
+    except ImportError:
+        return False
+    import locale
+
+    try:
+        libc = ctypes.CDLL(library)
+    except OSError:
+        return False
+    if not (hasattr(libc, "newlocale") and hasattr(libc, "freelocale")):
+        return False
+    libc.newlocale.restype = ctypes.c_void_p
+    libc.newlocale.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)
+    libc.freelocale.argtypes = (ctypes.c_void_p,)
+    # glibc and musl number the masks by category; macOS and the BSDs, where LC_ALL is
+    # category 0, leave that bit out
+    offset = 1 if locale.LC_ALL == 0 else 0
+    handle = libc.newlocale(1 << (locale.LC_CTYPE - offset), name.encode("ascii"), None)
+    if not handle:
+        return False
+    libc.freelocale(handle)
+    return True
+
+
+def child_ctype(available: Callable[[str], bool] = locale_available) -> str:
+    """``C.UTF-8`` where the platform has it (glibc 2.35+, musl, macOS), else ``C``"""
+    return UTF8_CTYPE if available(UTF8_CTYPE) else "C"
+
+
+def normalize_locale(env: MutableMapping[str, str], *, ctype: str) -> None:
+    """REQ-F-066: the C locale for a child, with ``ctype`` as its character set.
+
+    ``LC_ALL`` would override ``LC_CTYPE``, so it goes, with every other locale
+    variable the user set: ``LANG=C`` then covers collation, time, and money, and
+    ``LC_MESSAGES`` and ``LC_NUMERIC`` are named as the requirement asks. A UTF-8
+    ``ctype`` lets tools that refuse an ASCII locale, like Ansible, start"""
+    if sys.platform == "win32":
+        env.update(WINDOWS_C_LOCALE)
+        return
+    for name in LOCALE_CATEGORIES:
+        env.pop(name, None)
+    env.update(C_LOCALE)
+    env["LC_CTYPE"] = ctype
 
 
 def suppress_updates(env: Mapping[str, str], *, interactive: bool) -> bool:

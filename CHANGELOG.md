@@ -74,6 +74,14 @@ Apps built on treaty keep their own, structured schema changelog with
   only starts like a public key stay masked, as does a `public_key` holding private
   material; `Out(high_entropy=True)` still masks any value. Log redaction is unchanged:
   REQ-F-034 still writes a name containing `key` as `[REDACTED]` (#66)
+- Tools that require a UTF-8 locale, like Ansible, start under `ctx.run`: children no
+  longer get `LC_ALL=C`, which made them refuse to run. On Linux, macOS, and the BSDs a
+  child gets `LANG=C`, `LC_MESSAGES=C`, and `LC_NUMERIC=C`, so messages stay English
+  and numbers dot-decimal, and `LC_CTYPE=C.UTF-8` where the C library has that locale,
+  else `C`. `LC_ALL` and the user's other `LC_*` variables are removed from the child's
+  environment, so the categories treaty does not name (time, collation, money) stay C
+  through `LANG=C`. Windows children get `LC_ALL=C` and `LC_NUMERIC=C` as before, and
+  `preserve_locale=True` is unchanged (#62)
 
 ## [1.0.0rc5] - 2026-09-30
 

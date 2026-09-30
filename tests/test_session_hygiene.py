@@ -3,6 +3,7 @@ F-050, F-060, F-066, O-017, O-018, O-020."""
 
 import io
 import json
+import locale
 import os
 import shutil
 import signal
@@ -21,6 +22,7 @@ from treaty import App, CachePolicy, Ctx, NoArgs
 from treaty._app import _StrayStdout
 from treaty._atomic import retry_sharing_violation
 from treaty._audit import audit
+from treaty._mode import child_ctype, locale_available, normalize_locale
 
 SESSIONCTL = Path(__file__).resolve().parent / "fixture_session_app.py"
 BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
@@ -163,10 +165,76 @@ def test_a_subprocess_that_would_emit_a_german_number_emits_dot_decimals() -> No
     assert status == 0
     if not WINDOWS:  # Windows children take the locale from the user profile, not LC_ALL
         assert data_of(envelope)["stdout"] == "1234.56\n"
-    assert child_env(session_app, ("LC_ALL", "LC_NUMERIC"), env=GERMAN) == {
-        "LC_ALL": "C",
+    if WINDOWS:  # kept as before: native children ignore the variables
+        assert child_env(session_app, ("LC_ALL", "LC_NUMERIC"), env=GERMAN) == {
+            "LC_ALL": "C",
+            "LC_NUMERIC": "C",
+        }
+
+
+LOCALE_NAMES = ("LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_NUMERIC", "LC_TIME")
+SH_LOCALE = " ".join(f'{name}="${{{name}-unset}}"' for name in LOCALE_NAMES)
+
+
+@pytest.mark.skipif(WINDOWS, reason="Windows children get LC_ALL=C, as before")
+def test_a_child_gets_the_c_locale_with_utf8_text_and_none_of_the_users_overrides() -> None:
+    app = App("shctl", version="1.0.0")
+
+    @app.command("locale", description="Echo the locale", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"stdout": ctx.run(["sh", "-c", f"echo {SH_LOCALE}"]).stdout}
+
+    user = {**GERMAN, "LC_CTYPE": "de_DE.UTF-8", "LC_TIME": "de_DE.UTF-8", "LC_MESSAGES": "de"}
+    status, envelope, _ = run(app, ["locale"], env=user)
+    assert status == 0, envelope
+    seen = dict(pair.split("=", 1) for pair in str(data_of(envelope)["stdout"]).split())
+    assert seen == {
+        "LANG": "C",
+        "LC_ALL": "unset",
+        "LC_CTYPE": child_ctype(),
+        "LC_MESSAGES": "C",
         "LC_NUMERIC": "C",
+        "LC_TIME": "unset",
     }
+
+
+@pytest.mark.skipif(WINDOWS, reason="Windows children get LC_ALL=C, as before")
+def test_a_tool_that_requires_a_utf8_locale_starts_under_the_c_locale() -> None:
+    # Ansible's check: under LC_ALL=C the interpreter keeps the ASCII C locale
+    ansible = "import locale; locale.setlocale(locale.LC_ALL, ''); print(locale.getlocale()[1])"
+    status, envelope, _ = run(session_app, ["child", "--code", ansible], env=GERMAN)
+    assert status == 0
+    assert data_of(envelope)["stdout"] == "UTF-8\n"
+
+
+def test_c_utf8_is_used_where_the_platform_has_it_and_c_where_it_does_not() -> None:
+    env = {"LANG": "de_DE.UTF-8", "LC_ALL": "de_DE.UTF-8", "LC_TERMINAL": "iTerm2"}
+    missing = dict(env)
+    normalize_locale(missing, ctype=child_ctype(lambda name: False))
+    present = dict(env)
+    normalize_locale(present, ctype=child_ctype(lambda name: name == "C.UTF-8"))
+    if WINDOWS:
+        assert missing == present == {**env, "LC_ALL": "C", "LC_NUMERIC": "C"}
+        return
+    c = {"LANG": "C", "LC_MESSAGES": "C", "LC_NUMERIC": "C", "LC_TERMINAL": "iTerm2"}
+    assert missing == {**c, "LC_CTYPE": "C"}
+    assert present == {**c, "LC_CTYPE": "C.UTF-8"}
+
+
+@pytest.mark.skipif(WINDOWS, reason="Windows has no newlocale; children get LC_ALL=C")
+def test_probing_for_c_utf8_leaves_the_process_locale_alone() -> None:
+    before = locale.setlocale(locale.LC_ALL)
+    assert locale_available("C")
+    assert not locale_available("xx_YY.no-such-locale")
+    if sys.platform == "darwin":
+        assert locale_available("C.UTF-8")
+    assert locale.setlocale(locale.LC_ALL) == before
+
+
+@pytest.mark.skipif(WINDOWS, reason="Windows has no newlocale; children get LC_ALL=C")
+def test_a_c_library_that_cannot_be_opened_falls_back_to_c(tmp_path: Path) -> None:
+    # A static Python's dlopen fails: every command probes, so this must not raise
+    assert not locale_available("C.UTF-8", str(tmp_path / "no-such-libc.so"))
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
@@ -184,10 +252,13 @@ def test_git_error_messages_are_in_english_regardless_of_the_system_locale(
 
 
 def test_a_command_with_preserve_locale_does_not_have_lc_all_c_injected() -> None:
-    code = "import json, os; print(json.dumps([os.environ.get('LC_ALL'), os.environ.get('LANG')]))"
-    status, envelope, _ = run(session_app, ["child-localized", "--code", code], env=GERMAN)
+    names = ("LC_ALL", "LANG", "LC_CTYPE", "LC_MESSAGES")
+    code = f"import json, os; print(json.dumps([os.environ.get(n) for n in {names!r}]))"
+    env = {**GERMAN, "LC_MESSAGES": "de_DE.UTF-8"}
+    status, envelope, _ = run(session_app, ["child-localized", "--code", code], env=env)
     assert status == 0
-    assert json.loads(str(data_of(envelope)["stdout"])) == ["de_DE.UTF-8", "de_DE.UTF-8"]
+    seen = json.loads(str(data_of(envelope)["stdout"]))
+    assert seen == ["de_DE.UTF-8", "de_DE.UTF-8", None, "de_DE.UTF-8"]
 
 
 def test_the_parent_process_locale_is_unaffected_only_subprocess_environments_are() -> None:

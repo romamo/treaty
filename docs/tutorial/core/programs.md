@@ -95,9 +95,11 @@ Every program `ctx.run` starts gets an environment that keeps it from waiting fo
   and fails instead of hanging
 - **No pager, no editor**: `PAGER`, `GIT_PAGER`, and `MANPAGER` are `cat`, and off a
   terminal `EDITOR`, `VISUAL`, and `GIT_EDITOR` are `true`, which exits at once
-- **One language**: `LC_ALL=C`, so messages are English and numbers use a dot, on every
-  machine; `preserve_locale=True` on the command turns it off, and the `preserve-locale`
-  audit rule asks you to say why
+- **One language**: `LANG=C`, `LC_MESSAGES=C`, and `LC_NUMERIC=C`, so messages are English
+  and numbers use a dot, on every machine, while `LC_CTYPE=C.UTF-8` (`C` where the system
+  lacks it) keeps tools that need UTF-8 working; `LC_ALL` and your other `LC_*` variables
+  are removed so they cannot override it. `preserve_locale=True` on the command turns
+  it off, and the `preserve-locale` audit rule asks you to say why
 - **No colour, no update notices**: `NO_COLOR=1`, and off a terminal `CI=1` and the
   notifier switches of npm, Homebrew, pip, and gh
 - **The run's time limit**: the child gets what is left of the command's timeout; running

@@ -220,7 +220,7 @@ class Command:
     background: Background | None = None
     """Starts a process that outlives the run with ``ctx.spawn`` (REQ-C-010)"""
     preserve_locale: bool = False
-    """Children keep the user's locale instead of ``LC_ALL=C`` (REQ-F-066)"""
+    """Children keep the user's locale instead of the C locale (REQ-F-066)"""
     cache: CachePolicy | None = None
     """``ctx.cache`` with ``--no-cache`` and ``--cache-ttl`` (REQ-O-018)"""
     recursive_traversal: bool = False
