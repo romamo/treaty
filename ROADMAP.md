@@ -216,7 +216,7 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `docs/api.md` with a decision per public item, the `tests/test_public_api.py` snapshot,
   `CHANGELOG.md`, `docs/guide.md`, "Stability" and "Platforms" in the README. Breaking:
   `ExecArgs` unexported, `Ctx` run plumbing and seven `App` helpers private, and
-  `framework_version` is treaty's version. `1.0.0rc1` and `1.0.0rc2` tagged 2026-09-28. Open: the consumer ports,
+  `framework_version` is treaty's version. `1.0.0rc1` and `1.0.0rc2` tagged 2026-09-28, `1.0.0rc3` 2026-09-30. Open: the consumer ports,
   the rc soak, and the `1.0.0` tag, which need real consumers
 
 - Shell completion: the `completion` built-in prints a static bash or zsh script

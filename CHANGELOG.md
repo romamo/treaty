@@ -10,6 +10,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc3] - 2026-09-30
+
+The third 1.0 release candidate: retry backoff and the timeout audit rules, `-v` and `-vv`,
+library logging routed by level, and a round of audit, secret-redaction, and parsing fixes.
+Not additive over rc2: see Breaking.
+
 ### Breaking
 
 - `ctx.http` retries a POST or PATCH only when it never reached a server (a refused
@@ -583,7 +589,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc2...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc3...HEAD
+[1.0.0rc3]: https://github.com/romamo/treaty/compare/v1.0.0rc2...v1.0.0rc3
 [1.0.0rc2]: https://github.com/romamo/treaty/compare/v1.0.0rc1...v1.0.0rc2
 [1.0.0rc1]: https://github.com/romamo/treaty/compare/v0.1.0...v1.0.0rc1
 [0.1.0]: https://github.com/romamo/treaty/compare/v0.0.6...v0.1.0
