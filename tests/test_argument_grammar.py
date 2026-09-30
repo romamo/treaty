@@ -597,6 +597,36 @@ def test_help_lists_every_rule() -> None:
     ) in out.getvalue()
 
 
+def test_help_spells_a_rules_boolean_and_number_values_as_argv_takes_them() -> None:
+    @dataclass(frozen=True, slots=True, kw_only=True)
+    class Export:
+        dry_run: bool = Flag(default=False, description="Plan only")
+        plan: str | None = Flag(default=None, description="Plan file")
+        batch: int | None = Flag(default=None, description="Batch size")
+        strict: bool = Flag(default=False, description="Refuse warnings")
+
+    app = App("ex", version="1.0.0", description="Export")
+
+    @app.command(
+        "export",
+        description="Export",
+        danger_level="safe",
+        exit_codes=(),
+        requires=[
+            RequiredWhen("dry-run", True, then=("plan",)),
+            DefaultWhenAbsent("batch", "strict", True),
+        ],
+    )
+    def export(args: Export, ctx: Ctx) -> None:
+        return None
+
+    out = io.StringIO()
+    app.run(["export", "--help"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
+    assert "Rules\n  --dry-run requires --plan\n  without --batch, --strict defaults to true\n" in (
+        out.getvalue()
+    )
+
+
 @pytest.mark.parametrize(
     ("rule", "match"),
     [

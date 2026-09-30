@@ -12,6 +12,7 @@ appear in ``--schema`` as ``requires_groups`` and as ``anyOf``/``oneOf`` of the
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -93,12 +94,16 @@ class BoundRule:
         names = [f"--{f.flag}" for f in self.others]
         match self.rule:
             case RequiredWhen():
-                return f"--{self.field.flag} {self.json_value} requires {_listed(names, 'and')}"
+                when = f"--{self.field.flag}"
+                if self.json_value is not True:  # a boolean switch takes no value on argv
+                    when += f" {_spelled(self.json_value)}"
+                return f"{when} requires {_listed(names, 'and')}"
             case Excludes():
                 return f"--{self.field.flag} excludes {_listed(names, 'and')}"
             case DefaultWhenAbsent():
                 target = self.others[0].flag
-                return f"without --{self.field.flag}, --{target} defaults to {self.json_value}"
+                default = _spelled(self.json_value)
+                return f"without --{self.field.flag}, --{target} defaults to {default}"
             case RequiresAny():
                 return f"pass at least one of {_listed(self.flag_names, 'or')}"
             case RequiresOne():
@@ -139,6 +144,11 @@ class BoundRule:
         assert self.group
         branches = [_given_schema(f) for f in self.flags]
         return {"anyOf" if isinstance(self.rule, RequiresAny) else "oneOf": branches}
+
+
+def _spelled(value: object) -> str:
+    """A rule's value as argv spells it: ``csv``, ``true``, ``5``"""
+    return value if isinstance(value, str) else json.dumps(value)
 
 
 def _listed(names: Sequence[str], conjunction: str) -> str:
