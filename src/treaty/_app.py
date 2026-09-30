@@ -1998,6 +1998,10 @@ class _StrayStdout(io.TextIOBase):
         return len(text)
 
     def flush(self) -> None:
+        if getattr(self._err.stream, "closed", False):
+            # The finalizer's close flushes too, after the run: the stream's owner may
+            # have closed it by then, such as pytest's capture
+            return
         self._err.flush()
 
     def take(self) -> tuple[str, int]:

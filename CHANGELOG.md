@@ -33,6 +33,11 @@ Apps built on treaty keep their own, structured schema changelog with
   bare `NameError`. Annotations are lazy on 3.14, so the module still imports; the error
   names every undefined name and the field or parameter that uses it, and `treaty audit`
   reports it as `APP_IMPORT_FAILED` (#73)
+- An in-process `app.run([...])` under pytest's `capsys` no longer leaves a
+  `PytestUnraisableExceptionWarning` (`ValueError: I/O operation on closed file`), so a
+  suite run with `-W error` passes. The finalizer of the stand-in for `sys.stdout` that
+  catches stray prints flushed stderr after pytest had closed its capture stream; the
+  stand-in's flush now skips a stderr that is already closed (#65)
 
 ## [1.0.0rc5] - 2026-09-30
 

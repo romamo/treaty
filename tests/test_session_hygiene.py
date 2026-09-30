@@ -18,6 +18,7 @@ from conftest import WINDOWS, needs_posix_signals
 from fixture_session_app import app as session_app
 
 from treaty import App, CachePolicy, Ctx, NoArgs
+from treaty._app import _StrayStdout
 from treaty._atomic import retry_sharing_violation
 from treaty._audit import audit
 
@@ -712,6 +713,79 @@ def test_json_shaped_writes_go_to_stderr_without_a_warning() -> None:
     envelope, err = noisy("json")
     assert [w["context"]["text"] for w in stray(envelope)] == ["initialized"]  # type: ignore[index]
     assert '{"status": "ok"}\n' in err
+
+
+CAPSYS_SUITE = """
+import pytest
+
+from treaty import App, Ctx, NoArgs
+
+app = App("demo", version="1.0.0")
+
+
+@app.command("go", description="Go", danger_level="safe", exit_codes=())
+def go(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+    print("stray")
+    return {"ok": True}
+
+
+@pytest.mark.parametrize("n", range(5))
+def test_go(n: int, capsys: pytest.CaptureFixture[str]) -> None:
+    assert app.run(["go"]) == 0
+    assert '"THIRD_PARTY_STDOUT"' in capsys.readouterr().out
+"""
+
+
+def test_an_in_process_run_under_capsys_leaves_no_unraisable_flush(tmp_path: Path) -> None:
+    # Issue #65: the stdout stand-in's finalizer flushed pytest's closed capture stream
+    (tmp_path / "test_suite.py").write_text(CAPSYS_SUITE)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-W",
+            "error::pytest.PytestUnraisableExceptionWarning",
+            "test_suite.py",
+        ],
+        cwd=tmp_path,
+        env={**BASE_ENV, "NO_COLOR": "1"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "5 passed" in proc.stdout
+    assert "Unraisable" not in proc.stdout + proc.stderr
+
+
+def test_a_stdout_stand_in_that_outlives_its_run_still_works() -> None:
+    # Overlapping runs can restore a finished run's stand-in as sys.stdout: it stays open
+    app = App("keepctl", version="1.0.0")
+    kept: list[object] = []
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        kept.append(sys.stdout)
+        return {"ok": True}
+
+    first, second = io.StringIO(), io.StringIO()
+    for err in (first, second):
+        assert app.run(["go"], stdout=io.StringIO(), stderr=err, env={}, isatty=False) == 0
+    old = kept[0]
+    assert isinstance(old, _StrayStdout) and old is not kept[1]
+    assert old.isatty() is False
+    assert old.write("late\n") == len("late\n")
+    old.writelines(["later\n"])
+    old.flush()
+    assert old.take() == ("late\nlater\n", len("late\nlater\n"))  # still counted
+    first.close()
+    old.flush()  # its stderr is gone: nothing to flush into, and no error
+    old.close()
 
 
 # O-018: cache flags
