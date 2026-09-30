@@ -7,8 +7,14 @@
 # "release": land the commit on main, tag it, and start publish.yml
 mode = "release"
 
-# Days to wait after the latest release, counted from its CHANGELOG date
-min_days_between = 7
+# Days to wait after the latest release, counted from its CHANGELOG date. 0 releases after
+# every batch of merges.
+min_days_between = 0
+
+# A batch ends when this many minutes pass after a push to main with no other push. Each
+# push restarts the wait, so a run of merges gives one release. A run started by hand, or
+# by github-pr-triage after its last merge, skips the wait.
+quiet_minutes = 30
 
 # How each CHANGELOG heading under Unreleased bumps a stable version. A heading not listed
 # stops the bot. While the version is a pre-release, such as 1.0.0rc5, every release is the

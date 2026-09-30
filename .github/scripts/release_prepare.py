@@ -2,6 +2,7 @@
 
     plan   print the decision as JSON: release (with the next version) or skip (with why)
     apply  write the release commit's changes for a planned version
+    quiet  print the policy's quiet_minutes: how long main must stay unchanged after a push
 
 `apply` rewrites pyproject.toml, the project's entry in uv.lock, CHANGELOG.md (Unreleased
 becomes a dated section with a summary line and compare links), and the policy's
@@ -32,7 +33,8 @@ _RELEASE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?")
 _SEMVER_PRE = {"a": "alpha", "b": "beta", "rc": "rc"}
 _PARTS = ("patch", "minor", "major")  # ascending
 _MODES = ("off", "dry-run", "release")
-_POLICY_KEYS = {"mode", "min_days_between", "bump", "version_lines"}
+_POLICY_KEYS = {"mode", "min_days_between", "quiet_minutes", "bump", "version_lines"}
+_MAX_QUIET = 300  # a GitHub job runs at most 6 hours; leave room for the rest of the run
 _LINE_KEYS = {"file", "pattern", "replace", "when"}
 _WORDS = {
     "Breaking": ("breaking change", "breaking changes"),
@@ -105,6 +107,7 @@ class VersionLine:
 class Policy:
     mode: str
     min_days_between: int
+    quiet_minutes: int  # after a push to main, how long no other push must come
     bump: dict[str, str]  # CHANGELOG heading -> "major", "minor", or "patch"
     version_lines: tuple[VersionLine, ...]
 
@@ -121,6 +124,9 @@ class Policy:
         days = raw.get("min_days_between")
         if not isinstance(days, int) or isinstance(days, bool) or days < 0:
             raise InputError(f"{path.name}: min_days_between must be an integer >= 0")
+        quiet = raw.get("quiet_minutes")
+        if not isinstance(quiet, int) or isinstance(quiet, bool) or not 0 <= quiet <= _MAX_QUIET:
+            raise InputError(f"{path.name}: quiet_minutes must be an integer in 0..{_MAX_QUIET}")
         bump: dict[str, str] = {}
         table = raw.get("bump")
         if not isinstance(table, dict) or set(table) - set(_PARTS):
@@ -148,7 +154,7 @@ class Policy:
             lines.append(
                 VersionLine(entry["file"], pattern, entry["replace"], when == "prerelease")
             )
-        return cls(mode, days, bump, tuple(lines))
+        return cls(mode, days, quiet, bump, tuple(lines))
 
 
 def project(repo: Path) -> tuple[str, Release]:
@@ -348,7 +354,7 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "apply"):
+    for name in ("plan", "apply", "quiet"):
         p = sub.add_parser(name)
         p.add_argument(
             "--repo", type=Path, default=Path.cwd(), help="checkout of the default branch"
@@ -374,7 +380,9 @@ def main() -> int:
     repo = args.repo.resolve()
     try:
         policy = Policy.load(args.policy or repo / ".github" / "release-policy.toml")
-        if args.command == "plan":
+        if args.command == "quiet":
+            print(policy.quiet_minutes)
+        elif args.command == "plan":
             today = args.today or dt.datetime.now(dt.UTC).date()
             decision = plan(repo, policy, today, args.dry_run, args.check_blockers)
             print(json.dumps(decision, indent=2))
