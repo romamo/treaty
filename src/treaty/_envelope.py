@@ -66,32 +66,34 @@ def strip_escapes(text: str) -> str:
     return _C1.sub("", _ESCAPES.sub("", text))
 
 
-def visible(text: str, keep: str = "") -> str:
+def visible(text: str, keep: str = "", *, rewrite: bool = False) -> str:
     """``text`` with every control character but tab, newline, and those in ``keep``
     written as its escape (``\\x1b``, ``\\r``), as ``repr`` writes it: a line for a person
     shows what a value held, and the terminal acts on none of it. A carriage return in
-    ``keep`` stays only as part of a CRLF: a lone one rewrites the line"""
+    ``keep`` stays only as part of a CRLF, since a lone one rewrites the line, unless
+    ``rewrite`` lets it, as a progress line printed to the terminal does"""
 
     def shown(match: re.Match[str]) -> str:
         char = match[0]
-        if char in keep and (char != "\r" or text.startswith("\n", match.end())):
+        crlf = rewrite or text.startswith("\n", match.end())
+        if char in keep and (char != "\r" or crlf):
             return char
         return "\\r" if char == "\r" else f"\\x{ord(char):02x}"
 
     return _CONTROLS.sub(shown, text)
 
 
-def terminal_text(text: str, *, color: bool, keep: str = "") -> str:
+def terminal_text(text: str, *, color: bool, keep: str = "", rewrite: bool = False) -> str:
     """Text a person's terminal shows, from code that may style it: colors (SGR) stay when
     the run may color and every other escape goes, since only a color is presentation;
     other controls are shown as escapes, as in ``visible``"""
     if not color:
-        return visible(strip_escapes(text), keep)
+        return visible(strip_escapes(text), keep, rewrite=rewrite)
     colors = _SGR.findall(text)
     parts = [strip_escapes(part) for part in _SGR.split(text)]
     # Each part is free of ESC now, so the only ESC left starts a kept color
     joined = "".join(p + c for p, c in zip(parts, [*colors, ""], strict=True))
-    return visible(joined, keep + "\x1b")
+    return visible(joined, keep + "\x1b", rewrite=rewrite)
 
 
 def clean(value: object) -> object:

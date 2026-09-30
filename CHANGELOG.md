@@ -67,6 +67,15 @@ Apps built on treaty keep their own, structured schema changelog with
   lines on a color terminal keep colors but lose every other escape. The 8-bit C1 forms
   (`\x9b` CSI, `\x9d` OSC) are stripped from this text too, and a lone C1 control is shown
   as its escape; the JSON envelope, which is ASCII, keeps them as `\u` escapes (#72)
+- Text a handler or a library prints no longer passes terminal escapes to stderr
+  (security). It reaches stderr, and the `--debug` `stdout write` line, as a `ctx.log`
+  line does: colors (SGR) only where the run may color, every other escape, 7-bit or C1,
+  gone, and other controls shown as their escapes. Tab, newline, and carriage return stay
+  as printed on stderr, so a progress line drawn with `\r` still rewrites itself. An
+  escape printed across two writes, such as an OSC 52 whose payload comes in the next
+  `print()`, is held until it ends and cleaned whole. A secret that an escape splits
+  (`hun\x1b[0mter2`) is redacted once the escape is gone, on stderr and in the
+  `THIRD_PARTY_STDOUT` warning, whose `bytes` still counts what was printed (#105)
 - An error message keeps a program name and a trailing id verbatim: a first word with a
   `-`, `_`, `.`, `/`, or digit, or naming a program the command declares in `subprocess=`
   or `required_tools=`, keeps its case (`ansible-playbook exited 4`, `git refused the

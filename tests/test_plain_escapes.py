@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from treaty import App, Arg, Ctx, Exit, Format, NoArgs, table
+from treaty import App, Arg, Ctx, Exit, Flag, Format, NoArgs, table
 from treaty._envelope import clean, terminal_text, visible
 from treaty._plain import render_plain
 
@@ -232,3 +232,116 @@ def test_a_binary_wrapper_content_type_loses_its_escapes_in_plain_output() -> No
     out, err = io.StringIO(), io.StringIO()
     app.run(["blob", "--format", "plain"], stdout=out, stderr=err, env={}, isatty=False)
     assert inert(out.getvalue()) and "<binary 0 bytes x/y" in out.getvalue()
+
+
+# #105: text a handler or a library prints reaches stderr as a ctx.log line has it
+
+PRINTED = f"\x1b[32mok\x1b[0m {CLIPBOARD}copied{C1}"
+
+
+def printing_app() -> App:
+    app = App("probe", version="1.0.0")
+
+    @dataclass
+    class Login:
+        token: str = Flag(description="Token", secret=True, default="")
+
+    @app.command("print", description="Print", danger_level="safe", exit_codes=())
+    def printed(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        print(PRINTED)
+        return {}
+
+    @app.command("split", description="Print in parts", danger_level="safe", exit_codes=())
+    def split(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        print("\x1b]52;c;", end="", flush=True)  # OSC 52, its payload in the next write
+        print("aGk=\x07after \x1b[", end="")
+        print("2Jcursor \x9d0;", end="")
+        print("pwned\x9c title \x1b]0;never ended")  # released when the run ends
+        return {}
+
+    @app.command("progress", description="Progress", danger_level="safe", exit_codes=())
+    def progress(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        print("50%\r", end="")
+        print("100%\t\x07done")
+        return {}
+
+    @app.command("leak", description="Print a secret", danger_level="safe", exit_codes=())
+    def leak(args: Login, ctx: Ctx) -> dict[str, str]:
+        print(f"token {args.token[:3]}\x1b[0m{args.token[3:]}")
+        return {}
+
+    return app
+
+
+def run_printing(argv: list[str], *, isatty: bool = False, env: Any = None) -> tuple[str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    printing_app().run(argv, stdout=out, stderr=err, env=env or {}, isatty=isatty)
+    return out.getvalue(), err.getvalue()
+
+
+def test_printed_osc_52_on_a_color_terminal_keeps_only_the_color() -> None:
+    _, err = run_printing(["print"], isatty=True)
+    assert err == "\x1b[32mok\x1b[0m copied\n"
+
+
+def test_printed_osc_52_off_a_color_terminal_has_no_escape() -> None:
+    _, err = run_printing(["print"], isatty=True, env={"NO_COLOR": "1"})
+    assert err == "ok copied\n"
+    _, err = run_printing(["print", "--format", "plain", "--verbose"])
+    assert err == "ok copied\n"
+
+
+def test_a_printed_progress_line_keeps_its_carriage_return_tab_and_newline() -> None:
+    # The bell is still shown as its escape; ctx.log lines still show a CR as \r
+    for env in ({}, {"NO_COLOR": "1"}):
+        _, err = run_printing(["progress"], isatty=True, env=env)
+        assert err == "50%\r100%\t\\x07done\n"
+
+
+def test_an_escape_printed_in_two_writes_is_cleaned_whole() -> None:
+    _, err = run_printing(["split"], isatty=True)
+    # The unended OSC runs to the end of the text, its newline too, as it would in one write
+    assert err == "after cursor  title "
+
+
+def test_printed_text_under_debug_carries_no_escape() -> None:
+    for fmt in ("plain", "json"):
+        _, err = run_printing(["print", "--debug", "--format", fmt])
+        assert inert(err) and "\\u001b" not in err and "\\u009b" not in err, err
+        assert "ok copied" in err
+
+
+def test_the_third_party_stdout_warning_text_is_clean_and_counts_the_printed_bytes() -> None:
+    out, _ = run_printing(["print", "--format", "json"])
+    [warning] = json.loads(out)["warnings"]
+    assert warning["code"] == "THIRD_PARTY_STDOUT"
+    # As the envelope has any text: the 7-bit escapes go, the C1 ones are \u escapes
+    assert warning["context"]["text"] == f"ok copied{C1}"
+    assert warning["context"]["bytes"] == len(f"{PRINTED}\n".encode())
+
+
+def test_a_secret_an_escape_splits_is_redacted_once_the_escape_is_gone() -> None:
+    env = {"PROBE_TOKEN": "hunter22"}
+    for isatty in (True, False):
+        out, err = run_printing(["leak", "--verbose", "--format", "json"], isatty=isatty, env=env)
+        shown = err.replace("\x1b[0m", "")
+        assert "hunter22" not in shown and "token [REDACTED]" in shown, err
+        [warning] = json.loads(out)["warnings"]
+        assert warning["context"]["text"] == "token [REDACTED]"
+
+
+def test_a_c1_osc_in_printed_text_is_not_held_past_its_line() -> None:
+    # A right double quote's UTF-8 bytes decoded as Latin-1 end in \x9d, which opens an OSC:
+    # the lines printed after it are not held and lost with it
+    app = App("probe", version="1.0.0")
+
+    @app.command("mojibake", description="Mojibake", danger_level="safe", exit_codes=())
+    def mojibake(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        print("“quoted”".encode().decode("latin-1"))
+        print("line 1")
+        print("line 2")
+        return {}
+
+    err = io.StringIO()
+    app.run(["mojibake"], stdout=io.StringIO(), stderr=err, env={}, isatty=True)
+    assert err.getvalue().endswith("line 1\nline 2\n"), err.getvalue()
