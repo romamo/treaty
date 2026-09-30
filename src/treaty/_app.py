@@ -144,11 +144,12 @@ from ._manifest import (
 )
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
-    C_LOCALE,
     Format,
+    child_ctype,
     child_settings,
     color_allowed,
     is_headless,
+    normalize_locale,
     quiet_children,
     resolve_mode,
     suppress_updates,
@@ -740,8 +741,10 @@ class App:
         ``background=Background("tool stop-watcher", max_lifetime_seconds=3600)`` lets
         ``ctx.spawn`` start a process that outlives the run; the output carries
         ``background_pid`` and ``cleanup_command`` (REQ-C-010).
-        Children of ``ctx.run`` get ``LC_ALL=C`` and ``LC_NUMERIC=C``, so their messages
-        are English and their numbers dot-decimal; ``preserve_locale=True`` keeps the
+        Children of ``ctx.run`` get ``LANG=C``, ``LC_MESSAGES=C``, ``LC_NUMERIC=C``, and
+        ``LC_CTYPE=C.UTF-8`` (``C`` where the platform lacks it), with ``LC_ALL`` and the
+        user's other ``LC_*`` removed, so their messages are English, their numbers
+        dot-decimal, and their text UTF-8; ``preserve_locale=True`` keeps the
         user's locale for a command whose child output is meant for a person (REQ-F-066).
         ``cache=CachePolicy(ttl_seconds=3600)`` gives ``ctx.cache``, a store of bytes by
         key under ``$XDG_CACHE_HOME/<app>/<command>/``, with ``--no-cache`` and
@@ -2612,7 +2615,8 @@ class _Run:
         if quiet:
             self.app._silence_notifiers(child_env)
         if not command.preserve_locale:
-            child_env.update(C_LOCALE)  # REQ-F-066: English messages, dot decimals
+            # REQ-F-066: English messages, dot decimals, UTF-8 where the platform has it
+            normalize_locale(child_env, ctype=child_ctype())
         proxies = ProxyConfig(self.env, invocation.proxy, invocation.no_proxy)
         child_env.update(proxies.child_env())  # REQ-O-019: children go out the same way
         # REQ-O-033: --headless opens no browser even where one could be shown

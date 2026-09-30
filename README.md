@@ -511,8 +511,11 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   (REQ-F-046, REQ-F-055). Off a terminal or under `CI` they also get `CI=1`,
   `NO_UPDATE_NOTIFIER=1`, and the npm, Homebrew, pip, and gh notifier switches, and
   `app.suppress_update_notifier(fn)` adds an app's own (REQ-F-050). Every child gets
-  `LC_ALL=C` and `LC_NUMERIC=C`, so messages are English and numbers dot-decimal,
-  unless the command has `preserve_locale=True` (REQ-F-066). Grandchildren inherit them;
+  `LANG=C`, `LC_MESSAGES=C`, `LC_NUMERIC=C`, and `LC_CTYPE=C.UTF-8` (`C` where the
+  platform has no `C.UTF-8`), with `LC_ALL` and the user's other `LC_*` variables
+  removed, so messages are English, numbers and dates are C, and tools that need UTF-8,
+  like Ansible, still start, unless the command has `preserve_locale=True` (REQ-F-066).
+  Grandchildren inherit them;
   `env=` overrides single variables
 - Children get the run's own temp directory as `TMPDIR`, `TEMP`, and `TMP`, and are
   listed in its `children.pids` while they run (REQ-F-030, REQ-F-032)
@@ -1233,7 +1236,7 @@ all three. Where the operating system lacks a mechanism, the behavior differs:
 | Private temp dirs and files | Mode `0700` and `0600` | No permission bits; the user profile's ACLs apply |
 | Headless detection | No `DISPLAY` or `WAYLAND_DISPLAY` on Linux and the BSDs, or over SSH | A console session is never headless for lack of a display |
 | Output line endings | LF | LF: `App.main` never writes CRLF |
-| Child locale (`ctx.run` sets `LC_ALL=C`) | Children format numbers and dates in the C locale | Native children take the locale from the user profile and ignore `LC_ALL` |
+| Child locale (`ctx.run` sets the C locale) | `LANG=C`, `LC_MESSAGES=C`, `LC_NUMERIC=C`, and `LC_CTYPE=C.UTF-8` or `C` | `LC_ALL=C` and `LC_NUMERIC=C`; native children take the locale from the user profile and ignore them |
 | Venv `python.exe` children | The pid treaty tracks is the interpreter | The pid treaty tracks is the venv launcher, which starts the interpreter as its child |
 | `cleanup_command` in `data.cleanup` | `rm -f ...` | `del /f /q ...` |
 | `platform=` | `sys.platform` values | `win32` |
