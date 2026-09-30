@@ -88,6 +88,14 @@ Apps built on treaty keep their own, structured schema changelog with
   the same `elapsed_ms`. The next beat is now due one interval after the last one
   ticked, so missed beats are skipped and two beats are never closer than the interval
   (#56)
+- `treaty audit` follows a handler into every top-level package of the distribution
+  that ships it, not only the handler's own: a wheel with `apppkg` and `libpkg` fails
+  `no-chdir` when an `apppkg` handler calls `libpkg.workdir.enter`, which runs
+  `os.chdir`. `importlib.metadata` names the packages, and for an editable install, the
+  packages in the directory its `.pth` file adds. Other distributions, the standard
+  library, and treaty are still not followed, and with no installed distribution the
+  handler's package alone is first-party. The `Scope:` line and the report's `scope`
+  name the packages followed (#67)
 
 ## [1.0.0rc5] - 2026-09-30
 
