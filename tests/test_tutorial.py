@@ -437,10 +437,13 @@ def test_debug_logs_the_request_with_the_token_redacted(private_feed: str, tmp_p
 
 
 class _Feeds(http.server.BaseHTTPRequestHandler):
-    """A feed per path: /slow… answers after a second, /bad… with an object, not a list"""
+    """A feed per path: /slower… answers after two seconds, /slow… after one, /bad… with
+    an object, not a list"""
 
     def do_GET(self) -> None:
-        if self.path.startswith("/slow"):
+        if self.path.startswith("/slower"):
+            time.sleep(2.0)
+        elif self.path.startswith("/slow"):
             time.sleep(1.0)
         items = (
             {"oops": 1}
@@ -483,9 +486,30 @@ def test_import_all_reports_each_feed_and_fails_partly(feeds: str, tmp_path: Pat
 
 
 def test_import_all_leaves_the_feeds_it_has_no_time_for(feeds: str, tmp_path: Path) -> None:
-    """Three one-second feeds in 2.8 seconds: the third is not started, and says so"""
+    """Three one-second feeds in 2.8 seconds, as the tutorial runs them: the third is
+    not started, and says so. Issue #119: whether the second starts depends on how long
+    the first took on this runner, so only what holds at any speed is checked here"""
     urls = [f"{feeds}/slow1", f"{feeds}/slow2", f"{feeds}/slow3"]
     args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 2.8}
+    env = todo_batch.app.call("import-all", args, env={})
+    assert env.exit_code == 3
+    results = _results(env)
+    # Two feeds take at least two seconds, leaving under 0.8 for a third that needs 1
+    assert results[0] == (True, None) and results[2] == (False, "NOT_STARTED")
+    assert results[1] in [(True, None), (False, "NOT_STARTED")]
+    assert isinstance(env.data, dict)
+    skipped = [r for r in env.data["results"] if not r["ok"]]
+    assert all(r["error"]["retryable"] is True for r in skipped)
+
+
+def test_import_all_skips_a_feed_when_less_time_is_left_than_the_last_took(
+    feeds: str, tmp_path: Path
+) -> None:
+    """The estimate is the last feed's duration, whatever the runner's speed: a feed
+    after a quick one starts, and a quick feed after a two-second one does not when
+    less than two seconds are left (3.9 - 2, or less on a slower runner)"""
+    urls = [f"{feeds}/a", f"{feeds}/slower", f"{feeds}/b"]
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 3.9}
     env = todo_batch.app.call("import-all", args, env={})
     assert env.exit_code == 3
     assert _results(env) == [(True, None), (True, None), (False, "NOT_STARTED")]
