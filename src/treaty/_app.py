@@ -754,7 +754,8 @@ class App:
         ``timeout=`` is the seconds a run may take before it ends in ``TIMEOUT``, else the
         app's ``default_timeout``; ``timeout=None`` runs unbounded. A command that runs
         unbounded or longer than the app default gets ``--timeout``, the deadline of one
-        run, as network commands and streams do (REQ-C-012).
+        run, as network commands and streams do, unless a field of its own takes the name
+        (REQ-C-012).
         ``recursive_traversal=True`` gives ``ctx.walk``, which stops at a circular symlink,
         with ``--no-follow-symlinks`` and ``--max-depth`` (REQ-F-061, REQ-O-040).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs

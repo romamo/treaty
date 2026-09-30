@@ -30,8 +30,8 @@ Apps built on treaty keep their own, structured schema changelog with
   It means what it does on network commands, the deadline of the whole run, in place of
   the declared one; `0` runs unbounded. It is in the manifest, `--help`, completion, the
   MCP `inputSchema`, and `exec`'s `_opts`. `--proxy` and `--no-proxy` stay on
-  `has_network_io=True` commands. Such a command can no longer have a field of its own
-  named `timeout`: registration refuses it, as it does on network commands (#69)
+  `has_network_io=True` commands. A command with a field of its own named `timeout`
+  keeps it: the framework's flag yields there, as `-v` yields to a `short="v"` (#69)
 
 ### Fixed
 

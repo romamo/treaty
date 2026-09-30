@@ -140,7 +140,8 @@ class Command:
     resource_graph: Mapping[type, ResourceSpec]
     """Every resource reachable from ``resources``, validated at registration"""
     outlasts_default: bool = False
-    """Declares ``timeout=None``, or one longer than the app default: it gets ``--timeout``"""
+    """Declares ``timeout=None``, or one longer than the app default: it gets ``--timeout``
+    unless a field of its own is named ``timeout``"""
     safe_default: bool = False
     """A destructive command that runs as a dry run unless ``--live`` (REQ-O-048)"""
     gui_operations: tuple[str, ...] = ()
@@ -291,8 +292,12 @@ class Command:
     @property
     def accepts_timeout(self) -> bool:
         """``--timeout``: network commands, streams, which may never end on their own, and
-        commands that may run unbounded or longer than the app default"""
-        return self.has_network_io or self.streaming or self.outlasts_default
+        commands that may run unbounded or longer than the app default. On those last it
+        yields to a field of the command's own named ``timeout``, as ``-v`` yields to a
+        ``short="v"``, so an app that had one keeps it"""
+        if self.has_network_io or self.streaming:
+            return True
+        return self.outlasts_default and self.field_by_flag("timeout") is None
 
     def field_by_flag(self, flag: str) -> FieldInfo | None:
         for f in self.fields:

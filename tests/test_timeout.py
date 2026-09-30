@@ -181,18 +181,34 @@ def test_an_exec_line_bounds_an_unbounded_command() -> None:
     assert code == 1 and json.loads(out.getvalue())["error"]["code"] == "TIMEOUT"
 
 
-def test_a_timeout_field_on_an_unbounded_command_is_refused() -> None:
-    """The framework's --timeout does its job: the field would never reach the handler"""
+@dataclass(frozen=True, slots=True)
+class OwnTimeout:
+    timeout: float = Flag(default=5.0, description="Own limit")
 
-    @dataclass(frozen=True, slots=True)
-    class Own:
-        timeout: float = Flag(default=5.0, description="Own limit")
 
+def test_an_unbounded_commands_own_timeout_field_keeps_the_flag() -> None:
+    """An app that had --timeout on an unbounded command keeps it: the framework's yields
+    there, and the value reaches the field, not the deadline"""
+    app = App("checks", version="1.0.0")
+
+    @app.command("wait", description="Wait", timeout=None, danger_level="safe", exit_codes=())
+    def wait(args: OwnTimeout, ctx: Ctx) -> dict[str, object]:
+        return {"own": args.timeout, "timeout_s": ctx.timeout.seconds}
+
+    code, env = run_json(app, ["wait", "--timeout", "7"])
+    assert code == 0 and env["data"] == {"own": 7.0, "timeout_s": None}
+    assert env["meta"]["timeout_ms"] is None
+    assert app.manifest()["commands"]["wait"]["flags"]["timeout"]["description"] == "Own limit"
+
+
+def test_a_timeout_field_on_a_network_command_is_still_refused() -> None:
     app = App("checks", version="1.0.0")
     with pytest.raises(RegistrationError, match="drop --timeout"):
 
-        @app.command("wait", description="Wait", timeout=None, danger_level="safe", exit_codes=())
-        def wait(args: Own, ctx: Ctx) -> dict[str, object]:
+        @app.command(
+            "wait", description="Wait", has_network_io=True, danger_level="safe", exit_codes=()
+        )
+        def wait(args: OwnTimeout, ctx: Ctx) -> dict[str, object]:
             return {}
 
 
