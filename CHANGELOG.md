@@ -73,6 +73,11 @@ Apps built on treaty keep their own, structured schema changelog with
 - "Step 5: Lint with ruff's ALL rules" in the testing chapter: the settings that end
   `RUF009` on `Arg()`, `Flag()`, and `Out()` defaults and keep `Path` a runtime import
   under `TC003`, and `_ctx` for an unused context, which treaty passes by position (#70)
+- The manifest marks each command treaty registers with `"builtin": true`, on the
+  `manifest` output and on `--schema`, so an agent can tell the app's commands from the
+  framework's without a hard-coded name list. An app command omits the key, which reads as
+  `false`, including one that replaces a built-in's name. The manifest's `schema_version`
+  is now `3.1`, the spec's ManifestResponse contract with the marker (#70)
 
 ### Fixed
 

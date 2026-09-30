@@ -194,6 +194,10 @@ plus `doctor`, `cleanup`, `status` (see Declarations), `generate-skills`, `mcp-v
 group of the same name replaces them, and the `builtin-shadowed` audit rule says so.
 `App(schema_changelog=...)` adds `changelog` (see Schemas).
 
+- Each built-in's manifest entry, and its `--schema`, carries `"builtin": true`
+  (ManifestResponse 3.1), so an agent listing what the tool does can drop the framework's
+  commands without a name list. An app command has no `builtin` key, which reads as `false`,
+  and that includes an app command that replaces a built-in's name (REQ-O-041)
 - `manifest --etag sha256:...` answers exit 0, `data: null`, and `meta.not_modified: true`
   while the manifest is unchanged, on the CLI, in `exec`, and through `App.call`
   (REQ-O-041)
@@ -249,7 +253,7 @@ In `exec` and MCP, where stdin is taken, such a command needs `input_file`.
 `--format`, `--help`, `--schema` (alias `--print-schema`), `--output-schema`,
 `--schema-version`, `--stable-output`, `--unmask`, `--no-injection-protection`, and `--max-output` are global: they are accepted anywhere before `--`,
 so a command cannot declare a flag with those names or the short `-h`. The manifest lists
-them once, in its root `flags` map (ManifestResponse 3.0). The framework's other
+them once, in its root `flags` map (ManifestResponse 3.0 and later). The framework's other
 command flags (`--config`, `--quiet`, `--verbose`, `--debug`, `--fields`, `--cwd`, and the
 rest of `RESERVED_GLOBAL` in `_framework.py`) cannot be field names either: registration
 refuses a field that would never reach the handler. A name reserved before its feature

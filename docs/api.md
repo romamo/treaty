@@ -146,9 +146,9 @@ above). `Ctx.config` was already private (`_config_file`, workstream 02).
   `refresh_command`, `expires_at`, `required_permission`, `network_context`, `redirect`,
   `corrected_input`
 - `warnings[]`: `code`, `message`, `context`
-- Manifest root: `schema_version` (`"3.0"`, the spec's `ManifestResponse`),
+- Manifest root: `schema_version` (`"3.1"`, the spec's `ManifestResponse`),
   `framework_version`, `etag`, `flags`, `exit_codes`, `commands`, and `dependencies` when
-  declared
+  declared; a built-in's `CommandEntry` carries `builtin: true`, an app command omits it
 - `framework_version` is treaty's version; the app's version is `meta.tool_version`. Before
   the review it carried the app's version
 

@@ -22,7 +22,7 @@ from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "3.0"
+SCHEMA_VERSION = "3.1"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # TIMEOUT is shared: every handler runs under a deadline unless it is set to 0.
 # PRECONDITION too: a stray input() no one can answer exits 4 on any command (REQ-F-047)
 _ALWAYS = (
@@ -276,9 +276,11 @@ def command_entry(
     exits: ExitCodeRegistry,
     all_paths: Mapping[CommandPath, Command],
     *,
+    builtin: bool,
     shared: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """One CommandEntry; with ``shared`` given, entries equal to the shared table are hoisted"""
+    """One CommandEntry; ``builtin`` when treaty registered the command, not the app. With
+    ``shared`` given, entries equal to the shared table are hoisted"""
     exit_codes: dict[str, object] = dict(shared_exit_codes(exits))
     for name in command.exit_codes:
         entry = exits.by_name(name)
@@ -308,6 +310,9 @@ def command_entry(
         "exit_codes": exit_codes,
         "output_schema": command.output_schema,
     }
+    if builtin:
+        # REQ-O-041: set by who registered it; an app command is left unmarked, read as false
+        out["builtin"] = True
     positionals = [f.to_positional_entry() for f in command.fields if f.positional]
     if positionals:
         out["positionals"] = positionals
@@ -367,10 +372,14 @@ def command_entry(
 
 
 def command_schema(
-    command: Command, exits: ExitCodeRegistry, all_paths: Mapping[CommandPath, Command]
+    command: Command,
+    exits: ExitCodeRegistry,
+    all_paths: Mapping[CommandPath, Command],
+    *,
+    builtin: bool,
 ) -> dict[str, object]:
     """``--schema`` output for one command (REQ-C-015, REQ-O-032)"""
-    entry = command_entry(command, exits, all_paths)
+    entry = command_entry(command, exits, all_paths, builtin=builtin)
     entry["parameters"] = entry["flags"]
     # REQ-O-014; not ManifestResponse keys
     entry["schema_version"] = command.schema_version.value
@@ -474,15 +483,17 @@ def build_manifest(
     formats: Sequence[Format],
     app_name: str,
     *,
+    builtins: frozenset[CommandPath],
     dependencies: Sequence[Mapping[str, str]] = (),
 ) -> dict[str, object]:
-    """The manifest tree with the shared exit-code table hoisted to the root; the app's
+    """The manifest tree with the shared exit-code table hoisted to the root, each of
+    ``builtins`` marked ``builtin: true`` (REQ-O-041); the app's
     declared ``dependencies`` too, when it has any (REQ-O-031). ``framework_version`` is
     treaty's own version; the app's is ``meta.tool_version`` of the response"""
     shared = shared_exit_codes(exits)
     flags = global_flag_entries(formats, app_name)
     entries = {
-        path.value: command_entry(cmd, exits, commands, shared=shared)
+        path.value: command_entry(cmd, exits, commands, builtin=path in builtins, shared=shared)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
     # Everything an agent caches: a new global flag or shared code must change the etag

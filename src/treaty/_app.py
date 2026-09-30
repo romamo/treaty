@@ -1489,6 +1489,7 @@ class App:
             self.exits,
             self.formats,
             self.name,
+            builtins=self._builtins,
             dependencies=[d.to_json() for d in self.dependencies],
         )
 
@@ -4891,12 +4892,23 @@ class _Run:
     def schema(self, mode: Format, path: CommandPath | None, prefix: tuple[str, ...]) -> int:
         """``--schema`` is machine output in every mode; the envelope carries it as data"""
         if path is not None:
-            data = command_schema(self.app.commands[path], self.app.exits, self.app.commands)
+            data = command_schema(
+                self.app.commands[path],
+                self.app.exits,
+                self.app.commands,
+                builtin=path in self.app.builtins,
+            )
         else:
             subtree = {
                 p: c for p, c in self.app.commands.items() if p.parts[: len(prefix)] == prefix
             }
-            data = build_manifest(subtree, self.app.exits, self.app.formats, self.app.name)
+            data = build_manifest(
+                subtree,
+                self.app.exits,
+                self.app.formats,
+                self.app.name,
+                builtins=self.app.builtins,
+            )
         return self.emit(mode, self._envelope(0, data=data), render=_json_text, settle=False)
 
     def show_config(self, mode: Format) -> int:
