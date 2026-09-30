@@ -44,6 +44,7 @@ from ._scan import (
     reached_functions,
     resolve_name,
     source_tree,
+    unread_records,
 )
 from ._types import (
     FlagType,
@@ -2879,11 +2880,18 @@ def _scope(app: App) -> str:
     they followed, named"""
     homes = sorted({h for c in user_commands(app) if (h := first_party(c.handler)) is not None})
     named = f" ({'; '.join(homes)})" if homes else ""
+    unread = sorted({d for c in user_commands(app) for d in unread_records(c.handler)})
+    skipped = (
+        f"; skipped the installed distributions whose direct_url.json is not a PEP 610 "
+        f"record ({', '.join(unread)}), so an editable install among them is not followed"
+        if unread
+        else ""
+    )
     return (
         "source rules read each handler, the functions of its module it calls, and those "
         f"of its other first-party modules{named} {FOLLOW_DEPTH} calls deep; calls on "
         "objects, callbacks, and other distributions are not followed, so a pass here is "
-        "not a runtime check"
+        f"not a runtime check{skipped}"
     )
 
 
