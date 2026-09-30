@@ -631,6 +631,7 @@ command.
 | `@cli.command()` | `@app.command()` | `@app.command("x", danger_level=..., exit_codes=...)` |
 | `@cli.group()` | `app.add_typer(sub, name="x")` | `app.group("x", description=...)` |
 | `@click.argument("name")` | `Annotated[str, typer.Argument()]` | `name: str = Arg(description=...)` |
+| `@click.argument("name", required=False)` | `typer.Argument(None)` | `name: str \| None = Arg(default=None, description=...)`, after the required ones |
 | `@click.option("--flag", default=v)` | `Annotated[T, typer.Option()] = v` | `flag: T = Flag(default=v, description=...)` |
 | `required=True` | an option with no default | a `Flag` with no default |
 | `type=int`, `type=float` | the annotation | the field's annotation |

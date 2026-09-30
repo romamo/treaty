@@ -85,6 +85,28 @@ They are checked in phase 1 on what the caller passed, before `__post_init__`, o
 so an agent knows the combination before its first call. The `conditional-rules` audit
 rule spots a `__post_init__` that compares one field and raises about another.
 
+A positional with a default is optional: `Arg(default=None, ...)` makes the manifest's
+`PositionalEntry` say `required: false`, leaves it out of `--schema`'s `required`, and shows
+it as `[query]` in `--help`. Optional positionals may follow required ones, never precede
+them. A command that takes its subject as a positional or from a flag declares the "not
+both" half, which the manifest shows, and checks the "at least one" half in `__post_init__`:
+
+```python
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Resolve:
+    query: str | None = Arg(default=None, description="Instrument query or identifier")
+    figi: str | None = Flag(default=None, description="Resolve by FIGI instead")
+
+    def __post_init__(self) -> None:
+        if self.query is None and self.figi is None:
+            raise ParseError("pass a query or --figi", context={"field": "query"})
+
+# @app.command("resolve", ..., requires=[Excludes("query", prohibited=("figi",))])
+```
+
+So `resolve AAPL`, `resolve --figi BBG000B9XRY4`, and `resolve -- --odd-name` run, while
+`resolve` and `resolve AAPL --figi BBG000B9XRY4` exit `2` before the handler runs.
+
 `--validate-only` on any command runs phase 1 and stops: exit `0` with `data: null` and
 `meta.validation_only: true`, or exit `2` listing every error. The credential gate, the
 idempotency store, and the handler never run.

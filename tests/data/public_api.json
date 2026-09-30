@@ -150,7 +150,7 @@
     },
     "Arg": {
       "kind": "function",
-      "signature": "(*, description: 'str', pattern: 'str | None' = None, secret: 'bool | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, multiline: 'bool' = False, audit: 'bool' = True) -> 'Any'"
+      "signature": "(*, description: 'str', default: 'Any' = <dataclasses._MISSING_TYPE object>, pattern: 'str | None' = None, secret: 'bool | None' = None, pattern_type: 'str | None' = None, from_stdin: 'bool' = False, multiline: 'bool' = False, audit: 'bool' = True) -> 'Any'"
     },
     "AuditLog": {
       "fields": [
@@ -908,6 +908,7 @@
     ],
     "Arg": [
       "description",
+      "default",
       "pattern",
       "secret",
       "pattern_type",

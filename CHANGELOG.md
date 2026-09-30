@@ -42,6 +42,14 @@ Apps built on treaty keep their own, structured schema changelog with
   marker and an entry module that exits 4 with a clear message on an older Python or
   without the extra, or a separate `<name>-cli` distribution when several libraries share
   the CLI's argument models (#103)
+- `Arg(default=...)` declares an optional positional, as in
+  `query: str | None = Arg(default=None, ...)`: `resolve AAPL` and `resolve --figi X` both
+  run. The manifest's `PositionalEntry` says `required: false`, `--schema`, `exec`,
+  `--raw-payload`, and MCP let the field be left out, and `--help` shows `[query]`. An
+  optional positional may follow a required one; a required one after it, a variadic
+  `tuple[...]` without a default included, raises `RegistrationError`, as does a default
+  that breaks the field's own type or pattern. The migration guides map
+  `typer.Argument(None)`, click's `required=False`, and argparse's `nargs="?"` to it (#57)
 
 ### Fixed
 

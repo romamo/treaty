@@ -82,6 +82,15 @@ class FlagSpec:
             check_pattern_publishable(self.pattern, "Flag")
 
 
+def _field(spec: FlagSpec, default: object) -> Any:
+    """The dataclass field carrying ``spec``, with ``default`` when one is given"""
+    if isinstance(default, (list, dict, set)):
+        raise RegistrationError("mutable defaults are not allowed; use a tuple")
+    if default is MISSING:
+        return field(metadata={_META: spec})
+    return field(default=default, metadata={_META: spec})
+
+
 def Flag(
     *,
     description: str,
@@ -123,16 +132,13 @@ def Flag(
         deprecated=deprecated,
         audit=audit,
     )
-    if isinstance(default, (list, dict, set)):
-        raise RegistrationError("mutable defaults are not allowed; use a tuple")
-    if default is MISSING:
-        return field(metadata={_META: spec})
-    return field(default=default, metadata={_META: spec})
+    return _field(spec, default)
 
 
 def Arg(
     *,
     description: str,
+    default: Any = MISSING,
     pattern: str | None = None,
     secret: bool | None = None,
     pattern_type: str | None = None,
@@ -140,9 +146,14 @@ def Arg(
     multiline: bool = False,
     audit: bool = True,
 ) -> Any:
-    """Declare a positional argument on an arguments dataclass; ``from_stdin=True`` makes
-    the literal ``-`` read it from stdin, ``multiline`` lets it contain newlines, and
-    ``audit=False`` keeps it out of the audit log, as on ``Flag``"""
+    """Declare a positional argument on an arguments dataclass
+
+    ``default`` makes it optional, as in ``query: str | None = Arg(default=None, ...)``:
+    an optional positional may follow a required one, never precede it.
+    ``from_stdin=True`` makes the literal ``-`` read it from stdin, ``multiline``
+    lets it contain newlines, and ``audit=False`` keeps it out of the audit log, as on
+    ``Flag``.
+    """
     spec = FlagSpec(
         description,
         positional=True,
@@ -153,7 +164,7 @@ def Arg(
         multiline=multiline,
         audit=audit,
     )
-    return field(metadata={_META: spec})
+    return _field(spec, default)
 
 
 @dataclass(frozen=True, slots=True)
@@ -665,7 +676,8 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             seen_optional_positional = True
         elif spec.positional and seen_optional_positional:
             raise RegistrationError(
-                f"{cls.__qualname__}.{f.name}: required positional after optional positional"
+                f"{cls.__qualname__}.{f.name}: a required positional cannot follow an optional "
+                "one, since a value could fill either; give it a default too, or move it first"
             )
         if default is not MISSING:
             default = _checked_default(classified, default, f"{cls.__qualname__}.{f.name}")
