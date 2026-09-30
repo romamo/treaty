@@ -1,0 +1,155 @@
+name: Release bot
+
+# Cuts a release when .github/release-policy.toml says one is due: it writes the release
+# commit, runs CI on it, lands it on main, tags it, and starts publish.yml, whose own CI and
+# release-check jobs still gate the upload. In the policy's dry-run mode it stops after
+# showing the release commit it would make.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays, 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "policy: do what release-policy.toml says; dry-run: show the release, push nothing"
+        type: choice
+        options: [dry-run, policy]
+        default: dry-run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-bot
+  cancel-in-progress: false
+
+env:
+  BOT_NAME: github-actions[bot]
+  BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # pushes the release/v* branch in release mode
+      issues: read # release-blocker issues
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      mode: ${{ steps.plan.outputs.mode }}
+      version: ${{ steps.plan.outputs.version }}
+      base: ${{ steps.plan.outputs.base }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ (inputs.mode || 'policy') == 'dry-run' && '--dry-run' || '' }}
+        run: >-
+          uv run --no-project python .github/scripts/release_prepare.py plan
+          --check-blockers $DRY_RUN --github-output "$GITHUB_OUTPUT"
+
+      - name: Write the release commit
+        if: steps.plan.outputs.action == 'release'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          DATE: ${{ steps.plan.outputs.date }}
+          MODE: ${{ steps.plan.outputs.mode }}
+        run: |
+          uv run --no-project python .github/scripts/release_prepare.py apply \
+            --version "$VERSION" --date "$DATE"
+          uv sync --locked
+          uv run treaty check-docs treaty._cli:cli AGENTS.md
+          uv run --no-project python .github/scripts/release_check.py --tag "v$VERSION" --main HEAD
+          {
+            echo "### Release $VERSION ($MODE)"
+            echo
+            echo '```diff'
+            git diff
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push the release branch
+        id: commit
+        if: steps.plan.outputs.action == 'release' && steps.plan.outputs.mode == 'release'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          git add -A
+          git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q -m "Release $VERSION"
+          git push origin "HEAD:refs/heads/release/v$VERSION"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Report a skip
+        if: steps.plan.outputs.action == 'skip'
+        env:
+          REASON: ${{ steps.plan.outputs.reason }} # may quote an issue title: never inline it
+        run: |
+          printf 'No release: %s\n' "$REASON" >> "$GITHUB_STEP_SUMMARY"
+
+  ci:
+    needs: prepare
+    if: needs.prepare.outputs.action == 'release' && needs.prepare.outputs.mode == 'release'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  land:
+    needs: [prepare, ci]
+    if: needs.prepare.outputs.action == 'release' && needs.prepare.outputs.mode == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the push to main and the tag
+      actions: write # starts publish.yml; a tag pushed with this token starts no workflow
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+      BASE: ${{ needs.prepare.outputs.base }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Land on main, only if main has not moved
+        run: |
+          git fetch -q origin main "release/v$VERSION"
+          if [ "$(git rev-parse origin/main)" != "$BASE" ]; then
+            echo "::error::main moved since the plan ($BASE); the next run plans again"
+            exit 1
+          fi
+          git push origin "$SHA:refs/heads/main"
+
+      - name: Tag and publish
+        run: |
+          git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
+            tag -a "v$VERSION" -m "treaty $VERSION" "$SHA"
+          git push origin "v$VERSION"
+          gh workflow run publish.yml --ref main -f tag="v$VERSION"
+
+  # Whether CI or the landing passed or failed, the branch has served its purpose: a failed
+  # release is planned again from main by the next run
+  cleanup:
+    needs: [prepare, ci, land]
+    if: always() && needs.prepare.outputs.sha != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Delete the release branch
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: git push origin --delete "release/v$VERSION"
