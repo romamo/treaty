@@ -30,7 +30,7 @@ from ._deps import Endpoint
 from ._env import AUDIT_LOG, FORMAT, UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
-from ._out import out_spec
+from ._out import can_sort_by, out_spec
 from ._redact import secret_field
 from ._retry import budget_ms
 from ._scan import (
@@ -1373,14 +1373,42 @@ def _object_items(tp: object) -> type | None:
     return item if isinstance(item, type) and is_dataclass_type(item) else None
 
 
-def _id_like(cls: type) -> str:
-    """The field an array of ``cls`` is most likely keyed by"""
-    names = [f.name for f in dataclasses.fields(cls)]
+def _inner_object_arrays(tp: object) -> Iterator[type]:
+    """The items of each array of dataclasses nested in a list, tuple, or dict of ``tp``,
+    such as ``dict[str, list[Line]]``: treaty sorts those by JSON text, and neither a
+    command's nor a field's order declaration reaches them"""
+    base, _ = strip_optional(resolve_alias(tp))
+    if typing.get_origin(base) not in (list, tuple, dict):
+        return
+    for arg in typing.get_args(base):
+        if arg is Ellipsis:
+            continue
+        item = _object_items(arg)
+        if item is not None:
+            yield item
+        yield from _inner_object_arrays(arg)
+
+
+def _id_like(cls: type) -> str | None:
+    """The field an array of ``cls`` is most likely keyed by, of those a ``sort_key``
+    can name; None when no field can be one"""
+    hints = typing.get_type_hints(cls)
+    names = [f.name for f in dataclasses.fields(cls) if can_sort_by(hints[f.name])]
     for pattern in (r"^id$", r"_id$", r"^(key|name|slug)$"):
         found = next((n for n in names if re.search(pattern, n)), None)
         if found is not None:
             return found
-    return names[0] if names else "id"
+    return names[0] if names else None
+
+
+def _order_fix(cls: type, sort_key: str, ordered: str) -> str:
+    """The fix for an array of ``cls`` with no declared order, in the two spellings given
+    as templates with ``{key}``"""
+    key = _id_like(cls)
+    keep = f"{ordered} to keep the handler's order"
+    if key is None:
+        return f"{keep}; no field of {cls.__qualname__} can be a sort_key"
+    return f"{sort_key.format(key=key)} to order it by a field, or {keep}"
 
 
 _ID_SUFFIXES = ("_id", "uuid", "slug")
@@ -1446,10 +1474,13 @@ def _stable_order(app: App) -> Iterator[Finding]:
                 c.path.value,
                 "returns an array of objects with no declared order, so treaty sorts it by "
                 "each item's JSON text, not the order the handler built (REQ-F-020)",
-                f'sort_key="{_id_like(item)}" to order it by a field, or ordered=True to keep '
-                "the handler's order",
+                _order_fix(item, 'sort_key="{key}"', "ordered=True"),
             )
+        for item in _inner_object_arrays(c.output_type):
+            yield _inner_array(c, "output", item)
         for where, f, hint in output_fields(c.output_type):
+            for inner in _inner_object_arrays(hint):
+                yield _inner_array(c, f"output field {where}", inner)
             spec = out_spec(f)
             item = _object_items(hint)
             if item is not None and spec.sort_key is None and not spec.ordered:
@@ -1460,8 +1491,11 @@ def _stable_order(app: App) -> Iterator[Finding]:
                     f"output field {where} is an array of objects with no declared order, so "
                     "treaty sorts it by each item's JSON text, not the order the handler "
                     "built (REQ-F-020)",
-                    f'{f.name}: ... = treaty.Out(sort_key="{_id_like(item)}") to order it by '
-                    "a field, or treaty.Out(ordered=True) to keep the handler's order",
+                    _order_fix(
+                        item,
+                        f'{f.name}: ... = treaty.Out(sort_key="{{key}}")',
+                        "treaty.Out(ordered=True)",
+                    ),
                 )
             elif not spec.ordered and _holds_untyped(hint):
                 yield Finding(
@@ -1473,6 +1507,20 @@ def _stable_order(app: App) -> Iterator[Finding]:
                     f"type {f.name} with a frozen dataclass, or {f.name}: ... = "
                     "treaty.Out(ordered=True) to keep the handler's order of every array inside",
                 )
+
+
+def _inner_array(c: Command, where: str, item: type) -> Finding:
+    return Finding(
+        "stable-order",
+        Severity.WARNING,
+        c.path.value,
+        f"{where} nests an array of {item.__qualname__} in another list, tuple, or dict, "
+        "where no declared order reaches it, so treaty sorts it by each item's JSON text, "
+        "not the order the handler built (REQ-F-020)",
+        "hold the array in a field of a frozen dataclass declared "
+        'treaty.Out(sort_key="...") or treaty.Out(ordered=True), such as '
+        f"dict[str, Group] for dict[str, list[{item.__qualname__}]]",
+    )
 
 
 def _external_data(app: App) -> Iterator[Finding]:

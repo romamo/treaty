@@ -208,6 +208,16 @@ def sorted_indices(items: list[object], sort_key: str | None = None) -> list[int
 _KEY_TYPES = (str, int, dt.date, dt.datetime, dt.time)
 
 
+def can_sort_by(tp: object) -> bool:
+    """Whether a field annotated ``tp`` can be a ``sort_key``: a str, int, Enum, or date"""
+    key_type = resolve_alias(tp)
+    return (
+        isinstance(key_type, type)
+        and issubclass(key_type, (*_KEY_TYPES, Enum))
+        and key_type is not bool
+    )
+
+
 def check_order(tp: object, where: str, spec: OutSpec = NO_ORDER) -> None:
     """Each ``sort_key`` of an output type names a scalar field of the array's items"""
     base, _ = strip_optional(resolve_alias(tp))
@@ -225,11 +235,8 @@ def check_order(tp: object, where: str, spec: OutSpec = NO_ORDER) -> None:
             )
         assert isinstance(item, type)
         hints = typing.get_type_hints(item)
-        key_type = resolve_alias(hints.get(spec.sort_key))
-        if spec.sort_key not in {f.name for f in dataclasses.fields(item)} or not (
-            isinstance(key_type, type)
-            and issubclass(key_type, (*_KEY_TYPES, Enum))
-            and key_type is not bool
+        if spec.sort_key not in {f.name for f in dataclasses.fields(item)} or not can_sort_by(
+            hints.get(spec.sort_key)
         ):
             raise RegistrationError(
                 f"{where}: sort_key={spec.sort_key!r} must name a str, int, Enum, or date "
