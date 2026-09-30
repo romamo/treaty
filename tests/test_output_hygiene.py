@@ -13,7 +13,7 @@ import pytest
 from conftest import WINDOWS, spec_validator
 from fixture_hygiene_app import app
 
-from treaty import App, Ctx, Exit, NoArgs, ParseError
+from treaty import App, Ctx, Exit, NoArgs, ParseError, Subprocess
 from treaty._envelope import sentence
 
 HYGIENECTL = Path(__file__).resolve().parent / "fixture_hygiene_app.py"
@@ -332,8 +332,8 @@ def test_every_framework_error_message_is_a_sentence(argv: list[str]) -> None:
         ("the disk is full!", "The disk is full!"),
         ("  \x1b[31mnot found\x1b[0m ", "Not found."),
         ("", ""),
-        # A first word with an underscore, dot, slash, digit, or leading dash keeps its case;
-        # a hyphenated or camelCase one is a plain word and is capitalized
+        # A first word with an underscore, dash, dot, slash, or digit keeps its case (#64); a
+        # camelCase one is a plain word and is capitalized
         (
             "project_directory_missing: directory does not exist: /nonexistent",
             "project_directory_missing: directory does not exist: /nonexistent",
@@ -341,7 +341,7 @@ def test_every_framework_error_message_is_a_sentence(argv: list[str]) -> None:
         ("config.toml is unreadable", "config.toml is unreadable."),
         ("--region is required", "--region is required."),
         ("v2 is not supported", "v2 is not supported."),
-        ("schema-lock found drift", "Schema-lock found drift."),
+        ("schema-lock found drift", "schema-lock found drift."),
         ("maxRetries is negative", "MaxRetries is negative."),
         # No period after a path, URL, quoted value, or code
         ("cannot read ~/.config/app.toml", "Cannot read ~/.config/app.toml"),
@@ -351,12 +351,12 @@ def test_every_framework_error_message_is_a_sentence(argv: list[str]) -> None:
         ("set the variable APP_TOKEN", "Set the variable APP_TOKEN"),
         ("pass --confirm-destructive", "Pass --confirm-destructive"),
         ("the tag is v9.x", "The tag is v9.x"),
-        # A number or a version is prose and takes the period
-        ("the tag is 9.9", "The tag is 9.9."),
-        ("upgrade to 1.4.0", "Upgrade to 1.4.0."),
+        # A number or a version is an identifier and takes no period (#64)
+        ("the tag is 9.9", "The tag is 9.9"),
+        ("upgrade to 1.4.0", "Upgrade to 1.4.0"),
         ("the path is C:\\temp", "The path is C:\\temp"),
         ("retry after 5 seconds", "Retry after 5 seconds."),
-        ("the limit is 5", "The limit is 5."),
+        ("the limit is 5", "The limit is 5"),
     ],
 )
 def test_a_message_becomes_a_sentence_without_changing_code_in_it(
@@ -461,7 +461,7 @@ def test_a_run_nested_in_a_handler_gives_back_the_outer_swap() -> None:
 def test_a_message_that_starts_with_a_path_keeps_its_case() -> None:
     from treaty._envelope import sentence
 
-    assert sentence("no item #9") == "No item #9."
+    assert sentence("no item #9") == "No item #9"
     assert sentence("out.json exists") == "out.json exists."
     assert sentence("tmp/todo.json is not a todo file") == "tmp/todo.json is not a todo file."
     assert sentence("sort_key names no field") == "sort_key names no field."
@@ -470,16 +470,89 @@ def test_a_message_that_starts_with_a_path_keeps_its_case() -> None:
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("instance-id: an instance id is letters", "Instance-id: an instance id is letters."),
         ("however, it failed", "However, it failed."),
-        ("read-only file system", "Read-only file system."),
-        ("db-migrate is now db-up", "Db-migrate is now db-up."),
+        ("don't retry", "Don't retry."),
         ("x.json is gone", "x.json is gone."),
     ],
 )
-def test_a_plain_first_word_is_capitalized_even_with_a_hyphen_or_comma(
+def test_a_plain_first_word_is_capitalized_even_with_an_apostrophe_or_comma(
     text: str, expected: str
 ) -> None:
     from treaty._envelope import sentence
 
     assert sentence(text) == expected
+
+
+# Program names and trailing identifiers (#64)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # The issue's two messages
+        ("ansible-playbook exited 4", "ansible-playbook exited 4"),
+        ("component does not exist: crm-backend", "Component does not exist: crm-backend"),
+        # A first word with a dash, underscore, dot, slash, or digit keeps its case
+        ("db-migrate is now db-up", "db-migrate is now db-up"),
+        ("instance-id: an instance id is letters", "instance-id: an instance id is letters."),
+        ("read-only file system", "read-only file system."),
+        ("sort_key names no field", "sort_key names no field."),
+        ("out.json exists", "out.json exists."),
+        ("bin/deploy failed", "bin/deploy failed."),
+        ("s3 rejected the upload", "s3 rejected the upload."),
+        # No period after a last word with a dash, underscore, dot, slash, colon, or digit
+        ("no such host web-01", "No such host web-01"),
+        ("no such host web-db", "No such host web-db"),
+        ("unset APP_TOKEN", "Unset APP_TOKEN"),
+        ("cannot open out.json", "Cannot open out.json"),
+        ("cannot open tmp/x", "Cannot open tmp/x"),
+        ("the scheme is urn:x", "The scheme is urn:x"),
+        ("the release is v2", "The release is v2"),
+        ("the exit code was 4", "The exit code was 4"),
+        # Ordinary prose is unchanged
+        ("no such release", "No such release."),
+        ("the disk is full!", "The disk is full!"),
+        ("however, it failed", "However, it failed."),
+        ("is it running?", "Is it running?"),
+    ],
+)
+def test_program_names_and_trailing_identifiers_are_kept_verbatim(text: str, expected: str) -> None:
+    assert sentence(text) == expected
+
+
+def test_a_declared_program_opening_the_message_keeps_its_case() -> None:
+    assert sentence("git refused the push", frozenset({"git"})) == "git refused the push."
+    assert sentence("git: not a repository", frozenset({"git"})) == "git: not a repository."
+    assert sentence("git refused the push") == "Git refused the push."
+
+
+def test_a_handler_error_naming_a_declared_program_keeps_its_case() -> None:
+    demo = App("progs", version="0.1.0")
+
+    @demo.command(
+        "push",
+        description="Push",
+        danger_level="safe",
+        exit_codes=(),
+        subprocess=Subprocess("git", hardcoded_args=("push",)),
+    )
+    def push(args: NoArgs, ctx: Ctx) -> None:
+        raise Exit.PRECONDITION("git found no remote named origin")
+
+    @demo.command(
+        "apply",
+        description="Apply",
+        danger_level="safe",
+        exit_codes=(),
+        required_tools={"kubectl": "1.28"},
+    )
+    def apply(args: NoArgs, ctx: Ctx) -> None:
+        raise Exit.PRECONDITION("kubectl has no context")
+
+    for argv, expected in (
+        (["push"], "git found no remote named origin."),
+        (["apply"], "kubectl has no context."),
+    ):
+        out = io.StringIO()
+        demo.run(argv, stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+        assert json.loads(out.getvalue())["error"]["message"] == expected

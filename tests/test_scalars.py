@@ -154,7 +154,7 @@ def test_bounds_are_checked_before_the_parser() -> None:
     code, env = run(["deploy", "api", "--port", "0"])
     assert code == 2
     error = errors_of(env)["port"]
-    assert error["message"] == "Value for 'port' must be at least 1."
+    assert error["message"] == "Value for 'port' must be at least 1"
     assert error["context"]["minimum"] == 1
     code, env = run(["deploy", "api", "--port", "70000"])
     assert errors_of(env)["port"]["context"]["maximum"] == 65535

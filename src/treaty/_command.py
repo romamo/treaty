@@ -279,6 +279,14 @@ class Command:
         return served
 
     @property
+    def programs(self) -> frozenset[str]:
+        """The programs the command runs: ``subprocess=`` and ``required_tools=``"""
+        names = set(self.required_tools)
+        if self.subprocess is not None:
+            names.add(self.subprocess.binary)
+        return frozenset(names)
+
+    @property
     def accepts_timeout(self) -> bool:
         """``--timeout``: network commands, and streams, which may never end on their own"""
         return self.has_network_io or self.streaming

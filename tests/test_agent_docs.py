@@ -266,7 +266,7 @@ def test_version_mismatch_fails(tmp_path: Path) -> None:
     assert code == 81 and envelope["error"]["code"] == "DOCS_OUT_OF_DATE"
     [m] = envelope["data"]["mismatches"]
     assert m["kind"] == "version" and m["line"] == 1
-    assert envelope["error"]["message"] == "1 item in the docs disagrees with deployctl 1.4.0."
+    assert envelope["error"]["message"] == "1 item in the docs disagrees with deployctl 1.4.0"
 
 
 def test_any_flag_command_or_env_var_not_found_in_help_fails(tmp_path: Path) -> None:
@@ -287,7 +287,7 @@ def test_any_flag_command_or_env_var_not_found_in_help_fails(tmp_path: Path) -> 
     }
     envelope = json.loads(out)
     count = len(envelope["data"]["mismatches"])
-    want = f"{count} items in the docs disagree with deployctl 1.4.0."
+    want = f"{count} items in the docs disagree with deployctl 1.4.0"
     assert count > 1 and envelope["error"]["message"] == want
 
 

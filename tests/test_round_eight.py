@@ -82,7 +82,7 @@ def run(argv: list[str], stdin: str = "") -> tuple[int, dict]:
 
 def test_invalid_value_in_post_init_is_an_argument_error() -> None:
     code, env = run(["go", "--n", "7"])
-    assert code == 2 and env["error"]["message"] == "N cannot be 7."
+    assert code == 2 and env["error"]["message"] == "N cannot be 7"
 
 
 @pytest.mark.parametrize(

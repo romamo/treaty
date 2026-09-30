@@ -6,7 +6,7 @@ import dataclasses
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import IO
@@ -44,9 +44,10 @@ def json_safe(value: object, depth: int = 0) -> object:
 
 # REQ-F-007: CSI (colors, cursor movement), OSC (titles, links), other two-byte escapes,
 # and a stray ESC
-# A plain first word, capitalized: letters, joined by ' or -, and a trailing , : or ;. A dot,
-# a slash, an underscore, or a digit marks a path or an identifier, which keeps its case
-_WORD = re.compile(r"[^\W\d_]+(?:['-][^\W\d_]+)*[,:;]?")
+# A plain first word, capitalized: letters, joined by ', and a trailing , : or ;. A dash, a
+# dot, a slash, an underscore, or a digit marks a program, a path, or an identifier, which
+# keeps its case (``ansible-playbook``, ``out.json``, ``sort_key``)
+_WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)*[,:;]?")
 _ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?")
 # REQ-F-016: a null byte or a lone surrogate is not valid UTF-8 text
 _INVALID = re.compile(r"[\x00\ud800-\udfff]")
@@ -108,23 +109,25 @@ def clean(value: object) -> object:
 
 
 # A last word no period may follow, which would read as part of it: a URL, a path, a
-# quoted value, a flag, or an identifier (snake_case, dotted with a letter, camelCase). A
-# number or a version (``5``, ``1.4.0``) is prose and takes the period
-_CODE_TAIL = re.compile(r"://|^[~.]|['\"`]$|[_/\\=]|[^\W\d]\.\w|\w\.[^\W\d]|^-|[a-z][A-Z]")
+# quoted value, a flag, a number, or an identifier (``crm-backend``, ``sort_key``,
+# ``1.4.0``, camelCase). A copied id or version must not carry the period
+_CODE_TAIL = re.compile(r"^~|['\"`]$|[-_./\\:=\d]|[a-z][A-Z]")
 
 
-def sentence(text: str) -> str:
+def sentence(text: str, programs: Collection[str] = ()) -> str:
     """An error message as a complete sentence (REQ-C-013): a lowercase first word is
     capitalized and closing punctuation is added when missing. A first word that is a path,
-    a file name, or an identifier (``out.json``, ``tmp/x``, ``sort_key``) keeps its case,
-    since capitalizing it names another file, and a message ending in a path, URL, quoted
-    value, flag, or identifier gets no period, which would read as part of it. Escapes go
-    first, so a colored message is judged by its text."""
+    a file name, an identifier, or one of ``programs`` (``out.json``, ``sort_key``,
+    ``ansible-playbook``, ``git``) keeps its case, since capitalizing it names another file
+    or program, and a message ending in a path, URL, quoted value, flag, number, or
+    identifier gets no period, which would read as part of it. Escapes go first, so a
+    colored message is judged by its text."""
     text = _ESCAPES.sub("", text).strip()
     words = text.split()
     if not words:
         return text
-    if text[:1].islower() and _WORD.fullmatch(words[0]):
+    first = words[0]
+    if text[:1].islower() and _WORD.fullmatch(first) and first.rstrip(",:;") not in programs:
         text = text[0].upper() + text[1:]
     if text[-1] not in ".!?" and not _CODE_TAIL.search(words[-1]):
         text += "."
@@ -240,10 +243,13 @@ class ErrorDetail:
     """The replacement invocation of exit 13 (REDIRECTED)"""
     corrected_input: str | None = None
     """Strict JSON the malformed input was repaired to, for ``INVALID_JSON`` (REQ-F-059)"""
+    _programs: frozenset[str] = field(default=frozenset(), repr=False, compare=False)
+    """Programs the command declares: one that opens the message keeps its case
+    (REQ-C-013); not part of the envelope"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
-        object.__setattr__(self, "message", sentence(self.message))
+        object.__setattr__(self, "message", sentence(self.message, self._programs))
         if self.errors is not None:
             items = [
                 {**e, "message": sentence(str(e["message"]))} if "message" in e else e

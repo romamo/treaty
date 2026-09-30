@@ -90,7 +90,7 @@ jq -e 'keys == ["data", "error", "meta", "ok", "warnings"] and .ok and .error ==
   "error": {
     "code": "NOT_FOUND",
     "context": {"id": 9},
-    "message": "No item #9.",
+    "message": "No item #9",
     "phase": "execution",
     "retryable": false,
     "suggestion": "todo list --all shows every item number"
@@ -116,7 +116,7 @@ An agent acts on `error` in this order:
 
 Only `code`, `message`, and `retryable` are always there; the rest appear when they apply,
 never as `null`. treaty also tidies `message`: the handler raised `no item #9`, and the
-envelope says `No item #9.`
+envelope says `No item #9`: capitalized, with no period after the id an agent may copy.
 
 Some failures carry keys of their own: `network_context` for a failed network call,
 `corrected_input` for JSON that could be repaired, `conflict_id` for a create that found
