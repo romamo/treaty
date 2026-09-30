@@ -29,7 +29,7 @@ from ._errors import RegistrationError, SchemaError
 from ._out import Binary, out_spec
 from ._redact import secret_field
 from ._scalars import DECIMAL_TEXT, ScalarRegistry
-from ._types import is_dataclass_type, resolve_alias, strip_optional
+from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
 JsonSchema = dict[str, Any]
 
@@ -181,7 +181,7 @@ def _dataclass_schema(cls: type, scalars: ScalarRegistry, output: bool) -> JsonS
 def _dataclass_fields_schema(cls: type, scalars: ScalarRegistry, output: bool) -> JsonSchema:
     """Input: a field with a default may be left out. Output: every key is written, so
     each is required, but a ``volatile`` one, which ``--stable-output`` leaves out"""
-    hints = typing.get_type_hints(cls)
+    hints = type_hints(cls)
     properties: dict[str, JsonSchema] = {}
     required: list[str] = []
     for f in dataclasses.fields(cls):

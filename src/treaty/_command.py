@@ -46,7 +46,14 @@ from ._secrets import default_env_var
 from ._steps import STEP_KEYS, Rollback, StepName
 from ._subprocess import BROWSER_OPEN, HeadlessBehavior
 from ._timeout import Timeout
-from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
+from ._types import (
+    FlagType,
+    is_dataclass_type,
+    resolve_alias,
+    signature,
+    strip_optional,
+    type_hints,
+)
 from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope, ToolVersion
 
 Handler = Callable[..., Any]
@@ -849,8 +856,8 @@ def _compat(
             )
         if any(c.version.major == version.major for c in out):
             raise RegistrationError(f"{path}: compat names major {version.major} twice")
-        params = list(inspect.signature(shim).parameters) if callable(shim) else []
-        hints = typing.get_type_hints(shim) if params else {}
+        params = list(signature(shim).parameters) if callable(shim) else []
+        hints = type_hints(shim) if params else {}
         if len(params) != 1 or hints.get(params[0]) != output_type:
             raise RegistrationError(
                 f"{path}: compat[{key!r}] is a function of one parameter annotated "
@@ -1040,8 +1047,8 @@ def _inspect_handler(
             f"{path}: a streaming handler is a plain generator; an async def cannot yield "
             "events to treaty (REQ-F-049)"
         )
-    params = list(inspect.signature(fn).parameters.values())
-    hints = typing.get_type_hints(fn)
+    params = list(signature(fn).parameters.values())
+    hints = type_hints(fn)
     args_type = hints.get(params[0].name)
     if not is_dataclass_type(args_type):
         raise RegistrationError(f"{path}: first parameter must be annotated with an args dataclass")

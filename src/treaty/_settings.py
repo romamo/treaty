@@ -21,7 +21,6 @@ import dataclasses
 import hashlib
 import json
 import tomllib
-import typing
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +35,7 @@ from ._paths import check_path
 from ._redact import REDACTED, secret_name
 from ._scalars import ScalarRegistry
 from ._schema import to_jsonable
-from ._types import Classified, FlagType, classify
+from ._types import Classified, FlagType, classify, type_hints
 from ._values import InstanceId, InvalidValue
 
 CONTEXTS_KEY = "contexts"
@@ -128,7 +127,7 @@ class SettingsSpec:
     def inspect(cls, settings: type, scalars: ScalarRegistry) -> SettingsSpec:
         """The shape, then each field's type, a class registered in ``scalars`` included"""
         where = cls.check(settings)
-        hints = typing.get_type_hints(settings)
+        hints = type_hints(settings)
         fields: list[Setting] = []
         for f in dataclasses.fields(settings):
             try:

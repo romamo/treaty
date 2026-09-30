@@ -27,7 +27,7 @@ from enum import Enum
 from ._errors import RegistrationError
 from ._out import data_path, is_binary, out_spec
 from ._redact import secret_field
-from ._types import is_dataclass_type, resolve_alias, strip_optional
+from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
 SOURCE_KEY = "_source"
 TRUSTED_KEY = "_trusted"
@@ -123,7 +123,7 @@ class _Walk:
         if is_dataclass_type(base):
             assert isinstance(base, type)
             fields = {f.name: f for f in dataclasses.fields(base)}
-            hints = typing.get_type_hints(base)
+            hints = type_hints(base)
             out: dict[str, object] = {}
             for key, v in value.items():
                 f = fields.get(key)
@@ -239,7 +239,7 @@ def declares_external(tp: object, seen: frozenset[type] = frozenset()) -> bool:
     if not is_dataclass_type(base) or base in seen:
         return False
     assert isinstance(base, type)
-    hints = typing.get_type_hints(base)
+    hints = type_hints(base)
     return any(
         out_spec(f).external or declares_external(hints[f.name], seen | {base})
         for f in dataclasses.fields(base)

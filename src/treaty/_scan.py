@@ -23,6 +23,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._types import signature
+
 
 @dataclass(frozen=True, slots=True)
 class ArgvItem:
@@ -86,7 +88,7 @@ def _tree(fn: Callable[..., object]) -> ast.Module | None:
 
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     """Every ``<ctx>.<method>(...)`` call in the handler, ``<ctx>`` its second parameter"""
-    params = list(inspect.signature(fn).parameters)
+    params = list(signature(fn).parameters)
     tree = None if len(params) < 2 else source_tree(fn)
     if tree is None:
         return []
@@ -125,7 +127,7 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
 
 def ctx_attribute(fn: Callable[..., object], name: str) -> int | None:
     """The first line of the handler reading ``<ctx>.<name>``, such as ``ctx.http``"""
-    params = list(inspect.signature(fn).parameters)
+    params = list(signature(fn).parameters)
     tree = None if len(params) < 2 else source_tree(fn)
     if tree is None:
         return None

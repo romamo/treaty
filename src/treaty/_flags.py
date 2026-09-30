@@ -6,7 +6,6 @@ import dataclasses
 import keyword
 import math
 import re
-import typing
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -28,7 +27,7 @@ from ._scalars import (
     matches_preset,
 )
 from ._secrets import source_flags
-from ._types import Classified, FlagType, classify
+from ._types import Classified, FlagType, classify, type_hints
 
 _META = "treaty"
 FLAG_META = _META
@@ -605,7 +604,7 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
     """Read an arguments dataclass into ordered ``FieldInfo`` records"""
     if not dataclasses.is_dataclass(cls):
         raise RegistrationError(f"{cls.__qualname__} must be a dataclass")
-    hints = typing.get_type_hints(cls)
+    hints = type_hints(cls)
     infos: list[FieldInfo] = []
     seen_optional_positional = False
     for f in dataclasses.fields(cls):
