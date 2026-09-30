@@ -32,8 +32,14 @@ def render_event(data: object) -> str:
 def _lines(value: object, path: str) -> list[str]:
     if is_binary(value):
         assert isinstance(value, dict)
-        kind = f" {value['content_type']}" if "content_type" in value else ""
-        return [_line(path, f"<binary {value['size_bytes']} bytes{kind}>")]
+        # Both come from the data, so they lose their escapes as a value does
+        kind = (
+            f" {_text(strip_escapes(str(value['content_type'])))}"
+            if "content_type" in value
+            else ""
+        )
+        size = _text(strip_escapes(str(value["size_bytes"])))
+        return [_line(path, f"<binary {size} bytes{kind}>")]
     if isinstance(value, dict):
         if not value:
             return [_line(path, "{}")] if path else []

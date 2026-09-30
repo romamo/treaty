@@ -197,3 +197,17 @@ def test_visible_and_terminal_text() -> None:
     assert visible("a\rb", "\r") == "a\rb"
     assert terminal_text(f"\x1b[31mx\x1b[0m{CURSOR}", color=True) == "\x1b[31mx\x1b[0m"
     assert terminal_text(f"\x1b[31mx\x1b[0m{CURSOR}", color=False) == "x"
+
+
+def test_a_binary_wrapper_content_type_loses_its_escapes_in_plain_output() -> None:
+    # The <binary ...> line takes content_type and size_bytes from the data, as is
+    app = App("probe", version="1.0.0")
+
+    @app.command("blob", description="Blob", danger_level="safe", exit_codes=())
+    def blob(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        wrapper = {"type": "binary", "encoding": "base64", "value": ""}
+        return {"file": {**wrapper, "size_bytes": f"0{TITLE}", "content_type": f"x/y{C1}\r"}}
+
+    out, err = io.StringIO(), io.StringIO()
+    app.run(["blob", "--format", "plain"], stdout=out, stderr=err, env={}, isatty=False)
+    assert inert(out.getvalue()) and "<binary 0 bytes x/y" in out.getvalue()
