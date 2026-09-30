@@ -5,7 +5,7 @@
 # "off": the bot does nothing
 # "dry-run": plan and build the release commit in CI, show the diff, push nothing
 # "release": land the commit on main, tag it, and start publish.yml
-mode = "dry-run"
+mode = "release"
 
 # Days to wait after the latest release, counted from its CHANGELOG date
 min_days_between = 7
