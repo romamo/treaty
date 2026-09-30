@@ -280,11 +280,16 @@ def public_key(value: str) -> bool:
     if ssh is not None:
         kind, body = ssh.groups()
         return kind in _OPENSSH_TYPES and _ssh_blob_type(body) == kind
-    blocks = list(_PEM.finditer(value))
-    # Contiguous blocks that make up the whole value: nothing before, between, or after
-    if not blocks or "".join(b.group(0) for b in blocks) != value:
-        return False
-    return all(_pem_public(b.group(1) or b.group(2), b.group(3)) for b in blocks)
+    # Contiguous blocks that make up the whole value: nothing before, between, or after.
+    # Each block is matched where the last one ended, so an unclosed header stops the scan
+    # at once; searching from every header to a missing footer is quadratic.
+    at = 0
+    while at < len(value):
+        block = _PEM.match(value, at)
+        if block is None or not _pem_public(block.group(1) or block.group(2), block.group(3)):
+            return False
+        at = block.end()
+    return at > 0
 
 
 def key_summary(value: str) -> str:

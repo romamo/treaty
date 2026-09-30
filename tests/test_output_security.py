@@ -6,6 +6,7 @@ import io
 import json
 import os
 import random
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ from treaty import (
     RegistrationError,
 )
 from treaty._audit import audit
-from treaty._protect import base64_summary, jwt_summary, key_summary, public_key
+from treaty._protect import base64_summary, jwt_summary, key_summary, protect, public_key
 from treaty._redact import REDACTED, scrub, secret_field, secret_name
 
 
@@ -665,6 +666,24 @@ def test_a_public_key_field_is_not_marked_masked_in_the_schema_or_the_audit() ->
     assert "x-high-entropy" not in props["public_key"] and props["deploy_key"]["x-high-entropy"]
     found = next(r.findings for r in audit(app, "x:app", limit=100).rules if r.id == "high-entropy")
     assert [f.message.split()[2] for f in found] == ["deploy_key"]
+
+
+def test_public_before_another_word_does_not_exempt_a_credential_name() -> None:
+    # Only the word right before key names a public key: these hold secrets
+    for name in ("pub_sub_key", "public_repo_deploy_key", "non_public_api_key"):
+        assert secret_field(name), name
+        out = protect({name: "sk_live_abc123456789abcdef"}, object, unmask=False)
+        assert out.masked == (f"data.{name}",), name
+
+
+def test_unclosed_pem_headers_are_refused_in_linear_time() -> None:
+    # A lazy scan from each header to a missing footer was quadratic: ~2 s at 64 KiB
+    header = "-----BEGIN PUBLIC KEY-----\n"
+    value = header * (65536 // len(header))
+    started = time.perf_counter()
+    for _ in range(10):
+        assert not public_key(value)
+    assert time.perf_counter() - started < 1.0
 
 
 def test_logs_still_redact_a_public_key_by_its_name() -> None:

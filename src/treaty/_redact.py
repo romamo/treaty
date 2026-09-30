@@ -62,9 +62,10 @@ def secret_field(name: str) -> bool:
 
 def public_key_name(name: str) -> bool:
     """A field named for a public key, which is meant to be shared: ``public_key``,
-    ``publicKey``, ``ssh-pub-key``"""
+    ``publicKey``, ``ssh-pub-key``. Only the word right before ``key`` counts, so
+    ``pub_sub_key`` and ``public_repo_deploy_key`` stay credential names."""
     words = _words(name)
-    return len(words) > 1 and words[-1] == "key" and bool(_PUBLIC_WORDS.intersection(words))
+    return len(words) > 1 and words[-1] == "key" and words[-2] in _PUBLIC_WORDS
 
 
 def _words(name: str) -> list[str]:
