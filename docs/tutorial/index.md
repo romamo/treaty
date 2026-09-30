@@ -17,6 +17,7 @@ output.
 | A: New CLI | nothing | [Start a new CLI](A-new/start.md) |
 | B: Migrate | an argparse CLI | [Migrate an argparse CLI](B-migrate/argparse.md) |
 | B: Migrate | a click or typer CLI | [Migrate a click or typer CLI](B-migrate/click-typer.md) |
+| B: Migrate | a pydantic-settings CLI (`CliApp`) | [Migrate a pydantic-settings CLI](B-migrate/pydantic-settings.md) |
 
 Both tracks end in the same place: a treaty app that `treaty audit` can inspect. From there
 the core chapters take you through the audit's rules one at a time.
@@ -87,7 +88,8 @@ file rather than the one before it, so `todo_pages.py`, for example, has no `imp
 | --- | --- | --- |
 | [`todo_argparse.py`](../../examples/tutorial/todo_argparse.py) | the starting point: a typical argparse CLI | [argparse](B-migrate/argparse.md), and the failing run in [conformance](ship/conformance.md) |
 | [`todo_click.py`](../../examples/tutorial/todo_click.py), [`todo_typer.py`](../../examples/tutorial/todo_typer.py) | the same CLI in click and in typer | [click or typer](B-migrate/click-typer.md) |
-| [`todo_treaty.py`](../../examples/tutorial/todo_treaty.py) | `todo` on treaty, where every starting chapter ends | [new CLI](A-new/start.md), [argparse](B-migrate/argparse.md), [click or typer](B-migrate/click-typer.md) |
+| [`todo_pydantic.py`](../../examples/tutorial/todo_pydantic.py) | the same CLI in pydantic-settings | [pydantic-settings](B-migrate/pydantic-settings.md) |
+| [`todo_treaty.py`](../../examples/tutorial/todo_treaty.py) | `todo` on treaty, where every starting chapter ends | [new CLI](A-new/start.md), [argparse](B-migrate/argparse.md), [click or typer](B-migrate/click-typer.md), [pydantic-settings](B-migrate/pydantic-settings.md) |
 | [`todo_exit_codes.py`](../../examples/tutorial/todo_exit_codes.py) | plus declared exit codes; the version most chapters use | [exit codes](core/exit-codes.md), the other core chapters, and every ship chapter |
 | [`todo_network.py`](../../examples/tutorial/todo_network.py) | plus `import`, which fetches items over HTTP | [network](core/network-io.md), [cleanup](core/cleanup.md) |
 | [`todo_payload.py`](../../examples/tutorial/todo_payload.py) | plus `edit`, which takes its fields as JSON | [raw payload](core/raw-payload.md) |
@@ -98,6 +100,7 @@ file rather than the one before it, so `todo_pages.py`, for example, has no `imp
 | [`todo_v2.py`](../../examples/tutorial/todo_v2.py) | release 1.1.0: `done` renamed `complete`, `--all` deprecated | [stability](ship/stability.md) |
 | [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md), [testing](ship/testing.md) |
 | [`new_cli/test_contract.py`](../../examples/tutorial/new_cli/test_contract.py), [`new_cli/agent-contract.yml`](../../examples/tutorial/new_cli/agent-contract.yml) | contract tests for any treaty app, and a CI job with every gate | [testing](ship/testing.md) |
+| [`market_args.py`](../../examples/tutorial/market_args.py), [`market_prices.py`](../../examples/tutorial/market_prices.py), [`market_funds.py`](../../examples/tutorial/market_funds.py) | not `todo`: two CLIs sharing argument models | [pydantic-settings](B-migrate/pydantic-settings.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
 [Release what a run holds](core/cleanup.md) also uses
