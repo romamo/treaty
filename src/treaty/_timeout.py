@@ -119,6 +119,7 @@ def call_with_timeout[T](
     context: contextvars.Context | None = None,
     heartbeats: Sequence[Heartbeat] = (),
     clock: Callable[[], float] = time.monotonic,
+    ended: Callable[[threading.Thread], None] | None = None,
 ) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
 
@@ -132,6 +133,8 @@ def call_with_timeout[T](
     ``interruptible()``. A beat is scheduled from the time it ticked, so a wait that
     wakes late skips the beats it missed rather than ticking them all at once, and two
     beats are never closer than their interval. ``clock`` reads the time in seconds.
+    ``ended`` receives the worker on the worker itself as the handler ends, abandoned or
+    not, so what was kept for it can be released without polling.
     """
     run_in = context if context is not None else contextvars.copy_context()
     if timeout.seconds is None and not heartbeats:
@@ -144,6 +147,9 @@ def call_with_timeout[T](
             slot.result = run_in.run(fn)
         except BaseException as exc:  # noqa: BLE001 - re-raised on the calling thread below
             slot.exc = exc
+        finally:
+            if ended is not None:
+                ended(threading.current_thread())
 
     worker = threading.Thread(target=target, name="treaty-handler", daemon=True)
     pending = Pending(worker, slot)

@@ -21,6 +21,13 @@ Apps built on treaty keep their own, structured schema changelog with
   that ships the handler's package stops the audit with exit 4 and `PRECONDITION`,
   naming the distribution, and any other distribution's is skipped and named in the
   report's `scope` (#106)
+- Security: a handler that outlives its timeout no longer leaks its secret through
+  `logging` once no run is attached, as after `App.call` returned. The framework's handler
+  left the root logger with the last run, so a WARNING the handler logged then went to
+  `logging.lastResort` and `sys.stderr` unredacted. The handler now stays on the root until
+  every such thread ends, and with no run attached writes a record at WARNING or above where
+  `lastResort` would, the held threads' secrets redacted, and nothing when the host's own
+  handler takes the record (#118)
 
 ## [1.0.0rc6] - 2026-09-30
 

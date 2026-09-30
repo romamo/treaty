@@ -450,7 +450,10 @@ level: a WARNING or ERROR record is written as a `warn` or `error` line wherever
 the logger's name in `fields.logger`. A handler sits on the root logger for the whole run,
 `App.call` included, and the root's level is lowered for the run when it would hide what
 the run shows, then restored; so no record falls through to `logging.lastResort`, which
-writes to `sys.stderr` unredacted.
+writes to `sys.stderr` unredacted. A handler abandoned at its timeout keeps it on the
+root until its thread ends: a record at WARNING or above that it logs after the run
+returned is written to `sys.stderr` as `lastResort` would, its secrets redacted, and not at
+all when the host's own handler takes the record.
 
 The three flags are exclusive (two exit `2`). Stray `print()` text off a terminal is
 dropped, and still reported in `THIRD_PARTY_STDOUT`. The `log-not-print` audit rule flags
