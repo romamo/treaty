@@ -751,6 +751,10 @@ class App:
         ``--cache-ttl``; ``meta.cache_used`` says whether a read hit (REQ-O-018).
         ``has_network_io=True`` gives ``ctx.http``, which honors the proxy and CA bundle
         variables, with ``--proxy`` and ``--no-proxy`` (REQ-F-036, REQ-O-019).
+        ``timeout=`` is the seconds a run may take before it ends in ``TIMEOUT``, else the
+        app's ``default_timeout``; ``timeout=None`` runs unbounded. A command that runs
+        unbounded or longer than the app default gets ``--timeout``, the deadline of one
+        run, as network commands and streams do (REQ-C-012).
         ``recursive_traversal=True`` gives ``ctx.walk``, which stops at a circular symlink,
         with ``--no-follow-symlinks`` and ``--max-depth`` (REQ-F-061, REQ-O-040).
         ``gui_operations=["browser_open"]`` allows ``ctx.open_url`` and needs
@@ -831,6 +835,12 @@ class App:
             raise RegistrationError(f"{cmd_path}: {exc}") from None
         # A stream's timeout is an idle limit: the wait for each event (REQ-F-011)
         command_timeout = None if isinstance(timeout, _Inherit) else Timeout(timeout)
+        # A caller bounds one run of a command that may outlast the app default (REQ-C-012)
+        default = self.default_timeout.seconds
+        outlasts_default = command_timeout is not None and (
+            command_timeout.seconds is None
+            or (default is not None and command_timeout.seconds > default)
+        )
         fixes = dict(fix_commands or {})
         for error_code, fix in fixes.items():
             if not isinstance(error_code, str) or not _ERROR_CODE.fullmatch(error_code):
@@ -860,6 +870,7 @@ class App:
                         examples=[Example(d, c) for d, c in pairs],
                         has_network_io=has_network_io,
                         timeout=command_timeout,
+                        outlasts_default=outlasts_default,
                         supports_raw_payload=supports_raw_payload,
                         cleanup=cleanup,
                         renderers=overrides,

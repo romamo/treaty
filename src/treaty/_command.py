@@ -139,6 +139,8 @@ class Command:
     """Resource classes the handler takes after ``ctx``, in parameter order"""
     resource_graph: Mapping[type, ResourceSpec]
     """Every resource reachable from ``resources``, validated at registration"""
+    outlasts_default: bool = False
+    """Declares ``timeout=None``, or one longer than the app default: it gets ``--timeout``"""
     safe_default: bool = False
     """A destructive command that runs as a dry run unless ``--live`` (REQ-O-048)"""
     gui_operations: tuple[str, ...] = ()
@@ -288,8 +290,9 @@ class Command:
 
     @property
     def accepts_timeout(self) -> bool:
-        """``--timeout``: network commands, and streams, which may never end on their own"""
-        return self.has_network_io or self.streaming
+        """``--timeout``: network commands, streams, which may never end on their own, and
+        commands that may run unbounded or longer than the app default"""
+        return self.has_network_io or self.streaming or self.outlasts_default
 
     def field_by_flag(self, flag: str) -> FieldInfo | None:
         for f in self.fields:
@@ -330,6 +333,7 @@ def build_command(
     cleanup: Cleanup | None,
     renderers: Mapping[Format, Renderer],
     scalars: ScalarRegistry,
+    outlasts_default: bool = False,
     streaming: bool = False,
     safe_default: bool = False,
     gui_operations: Sequence[str] = (),
@@ -605,6 +609,7 @@ def build_command(
         examples=tuple(examples),
         has_network_io=has_network_io,
         timeout=timeout,
+        outlasts_default=outlasts_default,
         supports_raw_payload=supports_raw_payload,
         cleanup=cleanup,
         renderers=dict(renderers),
