@@ -19,6 +19,10 @@ Apps built on treaty keep their own, structured schema changelog with
   args schema marks it `"x-audited": false`. With `secret=True` the `[REDACTED]` wins.
   Idempotency records, which hold a hash of the arguments and the `data` a repeat replays,
   are not masked (#54)
+- Free-threaded CPython 3.14t is supported and tested: CI runs the suite on it with the
+  GIL off, and the package declares `Programming Language :: Python :: Free Threading ::
+  2 - Beta`. A new stress test runs `App.run` and `App.call` from several threads at
+  once and checks each run gets its own envelope, log lines, and secret redaction (#74)
 
 ### Fixed
 

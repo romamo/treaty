@@ -64,6 +64,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.14"]
+        include:
+          # Free-threaded CPython (PEP 779): the same suite with the GIL off
+          - os: ubuntu-latest
+            python: "3.14t"
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -83,9 +88,14 @@ jobs:
 
       - uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python }}
 
       - run: uv sync --locked
+
+      - name: The free-threaded job runs with the GIL off
+        if: endsWith(matrix.python, 't')
+        run: uv run python -c 'import sys; assert sys._is_gil_enabled() is False, sys.version'
+
       - run: uv run pytest -rs
 
   scaffold:
