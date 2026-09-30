@@ -485,6 +485,7 @@ command.
 | `add_argument("--flag", default=v)` | `flag: T = Flag(default=v, description=...)` |
 | `required=True` | a `Flag` with no default |
 | `type=int`, `type=float`, `type=Decimal`, `type=Path` | the field's annotation |
+| `type=resource_id` (a converter returning a value object) | `app.scalar(ResourceId, parse=..., pattern=...)` before the commands, then annotate the field `ResourceId`; the pattern reaches the manifest and is checked before the handler runs |
 | `choices=[...]` | `Literal[...]` or a `StrEnum` |
 | `action="store_true"` | `bool = Flag(default=False, ...)` |
 | `"-v", action="count"` verbosity | built in: `-v` (`--verbose`), `-vv` (`--debug`) |
@@ -500,8 +501,12 @@ command.
 | `type=argparse.FileType("r")`, `-` for stdin | `stdin_input=True`: the text arrives as `ctx.stdin_text`, from a pipe or `--input-file PATH` |
 | an `--output FILE` the command writes itself | keep an `output: Path` flag, and raise `treaty.already_exists` (`CONFLICT`) yourself when the file exists and `--force` is not given; `output_file=True` instead writes `data` in the `--format` representation |
 | `subprocess.run([...])` | `ctx.run([...])`, with `check=False` if you read `returncode`, declared with `subprocess=` ([Run other programs](../core/programs.md)) |
-| `-v`/`--verbose` printing progress | `ctx.log(...)`, shown under the framework's `--verbose`; a `-v` short is gone |
+| a helper that `os.chdir`s into the project so relative paths land there | `project_root=(".git",)` on the command and paths joined onto `ctx.project_root`; the `no-chdir` audit rule finds the `chdir`, also in a first-party helper the handler calls |
+| long in-process work (Ansible runs, migrations) | `timeout=` on the command; without it the 60 s default applies ([Run long work](../core/long-running.md#step-1-set-the-time-limit)) |
+| `-v`/`--verbose` printing progress | `ctx.log(...)`, shown under the framework's `--verbose` or its `-v`; drop the app's own `-v` flag |
 | `input("Sure?")`, `--yes` | `danger_level="destructive"`, `dry_run`, `--confirm-destructive` |
+| `--yes` meaning "apply; without it, print the plan and exit 0" | `safe_default=True`: the command previews and exits 0, and `--live` applies it ([Preview by default](../core/danger-level.md#preview-by-default)) |
+| a hand-written MCP server declaring the same operations again | `treaty-mcp module:app` serves every command as a tool ([Serve commands over MCP](../ship/mcp.md)) |
 | a `--password` flag | `secret=True` (inferred from the name): read from env or file only |
 
 ## What changes for the people using your CLI
@@ -529,6 +534,20 @@ Migration is a breaking change for callers. Put this list in your release notes:
   `todo manifest`
 - Secret-looking flags (`--token`, `--password`) no longer take a value on the command line;
   use `--token-from-env VAR` or `--token-from-file PATH`
+
+### A CLI that already emits JSON
+
+If the argparse CLI printed its own JSON envelope, agents already parse it, and the break is
+in the envelope rather than in the text:
+
+- A top-level key the old envelope had and treaty's does not, such as `status`, is gone;
+  put its value in `data`
+- Exit codes are renumbered, and a number can change meaning rather than just split: an old
+  `3` for "unknown" is treaty's `PARTIAL_FAILURE`. List the old and new codes side by side
+- A command that exited non-zero with data, such as a failed health check returning the
+  probe results, now answers `data: null` and carries the results in `error.context`
+- `compat=` keeps an older shape of one command's `data`, not of the envelope, so there is
+  no shim for this: bump each command's `schema_version` major and say so in the release notes
 
 ## Next
 
