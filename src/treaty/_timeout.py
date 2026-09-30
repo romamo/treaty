@@ -118,6 +118,7 @@ def call_with_timeout[T](
     interruptible: Callable[[], AbstractContextManager[None]] = nullcontext,
     context: contextvars.Context | None = None,
     heartbeats: Sequence[Heartbeat] = (),
+    clock: Callable[[], float] = time.monotonic,
 ) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
 
@@ -128,7 +129,9 @@ def call_with_timeout[T](
     The worker runs in ``context``, or a copy of the caller's: contextvars the host set
     reach the handler, and a stream passing one context keeps what its generator set.
     Each of ``heartbeats`` ticks on its own interval between waits, outside
-    ``interruptible()``.
+    ``interruptible()``. A beat is scheduled from the time it ticked, so a wait that
+    wakes late skips the beats it missed rather than ticking them all at once, and two
+    beats are never closer than their interval. ``clock`` reads the time in seconds.
     """
     run_in = context if context is not None else contextvars.copy_context()
     if timeout.seconds is None and not heartbeats:
@@ -147,23 +150,23 @@ def call_with_timeout[T](
     worker.start()
     if running is not None:
         running(pending)
-    start = time.monotonic()
+    start = clock()
     deadline = None if timeout.seconds is None else start + timeout.seconds
     due = [start + h.seconds for h in heartbeats]
     while True:
         until = min(due, default=None) if deadline is None else min([deadline, *due])
-        wait = None if until is None else max(0.0, until - time.monotonic())
+        wait = None if until is None else max(0.0, until - clock())
         with interruptible():
             worker.join(wait)
         if not worker.is_alive():
             break
-        now = time.monotonic()
+        now = clock()
         if deadline is not None and now >= deadline:
             raise TimeoutExpired(timeout, pending)
         for i, heartbeat in enumerate(heartbeats):
             if now >= due[i]:
                 heartbeat.tick()
-                due[i] += heartbeat.seconds
+                due[i] = now + heartbeat.seconds
     if slot.exc is not None:
         raise slot.exc
     return slot.result  # type: ignore[return-value]
