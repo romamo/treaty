@@ -390,18 +390,21 @@ def _command_at(
 
 def bind_values(argv: list[str], known: Mapping[CommandPath, Command]) -> list[str]:
     """``--flag -h`` as ``--flag=-h`` when the command's own ``--flag`` takes a value, so
-    ``split_globals`` reads the value as the flag's, not as ``--help`` (REQ-F-079)"""
+    ``split_globals`` reads the value as the flag's, not as ``--help`` (REQ-F-079); a short
+    ``-s -v`` as ``--say=-v``, since a short flag takes no ``=``"""
     command, i = _command_at(argv, known)
     if command is None:
         return argv
     bound = list(argv)
     while i < len(bound) and bound[i] != "--":
         tok = bound[i]
-        if not tok.startswith("--") or _global(tok) or not _takes_value(command, tok):
+        if not tok.startswith("-") or _global(tok) or not _takes_value(command, tok):
             i += 1
             continue
         if i + 1 < len(bound) and _global(bound[i + 1]):
-            bound[i : i + 2] = [f"{tok}={bound[i + 1]}"]
+            short = None if tok.startswith("--") else command.field_by_short(tok[1:])
+            long = tok if short is None else f"--{short.flag}"
+            bound[i : i + 2] = [f"{long}={bound[i + 1]}"]
             i += 1
         else:
             i += 2

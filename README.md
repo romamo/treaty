@@ -227,8 +227,8 @@ rest of `RESERVED_GLOBAL` in `_framework.py`) cannot be field names either: regi
 refuses a field that would never reach the handler. A name reserved before its feature
 lands exits `2` with `RESERVED_FLAG` when passed; every reserved name is implemented today.
 The short `-v` (`--verbose`, and `-vv` for `--debug`) is not reserved: a command may still
-declare `short="v"` and keeps it (see [Logging and verbosity](#logging-and-verbosity)). Every other flag,
-including `--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`,
+declare `short="v"` and keeps it (see [Logging and verbosity](#logging-and-verbosity)).
+Every other flag, including `--timeout`, `--confirm-destructive`, `--idempotency-key`, and `--raw-payload`,
 belongs to a command and goes after the full command path:
 
 ```bash
