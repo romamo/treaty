@@ -1,5 +1,6 @@
 import io
 import json
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Ctx, Flag, NoArgs, Timeout
+from treaty import App, Ctx, Flag, NoArgs, RegistrationError, Timeout
 from treaty._timeout import Heartbeat, TimeoutExpired, call_with_timeout
 
 
@@ -101,6 +102,114 @@ def test_exec_line_honors_timeout_override() -> None:
     code = app.run(["exec"], stdin=stdin, stdout=out, stderr=io.StringIO(), env={}, isatty=False)
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert code == 1 and lines[0]["ok"] is True and lines[1]["error"]["code"] == "TIMEOUT"
+
+
+def unbounded_app() -> App:
+    """``play`` and ``child`` run unbounded and ``long`` longer than the default, all
+    mutating and none on the network; ``short`` declares a limit under the default"""
+    app = App("checks", version="1.0.0", default_timeout=30)
+
+    @app.command(
+        "play", description="Run a playbook", timeout=None, danger_level="mutating", exit_codes=()
+    )
+    def play(args: SleepArgs, ctx: Ctx) -> dict[str, object]:
+        time.sleep(args.seconds)
+        return {"effect": "noop", "timeout_s": ctx.timeout.seconds, "remaining": ctx.remaining}
+
+    @app.command(
+        "long", description="Run long", timeout=600, danger_level="mutating", exit_codes=()
+    )
+    def long(args: SleepArgs, ctx: Ctx) -> dict[str, object]:
+        return {"effect": "noop", "timeout_s": ctx.timeout.seconds}
+
+    @app.command(
+        "short", description="Run briefly", timeout=10, danger_level="mutating", exit_codes=()
+    )
+    def short(args: SleepArgs, ctx: Ctx) -> dict[str, object]:
+        return {"effect": "noop", "timeout_s": ctx.timeout.seconds}
+
+    @app.command(
+        "child", description="Run a child", timeout=None, danger_level="mutating", exit_codes=()
+    )
+    def child(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        ctx.run([sys.executable, "-c", "import time; time.sleep(5)"])
+        return {"effect": "noop"}
+
+    return app
+
+
+def test_an_unbounded_command_takes_timeout_and_ends_in_timeout() -> None:
+    """Issue 69: timeout=None let no caller bound one run; --timeout is its deadline"""
+    code, env = run_json(unbounded_app(), ["play", "--seconds", "5", "--timeout", "0.2"])
+    assert code == 10 and env["error"]["code"] == "TIMEOUT"
+    assert env["meta"]["timeout_ms"] == 200 and env["meta"]["duration_ms"] < 5000
+    code, env = run_json(unbounded_app(), ["play", "--timeout", "3"])
+    assert code == 0 and env["data"]["timeout_s"] == 3.0 and 0 < env["data"]["remaining"] <= 3
+    code, env = run_json(unbounded_app(), ["play"])
+    assert code == 0 and env["data"] == {"effect": "noop", "timeout_s": None, "remaining": None}
+
+
+def test_the_timeout_of_an_unbounded_command_stops_its_child() -> None:
+    started = time.monotonic()
+    code, env = run_json(unbounded_app(), ["child", "--timeout", "0.3"])
+    assert code == 10 and env["error"]["code"] == "TIMEOUT"
+    assert time.monotonic() - started < 4
+
+
+def test_timeout_is_offered_past_the_app_default_only() -> None:
+    code, env = run_json(unbounded_app(), ["long", "--timeout", "1"])
+    assert code == 0 and env["data"]["timeout_s"] == 1.0
+    code, env = run_json(unbounded_app(), ["short", "--timeout", "1"])
+    assert code == 2 and env["error"]["context"]["flag"] == "timeout"
+    code, env = run_json(unbounded_app(), ["play", "--timeout", "-1"])
+    assert code == 2
+
+
+def test_the_manifest_lists_timeout_on_unbounded_and_long_commands() -> None:
+    app = unbounded_app()
+    flags = {name: c["flags"] for name, c in app.manifest()["commands"].items()}
+    assert {c for c in ("play", "long", "short") if "timeout" in flags[c]} == {"play", "long"}
+    assert "proxy" not in flags["play"] and "no-proxy" not in flags["play"]
+    spec_validator("manifest-response").validate(app.manifest())
+
+
+def test_an_exec_line_bounds_an_unbounded_command() -> None:
+    out = io.StringIO()
+    stdin = io.StringIO('{"_cmd": "play", "seconds": 5, "_opts": {"timeout": 0.2}}\n')
+    app = unbounded_app()
+    code = app.run(["exec"], stdin=stdin, stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+    assert code == 1 and json.loads(out.getvalue())["error"]["code"] == "TIMEOUT"
+
+
+@dataclass(frozen=True, slots=True)
+class OwnTimeout:
+    timeout: float = Flag(default=5.0, description="Own limit")
+
+
+def test_an_unbounded_commands_own_timeout_field_keeps_the_flag() -> None:
+    """An app that had --timeout on an unbounded command keeps it: the framework's yields
+    there, and the value reaches the field, not the deadline"""
+    app = App("checks", version="1.0.0")
+
+    @app.command("wait", description="Wait", timeout=None, danger_level="safe", exit_codes=())
+    def wait(args: OwnTimeout, ctx: Ctx) -> dict[str, object]:
+        return {"own": args.timeout, "timeout_s": ctx.timeout.seconds}
+
+    code, env = run_json(app, ["wait", "--timeout", "7"])
+    assert code == 0 and env["data"] == {"own": 7.0, "timeout_s": None}
+    assert env["meta"]["timeout_ms"] is None
+    assert app.manifest()["commands"]["wait"]["flags"]["timeout"]["description"] == "Own limit"
+
+
+def test_a_timeout_field_on_a_network_command_is_still_refused() -> None:
+    app = App("checks", version="1.0.0")
+    with pytest.raises(RegistrationError, match="drop --timeout"):
+
+        @app.command(
+            "wait", description="Wait", has_network_io=True, danger_level="safe", exit_codes=()
+        )
+        def wait(args: OwnTimeout, ctx: Ctx) -> dict[str, object]:
+            return {}
 
 
 def test_call_with_timeout_reraises_handler_exception() -> None:

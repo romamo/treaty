@@ -104,7 +104,8 @@ now; the audit never sees an app that does not build:
   `--schema` (a `--schema FILE` option becomes `--schema-file`). A `-v` counter becomes the
   framework's `-v` (`--verbose`) and `-vv` (`--debug`); a command that declares its own
   `Flag(short="v")` keeps `-v` for that flag, on that command only
-- **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`. Drop your own:
+- **With `has_network_io=True`**: `--timeout`, `--proxy`, and `--no-proxy`; `--timeout`
+  alone with `timeout=None` or a timeout over the app default. Drop your own:
   the handler reads the limit as `ctx.timeout.seconds`, and `timeout=5` on
   `@app.command` keeps an old default of 5 seconds, where treaty's is 60
 - **On a command that returns a list**: `--limit` and `--cursor`, as [Page long

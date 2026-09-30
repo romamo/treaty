@@ -344,8 +344,9 @@ longer accepted anywhere; `--format human` exits `2` listing the allowed values.
 
 Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 `@app.command(..., timeout=5)` per command, and `--timeout` on any command declaring
-`has_network_io=True` and on every streaming command (`--timeout 0` disables it; at most
-one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
+`has_network_io=True`, on every streaming command, and on every command whose own
+`timeout=` is `None` or longer than the app default, so a caller can bound one run of
+long work (`--timeout 0` disables it; at most one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
 caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
 response. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to

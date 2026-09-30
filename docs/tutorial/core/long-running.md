@@ -84,7 +84,8 @@ class ImportAll(Common):
 def import_all(args: ImportAll, ctx: Ctx, store: Store) -> Batch[Imported]:
 ```
 
-Network and streaming commands also take `--timeout SECONDS` from the caller, `0` for no
+Network and streaming commands, and a command whose own timeout is `None` or longer than
+the app's, as `import-all`'s is, also take `--timeout SECONDS` from the caller, `0` for no
 limit. When the limit passes, the run exits 10 with `TIMEOUT`, and every response carries
 the limit it ran under in `meta.timeout_ms`.
 

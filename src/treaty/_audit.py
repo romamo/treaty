@@ -2136,7 +2136,7 @@ def _timeout_budget(app: App) -> Iterator[Finding]:
                 f"heartbeat=True says the command runs long, but it inherits the app's "
                 f"{timeout.seconds:g} s default timeout",
                 f"timeout=<seconds it may take> on {c.path.value}, or timeout=None to run "
-                "unbounded",
+                "unbounded; either gives callers --timeout to bound one run",
             )
 
 
@@ -2156,7 +2156,8 @@ def _explicit_timeout(app: App) -> Iterator[Finding]:
             f"a {c.danger_level.value} command inherits the app's {default:g} s default, "
             "so a run that takes longer ends in TIMEOUT with its work half done",
             f"timeout=<seconds it may really take> on {c.path.value}, or timeout=None to run "
-            f"unbounded; timeout={default:g} keeps the default as a decision",
+            "unbounded, either of which gives callers --timeout to bound one run; "
+            f"timeout={default:g} keeps the default as a decision",
         )
 
 

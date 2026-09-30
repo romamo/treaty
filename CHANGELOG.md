@@ -23,6 +23,15 @@ Apps built on treaty keep their own, structured schema changelog with
   GIL off, and the package declares `Programming Language :: Python :: Free Threading ::
   2 - Beta`. A new stress test runs `App.run` and `App.call` from several threads at
   once and checks each run gets its own envelope, log lines, and secret redaction (#74)
+- `--timeout` on every command that declares `timeout=None` or a timeout longer than the
+  app's `default_timeout`, not only on network commands and streams, so a caller can
+  bound one run of long work: `checks play --timeout 600` ends in `TIMEOUT` (exit 10)
+  after 10 minutes, and `ctx.remaining`, `ctx.run`, and `ctx.lock` count down from it.
+  It means what it does on network commands, the deadline of the whole run, in place of
+  the declared one; `0` runs unbounded. It is in the manifest, `--help`, completion, the
+  MCP `inputSchema`, and `exec`'s `_opts`. `--proxy` and `--no-proxy` stay on
+  `has_network_io=True` commands. A command with a field of its own named `timeout`
+  keeps it: the framework's flag yields there, as `-v` yields to a `short="v"` (#69)
 
 ### Fixed
 
