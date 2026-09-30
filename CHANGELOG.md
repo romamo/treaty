@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- The audit rule `stable-order` is a warning for an output array of objects with no
+  declared order, a `list[T]` result or field of dataclasses, so `treaty audit --strict`
+  fails on it: treaty sorts such an array by each item's JSON text, which silently puts
+  `"10.00"` before `"5.00"`. Declare `sort_key=` or `ordered=True` on the command, or
+  `Out(sort_key=...)` or `Out(ordered=True)` on the field. Arrays inside untyped output
+  stay advice (#38)
+
 ## [1.0.0rc3] - 2026-09-30
 
 The third 1.0 release candidate: retry backoff and the timeout audit rules, `-v` and `-vv`,

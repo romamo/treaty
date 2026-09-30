@@ -1438,13 +1438,16 @@ def _stable_order(app: App) -> Iterator[Finding]:
             )
         item = _object_items(c.output_type)
         if item is not None and c.order.sort_key is None and not c.order.ordered:
+            # A warning, not advice: sorting by JSON text silently reorders the data, such
+            # as "10.00" before "5.00", and a clean --strict audit should not allow that
             yield Finding(
                 "stable-order",
-                Severity.ADVICE,
+                Severity.WARNING,
                 c.path.value,
                 "returns an array of objects with no declared order, so treaty sorts it by "
-                "each item's JSON text (REQ-F-020)",
-                f'sort_key="{_id_like(item)}", or ordered=True if the order is a ranking',
+                "each item's JSON text, not the order the handler built (REQ-F-020)",
+                f'sort_key="{_id_like(item)}" to order it by a field, or ordered=True to keep '
+                "the handler's order",
             )
         for where, f, hint in output_fields(c.output_type):
             spec = out_spec(f)
@@ -1452,12 +1455,13 @@ def _stable_order(app: App) -> Iterator[Finding]:
             if item is not None and spec.sort_key is None and not spec.ordered:
                 yield Finding(
                     "stable-order",
-                    Severity.ADVICE,
+                    Severity.WARNING,
                     c.path.value,
                     f"output field {where} is an array of objects with no declared order, so "
-                    "treaty sorts it by each item's JSON text (REQ-F-020)",
-                    f'{f.name}: ... = treaty.Out(sort_key="{_id_like(item)}"), or '
-                    "treaty.Out(ordered=True) if the order is a ranking",
+                    "treaty sorts it by each item's JSON text, not the order the handler "
+                    "built (REQ-F-020)",
+                    f'{f.name}: ... = treaty.Out(sort_key="{_id_like(item)}") to order it by '
+                    "a field, or treaty.Out(ordered=True) to keep the handler's order",
                 )
             elif not spec.ordered and _holds_untyped(hint):
                 yield Finding(
@@ -2510,7 +2514,7 @@ RULES: tuple[Rule, ...] = (
     Rule(
         "stable-order",
         "Arrays of objects in output declare their order",
-        Severity.ADVICE,
+        Severity.WARNING,
         _stable_order,
     ),
     Rule(

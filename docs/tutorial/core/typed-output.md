@@ -103,6 +103,16 @@ Some types are refused when the app is built, each for a reason:
 and settings for how treaty writes it, such as the order of a list (`sort_key=`) or whether
 its content came from outside the tool (`external=True`), which later chapters use.
 
+A `list[X]` or `tuple[X, ...]` of dataclasses needs its order declared. treaty sorts every
+output array so `data` is the same for the same result, and without a declared order it
+sorts objects by each item's JSON text: invoice lines with amounts `"5.00"` and `"10.00"`
+come back `"10.00"` first. Declare `lines: list[Line] = Out(sort_key="line_no")` to sort by
+a field, or `Out(ordered=True)` to keep the order the handler built, for a ranking or any
+list whose order is the data. A command that returns the list itself takes the same
+`sort_key=` or `ordered=True`. The audit rule `stable-order` reports an array of objects
+with neither as a warning, so `treaty audit --strict` fails until it is declared. A list of
+scalars, such as `list[str]`, needs nothing: strings and numbers sort by value.
+
 **Check:** `add`'s schema names every field of the result, and of the item inside it
 
 <!-- check -->

@@ -88,8 +88,8 @@ $ uv run treaty audit myapp.cli:app --format plain
 Pages only make sense in a fixed order, and treaty sorts every list before it pages it.
 `sort_key="id"` on the command names the field to sort by; `ordered=True` keeps the
 handler's order instead, for a ranking. Without either, treaty sorts by each item's JSON
-text, which is stable but rarely what a caller expects, and the `stable-order` rule asks
-for a key. `todo`'s `list` sorts by `id`.
+text, which is stable but rarely what a caller expects, and the `stable-order` rule warns,
+failing `--strict`, until the list declares one or the other. `todo`'s `list` sorts by `id`.
 
 ## Step 2: Check what a cursor refuses
 
