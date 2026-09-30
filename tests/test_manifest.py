@@ -119,3 +119,72 @@ def test_schema_entry_keeps_full_exit_table(app: App) -> None:
         "141",
         "143",
     }
+
+
+def test_builtins_are_marked_and_app_commands_are_not(app: App) -> None:
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    assert manifest["schema_version"] == "3.1"
+    marked = {path for path, entry in manifest["commands"].items() if entry.get("builtin")}
+    assert marked == {p.value for p in app.builtins}
+    assert "manifest" in marked and "audit-log" in marked
+    # REQ-O-041: an application command omits the marker, which reads as false
+    assert "builtin" not in manifest["commands"]["deploy.rollback"]
+    assert "builtin" not in manifest["commands"]["deploy.status"]
+
+
+def test_a_builtins_subcommands_are_marked(app: App) -> None:
+    from treaty._manifest import build_manifest
+    from treaty._values import CommandPath
+
+    # The marker follows the registered path set, so any group's children carry it
+    group = frozenset({CommandPath("deploy.rollback"), CommandPath("deploy.status")})
+    manifest = build_manifest(
+        app.commands, app.exits, app.formats, app.name, builtins=app.builtins | group
+    )
+    spec_validator("manifest-response").validate(manifest)
+    assert manifest["commands"]["deploy.rollback"]["builtin"] is True
+    assert manifest["commands"]["deploy.status"]["builtin"] is True
+
+
+def test_an_app_command_taking_a_builtins_name_is_not_marked(app: App) -> None:
+    from treaty import Ctx, NoArgs
+
+    assert app.manifest()["commands"]["doctor"]["builtin"] is True
+
+    @app.command(
+        "doctor", description="Check the deploy targets", danger_level="safe", exit_codes=()
+    )
+    def doctor(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {"targets": "ok"}
+
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    assert manifest["commands"]["doctor"]["description"] == "Check the deploy targets"
+    assert "builtin" not in manifest["commands"]["doctor"]
+    assert manifest["commands"]["status"]["builtin"] is True
+
+
+def test_schema_of_one_command_carries_the_marker(app: App) -> None:
+    assert run_json(app, ["doctor", "--schema"])[1]["data"]["builtin"] is True
+    assert "builtin" not in run_json(app, ["deploy", "rollback", "--schema"])[1]["data"]
+    subtree = run_json(app, ["deploy", "--schema"])[1]["data"]
+    assert subtree["schema_version"] == "3.1"
+    assert not any("builtin" in entry for entry in subtree["commands"].values())
+
+
+def test_the_builtin_job_groups_commands_are_marked() -> None:
+    from treaty import App, Ctx
+    from treaty._jobs import Job
+
+    class Jobs:
+        def status(self, job_id: str, ctx: Ctx) -> Job | None:
+            return None
+
+        def cancel(self, job_id: str, ctx: Ctx) -> Job | None:
+            return None
+
+    manifest = App("x", version="1.0.0", jobs=Jobs()).manifest()
+    spec_validator("manifest-response").validate(manifest)
+    assert manifest["commands"]["job.status"]["builtin"] is True
+    assert manifest["commands"]["job.cancel"]["builtin"] is True
