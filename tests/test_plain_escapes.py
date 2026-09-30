@@ -328,3 +328,20 @@ def test_a_secret_an_escape_splits_is_redacted_once_the_escape_is_gone() -> None
         assert "hunter22" not in shown and "token [REDACTED]" in shown, err
         [warning] = json.loads(out)["warnings"]
         assert warning["context"]["text"] == "token [REDACTED]"
+
+
+def test_a_c1_osc_in_printed_text_is_not_held_past_its_line() -> None:
+    # A right double quote's UTF-8 bytes decoded as Latin-1 end in \x9d, which opens an OSC:
+    # the lines printed after it are not held and lost with it
+    app = App("probe", version="1.0.0")
+
+    @app.command("mojibake", description="Mojibake", danger_level="safe", exit_codes=())
+    def mojibake(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        print("“quoted”".encode().decode("latin-1"))
+        print("line 1")
+        print("line 2")
+        return {}
+
+    err = io.StringIO()
+    app.run(["mojibake"], stdout=io.StringIO(), stderr=err, env={}, isatty=True)
+    assert err.getvalue().endswith("line 1\nline 2\n"), err.getvalue()

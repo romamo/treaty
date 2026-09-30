@@ -1976,9 +1976,11 @@ _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 MIN_REDACTED = 4
 
 # An escape a write() ends inside of, 7-bit or C1: print() may write one in two parts, and
-# the second part, cleaned on its own, would reach stderr as text (#105)
+# the second part, cleaned on its own, would reach stderr as text (#105). An OSC is held
+# only within its line: a stray \x9d, as in mojibake, would otherwise take the next lines
 _OPEN_ESCAPE = re.compile(
-    r"(?:\x1b(?:\][^\x07\x1b]*\x1b?|\[[0-?]*[ -/]*)?|\x9d[^\x07\x1b\x9c]*\x1b?|\x9b[0-?]*[ -/]*)\Z"
+    r"(?:\x1b(?:\][^\x07\x1b\n]*\x1b?|\[[0-?]*[ -/]*)?|\x9d[^\x07\x1b\x9c\n]*\x1b?"
+    r"|\x9b[0-?]*[ -/]*)\Z"
 )
 HELD_CAP = 4096
 """Characters of an unfinished escape held for the next write; past them it is cleaned as
