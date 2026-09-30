@@ -147,6 +147,13 @@ def test_a_marked_non_boolean_fails_registration() -> None:
             return Played("updated")
 
 
+@pytest.mark.parametrize("marker", ["no", 1, None])
+def test_a_non_bool_marker_fails_at_flag(marker: object) -> None:
+    """A truthy string such as "no" would otherwise mark the field silently"""
+    with pytest.raises(RegistrationError, match=r"dry_run is True or False"):
+        Flag(default=False, dry_run=marker, description="Force")  # type: ignore[arg-type]
+
+
 def test_a_marked_field_beside_a_dry_run_field_fails_registration() -> None:
     @dataclass(frozen=True, slots=True)
     class Both:

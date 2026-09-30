@@ -64,6 +64,8 @@ class FlagSpec:
             raise RegistrationError("every flag needs a description")
         if not isinstance(self.audit, bool):
             raise RegistrationError(f"audit is True or False, not {self.audit!r}")
+        if not isinstance(self.dry_run, bool):
+            raise RegistrationError(f"dry_run is True or False, not {self.dry_run!r}")
         if self.pattern_type is not None and self.pattern_type not in PATTERN_TYPES:
             raise RegistrationError(
                 f"pattern_type={self.pattern_type!r} is not one of "
