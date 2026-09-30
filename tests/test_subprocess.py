@@ -20,7 +20,7 @@ from conftest import WINDOWS, needs_posix_signals, spec_validator
 from treaty import App, CliExit, Ctx, Flag, NoArgs, RegistrationError, Timeout
 from treaty._mode import is_headless, quiet_children
 from treaty._signals import Cancelled, CancelSignal
-from treaty._subprocess import Processes
+from treaty._subprocess import LINE_BYTES, Processes
 from treaty._values import CommandPath
 
 pytestmark = pytest.mark.skipif(WINDOWS, reason="the children are /bin/sh commands")
@@ -600,3 +600,215 @@ def test_sigpipe_of_an_upstream_stage_is_not_a_failure() -> None:
 def test_a_program_name_keeps_its_case_in_the_message() -> None:
     code, env = run_argv("sh", "-c", "exit 3")
     assert error_of(env)["message"] == "`sh` exited with 3"
+
+
+# ctx.run(stream=True): a long child's lines as they arrive (#61)
+
+
+@dataclass(frozen=True, slots=True)
+class Streamed:
+    argv: tuple[str, ...] = Flag(default=(), description="The program and its arguments")
+    stdin: str | None = Flag(default=None, description="Text for the child's stdin", multiline=True)
+    token: str | None = Flag(default=None, description="A credential the child receives")
+
+
+def stream_app() -> App:
+    app = App("streams", version="1.0.0")
+
+    @app.command("follow", description="Stream argv", danger_level="safe", exit_codes=())
+    def follow(args: Streamed, ctx: Ctx) -> dict[str, object]:
+        done = ctx.run(list(args.argv), input=args.stdin, stream=True)
+        return {"stdout": done.stdout, "stderr": done.stderr}
+
+    return app
+
+
+STREAMS = stream_app()
+
+
+class Watched(io.StringIO):
+    """The run's stderr: calls ``on_write`` with each write as it happens"""
+
+    def __init__(self, on_write: object = None) -> None:
+        super().__init__()
+        self.on_write = on_write
+
+    def write(self, text: str) -> int:
+        if callable(self.on_write):
+            self.on_write(text)
+        return super().write(text)
+
+
+def stream(
+    argv: list[str], *extra: str, err: io.StringIO | None = None, isatty: bool = False, **env: str
+) -> tuple[int, dict[str, object], str]:
+    out, err = io.StringIO(), err if err is not None else io.StringIO()
+    code = STREAMS.run(
+        ["follow", *flags(argv), *extra, "--format", "json"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env={**BASE_ENV, **env},
+        isatty=isatty,
+    )
+    return code, json.loads(out.getvalue()), err.getvalue()
+
+
+def logged(err: str) -> list[str]:
+    return [json.loads(line)["message"] for line in err.splitlines()]
+
+
+def test_a_streamed_line_reaches_stderr_before_the_child_exits(tmp_path: Path) -> None:
+    go = tmp_path / "go"
+    # The child waits for the file the first line's echo creates: without streaming it
+    # would never see it, and gives up after 10 seconds
+    script = (
+        'echo first; i=0; while [ ! -e "$1" ]; do sleep 0.01; i=$((i+1)); '
+        "[ $i -gt 1000 ] && { echo late; exit 1; }; done; echo second >&2"
+    )
+    err = Watched(lambda text: "first" in text and go.touch())
+    code, envelope, text = stream(["sh", "-c", script, "_", str(go)], "--verbose", err=err)
+    assert code == 0, envelope
+    assert logged(text) == ["first", "second"]
+    assert envelope["data"] == {"stdout": "first\n", "stderr": "second\n"}
+
+
+def test_streamed_lines_show_where_ctx_log_does() -> None:
+    script = "echo out; echo err >&2"
+    code, envelope, text = stream(["sh", "-c", script])
+    assert code == 0 and text == ""  # off a terminal: errors only, as ctx.log
+    code, _, text = stream(["sh", "-c", script], isatty=True)
+    assert code == 0 and sorted(logged(text)) == ["err", "out"]
+
+
+def test_a_streamed_child_keeps_only_the_tail_of_a_large_output() -> None:
+    lines: list[str] = []
+    done = Processes(
+        BASE_ENV, deadline=None, headless=True, browser_open=False, echo=lines.append
+    ).run(["sh", "-c", "seq 1 30000; seq 1 20000 >&2"], stream=True)
+    # Every line is echoed, the two pipes interleaved
+    assert len(lines) == 50000 and {"30000", "20000"} <= set(lines)
+    assert len(done.stdout) == 4096 and done.stdout.endswith("\n29999\n30000\n")
+    assert len(done.stderr) == 4096 and done.stderr.endswith("\n19999\n20000\n")
+
+
+def test_a_failed_streamed_child_puts_its_stderr_tail_in_the_error() -> None:
+    code, envelope, _ = stream(["sh", "-c", "seq 1 20000 >&2; exit 3"])
+    assert code == 1 and error_of(envelope)["code"] == "SUBPROCESS_FAILED"
+    tail = error_of(envelope)["context"]["stderr"]  # type: ignore[index]
+    assert len(tail) == 4096 and tail.endswith("\n20000\n")
+
+
+def test_a_secret_in_a_streamed_line_is_redacted() -> None:
+    script = 'echo "using token $1"'
+    out, err = io.StringIO(), io.StringIO()
+    app = App("leaky", version="1.0.0")
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: SecretArg, ctx: Ctx) -> dict[str, object]:
+        ctx.run(["sh", "-c", script, "_", args.token], stream=True)
+        return {}
+
+    code = app.run(
+        ["x", "--token-from-env", "LEAKY_TOKEN", "--verbose", "--format", "json"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env={**BASE_ENV, "LEAKY_TOKEN": "hunter2-secret"},
+    )
+    assert code == 0 and "hunter2-secret" not in err.getvalue() + out.getvalue()
+    assert logged(err.getvalue()) == ["using token [REDACTED]"]
+
+
+def test_a_streamed_child_reads_its_input() -> None:
+    code, envelope, text = stream(["cat"], "--stdin", "a\nb\n", "--verbose")
+    assert code == 0 and logged(text) == ["a", "b"]
+    assert envelope["data"] == {"stdout": "a\nb\n", "stderr": ""}
+
+
+def test_a_streamed_child_that_runs_past_its_timeout_is_stopped() -> None:
+    lines: list[str] = []
+    procs = Processes(BASE_ENV, deadline=None, headless=True, browser_open=False, echo=lines.append)
+    started = time.monotonic()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(CliExit) as stopped:
+            procs.run(["sh", "-c", "echo hi; exec sleep 30"], timeout=Timeout(0.5), stream=True)
+        gc.collect()
+    assert stopped.value.name.value == "TIMEOUT" and time.monotonic() - started < 5
+    assert stopped.value.message.startswith("`sh` ran past")
+    assert lines == ["hi"] and not procs.tracked
+    assert not [w for w in caught if issubclass(w.category, ResourceWarning)]
+
+
+def test_a_streamed_child_under_app_call_logs_at_info_and_keeps_stdout_clean(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    envelope = STREAMS.call("follow", {"argv": ["sh", "-c", "echo out; echo err >&2"]})
+    captured = capsys.readouterr()
+    # App.call runs off a terminal: ctx.log's INFO lines, these too, are not written
+    assert captured.out == "" and captured.err == ""
+    assert envelope.ok and envelope.data == {"stdout": "out\n", "stderr": "err\n"}
+
+
+def test_the_command_deadline_stops_a_streamed_child(tmp_path: Path) -> None:
+    app = App("deadline", version="1.0.0", default_timeout=0.5)
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def x(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        script = f'echo $$ > "{tmp_path / "pid"}"; echo hi; exec sleep 30'
+        ctx.run(["sh", "-c", script], stream=True)
+        return {}
+
+    started = time.monotonic()
+    code, env = call(["x"], app=app)
+    assert code == 10 and error_of(env)["code"] == "TIMEOUT"
+    assert time.monotonic() - started < 5
+    assert_gone(int((tmp_path / "pid").read_text()))
+
+
+PEM = "-----BEGIN KEY-----\nMIIEsecret-line-one\nMIIEsecret-line-two\n-----END KEY-----"
+
+
+def test_each_line_of_a_multiline_secret_is_redacted_in_a_streamed_child() -> None:
+    printer = [sys.executable, "-c", "import os; print(os.environ['PEM'])"]
+    code, _, text = stream(printer, "--token-from-env", "PEM", "--verbose", PEM=PEM)
+    assert code == 0
+    assert not [line for line in PEM.splitlines() if line in text]
+    assert logged(text) == ["[REDACTED]"] * 4
+
+
+def test_a_secret_cut_by_the_line_split_is_redacted() -> None:
+    secret = "s3cret-value-xyz"
+    # The 64 KiB split falls inside the secret: its halves arrive as two chunks
+    write = f"import sys; sys.stdout.write('a' * {LINE_BYTES - 5} + {secret!r} + '\\n')"
+    code, _, text = stream(
+        [sys.executable, "-c", write], "--token-from-env", "TOK", "--verbose", TOK=secret
+    )
+    assert code == 0
+    assert secret[:5] not in text and secret[5:] not in text
+    assert "".join(logged(text)) == "a" * (LINE_BYTES - 5) + "[REDACTED]"
+
+
+@pytest.mark.skipif(WINDOWS, reason="needs setsid; Windows stops only the child")
+def test_a_detached_grandchild_is_not_blocked_by_a_timed_out_stream(tmp_path: Path) -> None:
+    done = tmp_path / "done"
+    # The grandchild leaves the process group, so the timeout does not stop it; after
+    # the run gives up it writes more lines than the queue and the pipe hold
+    grandchild = (
+        "import os, sys, time; os.setsid(); time.sleep(3); "
+        "[print('x' * 100) for _ in range(5000)]; sys.stdout.flush(); "
+        f"open({str(done)!r}, 'w').close()"
+    )
+    lines: list[str] = []
+    procs = Processes(BASE_ENV, deadline=None, headless=True, browser_open=False, echo=lines.append)
+    with pytest.raises(CliExit):
+        procs.run(
+            ["sh", "-c", '"$1" -c "$2" & echo hi; exec sleep 30', "_", sys.executable, grandchild],
+            timeout=Timeout(0.5),
+            stream=True,
+        )
+    deadline = time.monotonic() + 15
+    while not done.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert done.exists()

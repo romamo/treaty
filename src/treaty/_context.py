@@ -241,6 +241,7 @@ class Ctx:
         env: Mapping[str, str] | None = None,
         timeout: Timeout | None = None,
         check: bool = True,
+        stream: bool = False,
     ) -> Completed:
         """Run one program from an argument list, never a shell, and capture its output
 
@@ -249,9 +250,17 @@ class Ctx:
         defaults to what is left of the command's. A non-zero exit raises
         ``SUBPROCESS_FAILED`` (exit 1) unless ``check=False``; running out of time
         stops the child and raises ``TIMEOUT``.
+
+        ``stream=True`` is for a long child: each line it writes, on stdout or stderr, is
+        a ``ctx.log`` line as it arrives, redacted and shown where ``ctx.log`` is (a
+        terminal, or ``--verbose``), and never on stdout. ``Completed.stdout`` and
+        ``stderr`` then keep only their last 4096 characters. A grandchild that left the
+        child's process group, and so outlives a timeout, keeps a reader thread and the
+        pipe it inherited open until it closes the pipe or exits; what it writes after
+        the run stopped waiting is read and dropped, so it never blocks.
         """
         return self._processes.run(
-            argv, input=input, cwd=cwd, env=env, timeout=timeout, check=check
+            argv, input=input, cwd=cwd, env=env, timeout=timeout, check=check, stream=stream
         )
 
     def pipeline(

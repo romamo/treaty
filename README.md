@@ -589,6 +589,15 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   SIGTERM to its process group, background grandchildren included, then SIGKILL after 2
   seconds, before the `CANCELLED` or `TIMEOUT` envelope is written (REQ-F-031); no child
   starts after that
+- `ctx.run(argv, stream=True)` shows a long child's progress, such as
+  `ansible-playbook` or `terraform apply`: each line it writes, on stdout or stderr, is a
+  `ctx.log` INFO line as it arrives, secrets redacted (each line of a multi-line secret
+  too, and a secret a 64 KiB line split cuts), so it shows on a terminal or with
+  `--verbose`, and never on stdout, which keeps only the envelope. Off a terminal, in
+  `App.call`, and over MCP, the lines are dropped as `ctx.log`'s are. `Completed.stdout`
+  and `stderr`, and `SUBPROCESS_FAILED`'s `context.stderr`, keep the last 4096
+  characters; the timeout, signals, locale, `input=`, and `children.pids` work as without
+  it
 - On Windows only the child itself is stopped, not its grandchildren
 
 `App.main()` writes the same pager and, off a terminal, editor and update-notifier

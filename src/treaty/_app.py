@@ -199,7 +199,7 @@ from ._protect import (
     protect_batch,
     tagged,
 )
-from ._redact import NAME_CONTEXT, OMITTED, REDACTED, redacted, scrub
+from ._redact import NAME_CONTEXT, OMITTED, REDACTED, line_fragments, redacted, scrub
 from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen, RequiresAny, RequiresOne
@@ -2777,6 +2777,7 @@ class _Run:
         child_env.update(proxies.child_env())  # REQ-O-019: children go out the same way
         # REQ-O-033: --headless opens no browser even where one could be shown
         headless = self.headless or invocation.headless
+        log = self._log_sink(command, args, mode)
         # The run's env holds TOOL_TRACE_ID, so every child inherits it (REQ-F-025)
         self.processes = Processes(
             child_env,
@@ -2787,6 +2788,10 @@ class _Run:
             background=self.background_slot(command),
             cwd=self.cwd if self.cwd_given else None,
             session=self.session_for(),
+            # ctx.run(stream=True); the secrets are read on the handler's thread, when a
+            # stream starts, since a secret scalar's serialize= is user code
+            echo=lambda line: log(Level.INFO, line, {}),
+            secrets=functools.partial(self._stream_spellings, command, args),
         )
         if not supports(command.platform, sys.platform):
             self._warn(
@@ -4633,7 +4638,24 @@ class _Run:
             self.err.write(f"{where}; recorded, but pruning expired records failed: {exc}\n")
 
     def _redactor(self, command: Command, args: object) -> Callable[[str], str]:
-        """Replace every spelling of the run's secret values, the secret arguments' and
+        """Replace every spelling of the run's secret values"""
+        ordered = sorted(self._secret_spellings(command, args), key=len, reverse=True)
+
+        def redact(text: str) -> str:
+            for spelling in ordered:
+                text = text.replace(spelling, REDACTED)
+            return text
+
+        return redact
+
+    def _stream_spellings(self, command: Command, args: object) -> set[str]:
+        """What a streamed child's lines are redacted of: every spelling, and each line of
+        a multi-line one, since the child's output is echoed a line at a time"""
+        spellings = self._secret_spellings(command, args)
+        return spellings | line_fragments(spellings, MIN_REDACTED)
+
+    def _secret_spellings(self, command: Command, args: object) -> set[str]:
+        """Every spelling of the run's secret values, the secret arguments' and
         settings': the value, its serialized form for a registered scalar, and the
         escaped form ``repr`` puts in messages"""
         spellings: set[str] = set()
@@ -4658,14 +4680,7 @@ class _Run:
             for form in forms:
                 if isinstance(form, str) and len(form) >= MIN_REDACTED:
                     spellings.update({form, repr(form)[1:-1]})
-        ordered = sorted(spellings, key=len, reverse=True)
-
-        def redact(text: str) -> str:
-            for spelling in ordered:
-                text = text.replace(spelling, REDACTED)
-            return text
-
-        return redact
+        return spellings
 
     def _output(self, command: Command) -> tuple[object, OutSpec]:
         """The type the handler's result has in the answered schema, and its order"""

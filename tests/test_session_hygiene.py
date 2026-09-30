@@ -147,6 +147,28 @@ def test_ci_set_for_libraries_does_not_turn_a_terminal_run_into_json() -> None:
     assert seen == {"CI": None}
 
 
+# ctx.run(stream=True) on every platform; the POSIX cases are in test_subprocess (#61)
+
+
+def test_a_streamed_child_echoes_each_line_and_keeps_its_output() -> None:
+    app = App("streamctl", version="1.0.0")
+    code = "import sys; print('out'); print('err', file=sys.stderr)"
+
+    @app.command("follow", description="Stream a child", danger_level="safe", exit_codes=())
+    def follow(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        done = ctx.run([sys.executable, "-c", code], stream=True)
+        return {"stdout": done.stdout, "stderr": done.stderr}
+
+    status, envelope, err = run(app, ["follow", "--verbose"])
+    assert status == 0, envelope
+    assert sorted(json.loads(line)["message"] for line in err.splitlines()) == ["err", "out"]
+    # The output is kept as the child wrote it: CRLF on Windows
+    assert {k: str(v).replace("\r\n", "\n") for k, v in data_of(envelope).items()} == {
+        "stdout": "out\n",
+        "stderr": "err\n",
+    }
+
+
 # F-066: child locale
 
 GERMAN = {"LANG": "de_DE.UTF-8", "LC_ALL": "de_DE.UTF-8"}
