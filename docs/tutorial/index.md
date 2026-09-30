@@ -35,7 +35,9 @@ wait until the audit names them:
 
 ## Before you start
 
-- Python 3.14 and [uv](https://docs.astral.sh/uv/)
+- Python 3.14 and [uv](https://docs.astral.sh/uv/); a library that supports older versions
+  keeps treaty optional, as [A CLI that ships inside a library](#a-cli-that-ships-inside-a-library)
+  shows
 - [jq](https://jqlang.org/), which every **Done when** and **Check** pipes JSON into, and
   git, which [Run other programs](core/programs.md) runs
 - On Windows, read [Platforms](../../README.md#platforms) in the README first: the checks are
@@ -44,6 +46,101 @@ wait until the audit names them:
   migrate a CLI, run `uv add treaty` in its project
 - Read [The response envelope](envelope.md) once: every chapter reads its keys, and it
   defines the terms the chapters use
+
+## A CLI that ships inside a library
+
+treaty needs Python 3.14. A standalone tool can require it too, but a library that ships its
+CLI as a console script cannot: `requires-python` covers the whole distribution, so raising
+it to 3.14 for the CLI drops 3.10 to 3.13 for every user who only imports the library. Keep
+treaty out of the library's required dependencies, in one of two ways. Decide before the
+first chapter: it changes where `uv add treaty` goes.
+
+### An optional extra
+
+Put treaty in a `cli` extra with an environment marker, and point the console script at a
+small entry module:
+
+```toml
+[project]
+name = "quotes"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+cli = ['treaty>=1.0.0rc5; python_version >= "3.14"']
+
+[project.scripts]
+quotes = "quotes._entry:main"
+```
+
+The marker lets `pip install "quotes[cli]"` succeed on every version the library supports;
+below 3.14 it installs the library alone. The script is installed either way, so the entry
+module checks both conditions before it imports treaty, and says what to do instead of
+printing a traceback. It runs on the library's oldest Python, so it uses no 3.14 syntax:
+
+```python
+import sys
+
+
+def main() -> None:
+    if sys.version_info < (3, 14):
+        sys.stderr.write("quotes: the command line needs Python 3.14 or later\n")
+        sys.exit(4)
+    try:
+        from treaty import intercept_stdout
+    except ModuleNotFoundError as exc:
+        if exc.name != "treaty":
+            raise
+        sys.stderr.write('quotes: the command line needs the cli extra: pip install "quotes[cli]"\n')
+        sys.exit(4)
+    intercept_stdout()
+    from quotes.cli import app
+
+    app.main()
+```
+
+`quotes/cli.py` holds the app, as in any chapter, and nothing in the library imports it.
+After the checks the module does what the `entry.py` of `treaty init` does: it guards stdout,
+then imports the app. The checks run before treaty, so their message is plain text on
+stderr, not an envelope; exit 4 is the number of treaty's `PRECONDITION`, a failure the
+caller has to fix before a retry can work. Installed three ways, the script answers:
+
+```bash
+$ quotes price AAPL                        # 3.12, quotes[cli]: the library alone
+quotes: the command line needs Python 3.14 or later
+$ quotes price AAPL                        # 3.14, quotes without the extra
+quotes: the command line needs the cli extra: pip install "quotes[cli]"
+$ quotes price AAPL | jq -c '.data'        # 3.14, quotes[cli]
+{"price":187.5,"symbol":"AAPL"}
+```
+
+Both refusals exit 4, and on 3.12 `import quotes` works as before.
+
+### A separate CLI distribution
+
+The other way is a second distribution, such as `quotes-cli`, that holds the app and depends
+on the library and on treaty:
+
+```toml
+[project]
+name = "quotes-cli"
+requires-python = ">=3.14"
+dependencies = ["quotes", "treaty>=1.0.0rc5"]
+
+[project.scripts]
+quotes = "quotes_cli:app.main"
+```
+
+It needs no guard: an installer on an older Python refuses `quotes-cli` outright, and the
+library's metadata does not change. Prefer it when:
+
+- Several libraries share the CLI's argument models, such as two market-data providers
+  whose `lookup` and `history` take the same arguments: one CLI distribution holds the
+  shared dataclasses and migrates once, instead of an extra in each library
+- The CLI has dependencies of its own that library users should not install
+- The CLI and the library release on different schedules
+
+Prefer the extra when one library ships one CLI, and `pip install "quotes[cli]"` should be
+all a user needs.
 
 ## Your project, or the tutorial's checks
 

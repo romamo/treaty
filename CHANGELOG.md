@@ -37,6 +37,11 @@ Apps built on treaty keep their own, structured schema changelog with
   `cli_cmd()` to handlers, `Field` to `Flag`, `model_validator` to `__post_init__` and
   `requires=`, `BaseSettings` to `App(settings=)`, and argument models shared by several
   CLIs as `kw_only` base dataclasses (#102)
+- The tutorial index says how a library that supports Python before 3.14 ships a treaty
+  CLI as a console script: treaty in a `cli` extra with a `python_version >= "3.14"`
+  marker and an entry module that exits 4 with a clear message on an older Python or
+  without the extra, or a separate `<name>-cli` distribution when several libraries share
+  the CLI's argument models (#103)
 
 ### Fixed
 

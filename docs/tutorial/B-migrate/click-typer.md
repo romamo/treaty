@@ -553,6 +553,10 @@ can guard it. Point the script at a small entry module that calls
 `treaty.intercept_stdout()` and only then imports the app, as the `entry.py` of
 `treaty init` does; the text then goes to stderr and into a `THIRD_PARTY_STDOUT` warning.
 
+A library that supports Python before 3.14 keeps treaty in an optional extra and points the
+script at an entry module that checks for it first, as [A CLI that ships inside a
+library](../index.md#a-cli-that-ships-inside-a-library) shows.
+
 Shell completion moves too. click's `_TODO_COMPLETE=bash_source todo` and typer's
 `--install-completion` are replaced by the `completion` built-in, which generates the script
 from the manifest: `source <(todo completion bash --format plain)`.
