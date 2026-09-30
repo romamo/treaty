@@ -41,6 +41,20 @@ the dated section, both compare links, and nothing left under Unreleased. No ope
 be labelled `release-blocker`. Run the same check before tagging:
 `uv run --no-project python .github/scripts/release_check.py --tag vX --check-blockers`.
 
+The release bot (`.github/workflows/release-bot.yml`) can cut releases instead of a person. It
+runs every Monday, and on demand from the Actions tab. `.github/release-policy.toml` says
+when:
+- entries are under Unreleased
+- at least `min_days_between` days have passed since the latest release
+- no `release-blocker` issue is open
+
+It also says which version comes next. A pre-release goes to the next pre-release, and a
+stable version bumps by the largest CHANGELOG heading; the bot never goes from a pre-release
+to its stable version. `.github/scripts/release_prepare.py` writes the release commit, and the
+bot runs CI on it, lands it on main if main hasn't moved, tags it, and starts `publish.yml`.
+The policy's `mode` is `dry-run` until someone sets it to `release`: in dry-run the bot only
+shows the release commit it would make, in the run's summary.
+
 Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
 
 - Finish the cloudfall port and port a second, read-heavy CLI (pagination, streaming).

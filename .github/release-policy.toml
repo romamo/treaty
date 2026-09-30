@@ -1,0 +1,40 @@
+# The release bot (.github/workflows/release-bot.yml) reads this file on every run. It cuts
+# a release only when every rule here allows one, and publish.yml's release-check job still
+# gates the upload.
+
+# "off": the bot does nothing
+# "dry-run": plan and build the release commit in CI, show the diff, push nothing
+# "release": land the commit on main, tag it, and start publish.yml
+mode = "dry-run"
+
+# Days to wait after the latest release, counted from its CHANGELOG date
+min_days_between = 7
+
+# How each CHANGELOG heading under Unreleased bumps a stable version. A heading not listed
+# stops the bot. While the version is a pre-release, such as 1.0.0rc5, every release is the
+# next pre-release (rc6). The bot never goes from a pre-release to its stable version
+# (1.0.0): that is a person's decision.
+[bump]
+major = ["Breaking"]
+minor = ["Added", "Changed", "Deprecated", "Removed"]
+patch = ["Fixed", "Security"]
+
+# Lines the release commit rewrites besides pyproject.toml, uv.lock, and CHANGELOG.md. Each
+# pattern must match exactly once in its file. The replacement can use {version} (1.0.0rc6),
+# {semver} (1.0.0-rc.6), {date} (2026-10-05), and {pre} (rc6). Set `when = "prerelease"`
+# for a line that exists only before 1.0.0.
+[[version_lines]]
+file = "AGENTS.md"
+pattern = '<!-- cli-version: \S+ -->'
+replace = "<!-- cli-version: {semver} -->"
+
+[[version_lines]]
+file = "ROADMAP.md"
+pattern = "(?<=`framework_version` is treaty's version\\. ).*?(?= Open:)"
+replace = "The latest release is `{version}`, tagged {date}."
+
+[[version_lines]]
+file = "plans/1.0/15-release-readiness.md"
+pattern = 'Soak the release candidate \(rc\d+, \d{4}-\d\d-\d\d\)'
+replace = "Soak the release candidate ({pre}, {date})"
+when = "prerelease"
