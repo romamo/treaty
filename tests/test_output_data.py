@@ -15,8 +15,9 @@ import pytest
 from conftest import spec_validator
 
 from treaty import App, Binary, Ctx, Flag, NoArgs, Out, RegistrationError
-from treaty._audit import audit
+from treaty._audit import Severity, audit
 from treaty._cap import MARKER, MIN_BYTES
+from treaty._cli import BLOCKING
 from treaty._mcp import call_tool, tool_entries
 from treaty._plain import render_plain
 
@@ -271,6 +272,56 @@ def test_stable_order_rule_suggests_a_key_for_undeclared_object_arrays() -> None
     assert fixes[0].startswith('sort_key="id"')
     assert fixes[1].startswith('members: ... = treaty.Out(sort_key="id")')
     assert findings(tagged_app(), "stable-order") == []
+
+
+@dataclass(frozen=True, slots=True)
+class Line:
+    line_no: int
+    amount: str
+
+
+def invoice_app(**declare: object) -> App:
+    """An invoice whose lines are an array of objects, as a field and as the result (#38)"""
+
+    @dataclass(frozen=True, slots=True)
+    class Invoice:
+        lines: list[Line] = Out(**declare)  # type: ignore[arg-type]
+
+    app = App("billing", version="1.0.0")
+
+    @app.command("invoice", description="invoice", danger_level="safe", exit_codes=())
+    def invoice(args: NoArgs, ctx: Ctx) -> Invoice:
+        return Invoice([Line(1, "5.00"), Line(2, "10.00")])
+
+    @app.command(
+        "lines", description="lines", danger_level="safe", exit_codes=(), paginated=False, **declare
+    )
+    def lines(args: NoArgs, ctx: Ctx) -> list[Line]:
+        return [Line(1, "5.00"), Line(2, "10.00")]
+
+    return app
+
+
+def test_undeclared_object_array_order_fails_strict() -> None:
+    _, env = run(invoice_app(), ["invoice"])
+    # Sorted by JSON text, the handler's second line comes first
+    assert [line["amount"] for line in env["data"]["lines"]] == ["10.00", "5.00"]
+    found = findings(invoice_app(), "stable-order")
+    assert [(f.command, f.severity) for f in found] == [
+        ("invoice", Severity.WARNING),
+        ("lines", Severity.WARNING),
+    ]
+    assert all(f.severity in BLOCKING for f in found)
+    assert 'treaty.Out(sort_key="line_no")' in found[0].fix
+    assert "treaty.Out(ordered=True)" in found[0].fix
+    assert 'sort_key="line_no"' in found[1].fix and "ordered=True" in found[1].fix
+
+
+@pytest.mark.parametrize("declare", [{"sort_key": "line_no"}, {"ordered": True}])
+def test_declared_object_array_order_passes_strict(declare: dict[str, object]) -> None:
+    assert findings(invoice_app(**declare), "stable-order") == []
+    _, env = run(invoice_app(**declare), ["invoice"])
+    assert [line["amount"] for line in env["data"]["lines"]] == ["5.00", "10.00"]
 
 
 POSTINGS = [{"account": "Expenses:Food"}, {"account": "Assets:Cash"}]
