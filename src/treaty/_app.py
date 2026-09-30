@@ -2309,7 +2309,10 @@ class _Records(logging.Handler):
         replaced"""
         with self._guard:
             if any(not worker.is_alive() for worker, _ in self._workers):
-                self._changed()
+                # Not leaving the root here: an emit holds this handler's lock, and
+                # removeHandler takes logging's module lock, the reverse of dictConfig's
+                # order; the next attach, detach, hold, or forget leaves it
+                self._release()
             redactors = self._redactors
         for redact in redactors:
             text = redact(text)
@@ -2319,10 +2322,15 @@ class _Records(logging.Handler):
         """Release the ended handler threads' secrets, rebuild the redactors, and leave
         the root logger once no run is attached and no held thread lives; the caller holds
         the guard"""
-        self._workers = [(w, r) for w, r in self._workers if w.is_alive()]
-        self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r in self._workers))
+        self._release()
         if not self._runs and not self._workers:
             logging.getLogger().removeHandler(self)
+
+    def _release(self) -> None:
+        """Release the ended handler threads' secrets and rebuild the redactors; the
+        caller holds the guard"""
+        self._workers = [(w, r) for w, r in self._workers if w.is_alive()]
+        self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r in self._workers))
 
 
 _RECORDS = _Records()

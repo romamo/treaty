@@ -530,6 +530,47 @@ def test_a_handler_that_logs_after_its_app_call_returned_leaks_no_secret(
     assert proc.stderr.splitlines() == written, proc.stderr
 
 
+def test_a_record_written_as_last_resort_never_takes_the_logging_module_lock() -> None:
+    """A record written where ``logging.lastResort`` would, with a held thread ended
+    unforgotten, as when its ``hold`` came after its ``forget``: emitting holds the
+    handler's lock, and leaving the root logger there would take logging's module lock,
+    the reverse of ``logging.config.dictConfig``'s order, which deadlocks it. A
+    subprocess, since pytest's own capture handlers sit on the root logger"""
+    script = (
+        "import logging, threading\n"
+        "from treaty._app import _RECORDS\n"
+        "def write(record):\n"
+        "    pass\n"
+        "release = threading.Event()\n"
+        "worker = threading.Thread(target=release.wait)\n"
+        "worker.start()\n"
+        "_RECORDS.attach(write, lambda text: text, None)\n"
+        "_RECORDS.hold(worker, lambda text: text)\n"
+        "_RECORDS.detach(write)\n"
+        "release.set()\n"
+        "worker.join()\n"
+        "late = logging.getLogger('somelib')\n"
+        "late.isEnabledFor(logging.WARNING)  # its level cached, which takes the lock\n"
+        "with logging._lock:  # dictConfig's order: the module lock, then each handler's\n"
+        "    emitting = threading.Thread(target=late.warning, args=('late',), daemon=True)\n"
+        "    emitting.start()\n"
+        "    emitting.join(timeout=10)\n"
+        "    print(emitting.is_alive())\n"
+    )
+    env = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == ["False"], proc.stdout
+    assert proc.stderr.splitlines() == ["late"], proc.stderr
+
+
 def test_concurrent_calls_redact_each_others_secrets_in_library_records(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
