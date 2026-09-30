@@ -10,6 +10,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc5] - 2026-09-30
+
+The fifth 1.0 release candidate: fixes to rc4's `stable-order` warning and `Decimal`
+arguments. The warning now also covers object arrays nested in a list, tuple, or dict,
+so `treaty audit --strict` can fail where rc4 passed.
+
 ### Fixed
 
 - The audit rule `stable-order` warns about an array of objects nested in a list, tuple, or
@@ -630,7 +636,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc4...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc5...HEAD
+[1.0.0rc5]: https://github.com/romamo/treaty/compare/v1.0.0rc4...v1.0.0rc5
 [1.0.0rc4]: https://github.com/romamo/treaty/compare/v1.0.0rc3...v1.0.0rc4
 [1.0.0rc3]: https://github.com/romamo/treaty/compare/v1.0.0rc2...v1.0.0rc3
 [1.0.0rc2]: https://github.com/romamo/treaty/compare/v1.0.0rc1...v1.0.0rc2
