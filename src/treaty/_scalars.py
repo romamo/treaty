@@ -12,6 +12,7 @@ import dataclasses
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -173,3 +174,29 @@ class ScalarRegistry:
 
 EMPTY = ScalarRegistry()
 """Shared registry for callers that never see custom scalars"""
+
+DECIMAL_TEXT = r"-?[0-9]+(\.[0-9]+)?"
+"""Fixed-point text, the one form a ``Decimal`` travels in: no exponent, NaN, or Infinity"""
+DECIMAL_HINT = "pass a fixed-point number such as 12.30, with no exponent, NaN, or comma"
+
+
+def _parse_decimal(text: str) -> Decimal:
+    """Text ``DECIMAL_TEXT`` matched; ``-0`` and ``-0.00`` are zero, so a handler never
+    sees a signed zero. The scale is kept: ``12.30`` stays ``12.30``"""
+    value = Decimal(text)
+    return value.copy_abs() if value.is_zero() else value
+
+
+def _serialize_decimal(value: Decimal) -> str:
+    return format(value, "f")
+
+
+DECIMAL = ScalarSpec(
+    cls=Decimal,
+    parse=_parse_decimal,
+    serialize=_serialize_decimal,
+    base=str,
+    pattern=DECIMAL_TEXT,
+)
+"""``Decimal`` arguments, built in: a string on every route, parsed without a float. An
+app's own ``app.scalar(Decimal, ...)`` is found first and replaces it"""

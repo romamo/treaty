@@ -17,6 +17,8 @@ from ._errors import ParseError, RegistrationError
 from ._paths import PATTERN_TYPE, check_path
 from ._redact import REDACTED, secret_name
 from ._scalars import (
+    DECIMAL,
+    DECIMAL_HINT,
     PATTERN_TYPES,
     PRESET_PATTERNS,
     ScalarRegistry,
@@ -383,6 +385,12 @@ def apply_scalar(
     violation = spec.violation(base_value)
     if violation is not None:
         problem, detail = violation
+        if spec is DECIMAL:
+            raise ParseError(
+                f"value for {flag!r} is not a fixed-point decimal",
+                context={**ctx, **detail},
+                suggestion=DECIMAL_HINT,
+            )
         raise ParseError(f"value for {flag!r} {problem}", context={**ctx, **detail})
     try:
         return spec.parse(base_value)
@@ -498,6 +506,8 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
             raise RegistrationError(
                 f"{where}: default {default!r} is not a {target.scalar.cls.__qualname__}"
             )
+        if target.scalar is DECIMAL and target.scalar.violation(format(default, "f")):
+            raise RegistrationError(f"{where}: default {default!r} is not a finite decimal")
         return default
     match target.flag_type:
         case FlagType.ARRAY:

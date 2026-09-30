@@ -28,7 +28,7 @@ from typing import Any
 from ._errors import RegistrationError, SchemaError
 from ._out import Binary, out_spec
 from ._redact import secret_field
-from ._scalars import ScalarRegistry
+from ._scalars import DECIMAL_TEXT, ScalarRegistry
 from ._types import is_dataclass_type, resolve_alias, strip_optional
 
 JsonSchema = dict[str, Any]
@@ -113,10 +113,11 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
             return {"type": "string"}
         if base in _TEMPORAL:
             return {"type": "string", "format": _TEMPORAL[base]}
-        if base is Decimal:
-            return {"type": "string", "pattern": DECIMAL_PATTERN}
         if (spec := scalars.get(base)) is not None:
+            # Before the built-ins it may replace, such as Decimal, as serialization is
             return spec.json_schema()
+        if base is Decimal:
+            return {"type": "string", "pattern": DECIMAL_PATTERN, "format": "decimal"}
         if issubclass(base, Enum):
             return _enum_schema(base)
         if dataclasses.is_dataclass(base):
@@ -126,8 +127,9 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
 
 # REQ-F-005: dates and times travel as ISO 8601 text, keyed by exact class
 _TEMPORAL: dict[object, str] = {dt.datetime: "date-time", dt.date: "date", dt.time: "time"}
-# A Decimal is written as fixed-point text, so no float rounding touches it
-DECIMAL_PATTERN = r"^-?[0-9]+(\.[0-9]+)?$"
+# A Decimal is written and read as fixed-point text, so no float rounding touches it; an
+# argument and an output field share one schema
+DECIMAL_PATTERN = f"^{DECIMAL_TEXT}$"
 
 
 def _temporal(value: dt.date | dt.time) -> str:

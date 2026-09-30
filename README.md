@@ -934,6 +934,21 @@ patterns of REQ-F-045 with exit `2`: any `..` segment, a percent-encoded sequenc
 `Path` in `data` is absolute: a relative one is joined to `meta.cwd`, without resolving
 symlinks, so `Path("./src/.toolrc")` is written `/project/src/.toolrc`.
 
+## Decimals
+
+A field annotated `decimal.Decimal` (or `Decimal | None`, `tuple[Decimal, ...]`) reaches the
+handler as a `Decimal` parsed from fixed-point text, never through a float, so `--amount
+12.30` is `Decimal("12.30")` and is written back as `"12.30"`. The text is an optional `-`,
+digits, and an optional fraction: `1e3`, `NaN`, `Infinity`, `.5`, `+1`, and `1,5` exit `2`
+naming the flag. `-0` and `-0.00` are zero, so a handler never sees a signed zero. In
+`exec` lines and `--raw-payload` the value is a JSON string, or a JSON number read from the
+digits as written: `{"amount": 12.30}` is `Decimal("12.30")`. A float from anywhere else,
+such as an MCP client's arguments or `app.call(...)`, is refused, since it may already have
+lost digits; send a string. Arguments and output share one schema, `{"type": "string",
+"pattern": "^-?[0-9]+(\\.[0-9]+)?$", "format": "decimal"}`, and the manifest lists the flag
+as a `string` with that `pattern`. An app that registers `app.scalar(Decimal, ...)` gets its
+own parsing and schema instead.
+
 ## Custom scalars
 
 A domain class can annotate a field or an output attribute once the app knows how to parse
