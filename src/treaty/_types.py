@@ -6,7 +6,9 @@ which annotations are supported.
 
 from __future__ import annotations
 
+import annotationlib
 import dataclasses
+import inspect
 import types
 import typing
 from dataclasses import dataclass
@@ -14,7 +16,7 @@ from decimal import Decimal
 from enum import Enum, StrEnum
 from pathlib import Path
 
-from ._errors import SchemaError
+from ._errors import RegistrationError, SchemaError
 from ._scalars import DECIMAL, ScalarRegistry, ScalarSpec
 
 
@@ -49,6 +51,53 @@ class Classified:
     """A ``pathlib.Path`` string: hardened against traversal and encoded bytes"""
     scalar: ScalarSpec | None = None
     """A registered custom scalar: parsed through its spec after the base type"""
+
+
+def type_hints(obj: object) -> dict[str, typing.Any]:
+    """``typing.get_type_hints``, but an annotation naming what is not defined at runtime,
+    such as a class imported only under ``TYPE_CHECKING`` (annotations are lazy, so the
+    module still imports), is a RegistrationError that lists every such name"""
+    try:
+        return typing.get_type_hints(obj)
+    except NameError as exc:
+        lazy = typing.get_type_hints(obj, format=annotationlib.Format.FORWARDREF)
+        owner = getattr(obj, "__qualname__", repr(obj))
+        entries: list[str] = []
+        names: set[str] = set()
+        for key, tp in lazy.items():
+            undefined = list(dict.fromkeys(_undefined(tp)))
+            if not undefined:
+                continue
+            names.update(undefined)
+            if isinstance(obj, type):
+                label = f"{owner}.{key}"
+            else:
+                label = f"{owner}: " + ("the return" if key == "return" else f"parameter {key}")
+            entries.append(f"{label} names {', '.join(undefined)}")
+        if not entries:
+            entries.append(f"{owner}: an annotation names {exc.name}")
+            names.add(str(exc.name))
+        which = "that name is" if len(names) == 1 else "those names are"
+        pronoun = "it" if len(names) == 1 else "them"
+        raise RegistrationError(
+            f"{'; '.join(entries)}; {which} not defined at runtime: import {pronoun} outside "
+            "TYPE_CHECKING, since treaty reads annotations at registration to build the manifest"
+        ) from None
+
+
+def signature(fn: typing.Callable[..., object]) -> inspect.Signature:
+    """``inspect.signature`` for parameter names and kinds, which leaves the annotations
+    unevaluated, so ``type_hints`` is where an undefined name is reported"""
+    return inspect.signature(fn, annotation_format=annotationlib.Format.FORWARDREF)
+
+
+def _undefined(tp: object) -> typing.Iterator[str]:
+    """The names a ``FORWARDREF``-format annotation could not resolve, nested ones too"""
+    if isinstance(tp, annotationlib.ForwardRef):
+        yield tp.__forward_arg__
+        return
+    for arg in typing.get_args(tp):
+        yield from _undefined(arg)
 
 
 def resolve_alias(tp: object) -> object:

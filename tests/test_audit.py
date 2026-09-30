@@ -1570,11 +1570,36 @@ class Args:
 def plot(args: Args, ctx: Ctx) -> dict[str, str]:
     return {}
 """,
+    "undefined_annotation": """from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from treaty import App, Arg, Ctx
+
+if TYPE_CHECKING:
+    from decimal import Decimal
+
+app = App("spike", version="1.0.0")
+
+
+@dataclass(frozen=True)
+class Args:
+    amount: Decimal = Arg(description="Amount")
+
+
+@app.command("pay", description="Pay", danger_level="safe", exit_codes=())
+def pay(args: Args, ctx: Ctx) -> dict[str, str]:
+    return {}
+""",
 }
 
 
 @pytest.mark.parametrize(
-    ("module", "said"), [("bad_version", "App spike"), ("bad_annotation", "plot: ")]
+    ("module", "said"),
+    [
+        ("bad_version", "App spike"),
+        ("bad_annotation", "plot: "),
+        ("undefined_annotation", "Args.amount names Decimal"),
+    ],
 )
 @pytest.mark.parametrize(
     "command", ["audit", "schema-lock", "changelog-add", "agents-md", "check-docs", "conformance"]

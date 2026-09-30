@@ -44,7 +44,14 @@ from ._scan import (
     resolve_name,
     source_tree,
 )
-from ._types import FlagType, is_dataclass_type, resolve_alias, strip_optional
+from ._types import (
+    FlagType,
+    is_dataclass_type,
+    resolve_alias,
+    signature,
+    strip_optional,
+    type_hints,
+)
 from ._values import InvalidValue, SchemaVersion
 
 if TYPE_CHECKING:
@@ -758,7 +765,7 @@ _TREE_CALLS = frozenset(
 def traversal_calls(handler: Callable[..., object]) -> list[str]:
     """Recursive walks in the handler's source that ``ctx.walk`` would protect from a
     circular symlink and a runaway depth (REQ-F-061, heuristic)"""
-    params = list(inspect.signature(handler).parameters)
+    params = list(signature(handler).parameters)
     return _traversals(handler, params[1] if len(params) > 1 else None)
 
 
@@ -1353,7 +1360,7 @@ def output_fields(
     if not is_dataclass_type(base) or base in seen:
         return
     assert isinstance(base, type)
-    hints = typing.get_type_hints(base)
+    hints = type_hints(base)
     for f in dataclasses.fields(base):
         path = f"{where}.{f.name}" if where else f.name
         yield path, f, hints[f.name]
@@ -1392,7 +1399,7 @@ def _inner_object_arrays(tp: object) -> Iterator[type]:
 def _id_like(cls: type) -> str | None:
     """The field an array of ``cls`` is most likely keyed by, of those a ``sort_key``
     can name; None when no field can be one"""
-    hints = typing.get_type_hints(cls)
+    hints = type_hints(cls)
     names = [f.name for f in dataclasses.fields(cls) if can_sort_by(hints[f.name])]
     for pattern in (r"^id$", r"_id$", r"^(key|name|slug)$"):
         found = next((n for n in names if re.search(pattern, n)), None)
@@ -2160,7 +2167,7 @@ def unguarded_steps(handler: Callable[..., object]) -> list[str]:
     """``ctx.step(...)`` calls whose result no ``if`` tests, so a resumed run would still
     do the skipped steps' work"""
     tree = source_tree(handler)
-    params = list(inspect.signature(handler).parameters)
+    params = list(signature(handler).parameters)
     if tree is None or len(params) < 2:
         return []
     tested: set[int] = set()

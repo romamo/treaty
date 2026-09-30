@@ -5,6 +5,7 @@ import io
 import json
 import urllib.request
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
 from conftest import spec_validator
@@ -13,6 +14,10 @@ from treaty import Affects, App, Arg, Ctx, Flag, NoArgs, RegistrationError
 from treaty._audit import untimed_network_calls
 from treaty._profile import probes_for
 from treaty._values import CommandPath
+
+if TYPE_CHECKING:
+    from datetime import date
+    from decimal import Decimal
 
 APPLIED: list[str] = []
 
@@ -356,3 +361,51 @@ def test_audit_rule_only_applies_to_network_commands() -> None:
     rule = next(r for r in report.rules if r.id == "network-timeout")
     assert [f.command for f in rule.findings] == ["get"]
     assert "timeout=ctx.timeout.seconds" in rule.findings[0].fix
+
+
+# An annotation naming what is imported only under TYPE_CHECKING (#73)
+
+
+@dataclass(frozen=True, slots=True)
+class Later:
+    amount: Decimal = Arg(description="Amount")
+    when: tuple[date, ...] = Flag(default=(), description="Dates")
+    count: int = Flag(default=1, description="Count")
+
+
+@dataclass(frozen=True, slots=True)
+class Paid:
+    amount: Decimal
+
+
+def test_an_undefined_field_annotation_fails_registration_naming_each_name() -> None:
+    app = App("exrepro", version="1.0.0")
+    with pytest.raises(RegistrationError) as info:
+
+        @app.command("later", description="Later", danger_level="safe", exit_codes=())
+        def later(args: Later, ctx: Ctx) -> None:
+            return None
+
+    assert str(info.value) == (
+        "Later.amount names Decimal; Later.when names date; those names are not defined at "
+        "runtime: import them outside TYPE_CHECKING, since treaty reads annotations at "
+        "registration to build the manifest"
+    )
+
+
+def test_an_undefined_output_annotation_fails_registration() -> None:
+    app = App("exrepro", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"^Paid\.amount names Decimal; that name is "):
+
+        @app.command("pay", description="Pay", danger_level="safe", exit_codes=())
+        def pay(args: NoArgs, ctx: Ctx) -> Paid:
+            raise AssertionError
+
+
+def test_an_undefined_handler_annotation_fails_registration() -> None:
+    app = App("exrepro", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"^.*later: the return names Decimal; that name "):
+
+        @app.command("later", description="Later", danger_level="safe", exit_codes=())
+        def later(args: NoArgs, ctx: Ctx) -> Decimal:
+            raise AssertionError

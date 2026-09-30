@@ -19,7 +19,7 @@ from enum import Enum
 from typing import Any
 
 from ._errors import RegistrationError
-from ._types import is_dataclass_type, resolve_alias, strip_optional
+from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
 OUT_META = "treaty.out"
 
@@ -138,7 +138,7 @@ def arrange(value: object, tp: object, spec: OutSpec = NO_ORDER, *, stable: bool
         return value
     if is_dataclass_type(base):
         assert isinstance(base, type)
-        hints = typing.get_type_hints(base)
+        hints = type_hints(base)
         out = dict(value)
         for f in dataclasses.fields(base):
             fspec = out_spec(f)
@@ -234,7 +234,7 @@ def check_order(tp: object, where: str, spec: OutSpec = NO_ORDER) -> None:
                 f"{where}: sort_key={spec.sort_key!r} orders an array of dataclasses, not {tp!r}"
             )
         assert isinstance(item, type)
-        hints = typing.get_type_hints(item)
+        hints = type_hints(item)
         if spec.sort_key not in {f.name for f in dataclasses.fields(item)} or not can_sort_by(
             hints.get(spec.sort_key)
         ):
@@ -249,6 +249,6 @@ def check_order(tp: object, where: str, spec: OutSpec = NO_ORDER) -> None:
             check_order(arg, where)
     if is_dataclass_type(base):
         assert isinstance(base, type)
-        hints = typing.get_type_hints(base)
+        hints = type_hints(base)
         for f in dataclasses.fields(base):
             check_order(hints[f.name], f"{where}: {base.__qualname__}.{f.name}", out_spec(f))

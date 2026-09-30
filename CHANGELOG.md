@@ -18,6 +18,11 @@ Apps built on treaty keep their own, structured schema changelog with
   `PermissionError` and the run exited 1 or 2. On Windows treaty retries such a sharing
   violation for up to 2 seconds, then raises it, so a real permission problem still
   fails (#55)
+- A field, parameter, or return annotation that names a class imported only under
+  `TYPE_CHECKING`, or a typo, raises `RegistrationError` at `@app.command` instead of a
+  bare `NameError`. Annotations are lazy on 3.14, so the module still imports; the error
+  names every undefined name and the field or parameter that uses it, and `treaty audit`
+  reports it as `APP_IMPORT_FAILED` (#73)
 
 ## [1.0.0rc5] - 2026-09-30
 

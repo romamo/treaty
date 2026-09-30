@@ -20,6 +20,7 @@ from typing import Any, cast
 from ._aio import Loop
 from ._context import Ctx
 from ._errors import RegistrationError
+from ._types import signature, type_hints
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,12 +72,12 @@ def dependency_params(
         refuse_async_generator(fn, where)
     else:
         refuse_async(fn, where)
-    params = list(inspect.signature(fn).parameters.values())
+    params = list(signature(fn).parameters.values())
     if len(params) < 2 or any(
         p.kind not in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) for p in params
     ):
         raise RegistrationError(f"{where}: must take (args, ctx, *resources) positionally")
-    hints = typing.get_type_hints(fn)
+    hints = type_hints(fn)
     if hints.get(params[1].name) is not Ctx:
         raise RegistrationError(f"{where}: second parameter must be annotated with Ctx")
     deps: list[type] = []
@@ -99,8 +100,8 @@ def resource_spec(cls: type) -> ResourceSpec:
             f"{cls.__qualname__} is not a resource: it needs a classmethod acquire(cls, args, ctx)"
         )
     deps = dependency_params(acquire, f"{cls.__qualname__}.acquire", allow_async=True)
-    first = next(iter(inspect.signature(acquire).parameters))
-    wanted = typing.get_type_hints(acquire).get(first)
+    first = next(iter(signature(acquire).parameters))
+    wanted = type_hints(acquire).get(first)
     args_type = wanted if isinstance(wanted, type) and wanted is not object else None
     releases = _releases(cls)
     release = inspect.getattr_static(cls, "release", None)
@@ -125,7 +126,7 @@ def _releases(cls: type) -> bool:
     if not inspect.isfunction(release):
         raise RegistrationError(f"{where} must be a plain method: def release(self) -> None")
     refuse_async_generator(release, where)
-    params = list(inspect.signature(release).parameters.values())
+    params = list(signature(release).parameters.values())
     if len(params) != 1 or params[0].kind not in (
         params[0].POSITIONAL_ONLY,
         params[0].POSITIONAL_OR_KEYWORD,
