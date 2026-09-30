@@ -517,7 +517,7 @@ def test_concurrent_runs_redact_each_others_secrets_in_printed_text() -> None:
     results: dict[str, tuple[int, str, str]] = {}
 
     def one(token: str) -> None:
-        env = {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"}
+        env = {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "0"}
         results[token] = run(app, ["leak", "--verbose", "--format", "json"], env)
 
     threads = [threading.Thread(target=one, args=(t,)) for t in tokens]
@@ -566,13 +566,13 @@ def test_a_timed_out_handler_that_prints_later_leaks_no_secret_into_the_next_run
     code, out, _ = run(
         app,
         ["slow", "--format", "json"],
-        {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "off"},
+        {"LIBCTL_API_TOKEN": token, "LIBCTL_AUDIT_LOG": "0"},
     )
     assert envelope_of(out)["error"]["code"] == "TIMEOUT", out
     later: list[tuple[int, str, str]] = []
     second = threading.Thread(
         target=lambda: later.append(
-            run(app, ["hold", verbosity, "--format", "json"], {"LIBCTL_AUDIT_LOG": "off"})
+            run(app, ["hold", verbosity, "--format", "json"], {"LIBCTL_AUDIT_LOG": "0"})
         )
     )
     second.start()

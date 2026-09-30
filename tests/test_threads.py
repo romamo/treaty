@@ -45,13 +45,13 @@ def make_app(barrier: threading.Barrier) -> App:
 def run_one(app: App, results: dict[int, tuple[int, str, str]], n: int) -> None:
     out, err = io.StringIO(), io.StringIO()
     argv = ["work", "--n", str(n), "--format", "json", *(["--verbose"] if n % 2 else [])]
-    env = {"THREADCTL_API_TOKEN": token(n), "THREADCTL_AUDIT_LOG": "off"}
+    env = {"THREADCTL_API_TOKEN": token(n), "THREADCTL_AUDIT_LOG": "0"}
     code = app.run(argv, stdin=io.StringIO(), stdout=out, stderr=err, env=env, isatty=False)
     results[n] = (code, out.getvalue(), err.getvalue())
 
 
 def call_one(app: App, results: dict[int, dict[str, object]], n: int) -> None:
-    env = {"THREADCTL_API_TOKEN": token(n), "THREADCTL_AUDIT_LOG": "off"}
+    env = {"THREADCTL_API_TOKEN": token(n), "THREADCTL_AUDIT_LOG": "0"}
     envelope = app.call("work", {"n": n}, env=env)
     results[n] = {"ok": envelope.ok, "data": envelope.data, "warnings": envelope.warnings}
 
