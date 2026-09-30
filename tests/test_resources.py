@@ -9,7 +9,7 @@ from typing import Self
 
 import pytest
 
-from treaty import Affects, App, Arg, Ctx, Exit, Flag, ParseError, RegistrationError
+from treaty import Affects, App, Arg, Ctx, Exit, Flag, NoArgs, ParseError, RegistrationError
 
 ACQUIRED: list[str] = []
 
@@ -237,6 +237,27 @@ def test_acquire_must_take_ctx_second() -> None:
         return None
 
     register(handler, "BadCtx.acquire: second parameter must be annotated with Ctx")
+
+
+@dataclass(frozen=True, slots=True)
+class Quiet:
+    name: str
+
+    @classmethod
+    def acquire(cls, _args: object, _ctx: Ctx) -> Self:
+        return cls("quiet")
+
+
+def test_underscored_ctx_is_accepted_on_handlers_and_acquire() -> None:
+    """ruff's ARG001 and ARG003 want an unused ctx named _ctx; treaty passes it by position"""
+    app = App("fleet", version="1.0.0")
+
+    @app.command("x", description="x", danger_level="safe", exit_codes=())
+    def handler(_args: NoArgs, _ctx: Ctx, quiet: Quiet) -> list[str]:
+        return [quiet.name]
+
+    envelope = app.call("x", {}, env={})
+    assert envelope.exit_code == 0 and envelope.data == ["quiet"]
 
 
 def test_resource_cycle_is_refused() -> None:

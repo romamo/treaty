@@ -90,7 +90,7 @@ from ._declare import UNSUPPORTED_PLATFORM, Background, SideEffect, Subprocess, 
 from ._deprecation import Deprecated
 from ._deps import CheckFn, Dependency, check_checks, check_dependencies
 from ._dispatch import DispatchRequest, parse_dispatch_line
-from ._effect import affects_summary, effect_problem
+from ._effect import affects_summary, effect_problem, is_preview
 from ._env import KNOWN, SESSION, STATE_DIR, app_var
 from ._envelope import (
     ENVELOPE_SCHEMA_VERSION,
@@ -3942,6 +3942,10 @@ class _Run:
                     started=started,
                     meta=full_meta,
                 )
+            if is_preview(data):
+                # A would_* effect passed the check, so nothing was applied: say so in meta,
+                # as a safe_default dry run does, for mutating and destructive runs alike
+                full_meta = {**full_meta, "dry_run": True}
         if preview_only:
             entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
             return self._envelope(

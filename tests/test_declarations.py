@@ -198,6 +198,57 @@ def test_dry_run_carries_would_affect() -> None:
     }
 
 
+# #70: a would_* effect is a dry run, and meta says so
+
+
+@dataclass(frozen=True, slots=True)
+class Rename:
+    name: str = Arg(description="New name")
+    dry_run: bool = Flag(default=False, description="Preview only")
+
+
+@dataclass(frozen=True, slots=True)
+class Renamed:
+    effect: str
+
+
+def rename_app() -> App:
+    app = App("store", version="1.0.0")
+
+    @app.command("rename", description="Rename the store", danger_level="mutating", exit_codes=())
+    def rename(args: Rename, ctx: Ctx) -> Renamed:
+        return Renamed("would_update" if args.dry_run else "updated")
+
+    return app
+
+
+def test_a_mutating_dry_run_sets_meta_dry_run() -> None:
+    code, env = run(rename_app(), ["rename", "shop", "--dry-run"])
+    assert code == 0 and env["data"] == {"effect": "would_update"}
+    assert meta_of(env)["dry_run"] is True
+    envelope = rename_app().call("rename", {"name": "shop", "dry_run": True}, env={})
+    assert envelope.exit_code == 0 and envelope.extra_meta["dry_run"] is True
+
+
+def test_a_live_mutating_run_has_no_meta_dry_run() -> None:
+    code, env = run(rename_app(), ["rename", "shop"])
+    assert code == 0 and "dry_run" not in meta_of(env)
+
+
+def test_a_destructive_dry_run_and_its_refusal_set_meta_dry_run() -> None:
+    code, env = run(make_app(), ["purge", "logs", "--dry-run"])
+    assert code == 0 and meta_of(env)["dry_run"] is True
+    code, env = run(make_app(), ["purge", "logs"])
+    assert code == 2 and meta_of(env)["dry_run"] is True and APPLIED == []
+    code, env = run(make_app(), ["purge", "logs", "--confirm-destructive"])
+    assert code == 0 and "dry_run" not in meta_of(env) and APPLIED == ["logs"]
+
+
+def test_meta_dry_run_validates_against_the_envelope_schema() -> None:
+    _, env = run(rename_app(), ["rename", "shop", "--dry-run"])
+    spec_validator("response-envelope").validate(env)
+
+
 def test_dry_run_without_would_affect_is_invalid_effect() -> None:
     code, env = run(make_app(affects=False), ["purge", "logs", "--dry-run"])
     error = env["error"]

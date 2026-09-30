@@ -66,6 +66,13 @@ Apps built on treaty keep their own, structured schema changelog with
   audit fix names it. Two marked fields, a marked field that is not a `bool`, or a
   marked field beside one named `dry_run` raise `RegistrationError`; an unmarked
   `dry_run` field works as before (#63)
+- A run that reports a `would_*` effect carries `meta.dry_run: true`: a mutating
+  command's dry run, a destructive `--dry-run`, and the preview a destructive command
+  refuses with `CONFIRMATION_REQUIRED`, as a `safe_default` dry run already did. An agent
+  knows nothing changed without reading `data.effect`. Live runs are unchanged (#70)
+- "Step 5: Lint with ruff's ALL rules" in the testing chapter: the settings that end
+  `RUF009` on `Arg()`, `Flag()`, and `Out()` defaults and keep `Path` a runtime import
+  under `TC003`, and `_ctx` for an unused context, which treaty passes by position (#70)
 
 ### Fixed
 

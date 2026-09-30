@@ -1144,7 +1144,9 @@ flag.
 Mutating and destructive commands return an object with an `effect` field: `created`,
 `updated`, `deleted`, or `noop` on a live run, and a `would_*` value such as `would_delete`
 on a dry run. Registration fails when the output type cannot carry the field, and a run
-that reports the wrong kind of value exits `1` with `INVALID_EFFECT`.
+that reports the wrong kind of value exits `1` with `INVALID_EFFECT`. A run that reports a
+`would_*` effect also carries `meta.dry_run: true`, so an agent knows nothing changed
+without reading `data`.
 
 The framework gives those commands `--idempotency-key` (also `idempotency_key` in `exec`
 lines and `--raw-payload`). A successful live run is stored under the key; repeating the
