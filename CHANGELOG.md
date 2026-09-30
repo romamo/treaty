@@ -10,6 +10,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- The audit counts a distribution's other top-level packages as first-party only when the
+  handler was loaded from that distribution: a file its RECORD lists, or a file under the
+  project of its editable install. A local package that shadows an unrelated installed
+  one of the same name keeps only its own package, so the source rules no longer follow
+  helpers into the other distribution's packages. A `direct_url.json` that is not a
+  PEP 610 record now stops the audit with exit 4 and `PRECONDITION`, naming the
+  distribution, where it was taken as a non-editable install (#106)
+
 ## [1.0.0rc6] - 2026-09-30
 
 The sixth 1.0 release candidate: 7 breaking changes, 12 additions, and 13 fixes. Not

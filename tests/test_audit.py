@@ -1898,6 +1898,60 @@ def test_without_a_distribution_only_the_handlers_package_is_first_party(
     assert "first-party modules (apppkg) 3 calls deep" in data["scope"]
 
 
+def test_a_local_package_shadowing_an_installed_one_keeps_only_its_own_package(
+    tmp_path: Path,
+) -> None:
+    """Issue 106: a local apppkg ahead of an unrelated installed distribution that also
+    ships apppkg is not that distribution's code, so its otherlib is not followed"""
+    local, site = tmp_path / "local", tmp_path / "site-packages"
+    _write(local, _TWO_PACKAGES)
+    shadowed = {"apppkg/__init__.py": "", **_OTHERLIB}
+    _write(site, shadowed)
+    _dist_info(site, "shadowed", list(shadowed))
+    data = _audit_in_child(local, site)
+    assert _chdir_findings(data) == {}  # no otherlib.hop through the other distribution
+    assert "first-party modules (apppkg) 3 calls deep" in data["scope"]
+
+
+def test_first_party_covers_an_editable_install_that_hooks_the_import_system(
+    tmp_path: Path,
+) -> None:
+    """An editable install through an import hook names no directory in its .pth; its
+    direct_url.json names the project, which holds the handler"""
+    project, site = tmp_path / "two", tmp_path / "site-packages"
+    _write(project, _TWO_PACKAGES)
+    _write(site, {**_OTHERLIB, "__editable__.two.pth": "import __editable___two_finder\n"})
+    direct_url = json.dumps({"url": project.as_uri(), "dir_info": {"editable": True}})
+    record = ["__editable__.two.pth", "__editable___two_finder.py"]
+    extra = {"direct_url.json": direct_url, "top_level.txt": "apppkg\nlibpkg\n"}
+    _dist_info(site, "two", record, **extra)
+    _dist_info(site, "otherlib", list(_OTHERLIB))
+    _expect_both_packages_followed(_audit_in_child(project, site))
+
+
+def test_a_malformed_direct_url_record_stops_the_audit_naming_the_distribution(
+    tmp_path: Path,
+) -> None:
+    """A direct_url.json the audit cannot parse is an error, not a silent non-editable"""
+    project, site = tmp_path / "two", tmp_path / "site-packages"
+    _write(project, _TWO_PACKAGES)
+    _write(site, {**_OTHERLIB, "two.pth": f"{project}\n"})
+    _dist_info(site, "two", ["two.pth"], **{"direct_url.json": "{not json"})
+    proc = subprocess.run(
+        [sys.executable, "-c", "from treaty._cli import main; main()"]
+        + ["audit", "apppkg.cli:app", "--format", "json"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(map(str, (project, site)))},
+        cwd=project,
+        check=False,
+    )
+    error = json.loads(proc.stdout)["error"]
+    assert proc.returncode == 4 and error["code"] == "PRECONDITION"
+    assert "direct_url.json of the installed distribution two" in error["message"]
+    assert error["context"]["distribution"] == "two"
+
+
 @dataclass(frozen=True, slots=True)
 class Restarted:
     effect: str

@@ -26,6 +26,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._errors import Exit
 from ._types import signature
 
 
@@ -416,6 +417,7 @@ def clear_caches() -> None:
     _cached_reach.cache_clear()
     _shipped.cache_clear()
     _editable_roots.cache_clear()
+    _ships.cache_clear()
 
 
 def _unwrapped(target: object) -> object:
@@ -541,20 +543,24 @@ def _home(fn: Callable[..., object]) -> _Home | None:
             # A namespace package has no single directory: its modules are known by name,
             # and the handler's own portion of it names where a helper is
             root = path.parents[module.__name__.count(".") + (path.stem == "__init__")]
-        return _Home(_distribution_packages(top, root) or frozenset({top}), root)
+        return _Home(_distribution_packages(top, root, path) or frozenset({top}), root)
     if module.__name__ != "__main__":
-        return _Home(_distribution_packages(module.__name__, None), path.parent)
+        return _Home(_distribution_packages(module.__name__, None, path), path.parent)
     return _Home(None, path.parent)
 
 
-def _distribution_packages(top: str, root: Path | None) -> frozenset[str] | None:
+def _distribution_packages(top: str, root: Path | None, file: Path) -> frozenset[str] | None:
     """Every top-level package of the one distribution that ships ``top``, which the
-    distribution's installed file list names. An editable install's list names only its
-    ``.pth`` file, so for one whose ``.pth`` puts ``root`` on ``sys.path``, the packages in
-    ``root``. None when no distribution, or several, ship ``top``"""
+    distribution's installed file list names, when the handler's ``file`` is that
+    distribution's: a local ``top`` that shadows an installed one is not it. An editable
+    install's list names only its ``.pth`` file, so for one whose ``.pth`` puts ``root`` on
+    ``sys.path``, the packages in ``root``. None when no distribution, or several, ship
+    ``top``, or when the one that does is not where the handler was loaded from"""
     shipped = _shipped()
     owners = shipped.get(top, ())
     if len(owners) == 1:
+        if not _ships(owners[0], file):
+            return None
         return frozenset(name for name, dists in shipped.items() if owners[0] in dists) - {"treaty"}
     if owners or root is None or root not in _editable_roots():
         return None
@@ -571,6 +577,26 @@ def _shipped() -> dict[str, tuple[str, ...]]:
     }
 
 
+@functools.lru_cache(maxsize=64)
+def _ships(name: str, file: Path) -> bool:
+    """Whether a distribution called ``name`` installed ``file``, a resolved path: its
+    file list names it, or it is an editable install whose project directory, or a
+    directory its ``.pth`` puts on ``sys.path``, holds it"""
+    key = os.path.normcase(file.name)
+    for dist in importlib.metadata.distributions(name=name):
+        if any(
+            os.path.normcase(f.name) == key and Path(str(dist.locate_file(f))).resolve() == file
+            for f in dist.files or ()
+        ):
+            return True
+        project = _editable_project(dist)
+        if project is not None and any(
+            file.is_relative_to(d) for d in (project, *_pth_roots(dist))
+        ):
+            return True
+    return False
+
+
 @functools.lru_cache(maxsize=1)
 def _editable_roots() -> frozenset[Path]:
     """The directories the editable installs (PEP 610 ``dir_info.editable``) put on
@@ -578,31 +604,57 @@ def _editable_roots() -> frozenset[Path]:
     instead names none"""
     found: set[Path] = set()
     for dist in importlib.metadata.distributions():
-        if not _editable(dist.read_text("direct_url.json")):
-            continue
-        for file in dist.files or ():
-            if file.suffix != ".pth":
-                continue
-            pth = Path(str(dist.locate_file(file)))
-            if not pth.is_file():
-                continue
-            for line in pth.read_text(encoding="utf-8").splitlines():
-                entry = line.strip()
-                if entry and not entry.startswith(("#", "import ", "import\t")):
-                    found.add((pth.parent / entry).resolve())
+        if _editable_project(dist) is not None:
+            found.update(_pth_roots(dist))
     return frozenset(found)
 
 
-def _editable(direct_url: str | None) -> bool:
-    """Whether a ``direct_url.json`` records an editable install"""
+def _pth_roots(dist: importlib.metadata.Distribution) -> list[Path]:
+    """The directories ``dist``'s ``.pth`` files put on ``sys.path``"""
+    found: list[Path] = []
+    for file in dist.files or ():
+        if file.suffix != ".pth":
+            continue
+        pth = Path(str(dist.locate_file(file)))
+        if not pth.is_file():
+            continue
+        for line in pth.read_text(encoding="utf-8").splitlines():
+            entry = line.strip()
+            if entry and not entry.startswith(("#", "import ", "import\t")):
+                found.append((pth.parent / entry).resolve())
+    return found
+
+
+def _editable_project(dist: importlib.metadata.Distribution) -> Path | None:
+    """The project directory of an editable install, which its ``direct_url.json``
+    (PEP 610) records; None for any other install. A record that is not valid JSON, or
+    not the object PEP 610 describes, stops the audit: it cannot tell what is installed"""
+    direct_url = dist.read_text("direct_url.json")
     if direct_url is None:
-        return False
+        return None
     try:
         record = json.loads(direct_url)
-    except json.JSONDecodeError:
-        return False  # a record this audit cannot read names no install it follows
-    info = record.get("dir_info") if isinstance(record, dict) else None
-    return isinstance(info, dict) and info.get("editable") is True
+        if not isinstance(record, dict):
+            raise TypeError("the record is not a JSON object")
+        info = record.get("dir_info")
+        if info is None:
+            return None
+        if not isinstance(info, dict):
+            raise TypeError("dir_info is not a JSON object")
+        if info.get("editable") is not True:
+            return None
+        url = record["url"]
+        if not isinstance(url, str):
+            raise TypeError("url is not a string")
+        return Path.from_uri(url).resolve()
+    except (ValueError, KeyError, TypeError) as exc:
+        name = dist.metadata["Name"]
+        raise Exit.PRECONDITION(
+            f"the direct_url.json of the installed distribution {name} is not a PEP 610 "
+            f"record: {exc}",
+            context={"distribution": name},
+            fix_required=f"reinstall {name}, or uninstall it if the audit does not need it",
+        ) from None
 
 
 def _first_party(fn: types.FunctionType, home: _Home) -> bool:
