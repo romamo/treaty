@@ -137,8 +137,7 @@ def test_a_builtins_subcommands_are_marked(app: App) -> None:
     from treaty._manifest import build_manifest
     from treaty._values import CommandPath
 
-    # No built-in is a group today; the marker follows the registered path set, so a
-    # built-in group's children carry it too
+    # The marker follows the registered path set, so any group's children carry it
     group = frozenset({CommandPath("deploy.rollback"), CommandPath("deploy.status")})
     manifest = build_manifest(
         app.commands, app.exits, app.formats, app.name, builtins=app.builtins | group
@@ -172,3 +171,20 @@ def test_schema_of_one_command_carries_the_marker(app: App) -> None:
     subtree = run_json(app, ["deploy", "--schema"])[1]["data"]
     assert subtree["schema_version"] == "3.1"
     assert not any("builtin" in entry for entry in subtree["commands"].values())
+
+
+def test_the_builtin_job_groups_commands_are_marked() -> None:
+    from treaty import App, Ctx
+    from treaty._jobs import Job
+
+    class Jobs:
+        def status(self, job_id: str, ctx: Ctx) -> Job | None:
+            return None
+
+        def cancel(self, job_id: str, ctx: Ctx) -> Job | None:
+            return None
+
+    manifest = App("x", version="1.0.0", jobs=Jobs()).manifest()
+    spec_validator("manifest-response").validate(manifest)
+    assert manifest["commands"]["job.status"]["builtin"] is True
+    assert manifest["commands"]["job.cancel"]["builtin"] is True
