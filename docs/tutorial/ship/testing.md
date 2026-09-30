@@ -189,6 +189,79 @@ Give the conformance kit's launcher a sandbox before the job runs it on anything
 real data, as [Run the conformance kit](conformance.md#step-2-keep-the-probes-away-from-real-data)
 shows.
 
+## Step 5: Lint with ruff's ALL rules
+
+A project that lints with ruff and `select = ["ALL"]` gets three findings on every treaty
+command. None of them is a bug, and each has a setting or a spelling that ends it:
+
+- **`RUF009`** on an `Arg()`, `Flag()`, or `Out()` default: ruff takes the call for a
+  mutable default, but each returns a fresh field description. Declare the three immutable
+- **`ARG001`** on a handler's unused `ctx`, and **`ARG003`** on a resource's `acquire`:
+  name it `_ctx`. treaty passes `ctx` by position, so the name is yours
+- **`TC003`** wants `from pathlib import Path` under `if TYPE_CHECKING:`. That breaks the
+  app: treaty reads the annotations of the arguments and output dataclasses when a command
+  is registered, and a name imported only for type checkers raises `RegistrationError`.
+  `runtime-evaluated-decorators` tells ruff that a `@dataclass` needs its annotations at
+  runtime, which keeps those imports where they are
+
+```toml
+[tool.ruff.lint]
+select = ["ALL"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["treaty.Arg", "treaty.Flag", "treaty.Out"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-decorators = ["dataclasses.dataclass"]
+```
+
+A handler's own parameters are read too, so a module that imports `Ctx` or a resource class
+only for a handler's annotation gets `TC001` or `TC002` for it. Keep those imports with
+`per-file-ignores`, such as `"src/todo/commands/*.py" = ["TC001", "TC002", "TC003"]`. An
+import used only by a helper, such as the `Sequence` in a function that renders a table,
+can move under `TYPE_CHECKING`: treaty never reads those annotations.
+
+**Check:** with the settings and `_ctx`, neither `RUF009` nor `ARG` fires on `todo` and
+its tests still pass; `todo` uses `Path` at runtime, so a small arguments class shows that
+`TC003` fires without the setting and not with it. `todo` has no ruff of its own, so the
+check runs the treaty checkout's, a dev dependency there; in your project, `uv add --dev ruff`
+and run `uv run ruff check`
+
+<!-- check -->
+```bash
+cat >> pyproject.toml <<'EOF'
+
+[tool.ruff.lint]
+select = ["ALL"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["treaty.Arg", "treaty.Flag", "treaty.Out"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-decorators = ["dataclasses.dataclass"]
+EOF
+sed -i.bak 's/ ctx: Ctx/ _ctx: Ctx/' src/todo/cli.py && rm src/todo/cli.py.bak
+ruff() { uv run --project "$examples/../.." ruff "$@"; }
+ruff check --select RUF009,ARG001,ARG003 src/todo/cli.py > /dev/null
+uv run pytest -q > ../lint.out
+grep -q ' passed' ../lint.out
+cat > ../show_args.py <<'EOF'
+from dataclasses import dataclass
+from pathlib import Path
+
+from treaty import Flag
+
+
+@dataclass(frozen=True, slots=True)
+class ShowArgs:
+    path: Path = Flag(description="File to show")
+EOF
+ruff check --isolated --target-version py314 --select TC003 ../show_args.py > /dev/null \
+  || flagged=yes
+test "$flagged" = yes
+ruff check --config pyproject.toml --select TC003 ../show_args.py > /dev/null
+```
+
 ## Next
 
 That is the end of the tutorial: `todo` is tested as an agent uses it, and every change to

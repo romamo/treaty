@@ -76,6 +76,12 @@ def effect_problem(data: object, preview: bool, *, destructive: bool = False) ->
     return None
 
 
+def is_preview(data: object) -> bool:
+    """``data`` reports a ``would_*`` effect: a dry run that applied nothing"""
+    effect = data.get("effect") if isinstance(data, dict) else None
+    return isinstance(effect, str) and _PREVIEW_RE.fullmatch(effect) is not None
+
+
 def affects_summary(data: object) -> str | None:
     """``would_affect.summary`` of a response's data, when it has one"""
     affects = data.get("would_affect") if isinstance(data, dict) else None
