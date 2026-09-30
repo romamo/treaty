@@ -37,11 +37,26 @@ def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return members
 
 
+class JsonFloat(float):
+    """A JSON number with a fraction or an exponent that keeps the text it was written as,
+    so a ``Decimal`` field reads ``12.30`` as written, not as its nearest float"""
+
+    __slots__ = ("text",)
+    text: str
+
+    def __new__(cls, text: str) -> JsonFloat:
+        number = super().__new__(cls, text)
+        number.text = text
+        return number
+
+
 def loads_strict(text: str) -> object:
     """``json.loads`` without the NaN and Infinity extensions or repeated keys; also
     raises ``ValueError`` for an integer longer than the interpreter's digit limit"""
     try:
-        return json.loads(text, parse_constant=_no_constant, object_pairs_hook=_unique)
+        return json.loads(
+            text, parse_constant=_no_constant, object_pairs_hook=_unique, parse_float=JsonFloat
+        )
     except RecursionError:
         raise ValueError("JSON nested too deeply") from None
 

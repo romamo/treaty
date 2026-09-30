@@ -484,7 +484,7 @@ command.
 | `add_argument("name")` | `name: str = Arg(description=...)` |
 | `add_argument("--flag", default=v)` | `flag: T = Flag(default=v, description=...)` |
 | `required=True` | a `Flag` with no default |
-| `type=int`, `type=float`, `type=Path` | the field's annotation |
+| `type=int`, `type=float`, `type=Decimal`, `type=Path` | the field's annotation |
 | `choices=[...]` | `Literal[...]` or a `StrEnum` |
 | `action="store_true"` | `bool = Flag(default=False, ...)` |
 | `"-v", action="count"` verbosity | built in: `-v` (`--verbose`), `-vv` (`--debug`) |

@@ -10,6 +10,7 @@ import math
 import re
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import MISSING, dataclass, replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -34,10 +35,11 @@ from ._framework import (
     switch_value,
 )
 from ._idempotency import IdempotencyKey
-from ._json5 import Unreadable, loads_forgiving
+from ._json5 import JsonFloat, Unreadable, loads_forgiving
 from ._page import Limit, Position
 from ._paths import check_path
 from ._rules import check_rules
+from ._scalars import DECIMAL
 from ._secrets import (
     SecretRef,
     SecretSource,
@@ -945,6 +947,8 @@ def check_json_base(target: Classified, value: object, flag: str) -> object:
         case FlagType.STRING:
             if isinstance(value, str):
                 return check_path(value, flag) if target.path else value
+            if target.scalar is DECIMAL:
+                return _decimal_text(value, flag)
             raise ParseError(f"{flag!r} expects a string", context=ctx)
         case FlagType.ENUM:
             if isinstance(value, str) and value in target.enum_values:
@@ -956,3 +960,22 @@ def check_json_base(target: Classified, value: object, flag: str) -> object:
             )
         case FlagType.ARRAY:
             raise ParseError(f"{flag!r}: nested arrays are not supported", context=ctx)
+
+
+def _decimal_text(value: object, flag: str) -> str:
+    """A ``Decimal`` field's value other than a string, as the text the built-in parser
+    checks: an integer is exact, a number read from JSON keeps its source text, and a
+    Python caller's ``Decimal`` is its own. A float from elsewhere, such as an MCP client's
+    or a TOML file's, may already have lost digits, so it is refused"""
+    if isinstance(value, JsonFloat):
+        return value.text
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, Decimal):
+        return format(value, "f") if value.is_finite() else str(value)
+    raise ParseError(
+        f"{flag!r} expects a decimal as a string",
+        context={"field": flag, "value": value},
+        suggestion=f'pass it quoted, such as "12.30": a {type(value).__name__} may have '
+        "lost digits",
+    )

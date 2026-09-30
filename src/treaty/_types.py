@@ -10,11 +10,12 @@ import dataclasses
 import types
 import typing
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum, StrEnum
 from pathlib import Path
 
 from ._errors import SchemaError
-from ._scalars import ScalarRegistry, ScalarSpec
+from ._scalars import DECIMAL, ScalarRegistry, ScalarSpec
 
 
 class FlagType(StrEnum):
@@ -101,6 +102,9 @@ def classify(tp: object, scalars: ScalarRegistry) -> Classified:
             return Classified(FlagType.STRING, optional, base, path=True)
         if (spec := scalars.get(base)) is not None:
             return Classified(_SCALARS[spec.base], optional, base, scalar=spec)
+        if base is Decimal:
+            # Built in as fixed-point text; an app's own app.scalar(Decimal) above wins
+            return Classified(FlagType.STRING, optional, base, scalar=DECIMAL)
         if issubclass(base, Enum):
             members = list(base)
             if not all(isinstance(m.value, str) for m in members):

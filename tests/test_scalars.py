@@ -4,12 +4,14 @@ import io
 import json
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, Ctx, Flag, RegistrationError
+from treaty import App, Arg, Ctx, Flag, Out, RegistrationError
+from treaty._mcp import call_tool, tool_entries
 
 _ID = re.compile(r"[a-z][a-z0-9-]{0,62}")
 # Manifest and JSON Schema patterns are anchored; treaty matches with re.fullmatch
@@ -371,3 +373,155 @@ def test_duplicate_registration_is_refused() -> None:
     app.scalar(ResourceId, parse=ResourceId.from_boundary)
     with pytest.raises(RegistrationError, match="already a registered scalar"):
         app.scalar(ResourceId, parse=ResourceId.from_boundary)
+
+
+# Built-in Decimal (#39)
+
+
+@dataclass(frozen=True, slots=True)
+class PayArgs:
+    amount: Decimal = Flag(description="Amount to pay")
+    tip: Decimal | None = Flag(default=None, description="Tip")
+    splits: tuple[Decimal, ...] = Flag(default=(), description="Splits")
+    fee: Decimal = Flag(default=Decimal("1.50"), description="Fee")
+
+
+@dataclass(frozen=True, slots=True)
+class Payment:
+    amount: Decimal
+    tip: Decimal | None
+    splits: tuple[Decimal, ...] = Out(ordered=True)
+
+
+def pay_app() -> App:
+    app = App("payctl", version="1.0.0")
+
+    @app.command(
+        "pay",
+        description="Pay",
+        danger_level="safe",
+        supports_raw_payload=True,
+        exit_codes=(),
+    )
+    def pay(args: PayArgs, ctx: Ctx) -> Payment:
+        assert isinstance(args.amount, Decimal)
+        assert all(isinstance(s, Decimal) for s in args.splits)
+        return Payment(args.amount, args.tip, args.splits)
+
+    return app
+
+
+def pay(argv: list[str], stdin: str = "") -> tuple[int, dict]:
+    out = io.StringIO()
+    code = pay_app().run(
+        argv, stdin=io.StringIO(stdin), stdout=out, stderr=io.StringIO(), env={}, isatty=False
+    )
+    return code, json.loads(out.getvalue())
+
+
+def test_decimal_flag_is_parsed_from_fixed_point_text() -> None:
+    code, env = pay(["pay", "--amount", "12.30", "--splits", "2.50", "--splits", "007"])
+    assert code == 0
+    assert env["data"] == {"amount": "12.30", "tip": None, "splits": ["2.50", "7"]}
+
+
+def test_decimal_negative_zero_is_zero() -> None:
+    code, env = pay(["pay", "--amount", "-0.00", "--tip", "-0"])
+    assert code == 0
+    assert env["data"]["amount"] == "0.00" and env["data"]["tip"] == "0"
+    code, env = pay(["pay", "--amount", "-12.30"])
+    assert code == 0 and env["data"]["amount"] == "-12.30"
+
+
+@pytest.mark.parametrize("value", ["1e3", "NaN", "Infinity", "-inf", "1,5", ".5", "5.", "+1", ""])
+def test_decimal_flag_refuses_anything_but_fixed_point(value: str) -> None:
+    code, env = pay(["pay", "--amount", value])
+    assert code == 2
+    error = errors_of(env)["amount"]
+    assert error["message"] == "Value for 'amount' is not a fixed-point decimal."
+    assert "12.30" in error["suggestion"]
+
+
+def test_decimal_json_numbers_keep_their_source_text() -> None:
+    line = '{"_cmd": "pay", "amount": 12.30, "tip": "0.5", "splits": [1, 2.50]}'
+    code, env = pay(["exec"], stdin=line + "\n")
+    assert code == 0, env
+    assert env["data"] == {"amount": "12.30", "tip": "0.5", "splits": ["1", "2.50"]}
+    code, env = pay(["pay", "--raw-payload", '{"amount": 7.10}'])
+    assert code == 0 and env["data"]["amount"] == "7.10"
+    code, env = pay(["pay", "--raw-payload", '{"amount": 1e3}'])
+    assert code == 2
+    assert errors_of(env)["amount"]["message"] == "Value for 'amount' is not a fixed-point decimal."
+
+
+def test_decimal_from_python_is_taken_and_a_float_is_refused() -> None:
+    env = pay_app().call("pay", {"amount": Decimal("12.30")}, env={})
+    assert env.ok and env.data == {"amount": "12.30", "tip": None, "splits": []}
+    env = pay_app().call("pay", {"amount": 12.3}, env={})
+    assert env.error is not None and env.error.code == "ARG_ERROR"
+    assert env.error.message == "'amount' expects a decimal as a string."
+
+
+def test_decimal_schema_is_the_same_for_arguments_and_output() -> None:
+    code, env = pay(["pay", "--schema"])
+    assert code == 0
+    decimal = {"type": "string", "pattern": r"^-?[0-9]+(\.[0-9]+)?$", "format": "decimal"}
+    args = env["data"]["raw_payload_schema"]["properties"]
+    assert {k: v for k, v in args["amount"].items() if k != "description"} == decimal
+    assert args["splits"]["items"] == decimal
+    assert env["data"]["output_schema"]["properties"]["amount"] == decimal
+    manifest = pay_app().manifest()
+    spec_validator("manifest-response").validate(manifest)
+    flags = manifest["commands"]["pay"]["flags"]
+    assert flags["amount"]["type"] == "string"
+    assert flags["amount"]["pattern"] == r"^(?:-?[0-9]+(\.[0-9]+)?)$"
+    assert flags["fee"]["default"] == "1.50"
+
+
+def test_decimal_mcp_tool_takes_a_string_and_refuses_a_float() -> None:
+    app = pay_app()
+    entries = {e.name: e for e in tool_entries(app)}
+    amount = entries["pay"].input_schema["properties"]["amount"]
+    assert amount["type"] == "string" and amount["format"] == "decimal"
+    env = call_tool(app, entries, "pay", {"amount": "12.30"}, env={})
+    assert env.ok and env.data == {"amount": "12.30", "tip": None, "splits": []}
+    env = call_tool(app, entries, "pay", {"amount": 12.3}, env={})
+    assert env.error is not None and env.error.suggestion is not None
+    assert "quoted" in env.error.suggestion
+
+
+def test_decimal_default_must_be_finite() -> None:
+    @dataclass(frozen=True, slots=True)
+    class Bad:
+        amount: Decimal = Flag(default=Decimal("NaN"), description="Amount")
+
+    app = App("payctl", version="1.0.0")
+    with pytest.raises(RegistrationError, match="not a finite decimal"):
+
+        @app.command("pay", description="Pay", danger_level="safe", exit_codes=())
+        def pay_bad(args: Bad, ctx: Ctx) -> None: ...
+
+
+def test_an_app_registered_decimal_replaces_the_built_in() -> None:
+    app = App("payctl", version="1.0.0")
+    app.scalar(Decimal, base=float, parse=lambda v: Decimal(str(v)), serialize=float)
+
+    @dataclass(frozen=True, slots=True)
+    class Args:
+        amount: Decimal = Flag(description="Amount")
+
+    @dataclass(frozen=True, slots=True)
+    class Paid:
+        amount: Decimal
+
+    @app.command("pay", description="Pay", danger_level="safe", exit_codes=())
+    def pay_float(args: Args, ctx: Ctx) -> Paid:
+        return Paid(args.amount)
+
+    out = io.StringIO()
+    code = app.run(["pay", "--amount", "1e3"], stdout=out, stderr=io.StringIO(), env={})
+    assert code == 0
+    assert json.loads(out.getvalue())["data"] == {"amount": 1000.0}
+    command = app.manifest()["commands"]["pay"]
+    assert command["flags"]["amount"]["type"] == "number"
+    assert command["output_schema"]["properties"]["amount"]["type"] == "number"
