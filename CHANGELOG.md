@@ -20,6 +20,11 @@ Apps built on treaty keep their own, structured schema changelog with
 - The `stable-order` fix names a `sort_key` only from the fields that can be one (a str,
   int, Enum, or date); it no longer suggests a `Decimal` or `float` field, which fails
   registration, and suggests `ordered=True` alone when no field can be a key
+- A `Decimal` default reaches the handler as an argument would parse it: `Decimal("-0")`
+  is `0` and `Decimal("1E+2")` is `100`, where the default went through unchanged and a
+  handler could see a signed zero
+- A `Decimal` sent as a JSON number, in `exec`, `--raw-payload`, MCP, or `app.call`, counts
+  against `Flag(max_bytes=)` as its text, as a JSON string does; a number skipped the limit
 
 ## [1.0.0rc4] - 2026-09-30
 

@@ -946,8 +946,9 @@ digits as written: `{"amount": 12.30}` is `Decimal("12.30")`. A float from anywh
 such as an MCP client's arguments or `app.call(...)`, is refused, since it may already have
 lost digits; send a string. The argument's schema is `{"type": "string", "pattern":
 "^-?[0-9]+(\\.[0-9]+)?$", "format": "decimal"}`, an output field's the same without
-`format`, and the manifest lists the flag as a `string` with that `pattern`. An app that registers `app.scalar(Decimal, ...)` gets its
-own parsing and schema instead.
+`format`, and the manifest lists the flag as a `string` with that `pattern`. A default is
+taken as an argument would be, so `Decimal("-0")` is `0`. An app that registers
+`app.scalar(Decimal, ...)` gets its own parsing and schema instead.
 
 ## Custom scalars
 
