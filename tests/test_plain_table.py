@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel, Field
 
 from treaty import App, Ctx, NoArgs, Out
 from treaty._plain import NO_LAYOUT, Layout, layout_of, render_plain, table_width
@@ -148,6 +149,67 @@ def test_out_table_must_be_a_bool() -> None:
 
     with pytest.raises(RegistrationError, match="table is True or False"):
         Out(table="no")
+
+
+def test_ndjson_writes_records_not_a_table(tmp_path: Path) -> None:
+    lines = run(["items", "--format", "ndjson"]).splitlines()
+    assert [json.loads(line)["name"] for line in lines] == ["api", "web-frontend"]
+    target = tmp_path / "items.ndjson"
+    run(["items", "--format", "ndjson", "--output", str(target)])
+    assert target.read_text().splitlines() == lines
+
+
+class Release(BaseModel):
+    tag: str
+    downloads: int
+    size: float | None
+    notes: str = Field(alias="Notes")
+
+
+def adapted_app() -> App:
+    app = App("modelctl", version="1.0.0")
+    app.output_adapter(
+        BaseModel,
+        schema=lambda cls: cls.model_json_schema(mode="serialization"),
+        dump=lambda obj: obj.model_dump(mode="json", by_alias=True),
+    )
+
+    @app.command("ls", description="List releases", danger_level="safe", exit_codes=())
+    def ls(args: NoArgs, ctx: Ctx) -> list[Release]:
+        return [
+            Release(tag="v1.3.9", downloads=7, size=None, Notes="fix"),
+            Release(tag="v2", downloads=1200, size=1.5, Notes="new"),
+        ]
+
+    @app.command("none", description="List nothing", danger_level="safe", exit_codes=())
+    def none(args: NoArgs, ctx: Ctx) -> list[Release]:
+        return []
+
+    return app
+
+
+def test_a_list_of_pydantic_models_is_a_table_in_field_order() -> None:
+    out = io.StringIO()
+    adapted_app().run(["ls"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
+    # Columns as the dump writes them, the alias as the header; schema numbers right-aligned
+    assert out.getvalue().splitlines() == [
+        "tag     downloads  size  Notes",
+        "v1.3.9          7        fix",
+        "v2           1200   1.5  new",
+    ]
+
+
+def test_an_empty_list_of_pydantic_models_prints_no_rows() -> None:
+    out = io.StringIO()
+    adapted_app().run(["none"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
+    assert out.getvalue() == "(no rows)\n"
+
+
+def test_an_adapted_item_takes_its_numeric_columns_from_its_schema() -> None:
+    app = adapted_app()
+    layout = layout_of(list[Release], app.scalars.adapters)
+    assert layout == Layout(numeric=frozenset({"downloads", "size"}), rows=True)
+    assert layout_of(list[Release]) is NO_LAYOUT
 
 
 def test_json_jsonl_and_tsv_do_not_change() -> None:

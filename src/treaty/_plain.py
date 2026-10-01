@@ -21,6 +21,9 @@ from ._envelope import strip_escapes, visible
 from ._out import is_binary, out_spec
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
+if typing.TYPE_CHECKING:
+    from ._adapters import OutputAdapters
+
 _ESCAPES = str.maketrans({"\n": "\\n", "\t": "\\t"})
 
 NO_ROWS = "(no rows)"
@@ -34,7 +37,8 @@ MIN_CUT = 4
 
 @dataclass(frozen=True, slots=True)
 class Layout:
-    """What an output type of ``list[T]``, ``T`` a dataclass, declares of the table"""
+    """What an output type of ``list[T]``, ``T`` a dataclass or a class an output adapter
+    writes, such as a pydantic model, declares of the table"""
 
     order: tuple[str, ...] = ()
     """``T``'s fields in declaration order; other keys of ``data`` follow, as first seen"""
@@ -49,8 +53,10 @@ class Layout:
 NO_LAYOUT = Layout()
 
 
-def layout_of(output_type: object) -> Layout:
-    """The table a command's ``list[T]`` output declares; ``NO_LAYOUT`` for any other"""
+def layout_of(output_type: object, adapters: OutputAdapters | None = None) -> Layout:
+    """The table a command's ``list[T]`` output declares; ``NO_LAYOUT`` for any other.
+    A ``T`` one of ``adapters`` writes gives its numeric columns from its schema, and its
+    columns follow the keys its dump writes, since the normalized schema sorts them"""
     base, _ = strip_optional(resolve_alias(output_type))
     origin = typing.get_origin(base)
     args = typing.get_args(base)
@@ -61,6 +67,12 @@ def layout_of(output_type: object) -> Layout:
     else:
         return NO_LAYOUT
     item, _ = strip_optional(resolve_alias(item))
+    if adapters is not None and isinstance(item, type) and adapters.for_type(item) is not None:
+        properties = adapters.node(item).get("properties", {})
+        return Layout(
+            numeric=frozenset(k for k, v in properties.items() if _numeric_schema(v)),
+            rows=True,
+        )
     if not is_dataclass_type(item):
         return NO_LAYOUT
     assert isinstance(item, type)
@@ -81,6 +93,23 @@ def _numeric_type(tp: object) -> bool:
         and issubclass(base, (int, float, Decimal))
         and not issubclass(base, bool)
     )
+
+
+def _numeric_schema(node: object) -> bool:
+    """A property of integer or number, alone or with null"""
+    if not isinstance(node, Mapping):
+        return False
+    branches = node.get("anyOf")
+    if isinstance(branches, list):
+        kinds = [b.get("type") if isinstance(b, Mapping) else None for b in branches]
+        return _numeric_kind(kinds)
+    kind = node.get("type")
+    return _numeric_kind(kind if isinstance(kind, list) else [kind])
+
+
+def _numeric_kind(kinds: list[object]) -> bool:
+    present = [k for k in kinds if k != "null"]
+    return len(present) == 1 and present[0] in ("integer", "number")
 
 
 def table_width(env: Mapping[str, str]) -> int | None:

@@ -41,13 +41,15 @@ Apps built on treaty keep their own, structured schema changelog with
 - `--format plain` without a renderer prints a list of objects whose values are all
   scalars as an aligned table: a header of the field names in the output dataclass's
   field order, one row per object, numbers and `Decimal` fields right-aligned, `null` as an
-  empty cell, and `(no rows)` for an empty `list[T]`. Fifty items read as fifty lines
-  instead of fifty `key: value` blocks. When `COLUMNS` is a positive integer, a wider
+  empty cell, and `(no rows)` for an empty `list[T]`. A list of models an output adapter
+  writes, such as pydantic's, is a table in the order its dump writes the keys, its
+  integer and number properties right-aligned. Fifty items read as fifty lines instead of
+  fifty `key: value` blocks. When `COLUMNS` is a positive integer, a wider
   table cuts its widest text column with an ellipsis, down to four cells, and never cuts a
   number; `COLUMNS` joins the unprefixed conventions, so AGENTS.md lists it beside
   `NO_COLOR` and `TERM`. `Out(table=False)` leaves a field out of the table without
   touching JSON or the output schema. A list holding a nested value keeps the
-  `key: value` blocks; JSON, `jsonl`, and `tsv` do not change. Upgrading: rerun
+  `key: value` blocks; JSON, `jsonl`, `ndjson`, and `tsv` do not change. Upgrading: rerun
   `treaty agents-md` on each app after upgrading, or `treaty check-docs` exits 81 on the
   Environment Variables section of its AGENTS.md, which now lists `COLUMNS` (#8)
 

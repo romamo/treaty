@@ -2181,13 +2181,22 @@ class App:
                 target = run.output_target(command, invocation.output)
                 written = (
                     run.to_file(
-                        target, requested, envelope, render, layout_of(command.output_type)
+                        target,
+                        requested,
+                        envelope,
+                        render,
+                        layout_of(command.output_type, self.scalars.adapters),
                     )
                     if target is not None
                     else run.output_unresolved(command, invocation.output, envelope)
                 )
                 return run.emit(Format.JSON, written)
-            return run.emit(mode, envelope, render=render, layout=layout_of(command.output_type))
+            return run.emit(
+                mode,
+                envelope,
+                render=render,
+                layout=layout_of(command.output_type, self.scalars.adapters),
+            )
 
 
 # Runs that swapped sys.stdout and sys.stdin now, and the streams from before the first:

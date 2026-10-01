@@ -477,7 +477,9 @@ paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings es
 list of objects whose values are all scalars, such as a `list[Item]` result, prints as an
 aligned table instead: a header of the field names in the dataclass's field order, one row
 per object, numbers (and `Decimal` fields) right-aligned, `null` as an empty cell, and
-`(no rows)` for an empty `list[Item]`:
+`(no rows)` for an empty `list[Item]`. A list of models an output adapter writes, such as
+pydantic's, is a table too, its columns in the order the dump writes them and its integer
+and number properties right-aligned:
 
 ```text
 id  name  size_bytes
