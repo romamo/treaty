@@ -262,6 +262,7 @@
         "app_name",
         "version",
         "mode",
+        "format_name",
         "request_id",
         "env",
         "state",
@@ -497,6 +498,16 @@
         "YAML",
         "MARKDOWN",
         "ID"
+      ]
+    },
+    "FormatName": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": [
+        "builtin",
+        "mode"
       ]
     },
     "FrameworkCode": {
@@ -975,6 +986,11 @@
       "id_field",
       "passthrough",
       "help_command"
+    ],
+    "App.format": [
+      "mode",
+      "render",
+      "media_type"
     ],
     "App.run": [
       "argv",

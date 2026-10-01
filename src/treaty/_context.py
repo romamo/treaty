@@ -17,7 +17,7 @@ from ._http import Http, NetworkSettings
 from ._lifecycle import Teardown
 from ._lines import Lines
 from ._locks import Locks
-from ._mode import Format
+from ._mode import Format, FormatName
 from ._page import PageRequest
 from ._prompt import Prompter
 from ._retry import Retrier
@@ -57,6 +57,10 @@ class Ctx:
     app_name: str
     version: str
     mode: Format
+    format_name: FormatName
+    """The ``--format`` value the CLI caller asked for, such as ``html``, for which
+    ``mode`` is ``Format.PLAIN``, or ``jsonl``, for which it is ``Format.JSON``; ``json``
+    for an ``exec`` line and ``App.call``, which run and answer in JSON"""
     request_id: str
     env: Mapping[str, str]
     state: Mapping[str, object]

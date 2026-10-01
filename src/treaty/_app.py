@@ -172,6 +172,8 @@ from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
     MACHINE,
     Format,
+    FormatName,
+    MediaType,
     child_ctype,
     child_settings,
     color_allowed,
@@ -497,7 +499,8 @@ class App:
         self._state: Mapping[str, object] = dict(state or {})
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
-        self._renderers: dict[Format, Renderer] = {}
+        self._renderers: dict[FormatName, Renderer] = {}
+        self._media_types: dict[FormatName, MediaType] = {}
         self._tokenizers: dict[str, Tokenizer] = {APPROX: Tokenizer(APPROX, approx)}
         self.default_tokenizer = APPROX
         """What the token budget flags count with unless ``--tokenizer`` names another"""
@@ -701,27 +704,44 @@ class App:
         for hook in self._notifier_hooks:
             hook(env)
 
-    def format(self, mode: Format, *, render: Renderer) -> None:
+    def format(
+        self, mode: Format | str, *, render: Renderer, media_type: str | None = None
+    ) -> None:
         """Offer ``--format <mode>``, written by ``render`` for every command without its own
         renderer for it; declare it before the commands overriding it
 
         ``plain`` and ``tsv`` are always offered, and registering one replaces its built-in
         renderer. ``json`` and ``jsonl`` are the response envelope agents read, and
         ``ndjson`` is ``data`` as JSON lines, so they take no renderer.
+
+        A name ``Format`` lacks, such as ``app.format("html", render=...,
+        media_type="text/html")``, offers a new value: lowercase letters and digits, words
+        joined by ``-`` or ``_``. It runs as ``plain`` does, errors going to stderr as
+        prose, and ``media_type`` tells an agent in the manifest not to parse it as JSON.
         """
-        _check_renderer("app.format", mode, render)
-        if mode in self._renderers:
-            raise RegistrationError(f"--format {mode} already has a renderer")
-        self._renderers[mode] = render
+        name = _format_name("app.format", mode)
+        _check_renderer("app.format", name, render)
+        if name in self._renderers:
+            raise RegistrationError(f"--format {name} already has a renderer")
+        if media_type is not None:
+            try:
+                self._media_types[name] = MediaType(media_type)
+            except InvalidValue as exc:
+                raise RegistrationError(f"app.format({name.value!r}): {exc}") from None
+        self._renderers[name] = render
 
     @property
-    def formats(self) -> tuple[Format, ...]:
-        """The ``--format`` values this app offers, in ``Format`` order"""
+    def formats(self) -> tuple[FormatName, ...]:
+        """The ``--format`` values this app offers: the ``Format`` members in their order,
+        then the names it registered, in the order it did"""
         built_in = (Format.PLAIN, Format.JSON, Format.JSONL, Format.NDJSON, Format.TSV)
         ids = any(c.id_field is not None for c in self._commands.values())
-        return tuple(
-            m for m in Format if m in built_in or m in self._renderers or (m is Format.ID and ids)
+        members = tuple(
+            FormatName.of(m)
+            for m in Format
+            if m in built_in or FormatName.of(m) in self._renderers or (m is Format.ID and ids)
         )
+        return members + tuple(n for n in self._renderers if n.builtin is None)
 
     def tokenizer(self, name: str, *, count: Callable[[str], int], default: bool = False) -> None:
         """Offer ``--tokenizer <name>``, counting the tokens of a text with ``count``;
@@ -735,8 +755,9 @@ class App:
         if default:
             self.default_tokenizer = name
 
-    def _renderer(self, command: Command, mode: Format) -> Renderer | None:
+    def _renderer(self, command: Command, name: FormatName) -> Renderer | None:
         """The command's renderer for a text mode, else the app's; None is plain's built-in"""
+        mode = name.builtin
         if mode is Format.ID:
             assert command.id_field is not None
             return functools.partial(id_lines, field=command.id_field)
@@ -746,7 +767,8 @@ class App:
         if command.path == MANIFEST_PATH:
             # The manifest is for agents: every text mode keeps it JSON, indented for reading
             return _json_text
-        return command.renderers.get(mode, self._renderers.get(mode, _BUILT_IN.get(mode)))
+        built_in = None if mode is None else _BUILT_IN.get(mode)
+        return command.renderers.get(name, self._renderers.get(name, built_in))
 
     def group(self, path: str, *, description: str) -> Group:
         prefix = CommandPath(path)
@@ -774,7 +796,7 @@ class App:
         timeout: float | None | _Inherit = INHERIT,
         supports_raw_payload: bool = False,
         cleanup: Cleanup | None = None,
-        renderers: Mapping[Format, Renderer] | None = None,
+        renderers: Mapping[Format | str, Renderer] | None = None,
         streaming: bool = False,
         safe_default: bool = False,
         gui_operations: Sequence[str] = (),
@@ -1018,14 +1040,18 @@ class App:
             raise RegistrationError(
                 f"{cmd_path}: config_write_scope={config_write_scope!r} is not one of {scopes}"
             )
-        overrides = dict(renderers or {})
-        for mode, render in overrides.items():
-            _check_renderer(f"{cmd_path}: renderers", mode, render)
-            if mode not in self.formats:
+        overrides: dict[FormatName, Renderer] = {}
+        for mode, render in (renderers or {}).items():
+            name = _format_name(f"{cmd_path}: renderers", mode)
+            _check_renderer(f"{cmd_path}: renderers", name, render)
+            if name not in self.formats:
+                member = name.builtin
+                spelled = repr(name.value) if member is None else f"Format.{member.name}"
                 raise RegistrationError(
-                    f"{cmd_path}: --format {mode} is not offered; "
-                    f"register it first with app.format(Format.{mode.name}, render=...)"
+                    f"{cmd_path}: --format {name} is not offered; "
+                    f"register it first with app.format({spelled}, render=...)"
                 )
+            overrides[name] = render
         try:
             contract = SchemaVersion(schema_version)
         except InvalidValue as exc:
@@ -1719,12 +1745,21 @@ class App:
     def _refused_selection(
         self, command: Command, invocation: Invocation, globals_: GlobalOptions, mode: Format
     ) -> ParseError | None:
-        """``--stream`` against ``--no-stream`` (REQ-O-004), or ``--format id`` on a
-        command without an id (REQ-O-005)"""
+        """``--stream`` against ``--no-stream`` (REQ-O-004), ``--format id`` on a command
+        without an id (REQ-O-005), or ``--output`` naming a format the app registered,
+        which the parser, knowing only treaty's names, let through (REQ-O-001)"""
         if globals_.stream and invocation.no_stream:
             return ParseError(
                 "--stream and --no-stream contradict each other; pass one",
                 context={"flag": "stream", "also_given": ["no-stream"]},
+            )
+        custom = {n.value for n in self.formats if n.builtin is None}
+        if invocation.output is not None and str(invocation.output) in custom:
+            raw = str(invocation.output)
+            return ParseError(
+                f"--output takes a file path, not the format {raw!r}",
+                context={"flag": OUTPUT_FLAG, "value": raw},
+                suggestion=f"use --format {raw} to choose the representation",
             )
         if mode is Format.ID and command.id_field is None:
             return ParseError(
@@ -1817,6 +1852,7 @@ class App:
             audit_log_path=None if audit_log_path is None else str(audit_log_path),
             unlogged=UNLOGGED & self._builtins,
             settings_env_vars=self._settings_env_vars(),
+            media_types=self._media_types,
         )
 
     def _settings_env_vars(self) -> list[dict[str, object]]:
@@ -2071,21 +2107,23 @@ class App:
             globals_, rest = split_globals(bound, short_verbose=not self._claims_v(bound))
             run.err.verbosity = resolve_verbosity(globals_.verbosity, environ, run.tty)
             run.warnings_as_errors = globals_.warnings_as_errors
-            mode = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
-            requested = mode
-            if mode is Format.JSONL or globals_.token_count:
+            selected = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
+            requested = selected
+            if selected.mode is Format.JSONL or globals_.token_count:
                 # Every JSON envelope is already one compact line; a token count is JSON
                 # whatever --format says (REQ-O-049)
-                mode = Format.JSON
+                selected = FormatName.of(Format.JSON)
+            # A custom name runs as plain does; its renderer is looked up by the name (#179)
+            mode = selected.mode
             run.cap = OutputCap.resolve(globals_.max_output, environ, self.max_output, self.name)
             run.budget = self._budget(globals_)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
-        run.mode = mode
+        run.mode, run.format_name = mode, requested
         run.attach_logging()
         trace(
             "run",
-            format=mode.value,
+            format=selected.value,
             verbosity=run.err.verbosity.name.lower(),
             audit_log=None if run.journal is None else str(run.journal.path),
         )
@@ -2213,7 +2251,7 @@ class App:
                 assert isinstance(invocation.args, ExecArgs)
                 run.argv = None  # a line's hint cannot rerun the whole plan
                 return run.exec(invocation.args)
-            render = self._renderer(command, mode)
+            render = self._renderer(command, selected)
             if command.streaming:
                 if invocation.no_stream:
                     envelopes = run.stream(command, invocation, mode, whole=True)
@@ -3041,9 +3079,20 @@ def _is_pair(item: object) -> TypeGuard[tuple[str, str] | list[str]]:
     )
 
 
-def _check_renderer(where: str, mode: object, render: object) -> None:
-    if not isinstance(mode, Format):
-        raise RegistrationError(f"{where}: {mode!r} is not a Format member")
+def _format_name(where: str, mode: object) -> FormatName:
+    """A ``Format`` member, or the text of a name ``Format`` lacks, as a ``FormatName``"""
+    if isinstance(mode, Format):
+        return FormatName.of(mode)
+    if not isinstance(mode, str):
+        raise RegistrationError(f"{where}: {mode!r} is not a Format member or a format name")
+    try:
+        return FormatName(mode)
+    except InvalidValue as exc:
+        raise RegistrationError(f"{where}: {exc}") from None
+
+
+def _check_renderer(where: str, name: FormatName, render: object) -> None:
+    mode = name.builtin
     if mode in (Format.JSON, Format.JSONL):
         raise RegistrationError(f"{where}: {mode} is the response envelope and takes no renderer")
     if mode is Format.NDJSON:
@@ -3051,7 +3100,7 @@ def _check_renderer(where: str, mode: object, render: object) -> None:
     if mode is Format.ID:
         raise RegistrationError(f"{where}: {mode} writes the id_field= value and takes no renderer")
     if not callable(render):
-        raise RegistrationError(f"{where}: the {mode} renderer is not callable")
+        raise RegistrationError(f"{where}: the {name} renderer is not callable")
 
 
 def _each(render: Renderer | None) -> Renderer | None:
@@ -3307,6 +3356,9 @@ class _Run:
         """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
+        self.format_name = FormatName.of(Format.JSON)
+        """The ``--format`` value the caller asked for, which ``ctx.format_name``
+        reports: ``jsonl`` or a custom name though ``mode`` is json or plain"""
         self.ndjson_shown: collections.Counter[str] = collections.Counter()
         """How often ``ndjson`` wrote each warning to stderr so far, by its JSON: a stream's
         envelopes repeat the run's warnings, and add their own (masking) that later ones
@@ -3678,6 +3730,8 @@ class _Run:
             app_name=self.app.name,
             version=self.app.version,
             mode=mode,
+            # What the CLI caller asked for; json for an exec line and App.call
+            format_name=self.format_name,
             request_id=self.request_id,
             env=self.env,
             state=self.app._state,
@@ -6100,17 +6154,19 @@ class _Run:
     def to_file(
         self,
         path: Path,
-        mode: Format,
+        name: FormatName,
         envelope: Envelope,
         render: Renderer | None,
         layout: Layout = NO_LAYOUT,
     ) -> Envelope:
         """Write a successful result's ``data`` to ``path``; the envelope then describes
         the write. A failed run writes no file. A plain table in a file is never cut to
-        ``COLUMNS``: a file is not a terminal."""
+        ``COLUMNS``: a file is not a terminal. A custom format's renderer writes it, as
+        plain's does"""
         if not envelope.ok or envelope.data is None:
             return envelope
         data = envelope.data
+        mode = name.mode
         if mode in (Format.JSONL, Format.NDJSON):
             text = ndjson_records(data)
         elif mode is Format.JSON:
@@ -6122,7 +6178,7 @@ class _Run:
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
                 self.err.write(self._redact_now(_traceback(exc)))
                 return self._file_error(
-                    envelope, "RENDER_FAILED", f"the {mode} renderer failed", path
+                    envelope, "RENDER_FAILED", f"the {name} renderer failed", path
                 )
         try:
             write_atomic(path, text, new_mode=0o644)  # REQ-F-070
@@ -6420,6 +6476,7 @@ class _Run:
                 self.app.name,
                 builtins=self.app.builtins,
                 settings_env_vars=self.app._settings_env_vars(),
+                media_types=self.app._media_types,
             )
         return self.emit(
             mode, self._envelope(0, data=data), render=_machine_text(mode), settle=False
@@ -6473,7 +6530,9 @@ class _Run:
         return self._help(mode, command.path.parts, text)
 
     def _global_rows(self) -> list[tuple[str, str]]:
-        return global_rows(global_flag_entries(self.app.formats, self.app.name))
+        return global_rows(
+            global_flag_entries(self.app.formats, self.app.name, self.app._media_types)
+        )
 
     def _help(self, mode: Format, parts: tuple[str, ...], text: str) -> int:
         """Help text on stdout for a person; in JSON mode it goes to stderr and stdout gets
@@ -6495,6 +6554,7 @@ class _Run:
         plan_command = self.current
         text = self._read_plan(args)
         self.payload_stdin = None  # the plan is stdin; a line's payload needs input_file
+        self.format_name = FormatName.of(Format.JSON)  # every line runs and answers in JSON
         if isinstance(text, Envelope):
             return self.emit(Format.JSON, text)
         # Only \n ends a JSONL line: splitlines() would also break on U+2028, U+2029,

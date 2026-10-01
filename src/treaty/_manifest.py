@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Collection, Mapping, Sequence
 from importlib.metadata import version
+from types import MappingProxyType
 
 from ._command import (
     ARGV_KEY,
@@ -35,7 +36,7 @@ from ._framework import (
     framework_flags,
 )
 from ._lines import INPUT_LINES_KEY, StdinInput
-from ._mode import Format
+from ._mode import Format, FormatName, MediaType
 from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._values import CommandPath, Etag
@@ -85,16 +86,23 @@ def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
     return tuple(codes)
 
 
-def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, object]:
+def global_flag_entries(
+    formats: Sequence[FormatName], app_name: str, media_types: Mapping[FormatName, MediaType]
+) -> dict[str, object]:
     """REQ-F-079: split_globals accepts these anywhere on every command path; a flag with
-    an environment variable default names it, and lists it in ``env_vars`` (REQ-O-042)"""
+    an environment variable default names it, and lists it in ``env_vars`` (REQ-O-042).
+    The ``--format`` values include the names an app registered, and the description
+    states the media type each declared, which ``FlagEntry`` has no key for (#179)"""
+    written = "".join(
+        f"; {name} writes {media_types[name]}" for name in formats if name in media_types
+    )
     entries: dict[str, object] = {
         "format": {
             "type": "enum",
             "required": False,
             "enum_values": [m.value for m in formats],
             "description": f"Output representation; default ${app_var(app_name, FORMAT.key)}, "
-            "else json when stdout is not a terminal, plain otherwise",
+            f"else json when stdout is not a terminal, plain otherwise{written}",
         },
         "max-output": {
             "type": "integer",
@@ -566,7 +574,7 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
 def build_manifest(
     commands: Mapping[CommandPath, Command],
     exits: ExitCodeRegistry,
-    formats: Sequence[Format],
+    formats: Sequence[FormatName],
     app_name: str,
     *,
     builtins: frozenset[CommandPath],
@@ -574,6 +582,7 @@ def build_manifest(
     audit_log_path: str | None = None,
     unlogged: Collection[CommandPath] = (),
     settings_env_vars: Sequence[Mapping[str, object]] = (),
+    media_types: Mapping[FormatName, MediaType] = MappingProxyType({}),
 ) -> dict[str, object]:
     """The manifest tree with the shared exit-code table hoisted to the root, each of
     ``builtins`` marked ``builtin: true`` (REQ-O-041); the app's
@@ -584,7 +593,7 @@ def build_manifest(
     framework's variables that back no flag, then ``settings_env_vars`` (REQ-F-073)"""
     shared = shared_exit_codes(exits)
     root_env = [*framework_env_vars(app_name), *(dict(e) for e in settings_env_vars)]
-    flags = global_flag_entries(formats, app_name)
+    flags = global_flag_entries(formats, app_name, media_types)
     entries = {
         path.value: command_entry(cmd, exits, commands, builtin=path in builtins, shared=shared)
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)

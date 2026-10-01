@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import functools
+import re
 import sys
-from collections.abc import Callable, Collection, Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 
 from ._env import FORMAT, app_var
 from ._errors import ParseError
+from ._values import InvalidValue
 
 
 class Format(StrEnum):
@@ -34,27 +37,101 @@ MACHINE: frozenset[Format] = frozenset({Format.JSON, Format.NDJSON})
 """Formats a program reads: no color, and JSON lines for the logs on stderr"""
 
 
+_FORMAT_NAME = re.compile(r"[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*")
+_FORMAT_NAME_MAX = 32
+# type/subtype as RFC 6838 restricts the names, lowercase, with no parameters
+_MEDIA_TYPE = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}")
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class FormatName:
+    """One ``--format`` value: a ``Format`` member's, or a name an app registers with
+    ``app.format("html", render=...)``. A custom name runs as ``plain`` does: its
+    renderer writes stdout, and errors go to stderr as prose. A member's name equals and
+    hashes like the member, so ``Format.CSV in app.formats`` holds"""
+
+    value: str
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, FormatName):
+            return self.value == other.value
+        if isinstance(other, Format):
+            return self.value == other.value
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.value)  # a StrEnum member hashes as its value
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.value, str)
+            or len(self.value) > _FORMAT_NAME_MAX
+            or not _FORMAT_NAME.fullmatch(self.value)
+        ):
+            raise InvalidValue(
+                f"format name {self.value!r} is not lowercase letters and digits, words "
+                f"joined by - or _, starting with a letter, at most {_FORMAT_NAME_MAX} long"
+            )
+
+    @classmethod
+    def of(cls, mode: Format) -> FormatName:
+        return cls(mode.value)
+
+    @property
+    def builtin(self) -> Format | None:
+        """The ``Format`` member of this name, None for a custom one"""
+        return next((m for m in Format if m.value == self.value), None)
+
+    @property
+    def mode(self) -> Format:
+        """What the run does: the member's own pipeline, ``plain``'s for a custom name"""
+        return self.builtin or Format.PLAIN
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True, slots=True)
+class MediaType:
+    """What a custom ``--format`` writes, such as ``text/html``, named in the manifest"""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, str) or not _MEDIA_TYPE.fullmatch(self.value):
+            raise InvalidValue(
+                f"media type {self.value!r} is not a lowercase type/subtype such as text/html"
+            )
+
+    def __str__(self) -> str:
+        return self.value
+
+
 def resolve_mode(
     explicit: str | None,
     env: Mapping[str, str],
     stdout_isatty: bool,
-    offered: Collection[Format],
+    offered: Sequence[FormatName],
     app_name: str,
-) -> Format:
+) -> FormatName:
+    """``--format``, else ``<APP>_FORMAT``, else JSON off a terminal or under CI and plain
+    on one; a value the app does not offer exits 2 listing those it does"""
     if explicit is not None:
         context = {
             "flag": "format",
             "value": explicit,
-            "allowed": [m.value for m in Format if m in offered],
+            "allowed": [m.value for m in offered],
         }
         try:
-            mode = Format(explicit)
-        except ValueError:
+            name = FormatName(explicit)
+        except InvalidValue:
             raise ParseError(f"unknown --format {explicit!r}", context=context) from None
-        if mode not in offered:
+        if name in offered:
+            return name
+        if name.builtin is not None:
             # A real format with no renderer registered, not a typo
             raise ParseError(f"--format {explicit!r} is not offered by {app_name}", context=context)
-        return mode
+        raise ParseError(f"unknown --format {explicit!r}", context=context)
     # REQ-O-042: the tool's own variable, failing as the same --format value would
     var = app_var(app_name, FORMAT.key)
     forced = env.get(var)
@@ -65,8 +142,8 @@ def resolve_mode(
             exc.context["source"] = var
             raise
     if not stdout_isatty or env.get("CI"):
-        return Format.JSON
-    return Format.PLAIN
+        return FormatName.of(Format.JSON)
+    return FormatName.of(Format.PLAIN)
 
 
 # REQ-F-008: any of these, even empty for NO_COLOR, turns color off; CI systems set the rest

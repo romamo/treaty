@@ -144,6 +144,21 @@ Apps built on treaty keep their own, structured schema changelog with
   `<APP>_SESSION`, `<APP>_AUDIT_LOG`, and each plain setting's `<APP>_<NAME>` and declared
   names. A secret setting is left out, since root `env_vars` holds no secret. `--help` and
   AGENTS.md list a plain flag's `<APP>_<NAME>` (#178)
+- `app.format("html", render=..., media_type="text/html")` offers a format `Format` does not
+  list. The name, lowercase letters and digits with words joined by `-` or `_`, joins
+  `--format`'s values, `<APP>_FORMAT`, the manifest's enum, `--help`, and completion, and a
+  command's `renderers={"html": ...}` overrides it. It runs as `plain` does: errors go to
+  stderr as prose, `--output` writes the rendered text, and `--output html` is refused as a
+  format name. `media_type` is stated in the `--format` description, as `FlagEntry` has no
+  key for it. A string naming a `Format` member is that member, and `json`, `jsonl`,
+  `ndjson`, and `id` still take no renderer. The new `treaty.FormatName` is one `--format`
+  value: `App.formats` holds them, and a member's equals and hashes like the member, so
+  `Format.CSV in app.formats` still holds. The new `ctx.format_name` is the value the CLI
+  caller asked for (`jsonl` too, which runs as `json`; `json` for an `exec` line or
+  `App.call`), so a handler tells `html` from `plain`, whose `ctx.mode` is
+  `Format.PLAIN` for both. `--output` is argv only (an `exec` line and `App.call`
+  refuse an `output` key), so the refusal of `--output html` covers every path that
+  writes a file (#179)
 
 ## [1.0.0rc11] - 2026-10-01
 

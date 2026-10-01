@@ -25,6 +25,7 @@ review), **rename**, **remove**.
 | `Out` | output field marker | keep | Settles 07-D4 and X1: one marker, `Out`, not `Field`, so it cannot be confused with `dataclasses.field` |
 | `NoArgs` | class | keep | Arguments type of a command with none |
 | `Format` | enum | keep | `PLAIN`, `JSON`, `JSONL`, `CSV`, `TSV`, `YAML`, `MARKDOWN`, `ID` |
+| `FormatName` | value object | keep | One `--format` value: a `Format` member's or an app's own (`app.format("html", ...)`); `App.formats` lists them; a member's equals and hashes like the member; `ctx.format_name` is the one the CLI caller asked for (`jsonl` stays `jsonl` though `ctx.mode` is `JSON`), and `json` for an `exec` line or `App.call` |
 | `DangerLevel` | enum | keep | `SAFE`, `MUTATING`, `DESTRUCTIVE` |
 | `Example` | class | keep | Also accepted as `(description, command)` tuples |
 | `Renderer` | type alias | keep | `Callable[[Any], str]` |
@@ -129,7 +130,7 @@ same keywords.
 
 ## `Ctx`
 
-Fields (keep): `app_name`, `version`, `mode`, `request_id`, `env`, `state`, `timeout`,
+Fields (keep): `app_name`, `version`, `mode`, `format_name`, `request_id`, `env`, `state`, `timeout`,
 `color`, `headless`, `cwd`, `idempotency_key`, `stdin_text`, `argv_rest`, `page`, `token`,
 `trace_id`, `project_root`.
 

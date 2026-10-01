@@ -427,7 +427,7 @@ envelope, unless `--warnings-as-errors` is set. `ndjson` takes no renderer, and 
 `App.call`, and the MCP adapter answer with envelopes whatever `--format` says.
 
 A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
-returns the text. Formats are `Format` members, never strings:
+returns the text. A format is a `Format` member, or a name treaty does not know:
 
 ```python
 from treaty import App, Format
@@ -451,6 +451,18 @@ app offers. `Format` lists every format treaty knows (`plain`, `json`, `jsonl`, 
 `csv`, `tsv`, `yaml`, `markdown`); an app offers `plain`, `json`, `jsonl`, `ndjson`, `tsv`,
 and the ones it registers, and the manifest and `--help` list exactly those. Any other
 value exits `2` listing them, before anything runs or any file is written.
+
+An app can offer a format treaty does not list, such as a page for a person:
+`app.format("html", render=render_html, media_type="text/html")`. The name (lowercase
+letters and digits, words joined by `-` or `_`) joins `--format`'s values, `<APP>_FORMAT`,
+the manifest, `--help`, and completion, and a command's `renderers={"html": ...}` overrides
+it. It runs as `plain` does: errors go to stderr as prose, `--output` writes the rendered
+text, and `ctx.mode` is `Format.PLAIN`; `ctx.format_name` is the name the caller asked for
+(`FormatName("html")`), so a handler can tell it from `plain`; an `exec` line and
+`App.call` report `json`, as they run in JSON. `media_type` is stated in the `--format` flag's
+description, since the manifest has no key for it. A string naming a `Format` member is
+that member, and `json`, `jsonl`, `ndjson`, and `id`, which treaty writes itself, take no
+renderer.
 
 A command declared `output_file=True` takes `--output PATH`: the result goes to the file in
 the `--format` representation, and stdout gets the JSON envelope with `data: {"path": ...,

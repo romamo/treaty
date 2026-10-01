@@ -36,7 +36,7 @@ from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, dry_run_field, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._lines import INPUT_LINES_FLAG, StdinInput
-from ._mode import Format
+from ._mode import FormatName
 from ._out import NO_ORDER, Binary, OutSpec, check_order
 from ._output_base import OutputBase, OutputRoot, output_root
 from ._page import DEFAULT_LIMIT, Limit, Page
@@ -136,7 +136,7 @@ class Command:
     timeout: Timeout | None
     supports_raw_payload: bool
     cleanup: Cleanup | None
-    renderers: Mapping[Format, Renderer]
+    renderers: Mapping[FormatName, Renderer]
     """Per-format overrides of the app's renderers"""
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
@@ -414,7 +414,7 @@ def build_command(
     timeout: Timeout | None,
     supports_raw_payload: bool,
     cleanup: Cleanup | None,
-    renderers: Mapping[Format, Renderer],
+    renderers: Mapping[FormatName, Renderer],
     scalars: ScalarRegistry,
     outlasts_default: bool = False,
     streaming: bool = False,
