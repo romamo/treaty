@@ -4456,24 +4456,26 @@ class _Run:
         preview_only = invocation.preview
         running: list[Pending] = []
         before = _process_cwd()
-        try:
-            self.cancellation.check()
+
+        def handler() -> object:
             try:
-                outcome = user_code(
-                    lambda: call_with_timeout(
-                        (lambda: self.app._gate(command, ctx))
-                        if replay is not None
-                        else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
-                        timeout,
-                        self._held(self._redactor(command, args), running.append),
-                        self.cancellation.armed,
-                        heartbeats=self._heartbeats(command, invocation, mode, started),
-                        ended=_RECORDS.forget,
-                    ),
-                    passing=_HANDLER_SIGNALS,
+                return call_with_timeout(
+                    (lambda: self.app._gate(command, ctx))
+                    if replay is not None
+                    else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
+                    timeout,
+                    self._held(self._redactor(command, args), running.append),
+                    self.cancellation.armed,
+                    heartbeats=self._heartbeats(command, invocation, mode, started),
+                    ended=_RECORDS.forget,
                 )
             finally:
+                # Inside the boundary: a cwd the handler removed fails here, as a crash
                 self._restore_cwd(before)
+
+        try:
+            self.cancellation.check()
+            outcome = user_code(handler, passing=_HANDLER_SIGNALS)
         except CliExit as exc:
             return self._exit_envelope(command, args, exc, started, full_meta)
         except NotModified:

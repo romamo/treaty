@@ -486,7 +486,7 @@ treaty and `transaction add` still on argparse, `bean transaction list` runs on 
   still lists every command
 - `--version` stays with argparse; the `version` command is treaty's
 - The built-ins resolve: `manifest`, `version`, `exec`, and the others the root `--help`
-  lists. A argparse command named like a built-in that yields, such as `status` or `doctor`,
+  lists. An argparse command named like a built-in that yields, such as `status` or `doctor`,
   reaches treaty's built-in until it is migrated, so route it to argparse by name in the shim
   until then
 - A path retired with `app.redirect` resolves, so callers of the old name get exit 13 and

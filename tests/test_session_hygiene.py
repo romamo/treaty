@@ -515,6 +515,30 @@ def test_the_process_cwd_after_any_command_invocation_is_identical_to_before(
     assert warning["context"] == {"from": before, "to": str(data_of(envelope)["now"])}
 
 
+@pytest.mark.skipif(WINDOWS, reason="Windows refuses to remove a process's working directory")
+def test_a_handler_that_removes_the_starting_cwd_is_handler_crashed(tmp_path: Path) -> None:
+    """Changing back to a directory the handler removed fails inside the handler boundary,
+    so it answers HANDLER_CRASHED rather than escaping as a traceback"""
+    app = App("cwdctl", version="1.0.0")
+    start = tmp_path / "start"
+    start.mkdir()
+
+    @app.command("leave", description="Remove the cwd", danger_level="safe", exit_codes=())
+    def leave(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+        os.chdir(tmp_path)
+        start.rmdir()
+        return {}
+
+    previous = os.getcwd()
+    os.chdir(start)
+    try:
+        status, envelope, _ = run(app, ["leave"])
+    finally:
+        os.chdir(previous)
+    assert status == 1
+    assert envelope["error"]["code"] == "HANDLER_CRASHED"  # type: ignore[index]
+
+
 def test_a_stream_that_changes_directory_is_changed_back(tmp_path: Path) -> None:
     app = App("streamctl", version="1.0.0")
 
