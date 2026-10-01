@@ -2,6 +2,7 @@
 
 import io
 import json
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -301,6 +302,15 @@ def test_the_rightmost_of_equally_wide_text_columns_is_cut_first() -> None:
 def test_numbers_are_never_cut_and_text_stops_at_four_cells() -> None:
     data = [{"text": "abcdefghij", "n": 1234567890}]
     assert render_plain(data, NO_LAYOUT, 5) == "text           n\nabc…  1234567890\n"
+
+
+def test_cutting_long_cells_takes_time_by_columns_not_by_cells_cut() -> None:
+    # 300 columns of 2000 cells cut to four each: a cell at a time was 180M steps
+    data = [{f"c{i:03}": "x" * 2000 for i in range(300)}]
+    started = time.monotonic()
+    lines = render_plain(data, NO_LAYOUT, 80).splitlines()
+    assert time.monotonic() - started < 5
+    assert lines[1] == "  ".join(["xxx…"] * 300)
 
 
 def test_a_cut_wide_character_is_padded_not_split() -> None:

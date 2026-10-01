@@ -164,15 +164,25 @@ def render_table(items: list[object], layout: Layout, width: int | None) -> str 
         max(_width(titles[i]), *(_width(line[i]) for line in cells)) for i in range(len(header))
     ]
     if width is not None:
-        over = sum(widths) + len(GAP) * (len(widths) - 1) - width
-        while over > 0:
-            cuttable = [i for i, n in enumerate(numeric) if not n and widths[i] > MIN_CUT]
-            if not cuttable:
-                break
-            widest = max(cuttable, key=lambda i: (widths[i], i))
-            widths[widest] -= 1
-            over -= 1
+        _fit(widths, numeric, sum(widths) + len(GAP) * (len(widths) - 1) - width)
     return "".join(_row(line, widths, numeric) + "\n" for line in [titles, *cells])
+
+
+def _fit(widths: list[int], numeric: list[bool], over: int) -> None:
+    """Take ``over`` cells off the text columns, a cell at a time from the widest, the
+    rightmost of equals, none below ``MIN_CUT``. Each step lowers every widest column to
+    the next width down at once, so the work grows with the columns, not the cells cut"""
+    text = [i for i, n in enumerate(numeric) if not n]
+    while over > 0:
+        top = max((widths[i] for i in text), default=MIN_CUT)
+        if top <= MIN_CUT:
+            return
+        widest = [i for i in text if widths[i] == top]
+        floor = max([MIN_CUT, *(widths[i] for i in text if widths[i] < top)])
+        rounds, extra = divmod(min(over, (top - floor) * len(widest)), len(widest))
+        for rank, i in enumerate(reversed(widest)):
+            widths[i] = top - rounds - (1 if rank < extra else 0)
+        over -= rounds * len(widest) + extra
 
 
 def _numbers(values: list[object]) -> bool:

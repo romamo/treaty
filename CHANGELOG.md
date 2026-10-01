@@ -36,6 +36,7 @@ Apps built on treaty keep their own, structured schema changelog with
   `DEPRECATED_ENV_VAR` work as for settings (#9). An object flag reads its JSON object from
   the variable, checked as on argv; a list of objects cannot declare names, since a comma
   cannot split JSON, and is a `RegistrationError`
+
 ### Changed
 
 - `--format plain` without a renderer prints a list of objects whose values are all
