@@ -182,6 +182,7 @@ from ._parse import (
     Route,
     bind_values,
     build_from_mapping,
+    built_args,
     format_hint,
     misplaced_flag_target,
     parse_command_args,
@@ -1873,7 +1874,12 @@ class App:
             refused = self._refused_selection(command, invocation, globals_, mode)
             if refused is not None:
                 return run.emit(Format.JSON, run.arg_error(refused, meta=_mode_meta(command)))
-            invocation = run.rooted(command, invocation)
+            try:
+                invocation = run.rooted(command, invocation)
+            except ParseError as exc:
+                return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
+            except ArgsCrashed as exc:
+                return run.emit(mode, run.args_crashed(command, exc))
             if run.unprotected:
                 run.unprotected_record()
             if command.path == EXEC_PATH:
@@ -2587,6 +2593,23 @@ def _previewing(command: Command, invocation: Invocation) -> bool:
     )
 
 
+def _dry_run_switched(command: Command, invocation: Invocation) -> Invocation:
+    """The run as it will happen, decided in phase 1: a ``safe_default`` command's dry
+    run, or a destructive command's preview, with the dry-run switch already on in
+    ``args``, so a ``__post_init__`` refusing it is exit 2 before anything runs (#161)"""
+    if command.safe_default:
+        # REQ-O-048: a dry run unless --live; --dry-run still wins, as a preview is safe
+        dry_run = not invocation.live or _dry_run_requested(command, invocation.args)
+        # --live is the explicit confirmation; --confirm-destructive is not also needed
+        invocation = dataclasses.replace(invocation, confirmed=not dry_run)
+    else:
+        dry_run = _previewing(command, invocation)
+        invocation = dataclasses.replace(invocation, preview=dry_run)
+    if not dry_run or _dry_run_requested(command, invocation.args):
+        return invocation
+    return dataclasses.replace(invocation, args=_as_dry_run(command, invocation.args))
+
+
 def _dry_run_requested(command: Command, args: object) -> bool:
     """True when the command's dry-run switch is on: ``Flag(dry_run=True)`` or ``dry_run``,
     which a destructive command always has (REQ-C-004)"""
@@ -2596,10 +2619,38 @@ def _dry_run_requested(command: Command, args: object) -> bool:
 
 
 def _as_dry_run(command: Command, args: object) -> object:
-    """``args`` with the command's dry-run switch turned on"""
+    """``args`` with the command's dry-run switch turned on, built in phase 1
+
+    The rebuild reruns the args ``__post_init__``, handled as at parse time: a refusal
+    is a phase-1 ``ParseError`` naming the flag that applies instead, anything else
+    ``ArgsCrashed`` (#161)."""
     field = command.dry_run_field
-    assert field is not None and dataclasses.is_dataclass(args) and not isinstance(args, type)
-    return dataclasses.replace(args, **{field.name: True})
+    assert field is not None
+    return _rebuilt(
+        command,
+        args,
+        {field.name: True},
+        "pass --live to apply instead of the dry run (live: true in exec, MCP, or --raw-payload)"
+        if command.safe_default
+        else "pass --confirm-destructive to apply instead of the preview "
+        "(confirm_destructive: true in exec, MCP, or --raw-payload)",
+    )
+
+
+def _rebuilt(
+    command: Command, args: object, changes: Mapping[str, object], suggestion: str | None
+) -> object:
+    """``args`` with ``changes``: ``dataclasses.replace`` reruns its ``__post_init__``,
+    handled by ``built_args`` as at parse time: ``ParseError`` (exit 2, with
+    ``suggestion``) or ``ArgsCrashed`` (exit 1) (REQ-F-015, #161)"""
+    assert dataclasses.is_dataclass(args) and not isinstance(args, type)
+    values = {**{f.name: getattr(args, f.name) for f in dataclasses.fields(args)}, **changes}
+    try:
+        return built_args(command, lambda: dataclasses.replace(args, **changes), values)
+    except ParseError as exc:
+        if exc.suggestion is None and suggestion is not None and not exc.errors:
+            exc.suggestion = suggestion
+        raise
 
 
 _END = object()
@@ -3168,7 +3219,8 @@ class _Run:
 
     def rooted(self, command: Command, invocation: Invocation) -> Invocation:
         """Relative ``Path`` arguments, ``--input-file``, and ``--output`` under ``--cwd``,
-        once they passed ``check_path`` (REQ-O-017)"""
+        once they passed ``check_path`` (REQ-O-017); the rebuild raises as parsing does:
+        ``ParseError`` or ``ArgsCrashed`` from the args ``__post_init__``"""
         if not self.cwd_given:
             return invocation
 
@@ -3180,14 +3232,14 @@ class _Run:
             return value
 
         args = invocation.args
-        assert dataclasses.is_dataclass(args) and not isinstance(args, type)
         moved = {f.name: under(getattr(args, f.name)) for f in command.fields if f.path}
         changed = {k: v for k, v in moved.items() if v != getattr(args, k)}
         stdin_file = invocation.input_file
         output = invocation.output
         return dataclasses.replace(
             invocation,
-            args=dataclasses.replace(args, **changed) if changed else args,
+            # ParseError or ArgsCrashed from __post_init__, as at parse time (#161)
+            args=_rebuilt(command, args, changed, None) if changed else args,
             # --input-file - is stdin, not a file named '-'
             input_file=stdin_file
             if stdin_file is None or stdin_file == Path("-") or stdin_file.is_absolute()
@@ -3651,6 +3703,12 @@ class _Run:
             if isinstance(position, Envelope):
                 return position
             invocation = dataclasses.replace(invocation, cursor=position)
+        try:
+            invocation = _dry_run_switched(command, invocation)
+        except ParseError as exc:
+            return self.arg_error(exc, meta={**(meta or {}), **_mode_meta(command)})
+        except ArgsCrashed as exc:
+            return self.args_crashed(command, exc, meta=meta)
         if invocation.validate_only:
             return self.validated(meta)
         if command.auth is not None:
@@ -3676,15 +3734,7 @@ class _Run:
             invocation = dataclasses.replace(invocation, stdin_text=payload)
         if not command.safe_default:
             return self._keyed(command, invocation, mode, meta=meta)
-        # REQ-O-048: a dry run unless --live; --dry-run still wins, as a preview is safe
-        dry_run = not invocation.live or _dry_run_requested(command, invocation.args)
-        args = invocation.args
-        # --live is the explicit confirmation; --confirm-destructive is not also needed
-        invocation = dataclasses.replace(
-            invocation,
-            args=_as_dry_run(command, args) if dry_run else args,
-            confirmed=not dry_run,
-        )
+        dry_run = not invocation.confirmed
         envelope = self._keyed(command, invocation, mode, meta=meta)
         extra: dict[str, object] = {"dry_run": dry_run}
         if not dry_run:
@@ -3868,7 +3918,7 @@ class _Run:
         )
         if key is None and not session:
             return self._execute(command, invocation, mode, meta=meta)
-        if _previewing(command, invocation) or _dry_run_requested(command, invocation.args):
+        if _dry_run_requested(command, invocation.args):  # a preview too: phase 1 set it
             return self._execute(command, invocation, mode, meta=meta)
         started = time.perf_counter()
         timeout = self.app._effective_timeout(command, invocation.timeout)
@@ -4165,9 +4215,7 @@ class _Run:
             page=request(position, limit) if command.paginated else None,
         )
         args = invocation.args
-        preview_only = _previewing(command, invocation)
-        if preview_only:
-            args = _as_dry_run(command, args)
+        preview_only = invocation.preview
         running: list[Pending] = []
         before = _process_cwd()
         try:
