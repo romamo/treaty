@@ -144,6 +144,8 @@ def test_a_parser_exiting_on_its_own_is_its_exit_code_not_a_crash() -> None:
     assert ran.envelope["error"]["code"] == "DELEGATED_EXIT"
     ran = run_main(["ingest", "extract", "--help"])
     assert ran.code == 0 and "usage: ledger ingest extract" in ran.stdout
+    ran = run(["ingest", "bogus"])  # in-process too: the code, not argparse's coloured text
+    assert ran.code == 2 and ran.envelope["error"]["code"] == "DELEGATED_EXIT"
 
 
 def test_help_command_stands_in_for_a_lone_help_after_the_path() -> None:
