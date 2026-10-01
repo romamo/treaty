@@ -441,7 +441,8 @@ class App:
         ``payload`` being the line's object without ``_cmd``, and what it returns, an
         object, an array, or None, is the line's ``data`` in a success envelope. A
         ``ParseError`` it raises answers exit 2, a ``KeyboardInterrupt`` ``CANCELLED`` as
-        from a handler, any other exception exit 1 ``FALLBACK_FAILED``; without it, such a line is ``UNKNOWN_COMMAND``.
+        from a handler, any other exception exit 1 ``FALLBACK_FAILED``; without it, such a
+        line is ``UNKNOWN_COMMAND``.
 
         ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
         ``mcp-validate``, ``audit-log``, and ``completion`` are built-ins that yield: an app
@@ -5379,7 +5380,9 @@ class _Run:
         envelope = self._envelope(0, data=data, started=started, meta=meta)
         warnings = list(envelope.warnings)
         if data is not None:
-            protected = protect(data, object, unmask=self.unmask)
+            protected = protect(
+                data, object, unmask=self.unmask, adapters=self.app.scalars.adapters
+            )
             data = protected.data
             if protected.masked:
                 warnings.append(_masked_warning(protected.masked))
