@@ -3,6 +3,7 @@ command's arguments, with no pydantic import in treaty"""
 
 import io
 import json
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
@@ -12,7 +13,7 @@ import pytest
 from conftest import spec_validator
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-from treaty import App, ArgsAdapter, AuditLog, Ctx, RegistrationError
+from treaty import Affects, App, ArgsAdapter, AuditLog, Ctx, RegistrationError
 from treaty._tools import input_schema
 
 
@@ -260,3 +261,64 @@ def register(app: App, model: type) -> None:
     @app.command("go", description="Go", danger_level="safe", exit_codes=())
     def go(args: model, ctx: Ctx) -> dict[str, object]:  # type: ignore[valid-type]
         return {}
+
+
+class WipeArgs(BaseModel):
+    force: bool = Field(False, description="Skip the safety check")
+    dry_run: bool = Field(False, description="Preview only")
+
+    @model_validator(mode="after")
+    def no_forced_preview(self) -> WipeArgs:
+        if self.force and self.dry_run:
+            raise ValueError("--force makes no sense with --dry-run")
+        return self
+
+
+@dataclass(frozen=True, slots=True)
+class Wiped:
+    effect: str
+    would_affect: Affects | None = None
+
+
+def wipe_app(seen: list[WipeArgs]) -> App:
+    app = App("market", version="1.0.0")
+    app.args_adapter(BaseModel, schema=schema_of, validate=validate)
+
+    @app.command("wipe", description="Wipe", danger_level="destructive", exit_codes=())
+    def wipe(args: WipeArgs, ctx: Ctx) -> Wiped:
+        seen.append(args)
+        if args.dry_run:
+            return Wiped("would_delete", Affects("Wipes everything", ("all",), 1))
+        return Wiped("deleted")
+
+    return app
+
+
+def test_a_forced_preview_rebuilds_the_model_in_phase_one() -> None:
+    """A destructive command run without --confirm-destructive is a dry run treaty switches
+    on: the model is validated again with dry_run=True before anything runs (#161)"""
+    seen: list[WipeArgs] = []
+    code, env = run(["wipe"], app=wipe_app(seen))
+    assert code == 2 and env["error"]["code"] == "CONFIRMATION_REQUIRED"
+    assert [type(a) for a in seen] == [WipeArgs] and seen[0].dry_run is True
+    # The model_validator refusing the rebuilt model is exit 2, as at parse time
+    seen.clear()
+    code, env = run(["wipe", "--force"], app=wipe_app(seen))
+    explicit_code, explicit = run(["wipe", "--force", "--dry-run"], app=wipe_app(seen))
+    assert seen == []
+    assert code == explicit_code == 2
+    assert env["error"]["code"] == explicit["error"]["code"] == "ARG_ERROR"
+    refusal = {
+        "message": "Value error, --force makes no sense with --dry-run",
+        "context": {"type": "value_error"},
+    }
+    assert explicit["error"]["errors"] == [refusal]
+    # The forced run also names the flag that applies instead (#161)
+    suggestion = env["error"]["errors"][0].pop("suggestion")
+    assert "--confirm-destructive" in suggestion
+    assert env["error"]["errors"] == [refusal]
+    called = wipe_app(seen).call("wipe", {"force": True}, env=ENV)
+    assert called.exit_code == 2 and called.error is not None
+    assert list(called.error.errors) == [{**refusal, "suggestion": suggestion}] and seen == []
+    confirmed = wipe_app(seen).call("wipe", {"force": True, "confirm_destructive": True}, env=ENV)
+    assert confirmed.ok and confirmed.data == {"effect": "deleted", "would_affect": None}

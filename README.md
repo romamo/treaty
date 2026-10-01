@@ -1206,7 +1206,10 @@ dataclass, then hands the values to `validate` as JSON values; the handler, its 
 and its rollback receive what it returns. A `ValueError` it raises exits 2 with one
 `error.errors` entry per item of its `errors()` list (pydantic's `ValidationError` has one),
 at the item's `loc` with its `type` and `input`, never a secret's; one with no `loc`, such
-as a `model_validator`'s, names no field. `--schema`, `--help`, the manifest, and completion
+as a `model_validator`'s, names no field. A dry run treaty switches on, such as a
+destructive command's preview without `--confirm-destructive`, calls `validate` again in
+phase 1 with the model's `dry_run` field on, and a refusal there is answered the same way.
+`--schema`, `--help`, the manifest, and completion
 come from the same flags. A nested model, a dict, or a union of two types has no flag form
 and fails registration, as do two adapters covering one class and an adapter's class
 registered with `app.scalar`.
