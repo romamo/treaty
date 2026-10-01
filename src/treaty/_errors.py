@@ -116,6 +116,24 @@ class ArgsCrashed(Exception):
         """The field values it was given, so the crash report can redact secrets"""
 
 
+class ArgsRefused(ParseError):
+    """Phase 1 refused the arguments once every field had been read: an error of the
+    args ``__post_init__`` or of a field, with the field values it was given. User code
+    may quote a value in its message, so the envelope is redacted of the secrets among
+    them, as a handler's error is"""
+
+    def __init__(self, error: ParseError, values: Mapping[str, object]) -> None:
+        super().__init__(
+            error.message,
+            context=error.context,
+            suggestion=error.suggestion,
+            errors=error.errors,
+            code=error.code,
+        )
+        self.values = dict(values)
+        """The field values read, so the envelope can redact the secrets among them"""
+
+
 class CliExit(Exception):
     """Raised by a handler to end the run with a declared exit code
 

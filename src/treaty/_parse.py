@@ -17,7 +17,7 @@ from typing import Any, NoReturn
 from ._command import Command, OptionPlacement
 from ._declare import shell_safe
 from ._dispatch import invalid_json
-from ._errors import ArgsCrashed, ParseError
+from ._errors import ArgsCrashed, ArgsRefused, ParseError
 from ._flags import FieldInfo, apply_scalar
 from ._framework import (
     NO_INJECTION_FLAG,
@@ -812,6 +812,15 @@ def known_flags(command: Command, *, argv: bool = True) -> list[str]:
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
+    """The args dataclass built, or every phase 1 error with the values read, so the
+    envelope can redact the secrets among them from what user code wrote (#165)"""
+    try:
+        return _construct(command, values, errors)
+    except ParseError as exc:
+        raise ArgsRefused(exc, values) from None
+
+
+def _construct(command: Command, values: dict[str, object], errors: _Collector) -> object:
     """Report missing fields alongside everything collected, then build the dataclass
 
     The args ``__post_init__`` is the cross-field check of phase 1 (REQ-F-015): it runs
