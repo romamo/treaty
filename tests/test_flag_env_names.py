@@ -287,3 +287,51 @@ def test_a_plain_flag_may_name_its_prefixed_variable_and_a_deprecation_names_the
     [warning] = result.warnings
     assert warning.context["replacement"] == "--region"
     assert app.call("where", {}, env={"PY_IBKR_REGION": "ap"}).data == {"region": "ap"}
+
+
+@dataclass(frozen=True, slots=True)
+class Window:
+    start: int
+    end: int
+
+    def __post_init__(self) -> None:
+        if self.start > 99:
+            raise ZeroDivisionError("a bug in the object's own check")
+
+
+def test_an_object_flag_reads_its_json_from_a_declared_name() -> None:
+    @dataclass(frozen=True)
+    class Args:
+        window: Window = Flag(description="Window", env=("IBKR_WINDOW",))
+
+    app = App("py-ibkr", version="1.0.0")
+
+    @app.command("span", description="Span", danger_level="safe", exit_codes=())
+    def span(args: Args, ctx: Ctx) -> dict[str, int]:
+        return {"width": args.window.end - args.window.start}
+
+    code, out, _ = run(["span"], {"IBKR_WINDOW": '{"start": 2, "end": 5}'}, app=app)
+    assert code == 0 and json.loads(out)["data"] == {"width": 3}
+    code, out, _ = run(["span"], {"IBKR_WINDOW": '{"start": 2}'}, app=app)
+    error = json.loads(out)["error"]
+    assert code == 2 and error["message"].startswith("IBKR_WINDOW: ")
+    # An object's __post_init__ bug read from a variable is reported as on argv
+    crashed = '{"start": 100, "end": 101}'
+    via_argv = run(["span", "--window", crashed], {}, app=app)
+    via_env = run(["span"], {"IBKR_WINDOW": crashed}, app=app)
+    assert via_env[0] == via_argv[0] != 0
+    argv_error, env_error = (json.loads(r[1])["error"] for r in (via_argv, via_env))
+    assert env_error["code"] == argv_error["code"]
+
+
+def test_a_list_of_objects_cannot_declare_names() -> None:
+    @dataclass(frozen=True)
+    class Args:
+        windows: tuple[Window, ...] = Flag(default=(), description="Windows", env=("WINDOWS",))
+
+    app = App("py-ibkr", version="1.0.0")
+    with pytest.raises(RegistrationError, match="list of JSON objects"):
+
+        @app.command("spans", description="Spans", danger_level="safe", exit_codes=())
+        def spans(args: Args, ctx: Ctx) -> NoArgs:
+            return NoArgs()

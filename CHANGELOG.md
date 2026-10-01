@@ -32,7 +32,9 @@ Apps built on treaty keep their own, structured schema changelog with
   `--raw-payload` schema, since a variable may supply it. A value read from a variable is
   validated as strictly as a passed one, and its error names the variable in
   `context.source`. `--help`, AGENTS.md, the `env-prefix` audit rule, and
-  `DEPRECATED_ENV_VAR` work as for settings (#9)
+  `DEPRECATED_ENV_VAR` work as for settings (#9). An object flag reads its JSON object from
+  the variable, checked as on argv; a list of objects cannot declare names, since a comma
+  cannot split JSON, and is a `RegistrationError`
 
 ## [1.0.0rc10] - 2026-10-01
 

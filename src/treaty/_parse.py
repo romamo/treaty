@@ -884,6 +884,8 @@ def _apply_env(
                     values[f.name] = _from_variable(f, raw)
                 except ParseError as exc:
                     errors.add(_from_named(exc, var))
+                except ArgsCrashed as exc:  # an object's __post_init__
+                    errors.crash(exc)
                 continue
             ref = SecretRef(SecretSource.ENV, var)
         try:
@@ -895,9 +897,12 @@ def _apply_env(
 
 def _from_variable(field: FieldInfo, raw: str) -> object:
     """A plain flag's value from a variable, parsed as argv text; an array is
-    comma-separated, as a setting's is"""
+    comma-separated, as a setting's is. An object is its JSON text, as on argv; a list of
+    objects is refused at registration, since a comma cannot split JSON"""
     if field.flag_type is FlagType.ARRAY:
         return tuple(field.parse(v) for v in raw.split(","))
+    if (target := field.object_type) is not None:
+        return check_object(target, _decode_object(raw, field.flag, field.flag), field.flag)
     return field.parse(raw)
 
 

@@ -274,6 +274,7 @@ from ._suggest import closest, hint
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._tools import EXEC_PATH
+from ._types import FlagType
 from ._update import UpdateCheck, available, check_allowed
 from ._values import (
     CommandPath,
@@ -1352,6 +1353,11 @@ class App:
         }
         taken |= {v: f"the token of {where}" for v in command.token_env_vars}
         for f in command.fields:
+            if f.spec.env and f.flag_type is FlagType.ARRAY and f.object_type is not None:
+                raise RegistrationError(
+                    f"{where}: --{f.flag} takes a list of JSON objects, which a variable "
+                    "cannot carry as comma-separated text; drop env= or take one object"
+                )
             own = command.secret_env_vars.get(f.name)
             others = {k: v for k, v in taken.items() if k != own}
             check_env_names(
