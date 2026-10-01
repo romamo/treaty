@@ -472,7 +472,8 @@ def test_the_heartbeat_message_includes_elapsed_time_and_the_most_recent_progres
 
 def test_heartbeat_messages_are_plain_text_never_json() -> None:
     code, out, err = migrating(["migrate", "--heartbeat-interval", "0.1"], beats=1)
-    assert err and all(not line.startswith("{") for line in err.splitlines())
+    # Exit 0: the handler saw its beats; a crash's traceback is plain text too
+    assert code == 0 and err and all(not line.startswith("{") for line in err.splitlines())
     assert [line for line in out.splitlines() if "heartbeat" in line] == []
 
 
