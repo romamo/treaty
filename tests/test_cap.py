@@ -183,14 +183,16 @@ def test_the_written_line_newline_included_never_exceeds_the_cap(
 
 def test_total_bytes_counts_the_line_as_written() -> None:
     """``meta.total_bytes`` and the cap count the same bytes: the full line rerun under a
-    cap of exactly ``total_bytes`` is not cut"""
-    _, out = run(sized_app(10), ["ls"], env={"SIZECTL_MAX_OUTPUT_BYTES": str(CAP)})
+    cap of exactly ``total_bytes`` is not cut. ``--stable-output`` keeps ``duration_ms``
+    from changing the line's length between the runs"""
+    stable = ["ls", "--stable-output"]
+    _, out = run(sized_app(10), stable, env={"SIZECTL_MAX_OUTPUT_BYTES": str(CAP)})
     total = envelope(out)["meta"]["total_bytes"]
-    _, full = run(sized_app(10), ["ls", "--max-output", str(total + SLACK)])
+    _, full = run(sized_app(10), [*stable, "--max-output", str(total + SLACK)])
     assert len(full.encode()) <= total + SLACK and "truncated" not in envelope(full)["meta"]
-    _, cut = run(sized_app(10), ["ls", "--max-output", str(len(full.encode()) - 1)])
+    _, cut = run(sized_app(10), [*stable, "--max-output", str(len(full.encode()) - 1)])
     assert envelope(cut)["meta"]["truncated"] is True
-    _, exact = run(sized_app(10), ["ls", "--max-output", str(len(full.encode()))])
+    _, exact = run(sized_app(10), [*stable, "--max-output", str(len(full.encode()))])
     assert "truncated" not in envelope(exact)["meta"]
 
 
