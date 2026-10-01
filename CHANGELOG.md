@@ -36,6 +36,26 @@ Apps built on treaty keep their own, structured schema changelog with
   `DEPRECATED_ENV_VAR` work as for settings (#9). An object flag reads its JSON object from
   the variable, checked as on argv; a list of objects cannot declare names, since a comma
   cannot split JSON, and is a `RegistrationError`
+- A command declared `output_file=True` that returns `treaty.Binary` writes the raw bytes
+  to `--output`, atomically and whatever the `--format`, instead of their base64 wrapper
+  in the `--format` representation; `data` is `{path, bytes, content_type, sha256}`, with
+  `sha256` in lowercase hex and `content_type` only when the command declared one. A
+  failed run still writes no file, the output cap bounds the envelope and never the file,
+  and without `--output` the bytes stay base64 in `data`. A relative `--output` lands in
+  the base `output_file=` declares, as for the `--format` representation, and the
+  `--output` description names both the raw write and that base. `--output -` on such a
+  command exits `2`, as stdout carries only the envelope; other commands still write a
+  file named `-`. The new `binary-output-file` audit rule, an advice, suggests
+  `output_file=True` for a command returning bytes without it (#10)
+- The manifest is ManifestResponse 3.3: the `CommandEntry` of a command declared
+  `output_file=`, with any base, carries `output_file`, `"binary"` when it returns
+  `treaty.Binary` and its `--output` gets the raw bytes, `"formatted"` when the file gets
+  the `--format` representation. A passthrough command, whose `--output` gets the JSON
+  envelope whatever the `--format`, and an app's own `output` flag have no key, a
+  departure from REQ-O-001 listed in COMPLIANCE.md until cli-agent-spec#27 settles it.
+  `schema_version` is `"3.3"`; the spec's 3.2 adds `ConditionalRule` `any_of` and
+  `one_of`, which treaty's manifest does not emit, as only `--schema` shows a group rule
+  (#10)
 
 ### Changed
 

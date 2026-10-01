@@ -253,20 +253,39 @@ def env_var(raw: str) -> str:
 _FORMAT_NAMES = frozenset({"json", "jsonl", "ndjson", "tsv", "csv", "plain", "table", "id", "yaml"})
 
 
-def output_path(raw: str) -> Path:
-    """``--output``: a file path, never a format name such as ``json``"""
+def output_path(raw: str, command: Command) -> Path:
+    """``--output``: a file path, never a format name such as ``json``; never ``-`` for a
+    command that returns bytes, as stdout carries only the envelope"""
     if raw in _FORMAT_NAMES:
         raise ParseError(
             f"--output takes a file path, not the format {raw!r}",
             context={"flag": OUTPUT_FLAG, "value": raw},
             suggestion=f"use --format {raw} to choose the representation",
         )
+    if raw == "-" and command.returns_binary:
+        raise ParseError(
+            "--output takes a file path; raw bytes never go to stdout, which carries only "
+            "the envelope",
+            context={"flag": OUTPUT_FLAG, "value": raw},
+            suggestion="omit --output to get the bytes base64-encoded in data, or pass ./- "
+            "for a file named -",
+        )
     return check_path(raw, OUTPUT_FLAG)
 
 
 def _output_description(command: Command) -> str:
-    """The ``--output`` help, naming where a relative path lands unless it is the cwd (#68)"""
-    text = "Write the result to this file in the --format representation; stdout gets the envelope"
+    """The ``--output`` help: the raw bytes of a command returning ``treaty.Binary`` (#10),
+    else the ``--format`` representation; naming where a relative path lands unless it is
+    the cwd (#68)"""
+    if command.returns_binary:
+        text = (
+            "Write the returned bytes to this file as they are; stdout gets the envelope with "
+            "path, bytes, content_type, and sha256"
+        )
+    else:
+        text = (
+            "Write the result to this file in the --format representation; stdout gets the envelope"
+        )
     root = command.output_root
     if root is None or root.is_cwd:
         return text
@@ -453,7 +472,7 @@ FLAGS: tuple[FrameworkFlag, ...] = (
             if c.passthrough
             else _output_description(c)
         ),
-        parse=lambda v, c: output_path(str(v)),
+        parse=lambda v, c: output_path(str(v), c),
         metavar="PATH",
         entry=lambda c: {"pattern_type": "filepath"},
     ),

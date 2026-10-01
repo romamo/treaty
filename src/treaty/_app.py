@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import collections
 import contextlib
 import contextvars
 import dataclasses
 import errno
 import functools
+import hashlib
 import inspect
 import io
 import json
@@ -39,7 +41,7 @@ from typing import IO, Any, Literal, NoReturn, TextIO, TypeGuard, cast
 from ._adapters import OutputAdapter
 from ._aio import Loop, within
 from ._args_adapter import ArgsAdapter, ArgsAdapters
-from ._atomic import write_atomic
+from ._atomic import write_atomic, write_atomic_bytes
 from ._auth import (
     OVER_PRIVILEGED,
     AuthFailure,
@@ -179,7 +181,7 @@ from ._mode import (
     resolve_mode,
     suppress_updates,
 )
-from ._out import NO_ORDER, OutSpec, arrange, sorted_indices
+from ._out import NO_ORDER, OutSpec, arrange, is_binary, sorted_indices
 from ._output_base import PROJECT_ROOT, OutputBase
 from ._page import (
     CURSOR_FLAG,
@@ -832,7 +834,9 @@ class App:
         the ``data`` of another treaty command's envelope, whose failure ends this run with
         ``UPSTREAM_FAILED``; it implies ``stdin_input="lines"``. ``output_file=True`` adds
         ``--output PATH``, which writes ``data`` there in the ``--format`` representation
-        and the envelope to stdout.
+        and the envelope to stdout; a command returning ``treaty.Binary`` writes the raw
+        bytes, and ``data`` gives their ``path``, ``bytes``, ``content_type``, and
+        ``sha256``.
         ``requires_auth=True`` checks the app's ``credentials`` for ``required_scopes``
         before the handler runs. ``auth="browser"`` or ``"device"`` marks a login command:
         it gets ``--headless`` and ``--token-env-var``, and ``ctx.token`` from
@@ -2178,18 +2182,20 @@ class App:
                 envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
             if invocation.output is not None:
                 # REQ-O-001: the file gets the representation; stdout gets the envelope
+                # A relative path resolves against the declared base for raw bytes too (#68)
                 target = run.output_target(command, invocation.output)
-                written = (
-                    run.to_file(
+                if target is None:
+                    written = run.output_unresolved(command, invocation.output, envelope)
+                elif command.returns_binary and envelope.ok and is_binary(envelope.data):
+                    written = run.bytes_to_file(target, envelope)
+                else:
+                    written = run.to_file(
                         target,
                         requested,
                         envelope,
                         render,
                         layout_of(command.output_type, self.scalars.adapters),
                     )
-                    if target is not None
-                    else run.output_unresolved(command, invocation.output, envelope)
-                )
                 return run.emit(Format.JSON, written)
             return run.emit(
                 mode,
@@ -5989,6 +5995,25 @@ class _Run:
             "this run did not resolve; pass an absolute --output",
             output,
         )
+
+    def bytes_to_file(self, path: Path, envelope: Envelope) -> Envelope:
+        """Write the bytes a successful run returned, ``data`` being their wrapper, to
+        ``path`` as they are, whatever the ``--format``; the envelope then describes the
+        write, with the bytes' ``sha256`` (#10)"""
+        wrapper = envelope.data
+        assert isinstance(wrapper, dict) and is_binary(wrapper)
+        raw = base64.b64decode(wrapper["value"], validate=True)
+        try:
+            write_atomic_bytes(path, raw, new_mode=0o644)  # REQ-F-070
+        except OSError as exc:
+            return self._file_error(
+                envelope, "OUTPUT_UNWRITABLE", f"cannot write --output: {exc.strerror}", path
+            )
+        written: dict[str, object] = {"path": str(path), "bytes": len(raw)}
+        if "content_type" in wrapper:  # only when the command declared one, as in the wrapper
+            written["content_type"] = wrapper["content_type"]
+        written["sha256"] = hashlib.sha256(raw).hexdigest()  # lowercase hex
+        return dataclasses.replace(envelope, data=written)
 
     def _file_error(self, envelope: Envelope, code: str, message: str, path: Path) -> Envelope:
         """The result stays in ``data``, so a run that could not write its file loses nothing"""

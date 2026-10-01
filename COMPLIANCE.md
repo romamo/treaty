@@ -14,7 +14,8 @@ and process hygiene (09), network and filesystem utilities (10), and logging,
 verbosity, and the audit log (11), output selection and streaming flags (12),
 built-in commands (13), and agent docs (14).
 The spec has no tagged release yet: this assessment is against the spec commit CI pins
-as `SPEC_REF` (`5e6f0d8`, the spec's 1.9.0 release commit), and the 1.0 tag will name the spec release it conforms to.
+as `SPEC_REF` (`019247f`, the merge of the spec's PR #21 after its 1.9.0 release), and the
+1.0 tag will name the spec release it conforms to.
 1.0 claims Level 2; the Level 3 score below is published, not claimed (15-D3).
 
 Each requirement was checked against its acceptance criteria by reading the source and
@@ -58,6 +59,21 @@ Every other command is unaffected, and the scores above count them as done.
 | REQ-C-003 | A mutating passthrough command's `data` is `{"exit_code": n}` with no `effect`; only a replay adds `effect: noop` | [cli-agent-spec#25](https://github.com/cli-agent-spec/cli-agent-spec/issues/25) |
 | REQ-C-015 | No input schema describes the tool's arguments; `--schema` lists only treaty's flags, which go before the path | [cli-agent-spec#25](https://github.com/cli-agent-spec/cli-agent-spec/issues/25) |
 | Manifest `CommandEntry` | No key marks a passthrough command, so the manifest uses `option_placement: "strict"` and a sentence in `description`; `help_command` is not listed | [cli-agent-spec#24](https://github.com/cli-agent-spec/cli-agent-spec/issues/24) |
+
+## `--output` without `output_file`
+
+REQ-O-001 asks for `CommandEntry.output_file` on every command that registers
+`--output <path>`, with `"binary"` or `"formatted"`. treaty sets it on `output_file=`
+commands only. Two other kinds of `--output` fit neither value, so their commands have
+no key. A command whose args declare their own `output` field, written by the handler,
+holds what treaty cannot see; the `fs-side-effects` audit rule suggests
+`output_file=True` for it instead. A passthrough command's `--output` gets its JSON
+envelope whatever the `--format`, not a representation of `data`.
+
+| ID | Departure | Spec issue |
+|----|-----------|------------|
+| REQ-O-001 | No `output_file` key on a command whose `--output` is the app's own argument, not one treaty registers | [cli-agent-spec#27](https://github.com/cli-agent-spec/cli-agent-spec/issues/27) |
+| REQ-O-001 | No `output_file` key on a passthrough command, whose `--output` gets the JSON envelope, not the `--format` representation of `data` | [cli-agent-spec#27](https://github.com/cli-agent-spec/cli-agent-spec/issues/27) |
 
 ## Framework-automatic
 
@@ -182,7 +198,7 @@ Every other command is unaffected, and the scores above count them as done.
 
 | ID | Title | Priority | Level | Status | Notes |
 |----|-------|----------|-------|--------|-------|
-| [REQ-O-001](../cli-agent-ergonomics/requirements/o-001-output-format-flag.md) | --format Output Format Flag | P0 | 2 | Done | `--format` json, jsonl, ndjson, plain, tsv built in, others registered (`ndjson` is the spec's envelope-free JSONL rows: `data` alone, one line per item or event); unknown values exit 2 listing the offered ones; `--output PATH` on `output_file=True` commands, refusing format names |
+| [REQ-O-001](../cli-agent-ergonomics/requirements/o-001-output-format-flag.md) | --format Output Format Flag | P0 | 2 | Done | `--format` json, jsonl, ndjson, plain, tsv built in, others registered (`ndjson` is the spec's envelope-free JSONL rows: `data` alone, one line per item or event); unknown values exit 2 listing the offered ones; `--output PATH` on `output_file=` commands, refusing format names; a `treaty.Binary` result is written as raw bytes, `--output -` exits 2, and the manifest marks each such command with `output_file` (an app's own `output` flag and passthrough commands excepted, above) |
 | [REQ-O-002](../cli-agent-ergonomics/requirements/o-002-fields-selector.md) | --fields Selector | P2 | 3 | Done | Global `--fields id,name` on every command, built-ins included: keeps those top-level keys of object `data` or of each object item, after masking and trust tags and before the token budget and byte cap; unknown names ignored, `_source`/`_trusted` kept, `ok`/`error`/`warnings`/`meta` untouched; applies to each stream event, and an exec line or MCP call may set `fields` |
 | [REQ-O-003](../cli-agent-ergonomics/requirements/o-003-limit-and-cursor-pagination-flags.md) | --limit and --cursor Pagination Flags | P0 | 2 | Done | `--limit` and `--cursor` on every list command (and in exec, MCP, raw payloads, where `limit` must be an integer); base64url stateless cursors bound to the command and a digest of its other arguments; a malformed, foreign, or other-arguments cursor exits 2 with `INVALID_CURSOR`. Cursors are unsigned: a hand-edited inner cursor is refused only by the command's `cursor_check=` |
 | [REQ-O-004](../cli-agent-ergonomics/requirements/o-004-output-jsonl-stream-flag.md) | --format jsonl / --stream Flag | P2 | 3 | Done | `streaming=True` commands stream envelope lines by default (`streaming_default` in the manifest, `--no-stream` for one envelope); the summary line carries `meta.pagination`; global `--stream` is a no-op there, exit 2 with `--no-stream`, and on any other command answers buffered with a `STREAMING_NOT_SUPPORTED` warning, the criterion rather than the wire example's exit-2 error (12-D1). Deviation: a `stdin_records=` consumer ends its input at treaty's terminal envelope (`meta.end`) or a whole response (no `meta.seq`), not at the spec's `_summary` line (#32); awaits a cli-agent-spec decision ([cli-agent-spec#26](https://github.com/cli-agent-spec/cli-agent-spec/issues/26)) |

@@ -327,6 +327,9 @@ def test_the_manifest_marks_it_within_the_spec_schema() -> None:
         "is the last stderr line"
     )
     assert "output" in entry["flags"] and "validate-only" in entry["flags"]
+    # Its --output gets the JSON envelope whatever --format says, neither of output_file's
+    # values: no key, a REQ-O-001 departure until cli-agent-spec#27
+    assert "output_file" not in entry
     out = io.StringIO()
     assert ledger.run(["--schema"], stdout=out, stderr=io.StringIO(), env={}) == 0
     spec_validator("manifest-response").validate(json.loads(out.getvalue())["data"])

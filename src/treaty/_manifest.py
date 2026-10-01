@@ -23,7 +23,9 @@ from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "3.1"  # 3.1: CommandEntry.builtin (REQ-O-041)
+SCHEMA_VERSION = "3.3"  # 3.1: CommandEntry.builtin (REQ-O-041)
+# 3.2: ConditionalRule any_of and one_of, which the manifest does not emit (--schema does)
+# 3.3: CommandEntry.output_file (REQ-O-001)
 # TIMEOUT is shared: every handler runs under a deadline unless it is set to 0.
 # PRECONDITION too: a stray input() no one can answer exits 4 on any command (REQ-F-047)
 _ALWAYS = (
@@ -331,6 +333,11 @@ def command_entry(
         out["examples"] = [e.to_json() for e in command.examples]
     if command.has_network_io:
         out["has_network_io"] = True
+    if command.output_file:
+        # REQ-O-001: whether --output gets the --format representation or the raw bytes. A
+        # passthrough command's --output (its JSON envelope) and an app's own output flag
+        # have no key, a departure until cli-agent-spec#27
+        out["output_file"] = "binary" if command.returns_binary else "formatted"
     if command.streaming:
         out["streaming_default"] = True
     if command.id_field is not None:

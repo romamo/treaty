@@ -455,9 +455,18 @@ the `--format` representation, and stdout gets the JSON envelope with `data: {"p
 "bytes": N}`. A failed run writes no file. `--output json` (any format name) exits `2`
 suggesting `--format json`; `--output` never selects a representation.
 
-A relative `--output` lands in the working directory (or `--cwd`). A CLI whose paths are
-relative to a project it resolves names that directory instead, and an absolute `--output`
-is used as given:
+A command returning `treaty.Binary` writes the raw bytes instead, whatever the `--format`,
+and `data` is `{"path": ..., "bytes": N, "content_type": ..., "sha256": ...}`, with
+`sha256` in lowercase hex and `content_type` only when the command declared one. The
+manifest says which a command does: `"output_file": "binary"` here, `"formatted"` on the
+other `output_file=` commands (ManifestResponse 3.3); a passthrough command and an app's
+own `output` flag have none (see COMPLIANCE.md). Without `--output` the bytes stay
+base64 in `data`, and the `binary-output-file` audit rule suggests `output_file=True`.
+`--output -` exits `2` there, as stdout carries only the envelope.
+
+A relative `--output`, raw bytes or not, lands in the working directory (or `--cwd`). A
+CLI whose paths are relative to a project it resolves names that directory instead, and an
+absolute `--output` is used as given:
 
 ```python
 @app.command("render", description="Render the inventory", danger_level="safe",

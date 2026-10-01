@@ -37,7 +37,7 @@ from ._flags import FieldInfo, dry_run_field, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._lines import INPUT_LINES_FLAG, StdinInput
 from ._mode import Format
-from ._out import NO_ORDER, OutSpec, check_order
+from ._out import NO_ORDER, Binary, OutSpec, check_order
 from ._output_base import OutputBase, OutputRoot, output_root
 from ._page import DEFAULT_LIMIT, Limit, Page
 from ._protect import check_trust, declares_external, with_trust_tags
@@ -174,7 +174,8 @@ class Command:
     stdin_records: RecordSpec | None = None
     """``stdin_records=``: each input line a record of this type, ``ctx.stdin_records``"""
     output_file: bool = False
-    """``--output PATH`` writes the rendered ``data`` to a file (REQ-O-001)"""
+    """``--output PATH`` writes the rendered ``data`` to a file (REQ-O-001), or the raw
+    bytes of a command that ``returns_binary``"""
     requires_auth: bool = False
     """The app's credentials must hold ``required_scopes`` before the handler runs"""
     auth: AuthKind | None = None
@@ -330,6 +331,14 @@ class Command:
             if f.flag == flag:
                 return f
         return None
+
+    @property
+    def returns_binary(self) -> bool:
+        """Returns ``bytes`` or ``treaty.Binary``, or None: ``--output`` writes the raw bytes"""
+        if self.batch:
+            return False
+        base, _ = strip_optional(self.output_type)
+        return base is bytes or base is Binary
 
     @property
     def dry_run_field(self) -> FieldInfo | None:
