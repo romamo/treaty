@@ -28,6 +28,7 @@ from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
+from ._adapters import OutputAdapters
 from ._errors import CliExit, ParseError, RegistrationError, SchemaError
 from ._flags import apply_scalar
 from ._json5 import loads_strict
@@ -293,7 +294,8 @@ def _upstream_failed(envelope: dict[str, object], meta: dict[str, object], line:
     """``UPSTREAM_FAILED`` with the upstream error, secret-named keys redacted and
     high-entropy values masked, as they would be in this command's own ``data``"""
     error = envelope["error"]
-    upstream = protect(scrub("", error), object, unmask=False).data
+    # An undeclared object: no output adapter can apply to it
+    upstream = protect(scrub("", error), object, unmask=False, adapters=OutputAdapters()).data
     code = error.get("code") if isinstance(error, dict) else None
     exit_code = meta.get("exit_code")
     context: dict[str, object] = {"line": line, "upstream": upstream}
