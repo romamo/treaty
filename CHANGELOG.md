@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc10] - 2026-10-01
+
+The tenth 1.0 release candidate: 5 fixes and 11 additions.
+
 ### Fixed
 
 - A warning reaches stderr in a text format: under `--format plain`, `tsv`, or a format
@@ -1098,7 +1102,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc9...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc10...HEAD
+[1.0.0rc10]: https://github.com/romamo/treaty/compare/v1.0.0rc9...v1.0.0rc10
 [1.0.0rc9]: https://github.com/romamo/treaty/compare/v1.0.0rc8...v1.0.0rc9
 [1.0.0rc8]: https://github.com/romamo/treaty/compare/v1.0.0rc7...v1.0.0rc8
 [1.0.0rc7]: https://github.com/romamo/treaty/compare/v1.0.0rc6...v1.0.0rc7
