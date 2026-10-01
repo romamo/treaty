@@ -526,6 +526,28 @@ def drift_app() -> App:
     def plain_dict(args: NoArgs, ctx: Ctx) -> dict[str, list[str]]:
         raise Exit.DRIFT("drift", data={"servers": ["h1", "v6", "a0"]})
 
+
+class Security(BaseModel):
+    """py-ftmarkets' lookup result: the handler's order is FT's ranking (#182)"""
+
+    symbol: str
+    name: str
+    score: float
+
+
+def lookup_app(**declare: Any) -> App:
+    app = adapted()
+
+    @app.command("lookup", description="Lookup", danger_level="safe", exit_codes=(), **declare)
+    def lookup(args: NoArgs, ctx: Ctx) -> list[Security]:
+        best = Security(symbol="AAPL:NSQ", name="Apple", score=1.0)
+        rest = [Security(symbol=s, name="Apple", score=0.5) for s in ("APC:DUS", "0R2V:LSE")]
+        return [best, *rest]
+
+    @app.command("ranked", description="Ranked", danger_level="safe", exit_codes=(), **declare)
+    def ranked(args: NoArgs, ctx: Ctx) -> tuple[Security, ...]:
+        return ()
+
     return app
 
 
@@ -547,3 +569,63 @@ def test_a_dataclass_exit_data_keeps_order_and_a_plain_dict_is_still_sorted() ->
     assert run(app, ["fleet"])[1]["data"] == {"servers": ["h1", "v6", "a0"]}
     code, env = run(app, ["plain"])
     assert code == 83 and env["data"] == {"servers": ["a0", "h1", "v6"]}
+
+
+def test_an_undeclared_list_of_adapted_objects_is_a_stable_order_warning() -> None:
+    _, env = run(lookup_app(), ["lookup"])
+    # Re-sorted by JSON text, the handler's best match is no longer first
+    assert env["data"][0]["symbol"] != "AAPL:NSQ"
+    found = findings(lookup_app(), "stable-order")
+    assert [(f.command, f.severity) for f in found] == [
+        ("lookup", Severity.WARNING),
+        ("ranked", Severity.WARNING),
+    ]
+    assert "array of objects with no declared order" in found[0].message
+    assert 'sort_key="name"' in found[0].fix and "for a stable listing" in found[0].fix
+    assert "ordered=True" in found[0].fix and "a ranking" in found[0].fix
+
+
+@pytest.mark.parametrize("declare", [{"sort_key": "symbol"}, {"ordered": True}])
+def test_a_declared_list_of_adapted_objects_passes(declare: dict[str, Any]) -> None:
+    assert findings(lookup_app(**declare), "stable-order") == []
+    _, env = run(lookup_app(**declare), ["lookup"])
+    first = "0R2V:LSE" if "sort_key" in declare else "AAPL:NSQ"
+    assert env["data"][0]["symbol"] == first
+
+
+class Unkeyed(BaseModel):
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class Results:
+    hits: list[Security]
+    groups: dict[str, list[Security]]
+    maybe: list[Unkeyed]
+    kept: list[Security] = Out(ordered=True)
+
+
+def test_adapted_arrays_in_dataclass_fields_are_flagged_as_dataclass_ones() -> None:
+    app = adapted(none_as_empty=True)
+
+    @app.command("search", description="Search", danger_level="safe", exit_codes=())
+    def search(args: NoArgs, ctx: Ctx) -> Results:
+        return Results([], {}, [], [])
+
+    found = [f for f in findings(app, "stable-order") if f.severity is Severity.WARNING]
+    messages = " ".join(f.message for f in found)
+    assert "output field hits is an array of objects" in messages
+    assert "output field groups nests an array of Security" in messages
+    assert "output field maybe is an array of objects" in messages
+    assert "kept" not in messages and len(found) == 3
+    unkeyed = next(f for f in found if "maybe" in f.message)
+    assert "no field of Unkeyed can be a sort_key" in unkeyed.fix
+
+
+def test_an_order_declared_in_the_adapter_schema_is_no_finding() -> None:
+    # order_app's model declares x-sort-key and x-ordered on its arrays, and its list
+    # commands declare sort_key= and ordered=: only Report.orders is undeclared
+    found = [f for f in findings(order_app(), "stable-order") if f.severity is Severity.WARNING]
+    assert [(f.command, f.message.split(" is")[0]) for f in found] == [
+        ("report", "output field orders")
+    ]

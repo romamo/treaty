@@ -25,7 +25,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ._adapters import branches, untyped
+from ._adapters import OutputAdapters, branches, untyped
 from ._command import Command, DangerLevel, OptionPlacement
 from ._deps import Endpoint
 from ._env import AUDIT_LOG, FORMAT, UNPREFIXED, app_var
@@ -1550,8 +1550,9 @@ def output_fields(
         yield from output_fields(hints[f.name], path, seen | {base})
 
 
-def _object_items(tp: object) -> type | None:
-    """The dataclass items of a ``list[T]`` or ``tuple[T, ...]``, which treaty sorts"""
+def _object_items(tp: object, adapters: OutputAdapters) -> type | None:
+    """The object items of a ``list[T]`` or ``tuple[T, ...]``, which treaty sorts: a
+    dataclass, or a class an output adapter writes"""
     base, _ = strip_optional(resolve_alias(tp))
     args = typing.get_args(base)
     origin = typing.get_origin(base)
@@ -1560,10 +1561,12 @@ def _object_items(tp: object) -> type | None:
         item = resolve_alias(args[0])
     elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
         item = resolve_alias(args[0])
-    return item if isinstance(item, type) and is_dataclass_type(item) else None
+    if not isinstance(item, type):
+        return None
+    return item if is_dataclass_type(item) or adapters.for_type(item) is not None else None
 
 
-def _inner_object_arrays(tp: object) -> Iterator[type]:
+def _inner_object_arrays(tp: object, adapters: OutputAdapters) -> Iterator[type]:
     """The items of each array of dataclasses nested in a list, tuple, or dict of ``tp``,
     such as ``dict[str, list[Line]]``: treaty sorts those by JSON text, and neither a
     command's nor a field's order declaration reaches them"""
@@ -1573,17 +1576,27 @@ def _inner_object_arrays(tp: object) -> Iterator[type]:
     for arg in typing.get_args(base):
         if arg is Ellipsis:
             continue
-        item = _object_items(arg)
+        item = _object_items(arg, adapters)
         if item is not None:
             yield item
-        yield from _inner_object_arrays(arg)
+        yield from _inner_object_arrays(arg, adapters)
 
 
-def _id_like(cls: type) -> str | None:
+def _sort_fields(cls: type, adapters: OutputAdapters) -> list[str]:
+    """The fields of ``cls`` a ``sort_key`` can name: for an adapted class, the string and
+    integer properties of its schema"""
+    if adapters.for_type(cls) is not None:
+        properties = adapters.node(cls).get("properties")
+        props = properties if isinstance(properties, dict) else {}
+        return [n for n, p in props.items() if p.get("type") in ("string", "integer")]
+    hints = type_hints(cls)
+    return [f.name for f in dataclasses.fields(cls) if can_sort_by(hints[f.name])]
+
+
+def _id_like(cls: type, adapters: OutputAdapters) -> str | None:
     """The field an array of ``cls`` is most likely keyed by, of those a ``sort_key``
     can name; None when no field can be one"""
-    hints = type_hints(cls)
-    names = [f.name for f in dataclasses.fields(cls) if can_sort_by(hints[f.name])]
+    names = _sort_fields(cls, adapters)
     for pattern in (r"^id$", r"_id$", r"^(key|name|slug)$"):
         found = next((n for n in names if re.search(pattern, n)), None)
         if found is not None:
@@ -1591,14 +1604,14 @@ def _id_like(cls: type) -> str | None:
     return names[0] if names else None
 
 
-def _order_fix(cls: type, sort_key: str, ordered: str) -> str:
+def _order_fix(cls: type, sort_key: str, ordered: str, adapters: OutputAdapters) -> str:
     """The fix for an array of ``cls`` with no declared order, in the two spellings given
     as templates with ``{key}``"""
-    key = _id_like(cls)
-    keep = f"{ordered} to keep the handler's order"
+    key = _id_like(cls, adapters)
+    keep = f"{ordered} to keep the handler's order, as a ranking needs"
     if key is None:
         return f"{keep}; no field of {cls.__qualname__} can be a sort_key"
-    return f"{sort_key.format(key=key)} to order it by a field, or {keep}"
+    return f"{sort_key.format(key=key)} to order it by a field for a stable listing, or {keep}"
 
 
 _ID_SUFFIXES = ("_id", "uuid", "slug")
@@ -1639,6 +1652,7 @@ def _holds_untyped(tp: object) -> bool:
 
 
 def _stable_order(app: App) -> Iterator[Finding]:
+    adapters = app.scalars.adapters
     for c in user_commands(app):
         yield from _adapted_order(app, c)
         if not c.order.ordered and _holds_untyped(c.output_type):
@@ -1655,7 +1669,7 @@ def _stable_order(app: App) -> Iterator[Finding]:
                 'treaty.Out(sort_key="id") or treaty.Out(ordered=True), or ordered=True to '
                 "keep the handler's order of every array inside",
             )
-        item = _object_items(c.output_type)
+        item = _object_items(c.output_type, adapters)
         if item is not None and c.order.sort_key is None and not c.order.ordered:
             # A warning, not advice: sorting by JSON text silently reorders the data, such
             # as "10.00" before "5.00", and a clean --strict audit should not allow that
@@ -1665,15 +1679,15 @@ def _stable_order(app: App) -> Iterator[Finding]:
                 c.path.value,
                 "returns an array of objects with no declared order, so treaty sorts it by "
                 "each item's JSON text, not the order the handler built (REQ-F-020)",
-                _order_fix(item, 'sort_key="{key}"', "ordered=True"),
+                _order_fix(item, 'sort_key="{key}"', "ordered=True", adapters),
             )
-        for item in _inner_object_arrays(c.output_type):
+        for item in _inner_object_arrays(c.output_type, adapters):
             yield _inner_array(c, "output", item)
         for where, f, hint in output_fields(c.output_type):
-            for inner in _inner_object_arrays(hint):
+            for inner in _inner_object_arrays(hint, adapters):
                 yield _inner_array(c, f"output field {where}", inner)
             spec = out_spec(f)
-            item = _object_items(hint)
+            item = _object_items(hint, adapters)
             if item is not None and spec.sort_key is None and not spec.ordered:
                 yield Finding(
                     "stable-order",
@@ -1686,6 +1700,7 @@ def _stable_order(app: App) -> Iterator[Finding]:
                         item,
                         f'{f.name}: ... = treaty.Out(sort_key="{{key}}")',
                         "treaty.Out(ordered=True)",
+                        adapters,
                     ),
                 )
             elif not spec.ordered and _holds_untyped(hint):

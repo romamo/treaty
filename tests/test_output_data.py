@@ -514,7 +514,7 @@ def test_stable_order_fix_names_only_a_field_that_can_be_a_sort_key() -> None:
 
     fixes = {f.message.split(" is")[0]: f.fix for f in findings(app, "stable-order")}
     assert fixes["output field priced"] == (
-        "treaty.Out(ordered=True) to keep the handler's order; no field of "
+        "treaty.Out(ordered=True) to keep the handler's order, as a ranking needs; no field of "
         f"{Priced.__qualname__} can be a sort_key"
     )
     assert fixes["output field keyed"].startswith('keyed: ... = treaty.Out(sort_key="label")')
