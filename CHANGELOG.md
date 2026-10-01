@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc9] - 2026-10-01
+
+The ninth 1.0 release candidate: 2 fixes.
+
 ### Fixed
 
 - The output cap measures the envelope it falls back to when no cut of `data` fits: when
@@ -917,7 +921,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc8...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc9...HEAD
+[1.0.0rc9]: https://github.com/romamo/treaty/compare/v1.0.0rc8...v1.0.0rc9
 [1.0.0rc8]: https://github.com/romamo/treaty/compare/v1.0.0rc7...v1.0.0rc8
 [1.0.0rc7]: https://github.com/romamo/treaty/compare/v1.0.0rc6...v1.0.0rc7
 [1.0.0rc6]: https://github.com/romamo/treaty/compare/v1.0.0rc5...v1.0.0rc6
