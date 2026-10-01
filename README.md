@@ -430,6 +430,23 @@ the `--format` representation, and stdout gets the JSON envelope with `data: {"p
 "bytes": N}`. A failed run writes no file. `--output json` (any format name) exits `2`
 suggesting `--format json`; `--output` never selects a representation.
 
+A relative `--output` lands in the working directory (or `--cwd`). A CLI whose paths are
+relative to a project it resolves names that directory instead, and an absolute `--output`
+is used as given:
+
+```python
+@app.command("render", description="Render the inventory", danger_level="safe",
+             exit_codes=(), output_file=Project)  # a resource class with a directory
+def render(args: RenderArgs, ctx: Ctx) -> Inventory: ...
+```
+
+`output_file=` takes `True` (the working directory), `treaty.OutputBase.PROJECT_ROOT` (the
+command's `project_root=`; with no root found a relative `--output` exits `2`), a resource
+class with a `directory`, or a function `(ctx: Ctx, *resources) -> Path`. The resource or
+function is resolved before the handler runs, and the `--output` description in `--help`
+and the manifest names where a relative path lands. A failed run still writes no file, and
+a path with `..` exits `2` whatever the base.
+
 Without a renderer, `plain` prints flat lines, one item each: `key: value`, with dotted
 paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. An
 array prints each element as its own block, the way a stream prints its events.

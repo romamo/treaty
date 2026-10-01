@@ -82,6 +82,7 @@ from ._cap import (
 from ._changelog import load_changelog
 from ._command import (
     DEFAULT_HEARTBEAT_MS,
+    OUTPUT_FLAG,
     Cleanup,
     Command,
     DangerLevel,
@@ -94,7 +95,7 @@ from ._command import (
 )
 from ._completion import COMPLETION_PATH
 from ._config import ConfigFile, ConfigScope, local_config, user_config
-from ._context import Ctx, LogSink
+from ._context import Ctx, LogSink, OutputSlot
 from ._declare import UNSUPPORTED_PLATFORM, Background, SideEffect, Subprocess, supports
 from ._deprecation import Deprecated
 from ._deps import CheckFn, Dependency, check_checks, check_dependencies
@@ -174,6 +175,7 @@ from ._mode import (
     suppress_updates,
 )
 from ._out import NO_ORDER, OutSpec, arrange, sorted_indices
+from ._output_base import PROJECT_ROOT, OutputBase
 from ._page import (
     CURSOR_FLAG,
     DEFAULT_LIMIT,
@@ -761,7 +763,7 @@ class App:
         heartbeat: bool = False,
         stdin_input: bool | Literal["lines"] = False,
         stdin_records: type | None = None,
-        output_file: bool = False,
+        output_file: bool | OutputBase | type | Callable[..., Path] = False,
         requires_auth: bool = False,
         auth: str | None = None,
         token_env_vars: Sequence[str] = (),
@@ -826,7 +828,10 @@ class App:
         ``compat={"1.4": to_v1}`` keeps an older major selectable with ``--schema-version
         1``; the shim takes the command's output and returns the old shape.
         ``project_root=(".git",)`` finds the nearest directory from the cwd up holding a
-        marker, as ``ctx.project_root`` and ``meta.project_root``. ``retry=Retry(...)``
+        marker, as ``ctx.project_root`` and ``meta.project_root``. A relative ``--output``
+        lands in the cwd; ``output_file=OutputBase.PROJECT_ROOT``, a resource class with a
+        ``directory``, or a function ``(ctx, *resources) -> Path`` puts it in that directory
+        instead. ``retry=Retry(...)``
         enables ``ctx.retry`` with ``--retries`` and ``--retry-delay``.
         Arrays in ``data`` are sorted (REQ-F-020): ``sort_key="id"`` orders an output
         list of objects by that field; ``ordered=True`` keeps the handler's order, for a
@@ -2005,7 +2010,7 @@ class App:
             if refused is not None:
                 return run.emit(Format.JSON, run.arg_error(refused, meta=_mode_meta(command)))
             try:
-                invocation = run.rooted(command, invocation)
+                invocation = run.based(command, run.rooted(command, invocation))
             except ParseError as exc:
                 return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
             except ArgsCrashed as exc:
@@ -2036,7 +2041,12 @@ class App:
                 envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
             if invocation.output is not None:
                 # REQ-O-001: the file gets the representation; stdout gets the envelope
-                written = run.to_file(invocation.output, requested, envelope, render)
+                target = run.output_target(command, invocation.output)
+                written = (
+                    run.to_file(target, requested, envelope, render)
+                    if target is not None
+                    else run.output_unresolved(command, invocation.output, envelope)
+                )
                 return run.emit(Format.JSON, written)
             return run.emit(mode, envelope, render=render)
 
@@ -2098,7 +2108,8 @@ def _call(
     if command.is_async:
         return _call_async(command, args, ctx, provided)
     resolver = Resolver(command.resource_graph, args, ctx, provided)
-    result = command.handler(args, ctx, *resolver.all(command.resources))
+    resources = resolver.all((*command.resources, *_output_deps(command, ctx)))
+    result = _located(command, args, ctx, resources)
     if inspect.isawaitable(result):
         # A decorated coroutine that registration could not see (REQ-F-049): its body
         # never ran, which a success envelope would hide
@@ -2127,14 +2138,36 @@ def _call_async(
             within(
                 ctx.remaining,
                 ctx.timeout,
-                lambda: resolver.aall(command.resources),
-                lambda resources: command.handler(args, ctx, *resources),
+                lambda: resolver.aall((*command.resources, *_output_deps(command, ctx))),
+                lambda resources: _located(command, args, ctx, resources),
                 lambda code, message, context: ctx.warn(code, message, **context),
             )
         )
     finally:
         if teardown is None:
             loop.close()
+
+
+def _cwd_output(command: Command) -> bool:
+    """A relative ``--output`` of the command lands under the cwd (``output_file=True``)"""
+    return command.output_root is None or command.output_root.is_cwd
+
+
+def _output_deps(command: Command, ctx: Ctx) -> tuple[type, ...]:
+    """The resources ``output_file=`` resolves a relative ``--output`` with, when this run
+    has one (#68)"""
+    root = command.output_root
+    return () if ctx._output is None or root is None else root.deps
+
+
+def _located(command: Command, args: object, ctx: Ctx, resources: Sequence[object]) -> Any:
+    """Resolve where a relative ``--output`` lands, then run the handler with its own
+    resources: the base is known before any work is done (#68)"""
+    count = len(command.resources)
+    root = command.output_root
+    if ctx._output is not None and root is not None:
+        ctx._output.directory = root.directory(ctx, resources[count:], command.path.value)
+    return command.handler(args, ctx, *resources[:count])
 
 
 CLEANUP_FAILED = "CLEANUP_FAILED"
@@ -3055,6 +3088,8 @@ class _Run:
         self.status: str | None = None
         """The latest ``ctx.progress`` message, for ``--heartbeat-interval`` (REQ-O-012)"""
         self._roots: dict[tuple[str, ...], Path | None] = {}
+        self._output_slot: OutputSlot | None = None
+        """Where the running command's relative ``--output`` lands, once resolved (#68)"""
         self.session: Session | None = None
         self.cache: Cache | None = None
         """The current ``cache=`` command's ``ctx.cache``, for ``meta.cache_used``"""
@@ -3382,6 +3417,7 @@ class _Run:
             _retrier=self.retrier,
             _locks=Locks(self.locks_dir(), deadline),
             _deadline=deadline,
+            _output=self.output_slot(command, invocation),
             _teardown=self.teardown,
             _steps=self.steps,
             _session=self.processes.session,
@@ -3470,8 +3506,49 @@ class _Run:
             input_file=stdin_file
             if stdin_file is None or stdin_file == Path("-") or stdin_file.is_absolute()
             else self.cwd / stdin_file,
-            output=output if output is None or output.is_absolute() else self.cwd / output,
+            # Another base than the cwd puts a relative --output where it resolves (#68)
+            output=output
+            if output is None or output.is_absolute() or not _cwd_output(command)
+            else self.cwd / output,
         )
+
+    def based(self, command: Command, invocation: Invocation) -> Invocation:
+        """A relative ``--output`` of an ``OutputBase.PROJECT_ROOT`` command under the
+        project root, checked before anything runs; with no root found it exits 2 (#68)"""
+        output = invocation.output
+        if output is None or output.is_absolute() or command.output_root is not PROJECT_ROOT:
+            return invocation
+        root = self.project_root(command)
+        if root is None:
+            raise ParseError(
+                f"--output {str(output)!r} is relative to the project root, and no "
+                f"{' or '.join(command.project_root)} was found from {self.cwd} up",
+                context={"flag": OUTPUT_FLAG, "value": str(output)},
+                suggestion="pass an absolute --output, or run inside the project",
+            )
+        return dataclasses.replace(invocation, output=root / output)
+
+    def output_slot(self, command: Command, invocation: Invocation) -> OutputSlot | None:
+        """A slot for the directory a relative ``--output`` lands in, when the command's
+        ``output_file=`` resource or function resolves it during the run (#68)"""
+        output, root = invocation.output, command.output_root
+        wanted = (
+            output is not None
+            and not output.is_absolute()
+            and root is not None
+            and root.locate is not None
+        )
+        self._output_slot = OutputSlot() if wanted else None
+        return self._output_slot
+
+    def output_target(self, command: Command, output: Path) -> Path | None:
+        """Where ``--output`` is written: as given when absolute or under the cwd, else in
+        the directory the run resolved; None when the handler never resolved it (#68)"""
+        root = command.output_root
+        if output.is_absolute() or root is None or root.locate is None:
+            return output
+        slot = self._output_slot
+        return None if slot is None or slot.directory is None else slot.directory / output
 
     def check_update(self, mode: Format, *, skip: bool) -> None:
         """``meta.update_available`` from the cached answer, and one stderr line for a
@@ -5569,6 +5646,20 @@ class _Run:
             )
         written = {"path": str(path), "bytes": len(text.encode("utf-8"))}
         return dataclasses.replace(envelope, data=written)
+
+    def output_unresolved(self, command: Command, output: Path, envelope: Envelope) -> Envelope:
+        """A relative ``--output`` whose base the handler never resolved, as when a stored
+        result is replayed: no file is written, and the result stays in ``data`` (#68)"""
+        if not envelope.ok or envelope.data is None:
+            return envelope
+        assert command.output_root is not None
+        return self._file_error(
+            envelope,
+            "OUTPUT_UNWRITABLE",
+            f"cannot write --output: it is relative to {command.output_root.label}, which "
+            "this run did not resolve; pass an absolute --output",
+            output,
+        )
 
     def _file_error(self, envelope: Envelope, code: str, message: str, path: Path) -> Envelope:
         """The result stays in ``data``, so a run that could not write its file loses nothing"""

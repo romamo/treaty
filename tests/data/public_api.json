@@ -618,6 +618,13 @@
       "kind": "class",
       "methods": []
     },
+    "OutputBase": {
+      "kind": "enum",
+      "members": [
+        "CWD",
+        "PROJECT_ROOT"
+      ]
+    },
     "Page": {
       "fields": [
         "items",

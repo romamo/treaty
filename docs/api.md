@@ -41,6 +41,7 @@ review), **rename**, **remove**.
 | `Affects` | keep | `would_affect` of a dry run |
 | `Background`, `Subprocess`, `SideEffect` | keep | `background=`, `subprocess=`, `filesystem_side_effects=` |
 | `CachePolicy` | keep | `cache=` |
+| `OutputBase` | keep | `output_file=`: where a relative `--output` lands (#68) |
 | `Check`, `Dependency`, `endpoint` | keep | `App(checks=)`, `App(dependencies=)` |
 | `Deprecated` | keep | `deprecated=` on a command or `Flag` |
 | `DefaultWhenAbsent`, `Excludes`, `RequiredWhen`, `RequiresAny`, `RequiresOne` | keep | `requires=` |

@@ -705,9 +705,11 @@ _WRITES = frozenset({"write_text", "write_bytes", "mkdir", "makedirs", "mkdtemp"
 def disk_writes(handler: Callable[..., object]) -> list[str]:
     """Calls in the handler's source that write to disk (REQ-C-011, heuristic)"""
     tree = source_tree(handler)
-    if tree is None:
-        return []
-    found: list[str] = []
+    return [] if tree is None else [name for name, _ in _write_calls(tree)]
+
+
+def _write_calls(tree: ast.AST) -> list[tuple[str, ast.Call]]:
+    found: list[tuple[str, ast.Call]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -718,12 +720,69 @@ def disk_writes(handler: Callable[..., object]) -> list[str]:
             continue
         last = name.rpartition(".")[2]
         if last in _WRITES:
-            found.append(name)
+            found.append((name, node))
         elif last == "open":
             mode = node.args[1] if len(node.args) > 1 else None
             mode = next((k.value for k in node.keywords if k.arg == "mode"), mode)
             if isinstance(mode, ast.Constant) and set(str(mode.value)) & set("wax+"):
-                found.append(name)
+                found.append((name, node))
+    return found
+
+
+_PATH_MODULES = frozenset({"os", "tempfile", "shutil", "io", "builtins"})
+
+
+def flag_path_writes(handler: Callable[..., object], flags: Mapping[str, str]) -> list[str]:
+    """The ``--flag`` of each disk write in the handler whose path comes from one of its
+    ``Path`` flags, read as ``args.<field>`` or through a name assigned from it; ``flags``
+    maps a field to its flag (#68, heuristic)"""
+    tree = source_tree(handler)
+    params = list(signature(handler).parameters)
+    if tree is None or not params or not flags:
+        return []
+    args_name = params[0]
+
+    def source(expr: ast.AST, tainted: Mapping[str, str]) -> str | None:
+        for node in ast.walk(expr):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == args_name
+                and node.attr in flags
+            ):
+                return flags[node.attr]
+            if isinstance(node, ast.Name) and node.id in tainted:
+                return tainted[node.id]
+        return None
+
+    tainted: dict[str, str] = {}
+    changed = True
+    while changed:  # a name assigned from a tainted name is tainted too
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets, value = [node.target], node.value
+            else:
+                continue
+            flag = source(value, tainted)
+            for target in targets:
+                if flag is not None and isinstance(target, ast.Name) and target.id not in tainted:
+                    tainted[target.id] = flag
+                    changed = True
+    found: list[str] = []
+    for _, call in _write_calls(tree):
+        func = call.func
+        # path.write_text(...) and path.parent.mkdir(...) write where the receiver points;
+        # open(path, "w") and os.makedirs(path) where their first argument does
+        if isinstance(func, ast.Attribute) and _dotted(func.value) not in _PATH_MODULES:
+            where: ast.AST | None = func.value
+        else:
+            where = call.args[0] if call.args else None
+        flag = None if where is None else source(where, tainted)
+        if flag is not None:
+            found.append(flag)
     return found
 
 
@@ -734,6 +793,22 @@ def _fs_side_effects(app: App) -> Iterator[Finding]:
         if c.danger_level is not DangerLevel.SAFE or c.filesystem_side_effects or c.output_file:
             continue
         found = _first(reached_functions(c.handler), disk_writes)
+        flags = {f.name: f.flag for f in c.fields if f.path and not f.positional}
+        named = flag_path_writes(c.handler, flags)
+        if named:
+            # A file the caller names is the command's output, not a cache it leaves
+            yield Finding(
+                "fs-side-effects",
+                Severity.ADVICE,
+                c.path.value,
+                f"the handler writes the file --{named[0]} names itself, so a failed run can "
+                "leave it half written and data does not say where it went (REQ-O-001, "
+                "heuristic)",
+                "output_file=True in place of the flag, returning the data: --output PATH then "
+                "writes it atomically and data gives path and bytes; output_file=<resource or "
+                "function> when a relative path lands in a directory the app resolves",
+            )
+            continue
         if found is not None:
             unit, writes = found
             yield Finding(

@@ -163,6 +163,14 @@ Apps built on treaty keep their own, structured schema changelog with
   exception exit 1 `FALLBACK_FAILED`. Its lines are redacted,
   masked, capped, and audit-logged like a command's, never deduplicated, and refused under
   `exec --dry-run`. The click/typer and argparse chapters' shims use both (#28)
+- `output_file=` takes the directory a relative `--output` lands in: `True` stays the
+  working directory, `treaty.OutputBase.PROJECT_ROOT` the command's `project_root=`, and a
+  resource class with a `directory` or a function `(ctx: Ctx, *resources) -> Path` a
+  directory the app resolves itself, such as a `--project` it reads. An absolute `--output`
+  is used as given, a failed run writes no file, and the `--output` description in `--help`
+  and the manifest names the base. The `fs-side-effects` audit rule now suggests
+  `output_file=True` for a safe command that writes to a path from one of its `Path` flags,
+  instead of a cache side effect (#68)
 
 ## [1.0.0rc9] - 2026-10-01
 
