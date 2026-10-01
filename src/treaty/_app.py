@@ -2696,6 +2696,9 @@ class _Run:
         """Why ``payload_stdin`` is None"""
         self.warnings: list[WarningDetail] = []
         """``ctx.warn`` entries of the command that runs now, added to its envelopes"""
+        self.warnings_shown: list[WarningDetail] = []
+        """Warnings a text format already wrote to stderr, so none is written twice: a
+        stream's events carry every warning raised before them (#152)"""
         self.token: str | None = None
         """A login command's token, redacted wherever a secret argument is"""
         self.config_file: ConfigFile | None = None
@@ -3662,6 +3665,7 @@ class _Run:
             if old.removed_in is not None:
                 context["removed_in"] = old.removed_in
             self._warn(code, message, context)
+            self.warnings_shown.append(self.warnings[-1])  # the line below says it
             line: dict[str, object] = {"level": "warn", "code": code, "message": message}
             line |= {k: v for k, v in context.items() if k != "since"}
             self.err.write(json.dumps(line, separators=(",", ":")) + "\n", Level.WARN)
@@ -5109,12 +5113,15 @@ class _Run:
     ) -> int:
         """Data through the renderer on stdout, errors as prose on stderr"""
         if self.budget is not None:
+            before = len(envelope.warnings)
             envelope = self._budgeted(self.budget, envelope)
             if envelope.extra_meta.get("truncated"):
                 # The text carries no meta: the cut and the way on go to stderr
                 after = envelope.extra_meta.get("next_token_offset")
                 rest = "" if after is None else f"; next: --token-offset {after}"
                 self.err.write(f"cut to --token-limit {self.budget.limit}{rest}\n", Level.WARN)
+                # That line reports the budget's cuts: their warnings are not written again
+                self.warnings_shown += envelope.warnings[before:]
         if settle:
             before = len(envelope.warnings)
             envelope = self.settle(envelope)
@@ -5122,6 +5129,7 @@ class _Run:
                 # No envelope carries it here: one WarningDetail line on stderr (REQ-O-030)
                 line = json.dumps(warning.to_json(), separators=(",", ":"))
                 self.err.write(line + "\n", Level.WARN)
+                self.warnings_shown.append(warning)
         code = envelope.exit_code
         pagination = envelope.extra_meta.get("pagination")
         if isinstance(pagination, dict) and pagination.get("has_more"):
@@ -5155,6 +5163,7 @@ class _Run:
                 self.out.write(terminal_text(text, color=color, keep="\r"))
         elif data is not None:
             self.out.write(fallback(data))
+        self._warning_lines(envelope)
         if envelope.error is not None:
             # Error lines show a control as its escape: what a bad value held is the
             # diagnosis, and the terminal acts on none of it
@@ -5180,6 +5189,20 @@ class _Run:
         self.delivered = True
         self.err.flush()
         return code
+
+    def _warning_lines(self, envelope: Envelope) -> None:
+        """The envelope's warnings, which a text format's stdout has no room for: one
+        ``warning: <CODE>: <message>`` line each on stderr, after the result, redacted and
+        cleaned as a ``ctx.log`` line is; one already written is skipped (#152)"""
+        color = color_allowed(self.env, self.tty)
+        for warning in envelope.warnings:
+            if warning in self.warnings_shown:
+                continue
+            self.warnings_shown.append(warning)
+            if self.unprotected and warning.code == UNPROTECTED_CODE:
+                continue  # unprotected_record wrote it before the command ran
+            line = f"warning: {warning.code}: {self._redact_everywhere(warning.message)}"
+            self.err.write(terminal_text(line, color=color) + "\n", Level.WARN)
 
     def schema(self, mode: Format, path: CommandPath | None, prefix: tuple[str, ...]) -> int:
         """``--schema`` is machine output in every mode; the envelope carries it as data"""
