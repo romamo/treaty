@@ -43,6 +43,17 @@ Apps built on treaty keep their own, structured schema changelog with
   list whose order is not declared, including one nested in a dataclass field or a dict;
   `ordered=True` or `sort_key=` on the command (or `treaty.Out(...)` on the field) clears
   it (#182)
+### Fixed
+
+- The `recursive-traversal` audit rule no longer warns that a circular symlink can loop
+  `Path.rglob()`, `Path.walk()`, `os.walk()`, or `os.fwalk()`, which do not enter a
+  symlinked directory unless asked, nor `shutil.rmtree()`, which never does. The loop
+  warning stays for a call passing `recurse_symlinks=`, `follow_symlinks=`, or
+  `followlinks=` as anything but a literal false (by name, by position, or in a `**`
+  mapping), and for `glob(..., recursive=True)` and `shutil.copytree()`. A walk that cannot
+  loop is advice instead: no `--max-depth` bounds it. `os.walk` is recognized under an alias such as
+  `from os import walk as w`, and a module-level `walk` that is not a directory walk, such
+  as `ast.walk`, is no longer flagged (#180)
 
 ## [1.0.0rc11] - 2026-10-01
 

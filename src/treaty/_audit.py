@@ -14,6 +14,7 @@ import io
 import itertools
 import json
 import math
+import os
 import re
 import shlex
 import time
@@ -856,23 +857,57 @@ def _cache_declared(app: App) -> Iterator[Finding]:
             )
 
 
-_TREE_CALLS = frozenset(
-    {"os.walk", "os.fwalk", "shutil.rmtree", "shutil.copytree", "rmtree", "copytree"}
-)
+_TREE_CALLS = frozenset({"shutil.copytree", "copytree"})
+_UNLINKING_CALLS = frozenset({"shutil.rmtree", "rmtree"})
+"""Removes a symlink rather than entering it, so only its depth is unbounded"""
+# The walks that enter a symlinked directory only when asked, from Python 3.13: the
+# keyword that asks, and its position where the signature also takes it positionally
+_FOLLOW_KEYWORDS = frozenset({"recurse_symlinks", "follow_symlinks", "followlinks"})
+_OS_WALKS: dict[object, int | None] = {os.walk: 3, os.fwalk: None}
+_PATH_WALK_FOLLOW_AT = 2
 
 
-def traversal_calls(handler: Callable[..., object]) -> list[str]:
+@dataclass(frozen=True, slots=True)
+class Traversal:
+    """A recursive walk in a handler's source: ``loops`` when it follows symlinked
+    directories, so a circular link can loop it, else only its depth is unbounded"""
+
+    call: str
+    loops: bool
+
+
+def traversal_calls(handler: Callable[..., object]) -> list[Traversal]:
     """Recursive walks in the handler's source that ``ctx.walk`` would protect from a
-    circular symlink and a runaway depth (REQ-F-061, heuristic)"""
+    circular symlink and a runaway depth (REQ-F-061, REQ-O-040, heuristic)"""
     params = list(signature(handler).parameters)
     return _traversals(handler, params[1] if len(params) > 1 else None)
 
 
-def _traversals(fn: Callable[..., object], ctx_name: str | None) -> list[str]:
+def _passed(value: ast.expr) -> bool:
+    """A follow argument other than a literal False, None, or 0: a name or expression may
+    be true, so it counts as passed"""
+    return not (isinstance(value, ast.Constant) and not value.value)
+
+
+def _follows(node: ast.Call, positional: int | None) -> bool:
+    """Whether the call asks the walk to enter symlinked directories: the keyword, a
+    ``**`` mapping that may hold it, or an argument at its position, a ``*`` one included"""
+    if any(
+        k.arg is None or (k.arg in _FOLLOW_KEYWORDS and _passed(k.value)) for k in node.keywords
+    ):
+        return True
+    if positional is None:
+        return False
+    if any(isinstance(a, ast.Starred) for a in node.args):
+        return True
+    return len(node.args) > positional and _passed(node.args[positional])
+
+
+def _traversals(fn: Callable[..., object], ctx_name: str | None) -> list[Traversal]:
     tree = source_tree(fn)
     if tree is None:
         return []
-    found: list[str] = []
+    found: list[Traversal] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -881,12 +916,26 @@ def _traversals(fn: Callable[..., object], ctx_name: str | None) -> list[str]:
         name = _dotted(func) or attr
         if isinstance(func, ast.Attribute) and _dotted(func.value) == ctx_name:
             continue  # ctx.walk itself
-        recursive_glob = attr in ("glob", "iglob") and any(
-            k.arg == "recursive" and not (isinstance(k.value, ast.Constant) and not k.value.value)
-            for k in node.keywords
-        )
-        if name in _TREE_CALLS or attr in ("rglob", "walk") or recursive_glob:
-            found.append(name)
+        if name in _TREE_CALLS or (
+            attr in ("glob", "iglob")
+            and any(k.arg == "recursive" and _passed(k.value) for k in node.keywords)
+        ):
+            found.append(Traversal(name, loops=True))
+            continue
+        if name in _UNLINKING_CALLS:
+            found.append(Traversal(name, loops=False))
+            continue
+        if attr == "rglob":
+            found.append(Traversal(name, loops=_follows(node, None)))
+            continue
+        # os.walk however it is imported or aliased; a module-level name that is
+        # something else, such as ast.walk or the app's own walk, is not a directory
+        # walk. A walk that does not resolve, a Path's among them, is read as Path.walk
+        target = resolve_name(fn, name) if _dotted(func) else None
+        if target in _OS_WALKS:
+            found.append(Traversal(name, loops=_follows(node, _OS_WALKS[target])))
+        elif attr in ("walk", "fwalk") and target is None:
+            found.append(Traversal(name, loops=_follows(node, _PATH_WALK_FOLLOW_AT)))
     return found
 
 
@@ -894,19 +943,34 @@ def _recursive_traversal(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         # A helper's ctx is not the handler's second parameter; it is taken by name
         units = reached_functions(c.handler)
-        found = _first(units[:1], traversal_calls) or _first(
-            units[1:], lambda fn: _traversals(fn, "ctx")
-        )
-        if found is not None:
-            unit, calls = found
-            declare = "" if c.recursive_traversal else "recursive_traversal=True, then "
+
+        def detect(fn: Callable[..., object], first: bool) -> list[Traversal]:
+            return traversal_calls(fn) if first else _traversals(fn, "ctx")
+
+        found = [(u, t) for i, u in enumerate(units) for t in detect(u.fn, i == 0)]
+        if not found:
+            continue
+        # A walk a symlink can loop outranks one whose depth alone is unbounded
+        unit, walk = next(((u, t) for u, t in found if t.loops), found[0])
+        declare = "" if c.recursive_traversal else "recursive_traversal=True, then "
+        fix = f"{declare}for entry in ctx.walk(root): ..."
+        if walk.loops:
             yield Finding(
                 "recursive-traversal",
                 Severity.WARNING,
                 c.path.value,
-                f"{calls[0]}() walks a directory tree that a circular symlink can loop and "
+                f"{walk.call}() walks a directory tree that a circular symlink can loop and "
                 f"no --max-depth bounds (REQ-F-061, REQ-O-040, heuristic){unit.where}",
-                f"{declare}for entry in ctx.walk(root): ...",
+                fix,
+            )
+        else:
+            yield Finding(
+                "recursive-traversal",
+                Severity.ADVICE,
+                c.path.value,
+                f"{walk.call}() does not enter symlinked directories, so it cannot loop, "
+                f"but no --max-depth bounds this walk (REQ-O-040, heuristic){unit.where}",
+                fix,
             )
 
 
