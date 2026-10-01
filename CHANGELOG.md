@@ -40,7 +40,9 @@ Apps built on treaty keep their own, structured schema changelog with
   and `exec --dry-run` previews even a line that passes it. The flag's manifest
   description says the command previews without it, and generated skills say so too. A
   confirmation on a safe or destructive command, on a non-boolean field, with a default
-  other than `False`, or beside a `dry_run` switch is a `RegistrationError` (#197)
+  other than `False`, with `env=` (a variable left set would confirm every run), or
+  beside a `dry_run` switch is a `RegistrationError`. The audit log records a preview's
+  `args` with `dry_run: true` (#197)
 
 ## [1.0.0rc12] - 2026-10-01
 

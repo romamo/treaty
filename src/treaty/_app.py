@@ -3632,6 +3632,14 @@ class _Run:
             parameters["validate_only"] = True
         if invocation is not None and invocation.confirmed:
             parameters["confirm_destructive"] = True
+        if (
+            command is not None
+            and args is not None
+            and command.confirm_field is not None
+            and _dry_run_requested(command, args)
+        ):
+            # An unconfirmed run is a preview: logged as the dry run it is (#197)
+            parameters["dry_run"] = True
         if self.unprotected:
             parameters["no_injection_protection"] = True
         entry: dict[str, object] = {

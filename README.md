@@ -1531,9 +1531,10 @@ run under the same contract (a `would_*` effect, `meta.dry_run: true`, not store
 idempotency key), and with it the command runs. The flag keeps its name, its default is
 `False`, and a missing value is a preview on every input path: argv, `--raw-payload`,
 `exec` lines, and `App.call` and MCP. `exec --dry-run` previews even a line that passes
-it. The manifest's description of the flag says the command previews without it. A safe
-or destructive command, a non-boolean field, or a command that also declares a dry-run
-switch is a `RegistrationError`; a destructive command previews through `dry_run` and
+it. The manifest's description of the flag says the command previews without it, and the
+audit log records the preview with `dry_run: true`. A safe or destructive command, a
+non-boolean field, `env=` (it is passed on each run, never read from a variable), or a
+command that also declares a dry-run switch is a `RegistrationError`; a destructive command previews through `dry_run` and
 `--confirm-destructive`, or `safe_default=True`.
 
 The framework gives those commands `--idempotency-key` (also `idempotency_key` in `exec`

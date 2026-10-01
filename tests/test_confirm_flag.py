@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Ctx, Flag, RegistrationError
+from treaty import App, Batch, Ctx, Flag, Item, RegistrationError
+from treaty._mcp import call_tool, tool_entries
 from treaty._skills import render
 
 ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
@@ -201,3 +202,58 @@ def test_a_confirmation_is_a_boolean_off_by_default() -> None:
         Flag(confirm=True, dry_run=True, description="Apply")
     with pytest.raises(RegistrationError, match="default is False"):
         Flag(confirm=True, default="", description="Apply")
+
+
+def test_a_confirmation_is_never_read_from_a_variable() -> None:
+    # Flag(env=) also reads <APP>_<NAME>: CF_YES=1 left in the environment would confirm
+    # every later run unseen
+    with pytest.raises(RegistrationError, match="takes no env="):
+        Flag(confirm=True, env=("DEPLOY_YES",), description="Apply")
+    applied: list[str] = []
+    code, [envelope] = run(approve_app(applied), ["approve"], env={"CF_YES": "1"})
+    assert code == 0 and meta(envelope)["dry_run"] is True
+    assert applied == []
+
+
+def test_the_audit_log_records_a_preview_as_a_dry_run(tmp_path: Path) -> None:
+    log = tmp_path / "audit.jsonl"
+    app = approve_app([])
+    run(app, ["approve"], env={"CF_AUDIT_LOG": str(log)})
+    run(app, ["approve", "--yes"], env={"CF_AUDIT_LOG": str(log)})
+    preview, ran = (json.loads(line)["args"] for line in log.read_text().splitlines())
+    assert preview == {"proposal": "p1", "yes": False, "dry_run": True}
+    assert ran == {"proposal": "p1", "yes": True}
+
+
+def test_an_mcp_call_without_the_flag_previews() -> None:
+    applied: list[str] = []
+    app = approve_app(applied)
+    entries = {e.name: e for e in tool_entries(app)}
+    envelope = call_tool(app, entries, "approve", {}, env=ENV)
+    assert envelope.ok and envelope.data == {"effect": "would_update", "proposal": "p1"}
+    assert applied == []
+
+
+@dataclass(frozen=True, slots=True)
+class Approved:
+    effect: str
+    proposal: str
+
+
+def test_a_batch_without_the_flag_previews_every_item() -> None:
+    applied: list[str] = []
+    app = App("cf", version="1.0.0")
+
+    @app.command("approve", description="Approve proposals", danger_level="mutating", exit_codes=())
+    def approve(args: ApproveArgs, ctx: Ctx) -> Batch[Approved]:
+        if args.yes:
+            applied.append(args.proposal)
+        effect = "updated" if args.yes else "would_update"
+        return Batch([Item(n, Approved(effect, f"p{n}")) for n in (1, 2)])
+
+    code, [envelope] = run(app, ["approve"])
+    assert code == 0, envelope
+    assert envelope["data"]["effect"] == "would_update"  # type: ignore[index]
+    assert meta(envelope)["dry_run"] is True and applied == []
+    code, [envelope] = run(app, ["approve", "--yes"])
+    assert code == 0 and envelope["data"]["effect"] == "updated"  # type: ignore[index]

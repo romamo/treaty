@@ -77,6 +77,12 @@ class FlagSpec:
             raise RegistrationError(
                 "confirm=True and dry_run=True are opposite switches; a flag is one of them"
             )
+        if self.confirm and self.env:
+            # A variable left in the environment would confirm every later run unseen
+            raise RegistrationError(
+                "confirm=True takes no env=: the confirmation is passed on each run, never "
+                "read from a variable"
+            )
         if self.pattern_type is not None and self.pattern_type not in PATTERN_TYPES:
             raise RegistrationError(
                 f"pattern_type={self.pattern_type!r} is not one of "
