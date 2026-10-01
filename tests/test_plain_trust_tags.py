@@ -121,3 +121,23 @@ def test_a_plain_output_file_of_external_data_has_the_marker(tmp_path: Path) -> 
     code, _, _ = run(["rows", "--format", "plain", "--output", str(target)])
     assert code == 0
     assert target.read_text() == f"{MARKER}\nname  size\na        1\nb       22\n"
+
+
+def test_a_token_limited_cut_of_external_rows_keeps_the_marker() -> None:
+    # The budget rebuilds the envelope: the rows it keeps are still external content
+    code, out, err = run(["rows", "--format", "plain", "--token-limit", "20"])
+    assert code == 0
+    assert "cut to --token-limit 20" in err
+    assert out == f"{MARKER}\nname  size\na        1\n"
+    _, out, _ = run(["rows", "--format", "json", "--token-limit", "20"])
+    envelope = json.loads(out)
+    assert envelope["meta"]["truncated"] is True
+    assert envelope["data"] == [{**TAGS, "name": "a", "size": 1}]
+
+
+def test_warnings_as_errors_keeps_the_marker_on_the_external_data() -> None:
+    # Settling turns the untrusted-content warning into an error and rebuilds the envelope
+    code, out, err = run(["page", "--format", "plain", "--warnings-as-errors"])
+    assert code == 1
+    assert out.startswith(f"{MARKER}\ntitle: Hello\n")
+    assert "WARNINGS_AS_ERRORS" in err
