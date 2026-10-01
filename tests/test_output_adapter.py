@@ -4,7 +4,7 @@
 import io
 import json
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import pytest
 from jsonschema import Draft7Validator
@@ -395,3 +395,34 @@ def test_adapter_registration_is_strict() -> None:
         app.output_adapter(Exception, schema=later, dump=dump)  # type: ignore[arg-type]
     with pytest.raises(RegistrationError, match="scalar or adapted, not both"):
         app.scalar(Invoice, parse=lambda text: Invoice(number=text, total=0))
+
+
+class Cat(BaseModel):
+    kind: Literal["cat"] = "cat"
+    meows: int
+
+
+class Dog(BaseModel):
+    kind: Literal["dog"] = "dog"
+    barks: int
+    secret_note: str = Field(json_schema_extra={"x-high-entropy": True})
+
+
+class Home(BaseModel):
+    pet: Cat | Dog
+    tagged: Cat | Dog = Field(discriminator="kind")
+
+
+def test_a_union_of_models_writes_the_branch_the_value_is() -> None:
+    # Not the first object branch: a Dog is checked, masked, and arranged as a Dog
+    app = adapted()
+
+    @app.command("home", description="Home", danger_level="safe", exit_codes=())
+    def home(args: NoArgs, ctx: Ctx) -> Home:
+        dog = Dog(barks=2, secret_note="plain words here")
+        return Home(pet=dog, tagged=dog)
+
+    code, env = run(app, ["home"])
+    assert code == 0, env["error"]
+    assert env["data"]["pet"]["barks"] == 2 and env["data"]["tagged"]["kind"] == "dog"
+    assert "plain words here" not in json.dumps(env)

@@ -370,18 +370,41 @@ def untyped(node: object) -> bool:
 
 def branch(node: JsonSchema, value: object) -> JsonSchema:
     """The ``anyOf`` or ``oneOf`` branch of ``node`` that describes ``value``, by its JSON
-    kind; an object picks the first object branch. ``{}`` when none does."""
+    kind; an object picks the first object branch its keys and constants fit, as a union
+    of models needs, else the first object branch. ``{}`` when none does."""
     options = node.get("anyOf", node.get("oneOf"))
     if isinstance(options, list):
-        for option in options:
-            if isinstance(option, dict) and _accepts(option, value):
-                return branch(option, value)
-        return {}
+        accepted = [o for o in options if isinstance(o, dict) and _accepts(o, value)]
+        if isinstance(value, dict):
+            fitting = [o for o in accepted if _fits_object(o, value)]
+            accepted = fitting or accepted
+        return branch(accepted[0], value) if accepted else {}
     every = node.get("allOf")
     if isinstance(every, list) and len(every) == 1 and isinstance(every[0], dict):
         rest = {k: v for k, v in node.items() if k != "allOf"}
         return branch({**every[0], **rest}, value)
     return node
+
+
+def _fits_object(node: JsonSchema, value: Mapping[str, object]) -> bool:
+    """``value`` has each required key of ``node``, no key a closed ``node`` leaves out,
+    and the ``const`` or ``enum`` value each such property names"""
+    properties = node.get("properties")
+    if not isinstance(properties, dict):
+        return True  # a nested union or an open object: decided further down
+    if any(key not in value for key in node.get("required", ())):
+        return False
+    if node.get("additionalProperties") is False and any(k not in properties for k in value):
+        return False
+    for key, v in value.items():
+        prop = properties.get(key)
+        if not isinstance(prop, dict):
+            continue
+        if "const" in prop and prop["const"] != v:
+            return False
+        if isinstance(prop.get("enum"), list) and v not in prop["enum"]:
+            return False
+    return True
 
 
 def _accepts(node: JsonSchema, value: object) -> bool:
