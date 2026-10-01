@@ -161,6 +161,14 @@ Forgetting one does not fail silently. A handler that raises a code it did not d
 Mutating and destructive commands also get `CONFLICT` without declaring it, and every
 command gets `GENERAL_ERROR`, `ARG_ERROR`, `PRECONDITION`, and `TIMEOUT`.
 
+`treaty audit` finds a forgotten code before a run does: the `declared-exits` rule reads
+each `Exit.NAME` and `CliExit(ExitCodeName("NAME"))` in the handler, the functions of your
+code it calls, its resources' `acquire`, and its args class's `__post_init__`, and warns
+for each code the command neither declares nor gets without declaring, naming the line:
+`raises STORE_CORRUPT (todo.py:88), which exit_codes does not list`. It reads code, not
+runs, so a code on a branch that is never taken counts too; a declared code it never sees
+raised is fine.
+
 ## Step 4: Raise with enough context to act on
 
 Every `Exit.NAME(...)` takes a message and a few optional fields. Fill in the ones the

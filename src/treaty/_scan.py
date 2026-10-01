@@ -26,8 +26,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._errors import Exit
+from ._errors import CliExit, Exit
 from ._types import signature
+from ._values import ExitCodeName, InvalidValue
 
 
 @dataclass(frozen=True, slots=True)
@@ -899,6 +900,67 @@ def direct_subprocess_calls(fn: Callable[..., object]) -> list[ShellCall]:
         if any(target is starter for starter in _STARTERS):
             found.append(ShellCall(name, node.lineno))
     return sorted(found, key=lambda c: c.line)
+
+
+@dataclass(frozen=True, slots=True)
+class ExitRaise:
+    """An exit code a function names: ``Exit.NAME`` or ``CliExit(ExitCodeName("NAME"))``"""
+
+    name: ExitCodeName
+    file: str
+    """The file, relative to the app's first-party root"""
+    line: int
+
+    @property
+    def where(self) -> str:
+        """``app.py:42``"""
+        return f"{self.file}:{self.line}"
+
+
+def exit_raises(fn: Callable[..., object]) -> list[ExitRaise]:
+    """Every exit code ``fn``'s source names, in source order: an attribute of treaty's
+    ``Exit``, however the module imported it (``from treaty import Exit as E``,
+    ``treaty.Exit``), and ``CliExit(ExitCodeName("NAME"), ...)``. Raised or not: a code
+    named on a branch that is never taken counts too (#211)"""
+    tree = source_tree(fn)
+    code = getattr(fn, "__code__", None)
+    if tree is None or not isinstance(code, types.CodeType):
+        return []
+    scope: dict[str, object] = {**module_scope(fn), **_closure(fn), **_imported(fn, tree)}
+
+    def refers(node: ast.expr | None, target: object) -> bool:
+        name = None if node is None else dotted(node)
+        return name is not None and _static(scope, name.split(".")) is target
+
+    def literal_name(node: ast.expr | None) -> str | None:
+        if not (isinstance(node, ast.Call) and refers(node.func, ExitCodeName) and node.args):
+            return None
+        value = node.args[0]
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            return value.value
+        return None
+
+    home = _home(fn)
+    path = Path(code.co_filename).resolve()
+    if home is not None and path.is_relative_to(home.root):
+        path = path.relative_to(home.root)
+    found: list[ExitRaise] = []
+    for node in ast.walk(tree):
+        text: str | None = None
+        if isinstance(node, ast.Attribute) and refers(node.value, Exit):
+            text, at = node.attr, node.lineno
+        elif isinstance(node, ast.Call) and refers(node.func, CliExit):
+            given = node.args[0] if node.args else None
+            given = next((k.value for k in node.keywords if k.arg == "name"), given)
+            text, at = literal_name(given), node.lineno
+        if text is None:
+            continue
+        try:
+            name = ExitCodeName(text)
+        except InvalidValue:
+            continue  # not an exit code name: Exit raises AttributeError on it when it runs
+        found.append(ExitRaise(name, path.as_posix(), code.co_firstlineno + at - 1))
+    return sorted(found, key=lambda r: (r.line, r.name.value))
 
 
 def dotted(node: ast.expr) -> str | None:
