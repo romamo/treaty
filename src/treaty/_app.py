@@ -120,7 +120,7 @@ from ._errors import (
 )
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy, SideEffects
 from ._fix import command_problem, fix_problem
-from ._flags import Arg, Flag, object_secrets
+from ._flags import Arg, Flag
 from ._framework import framework_collisions
 from ._help import global_rows, render_command, render_root
 from ._http import Http, NetworkFailure, ProxyConfig
@@ -4889,11 +4889,6 @@ class _Run:
         if self.token is not None and len(self.token) >= MIN_REDACTED:
             spellings.update({self.token, repr(self.token)[1:-1]})
         secrets = [(getattr(args, f.name, None), f.default) for f in command.fields if f.secret]
-        for f in command.fields:
-            if f.object_type is not None:
-                # An object's secret fields, at any depth (a value, never a default)
-                nested = object_secrets(getattr(args, f.name, None), f.classified)
-                secrets += [(value, None) for value in nested]
         spec, settings = self.app.settings, self.settings.value
         if spec is not None and settings is not None:
             for setting in spec.fields:

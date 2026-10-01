@@ -18,7 +18,7 @@ from ._command import Command, OptionPlacement
 from ._declare import shell_safe
 from ._dispatch import invalid_json
 from ._errors import ArgsCrashed, ParseError
-from ._flags import FieldInfo, apply_scalar, has_secrets
+from ._flags import FieldInfo, apply_scalar
 from ._framework import (
     NO_INJECTION_FLAG,
     RAW_PAYLOAD_FLAG,
@@ -38,7 +38,6 @@ from ._idempotency import IdempotencyKey
 from ._json5 import JsonFloat, Unreadable, loads_forgiving
 from ._page import Limit, Position
 from ._paths import check_path
-from ._redact import REDACTED
 from ._rules import check_rules
 from ._scalars import DECIMAL
 from ._secrets import (
@@ -578,7 +577,7 @@ def parse_command_args(
         if target is None:
             return field.parse(raw)
         where = f"{field.flag}[{index}]" if field.flag_type is FlagType.ARRAY else field.flag
-        return check_object(target, _decode_object(raw, field.flag, where, target), where)
+        return check_object(target, _decode_object(raw, field.flag, where), where)
 
     def value_after(tok: str, flag: str, has_eq: bool, inline: str) -> str:
         """The token's value, consuming the next token when it is not inline"""
@@ -779,21 +778,18 @@ def _decode_raw_payload(raw: str) -> Mapping[str, object]:
     return decoded
 
 
-def _decode_object(raw: str, flag: str, where: str, target: Classified) -> object:
+def _decode_object(raw: str, flag: str, where: str) -> object:
     """An object field's argv value: strict JSON, or the JSON5 forms agents write; one
-    holding a secret is never echoed back, corrected or not"""
+    holds no secret, since registration refuses one in an object"""
     what = f"--{flag}" if where == flag else f"--{flag} ({where})"
     try:
         return loads_forgiving(raw)
     except Unreadable as exc:
-        error = invalid_json(what, exc, {"flag": where})
+        raise invalid_json(what, exc, {"flag": where}) from None
     except ValueError as exc:
-        error = ParseError(f"{what} is not valid JSON", context={"flag": where, "cause": str(exc)})
-    if has_secrets(target):
-        error.context.pop("corrected_input", None)
-        error.context.pop("cause", None)
-        error.suggestion = None
-    raise error from None
+        raise ParseError(
+            f"{what} is not valid JSON", context={"flag": where, "cause": str(exc)}
+        ) from None
 
 
 def known_flags(command: Command, *, argv: bool = True) -> list[str]:
@@ -933,8 +929,6 @@ def _check_field_value(field: FieldInfo, value: object) -> object:
     if field.flag_type is FlagType.ARRAY:
         item = field.classified.item
         if not isinstance(value, list) or item is None:
-            if field.object_type is not None:
-                ctx.pop("value")  # it may hold an object's secret
             raise ParseError(f"{field.flag!r} expects an array", context=ctx)
         if item.flag_type is FlagType.OBJECT:
             return _all_items(item, value, field.flag)
@@ -1032,26 +1026,19 @@ def _json_type(value: object) -> str:
 
 
 def _check_member(member: FieldInfo, value: object) -> object:
-    """One field of an object, ``member.flag`` its location; a secret is never echoed"""
+    """One field of an object, ``member.flag`` its location"""
     if value is None and member.classified.optional:
         return None
-    try:
-        if member.flag_type is FlagType.ARRAY and isinstance(value, list):
-            item = member.classified.item
-            assert item is not None, "array fields always carry an item type"
-            if item.flag_type is FlagType.OBJECT:
-                return _all_items(item, value, member.flag)
-            return tuple(
-                _check_patterned(replace(member, flag=f"{member.flag}[{i}]"), item, v)
-                for i, v in enumerate(value)
-            )
-        return _check_field_value(member, value)
-    except ParseError as exc:
-        if member.secret:
-            for e in exc.errors or (exc,):
-                if "value" in e.context:
-                    e.context["value"] = REDACTED
-        raise
+    if member.flag_type is FlagType.ARRAY and isinstance(value, list):
+        item = member.classified.item
+        assert item is not None, "array fields always carry an item type"
+        if item.flag_type is FlagType.OBJECT:
+            return _all_items(item, value, member.flag)
+        return tuple(
+            _check_patterned(replace(member, flag=f"{member.flag}[{i}]"), item, v)
+            for i, v in enumerate(value)
+        )
+    return _check_field_value(member, value)
 
 
 def _check_patterned(field: FieldInfo, target: Classified, value: object) -> object:

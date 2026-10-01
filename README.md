@@ -1065,8 +1065,8 @@ an unregistered class. `pattern_type` takes the REQ-C-020 presets `alphanumeric_
 
 A flag can take a structured record: annotate it with a frozen dataclass, `X | None`, or
 `tuple[X, ...]` for a list of them. The dataclass's own fields are plain fields, or carry
-`Flag(...)` for a description, `secret`, `pattern`, `pattern_type`, `multiline`, or
-`max_bytes`; they may be any argument type, other objects and lists of objects among them,
+`Flag(...)` for a description, `pattern`, `pattern_type`, `multiline`, `max_bytes`, or
+`secret=False`; they may be any argument type, other objects and lists of objects among them,
 up to 8 deep:
 
 ```python
@@ -1091,9 +1091,11 @@ entry in `error.errors` at its location, such as `postings[1].number`, exit `2`.
 dataclass's `__post_init__` runs in phase 1 too. `--schema` and the MCP `inputSchema`
 carry the object's schema; the manifest lists the flag as a `string` (an `array` for a list)
 whose description shows its shape, as `--help` does, and completion offers no values for
-it. A field under a secret's name, or declared `secret=True`, is never echoed in an error
-and is redacted from logs and the audit log. An object flag cannot be positional, a secret,
-or a setting, and a value class meant to travel as one string, such as an id, still needs
+it. An object travels on argv, so it holds no secret (REQ-C-016): a field under a
+secret's name, such as `postings[].token`, or declared `secret=True`, fails registration;
+make it a top-level flag, read from `--x-from-env` or `--x-from-file`, or declare
+`secret=False` when the name misleads. An object flag cannot be positional, a secret, or a
+setting, and a value class meant to travel as one string, such as an id, still needs
 `app.scalar(...)`: an unregistered frozen dataclass on a flag is an object.
 
 ## Resources

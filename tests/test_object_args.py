@@ -5,13 +5,12 @@ import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
-from pathlib import Path
 from typing import Literal
 
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, AuditLog, Ctx, Flag, RegistrationError, Subprocess
+from treaty import App, Arg, Ctx, Flag, RegistrationError, Subprocess
 from treaty._tools import input_schema
 
 
@@ -38,8 +37,6 @@ class Posting:
     side: Side = Side.DEBIT
     memo: str | None = Flag(default=None, description="Free text", multiline=True)
     tags: tuple[str, ...] = ()
-    api_key: str | None = None
-    pin: str | None = Flag(default=None, description="Signing PIN", secret=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,31 +187,59 @@ def test_malformed_json_on_argv_names_the_field() -> None:
     assert code == 2 and env["error"]["context"] == {"field": "primary", "type": "array"}
 
 
-def test_a_nested_secret_is_never_echoed() -> None:
-    code, env = run(
-        ["add", "--postings", '{"account": "cash", "amount": {"number": "1"}, "api_key": 42}']
-    )
-    assert code == 2
-    assert env["error"]["context"] == {"field": "postings[0].api_key", "value": "[REDACTED]"}
-    code, env = run(["add", "--postings", '{api_key: "hunter2hunter2", account: }'])
-    assert code == 2 and "hunter2" not in json.dumps(env)
+@dataclass(frozen=True, slots=True)
+class Signer:
+    name: str
+    pin: str = Flag(description="Signing PIN", secret=True)
 
 
-def test_the_audit_log_redacts_nested_secrets(tmp_path: Path) -> None:
-    path = tmp_path / "audit.jsonl"
-    app = make_app(audit_log=AuditLog(path=path))
-    posting = {
-        "account": "cash",
-        "amount": {"number": "1"},
-        "api_key": "hunter2hunter2",
-        "pin": "8675309-8675309",
-    }
-    code, _ = run(["add", "--postings", json.dumps(posting)], app=app)
-    assert code == 0
-    entry = json.loads(path.read_text().splitlines()[-1])
-    assert entry["args"]["postings"][0]["api_key"] == "[REDACTED]"
-    assert entry["args"]["postings"][0]["pin"] == "[REDACTED]"
-    assert "hunter2" not in path.read_text() and "8675309" not in path.read_text()
+@dataclass(frozen=True, slots=True)
+class Leg:
+    account: str
+    api_token: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Batch:
+    legs: tuple[Leg, ...] = ()
+    signer: Signer | None = None
+
+
+def test_a_secret_inside_an_object_is_refused_naming_its_path() -> None:
+    """REQ-C-016: an object travels on argv, so a secret in one, declared or by its name,
+    must be a top-level flag read from --x-from-env or --x-from-file"""
+
+    @dataclass(frozen=True, slots=True)
+    class ByName:
+        postings: tuple[Leg, ...] = Flag(default=(), description="Legs")
+
+    with pytest.raises(RegistrationError, match=r"go: .*postings\[\]\.api_token .*--x-from-env"):
+        register(ByName)
+
+    @dataclass(frozen=True, slots=True)
+    class Declared:
+        signer: Signer = Flag(description="Signer")
+
+    with pytest.raises(RegistrationError, match=r"signer\.pin"):
+        register(Declared)
+
+    @dataclass(frozen=True, slots=True)
+    class Deep:
+        batch: Batch = Flag(description="Batch")
+
+    with pytest.raises(RegistrationError, match=r"batch\.legs\[\]\.api_token, batch\.signer\.pin"):
+        register(Deep)
+
+    @dataclass(frozen=True, slots=True)
+    class Cleared:
+        account: str
+        api_token: str = Flag(description="A token's public id", secret=False)
+
+    @dataclass(frozen=True, slots=True)
+    class Fine:
+        item: Cleared = Flag(description="Item")
+
+    register(Fine)
 
 
 def test_schema_manifest_and_mcp_carry_the_object_shape() -> None:

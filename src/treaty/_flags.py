@@ -436,32 +436,6 @@ def jsonable_value(value: object, target: Classified) -> object:
     return jsonable_default(value, target.scalar)
 
 
-def object_secrets(value: object, target: Classified) -> list[object]:
-    """The values of an object's secret fields at any depth, for the run's redaction"""
-    if value is None:
-        return []
-    if target.flag_type is FlagType.ARRAY and target.item is not None:
-        assert isinstance(value, tuple)
-        return [s for v in value for s in object_secrets(v, target.item)]
-    if target.flag_type is not FlagType.OBJECT:
-        return []
-    found: list[object] = []
-    for m in target.members:
-        nested = getattr(value, m.name)
-        if m.secret and nested is not None:
-            found.extend(nested if isinstance(nested, tuple) else (nested,))
-        else:
-            found.extend(object_secrets(nested, m.classified))
-    return found
-
-
-def has_secrets(target: Classified) -> bool:
-    """Whether an object holds a secret field at any depth, so its text is never echoed"""
-    if target.item is not None:
-        return has_secrets(target.item)
-    return any(m.secret or has_secrets(m.classified) for m in target.members)
-
-
 def jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
     if isinstance(value, Enum):
         return value.value
@@ -812,8 +786,6 @@ def _inspect_object(cls: type, scalars: ScalarRegistry, outer: tuple[type, ...])
             default=default,
             spec=spec,
         )
-        if info.secret and info.flag_type in (FlagType.BOOLEAN, FlagType.OBJECT):
-            raise RegistrationError(f"{at}: a {info.flag_type.value} cannot hold a secret")
         _check_value_spec(at, spec, classified, secret=info.secret)
         _check_default_constraints(info, at)
         members.append(info)
@@ -850,6 +822,17 @@ def _check_value_spec(where: str, spec: FlagSpec, classified: Classified, *, sec
         raise RegistrationError(
             f"{where}: max_bytes is for str fields that are not secrets or paths"
         )
+
+
+def _secret_paths(target: Classified, where: str) -> list[str]:
+    """Where an object holds a secret, declared or by name, as ``postings[].token``"""
+    if target.item is not None:
+        return _secret_paths(target.item, f"{where}[]")
+    paths: list[str] = []
+    for m in target.members:
+        at = f"{where}.{m.name}"
+        paths.extend([at] if m.secret else _secret_paths(m.classified, at))
+    return paths
 
 
 def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
@@ -928,6 +911,15 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
         )
         if info.secret:
             _check_secret_field(cls, info)
+        if info.object_type is not None and (paths := _secret_paths(classified, info.flag)):
+            # REQ-C-016: a JSON object travels on argv, so it cannot carry a secret. A
+            # SchemaError, so registration names the command
+            raise SchemaError(
+                f"{cls.__qualname__}.{f.name}: {', '.join(paths)} would be a secret inside an "
+                "object, which travels on argv; make it a top-level Flag(...), read from "
+                "--x-from-env or --x-from-file, or pass secret=False if it holds none "
+                "(REQ-C-016)"
+            )
         text = item if item is not None else classified
         if spec.multiline and text.flag_type is not FlagType.STRING:
             raise RegistrationError(

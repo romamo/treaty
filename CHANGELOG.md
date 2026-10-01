@@ -32,9 +32,11 @@ Apps built on treaty keep their own, structured schema changelog with
   the dataclass's fields), an unknown or missing key is refused, and every error is one
   `error.errors` entry at its location, such as `postings[1].number`, exit 2. `--schema`
   and the MCP `inputSchema` carry the object's schema, and the manifest and `--help` show
-  its shape. A nested field under a secret's name or declared `secret=True` is never
-  echoed in an error and is redacted from logs and the audit log. An object flag cannot be
-  positional, a secret, a setting, or a `Subprocess(user_controlled_args=)` field (#6)
+  its shape. An object holds no secret (REQ-C-016): a nested field under a secret's name
+  or declared `secret=True` fails registration naming its path, such as
+  `postings[].token`, so it becomes a top-level flag read from `--x-from-env` or
+  `--x-from-file`. An object flag cannot be positional, a secret, a setting, or a
+  `Subprocess(user_controlled_args=)` field (#6)
 
 ## [1.0.0rc9] - 2026-10-01
 
