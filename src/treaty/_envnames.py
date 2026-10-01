@@ -1,10 +1,15 @@
-"""Declared variable names: ``Flag(env=(...))`` on a settings field (#7).
+"""Declared variable names: ``Flag(env=(...))`` on a settings field (#7) or a command's
+flag (#9).
 
-A field is read from ``<APP>_<NAME>`` first, then from each declared name in order, so a
-tool keeps a variable its users already export, such as ``BEANCOUNT_FILE``. The prefixed
-name always wins: it is the one treaty documents, and a stale shared variable must not
-shadow it. A declared name may be ``EnvName(..., deprecated=Deprecated(...))``: still
-read, with a ``DEPRECATED_ENV_VAR`` warning naming the variable to use instead.
+A settings field or a secret flag is read from ``<APP>_<NAME>`` first, then from each
+declared name in order, so a tool keeps a variable its users already export, such as
+``BEANCOUNT_FILE`` or ``IBKR_FLEX_TOKEN``; a flag passed on the command line, or a secret's
+``--x-from-env``/``--x-from-file``, comes before both. The prefixed name always wins over
+a declared one: it is the one treaty documents, and a stale shared variable must not
+shadow it. A plain flag reads no ``<APP>_<NAME>``, only its declared names.
+
+A declared name may be ``EnvName(..., deprecated=Deprecated(...))``: still read, with a
+``DEPRECATED_ENV_VAR`` warning naming what to use instead.
 """
 
 from __future__ import annotations
@@ -41,10 +46,11 @@ class EnvName:
             )
 
 
-def replacement(name: EnvName, own: str) -> str:
-    """The variable a deprecation warning names: the declared one, else ``own``"""
+def replacement(name: EnvName, default: str) -> str:
+    """What a deprecation warning says to use: the declared replacement, else ``default``,
+    the field's own variable or, for a flag without one, the flag"""
     old = name.deprecated
-    return own if old is None or old.replacement is None else old.replacement
+    return default if old is None or old.replacement is None else old.replacement
 
 
 def env_names(value: object) -> tuple[EnvName, ...]:
@@ -69,12 +75,17 @@ def env_names(value: object) -> tuple[EnvName, ...]:
 
 
 def check_env_names(
-    where: str, own: str, names: tuple[EnvName, ...], taken: Mapping[str, str]
+    where: str,
+    own: str | None,
+    names: tuple[EnvName, ...],
+    taken: Mapping[str, str],
+    *,
+    default: str,
 ) -> None:
     """At registration: no declared name is the field's own ``<APP>_<NAME>``, or a
-    variable that ``taken`` says something else reads; a deprecation's replacement is the
-    own name or a declared name that is not deprecated itself"""
-    current = {own} | {n.name for n in names if n.deprecated is None}
+    variable that ``taken`` says something else reads; a deprecation's replacement is
+    ``default`` or a declared name that is not deprecated itself"""
+    current = {default} | {n.name for n in names if n.deprecated is None}
     for n in names:
         if n.name == own:
             raise RegistrationError(
@@ -86,10 +97,10 @@ def check_env_names(
                 f"{where}: env name {n.name} is already read for {taken[n.name]}; "
                 "one variable sets one value"
             )
-        instead = replacement(n, own)
+        instead = replacement(n, default)
         if instead not in current:
             raise RegistrationError(
-                f"{where}: EnvName({n.name!r}) names replacement {instead!r}; name {own} "
+                f"{where}: EnvName({n.name!r}) names replacement {instead!r}; name {default} "
                 "or a declared name that is not deprecated"
             )
 
@@ -106,13 +117,13 @@ def read_env(
     return None
 
 
-def declared_text(name: EnvName, what: str, own: str) -> str:
+def declared_text(name: EnvName, what: str, after: str | None, default: str) -> str:
     """How ``--help`` and AGENTS.md describe a declared name: what it sets, the variable
-    that outranks it, and its deprecation"""
-    text = f"{what}, when {own} is not set"
+    that outranks it, and its deprecation, whose replacement is ``default`` unless named"""
+    text = what if after is None else f"{what}, when {after} is not set"
     old = name.deprecated
     if old is not None:
-        text += f" (deprecated since {old.since}; use {replacement(name, own)})"
+        text += f" (deprecated since {old.since}; use {replacement(name, default)})"
     return text
 
 

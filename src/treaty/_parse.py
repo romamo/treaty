@@ -12,11 +12,13 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import MISSING, dataclass, replace
 from decimal import Decimal
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, NoReturn
 
 from ._command import ARGV_KEY, Command, OptionPlacement
 from ._declare import shell_safe
 from ._dispatch import invalid_json
+from ._envnames import read_env
 from ._errors import ArgsCrashed, ArgsRefused, ParseError
 from ._flags import FieldInfo, apply_scalar
 from ._framework import (
@@ -70,6 +72,8 @@ from ._verbosity import (
     WARNINGS_AS_ERRORS_FLAG,
     short_verbosity,
 )
+
+_NO_SOURCES: Mapping[str, str] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +155,9 @@ class Invocation:
     argv_rest: tuple[str, ...] = ()
     """A passthrough command's argv for its tool: every token after the command path, or
     the ``argv`` of an exec line or ``App.call``"""
+    env_sources: Mapping[str, str] = _NO_SOURCES
+    """The variable each field left off the command line was read from: a secret's
+    ``<APP>_<NAME>`` or a ``Flag(env=)`` name"""
 
     def __post_init__(self) -> None:
         if self.proxy is not None and self.no_proxy:
@@ -833,9 +840,11 @@ def parse_command_args(
                 if getattr(built, spec.attr) != given:
                     raise _repeated(spec.name)
         return replace(built, **framework)
-    _apply_secrets(command, values, secrets, env, errors)
+    sources = _apply_env(command, values, secrets, env, errors)
     given = frozenset(values)
-    return Invocation(args=_finish(command, values, errors), given=given, **framework)
+    return Invocation(
+        args=_finish(command, values, errors), given=given, env_sources=sources, **framework
+    )
 
 
 def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef) -> None:
@@ -848,28 +857,58 @@ def _take_secret(secrets: dict[str, SecretRef], field: FieldInfo, ref: SecretRef
     secrets[field.name] = ref
 
 
-def _apply_secrets(
+def _apply_env(
     command: Command,
     values: dict[str, object],
     secrets: dict[str, SecretRef],
     env: Mapping[str, str],
     errors: _Collector,
-) -> None:
-    """Resolve every secret field in phase 1: named source, else its default variable"""
+) -> dict[str, str]:
+    """Phase 1, for each field the caller left out: a secret's named source, else its
+    ``<APP>_<NAME>``, else its ``Flag(env=)`` names in order; a plain flag's ``Flag(env=)``
+    names. A value read from a variable is checked as strictly as one passed, and its
+    error names the variable. Returns the variable each field was read from"""
+    sources: dict[str, str] = {}
     for f in command.fields:
-        if not f.secret:
+        if f.name in values:
             continue
         ref = secrets.get(f.name)
         if ref is None:
-            var = command.secret_env_vars[f.name]
-            if env.get(var):
-                ref = SecretRef(SecretSource.ENV, var)
-            else:
+            found = read_env(command.secret_env_vars.get(f.name), f.spec.env, env)
+            if found is None:
                 continue
+            var, raw = found
+            sources[f.name] = var
+            if not f.secret:
+                try:
+                    values[f.name] = _from_variable(f, raw)
+                except ParseError as exc:
+                    errors.add(_from_named(exc, var))
+                continue
+            ref = SecretRef(SecretSource.ENV, var)
         try:
             values[f.name] = f.parse(resolve_secret(f.flag, ref, env))
         except ParseError as exc:
-            errors.add(exc)
+            errors.add(_from_named(exc, sources[f.name]) if f.name in sources else exc)
+    return sources
+
+
+def _from_variable(field: FieldInfo, raw: str) -> object:
+    """A plain flag's value from a variable, parsed as argv text; an array is
+    comma-separated, as a setting's is"""
+    if field.flag_type is FlagType.ARRAY:
+        return tuple(field.parse(v) for v in raw.split(","))
+    return field.parse(raw)
+
+
+def _from_named(exc: ParseError, var: str) -> ParseError:
+    """``exc`` about a value read from ``var``, naming it; a secret's is already scrubbed"""
+    return ParseError(
+        f"{var}: {exc.message}",
+        code=exc.code,
+        context={**exc.context, "source": var},
+        suggestion=exc.suggestion or f"fix or unset {var}",
+    )
 
 
 def _decode_raw_payload(raw: str) -> Mapping[str, object]:
@@ -1065,9 +1104,11 @@ def build_from_mapping(
             errors.add(exc)
         except ArgsCrashed as exc:  # an object's __post_init__, before secrets are read
             errors.crash(exc)
-    _apply_secrets(command, values, secrets, env, errors)
+    sources = _apply_env(command, values, secrets, env, errors)
     given = frozenset(values)
-    return Invocation(args=_finish(command, values, errors), given=given, **framework)
+    return Invocation(
+        args=_finish(command, values, errors), given=given, env_sources=sources, **framework
+    )
 
 
 def _check_json_value(field: FieldInfo, value: object) -> object:

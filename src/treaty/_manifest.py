@@ -370,8 +370,12 @@ def command_entry(
     if command.subprocess is not None:
         out["subprocess"] = command.subprocess.to_json(command.fields)  # REQ-C-019
     if command.secret_env_vars:
+        # Each secret's <APP>_<NAME>, then the names its Flag(env=) declares, in order
         out["secret_env_vars"] = [
-            command.secret_env_vars[f.name] for f in command.fields if f.secret
+            var
+            for f in command.fields
+            if f.secret
+            for var in (command.secret_env_vars[f.name], *(n.name for n in f.spec.env))
         ]
     return out
 
@@ -454,7 +458,9 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         prop = dict(base["properties"][f.name])
         prop["description"] = f.spec.description
         properties[key] = prop
-        if f.required:  # an X | None field without a default is optional, as the parser says
+        # An X | None field without a default is optional, as the parser says; a Flag(env=)
+        # variable may supply one, as --x-from-env does a secret
+        if f.required and not f.spec.env:
             required.append(key)
     properties.update(
         (f.key, f.to_property(command))

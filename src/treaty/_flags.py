@@ -131,9 +131,10 @@ def Flag(
     body too private to keep; unlike ``secret``, argv and error messages still carry it.
     ``dry_run=True`` on a boolean makes it the command's dry run in place of a field
     named ``dry_run``, so a wrapper keeps the tool's own ``--check`` or ``--noop``.
-    ``env=("BEANCOUNT_FILE",)`` on a settings field reads those variables, in order,
-    after ``<APP>_<NAME>``; ``EnvName("OLD", deprecated=Deprecated("1.4.0"))`` still reads
-    one, with a warning naming the variable to use instead.
+    ``env=("IBKR_FLEX_TOKEN",)`` reads those variables, in order, when the flag is not
+    passed: after ``<APP>_<NAME>`` for a settings field or a secret, which read that one
+    too. ``EnvName("OLD", deprecated=Deprecated("1.4.0"))`` still reads one, with a
+    warning naming what to use instead.
     """
     spec = FlagSpec(
         description,
@@ -349,6 +350,10 @@ class FieldInfo:
             description = f"{description} (- reads it from stdin)"
         if not self.spec.audit:
             description = f"{description} ({UNAUDITED})"
+        if self.spec.env:
+            # FlagEntry allows no extra keys, so the variables are named in the description
+            names = " or ".join(f"${n.name}" for n in self.spec.env)
+            description = f"{description} (read from {names} when not passed)"
         if (old := self.spec.deprecated) is not None:
             instead = "" if old.replacement is None else f"; use --{old.replacement}"
             description = f"{description} (deprecated since {old.since}{instead})"
@@ -360,7 +365,8 @@ class FieldInfo:
             kind = FlagType.ARRAY if kind is FlagType.ARRAY else FlagType.STRING
         entry: dict[str, object] = {
             "type": kind.value,
-            "required": self.required,
+            # A variable may supply it, as --x-from-env does a secret's
+            "required": self.required and not self.spec.env,
             "description": description,
         }
         if self.default is not MISSING and self.default is not None:
@@ -945,11 +951,6 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: from_stdin=True is for value fields; a boolean "
                 "takes no value, and a secret comes from --x-from-env or --x-from-file"
-            )
-        if spec.env:
-            raise RegistrationError(
-                f"{cls.__qualname__}.{f.name}: env= is for settings fields; declare the "
-                "value in App(settings=) to read it from those variables"
             )
         if spec.dry_run and info.flag_type is not FlagType.BOOLEAN:
             raise RegistrationError(

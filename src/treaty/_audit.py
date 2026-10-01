@@ -2168,7 +2168,8 @@ def env_reads(fn: Callable[..., object]) -> list[str]:
 
 def _env_prefix(app: App) -> Iterator[Finding]:
     prefix = app_var(app.name, "") + "_"
-    # A name a setting declares with Flag(env=) is read on purpose, and documented
+    # A name a setting or one of the command's flags declares with Flag(env=) is read on
+    # purpose, and documented
     declared = settings_env_names(app._settings_cls)
     for c in user_commands(app):
         code = [c.handler, *(spec.acquire for spec in c.resource_graph.values())]
@@ -2176,12 +2177,14 @@ def _env_prefix(app: App) -> Iterator[Finding]:
         for fn in code:
             for unit in reached_functions(fn):
                 seen.update((n, unit) for n in env_reads(unit.fn) if n not in seen)
+        flagged = {n.name for f in c.fields for n in f.spec.env}
         for name, unit in sorted(seen.items()):
             if (
                 name.startswith(prefix)
                 or name in UNPREFIXED
                 or name in c.token_env_vars
                 or name in declared
+                or name in flagged
             ):
                 continue
             yield Finding(

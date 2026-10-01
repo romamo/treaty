@@ -6,7 +6,8 @@ import shlex
 from collections.abc import Mapping, Sequence
 
 from ._command import Command
-from ._flags import object_shape
+from ._envnames import declared_text
+from ._flags import FieldInfo, object_shape
 from ._framework import framework_flags
 from ._types import FlagType
 from ._values import CommandPath
@@ -106,6 +107,24 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
     return rows
 
 
+def declared_env_rows(path: CommandPath, command: Command) -> list[tuple[str, FieldInfo, str]]:
+    """Each ``Flag(env=)`` name of the command's flags, the field it sets, and what it is"""
+    rows: list[tuple[str, FieldInfo, str]] = []
+    for f in command.fields:
+        own = command.secret_env_vars.get(f.name)
+        what = f"Default of --{f.flag} of {path.value}"
+        default = own or f"--{f.flag}"
+        rows += [(n.name, f, declared_text(n, what, own, default)) for n in f.spec.env]
+    return rows
+
+
+def _declared_rows(f: FieldInfo, when: str, default: str) -> list[tuple[str, str]]:
+    """One row per ``Flag(env=)`` name, read in order ``when``; a deprecated one names
+    its replacement, ``default`` unless declared"""
+    what = f"{f.spec.description}: read {when}"
+    return [(f"${n.name}", declared_text(n, what, None, default)) for n in f.spec.env]
+
+
 def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
     positionals = [f for f in command.fields if f.positional]
     flags = [f for f in command.fields if not f.positional]
@@ -142,6 +161,7 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
             rows.append((f"--{f.env_flag} VAR", f"{f.spec.description}: read from $VAR{need}"))
             rows.append((f"--{f.file_flag} PATH", f"{f.spec.description}: read from PATH"))
             rows.append((f"${var}", f"{f.spec.description}: default when neither is given"))
+            rows += _declared_rows(f, f"when ${var} is not set", var)
             continue
         label = f"--{f.flag}" + (f", -{f.spec.short}" if f.spec.short else "")
         text = f.spec.description + (" (required)" if f.required else "")
@@ -151,6 +171,7 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
             each = "repeat it, one JSON object each" if repeated else "a JSON object"
             text += f"; {each}: {object_shape(shape)}"
         rows.append((label, text))
+        rows += _declared_rows(f, f"when --{f.flag} is not given", f"--{f.flag}")
     rows.extend(_framework_rows(command))
     lines += _section("Flags", rows)
     if command.requires:  # REQ-C-026

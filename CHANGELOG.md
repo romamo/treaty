@@ -23,6 +23,16 @@ Apps built on treaty keep their own, structured schema changelog with
   field's own `<APP>_<FIELD>`, or is read for another field or a framework option is a
   `RegistrationError`, as is a plain setting naming a variable a command reads as a secret
   or token, which `--show-config` would print (#7)
+- A command's flag takes the same `env=(...)`, so it reads the variable a wrapped service
+  already uses, such as `IBKR_FLEX_TOKEN`, when it is not passed, on every input path:
+  argv, `--raw-payload`, `exec` lines, and `App.call` and MCP. A secret reads its own
+  `<APP>_<NAME>` first, and its declared names join `secret_env_vars` in the manifest; its
+  value stays redacted everywhere. A plain flag reads only its declared names, which its
+  manifest description lists; a required one shows `required: false` in the manifest and the
+  `--raw-payload` schema, since a variable may supply it. A value read from a variable is
+  validated as strictly as a passed one, and its error names the variable in
+  `context.source`. `--help`, AGENTS.md, the `env-prefix` audit rule, and
+  `DEPRECATED_ENV_VAR` work as for settings (#9)
 
 ## [1.0.0rc10] - 2026-10-01
 

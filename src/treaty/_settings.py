@@ -140,7 +140,7 @@ class SettingsSpec:
                 continue
             own = app_var(app_name, f.name)
             others = {k: v for k, v in taken.items() if k != own}
-            check_env_names(f"{where}: field {f.name!r}", own, declared.env, others)
+            check_env_names(f"{where}: field {f.name!r}", own, declared.env, others, default=own)
             taken |= {n.name: f"setting {f.name!r}" for n in declared.env}
 
     @classmethod
@@ -193,6 +193,21 @@ def plain_settings_env(settings: type | None) -> dict[str, str]:
         if not secret:
             plain |= dict.fromkeys((n.name for n in declared.env), f"plain setting {f.name!r}")
     return plain
+
+
+def settings_env_taken(settings: type | None, app_name: str) -> dict[str, str]:
+    """Every variable the settings read, prefixed or declared, with the field it sets"""
+    if settings is None:
+        return {}
+    taken: dict[str, str] = {}
+    for f in dataclasses.fields(settings):
+        declared = f.metadata.get(FLAG_META)
+        names = [
+            app_var(app_name, f.name),
+            *(() if declared is None else (n.name for n in declared.env)),
+        ]
+        taken |= dict.fromkeys(names, f"setting {f.name!r}")
+    return taken
 
 
 @dataclass(frozen=True, slots=True)
