@@ -228,21 +228,22 @@ def _feed(write: int, lines: list[bytes], pause: float) -> threading.Thread:
 
 
 def test_each_line_read_restarts_a_streams_idle_timeout() -> None:
-    # tally yields once, at the end; 8 lines 0.2 s apart outlast its 0.5 s idle limit,
-    # but each read shows the input is alive
+    # tally yields once, at the end; 10 lines 0.2 s apart outlast a 1 s idle limit, but
+    # each read shows the input is alive. The limit leaves a loaded runner's late wake
+    # 0.8 s per line (#172)
     read, write = os.pipe()
-    feeder = _feed(write, [b"%d\n" % n for n in range(8)], 0.2)
+    feeder = _feed(write, [b"%d\n" % n for n in range(10)], 0.2)
     with os.fdopen(read, "r", encoding="utf-8") as stdin:
-        code, events = run(["tally"], stdin)  # type: ignore[arg-type]
+        code, events = run(["tally", "--timeout", "1"], stdin)  # type: ignore[arg-type]
     feeder.join()
-    assert code == 0 and events[0]["data"] == {"lines": 8, "first": "0"}
+    assert code == 0 and events[0]["data"] == {"lines": 10, "first": "0"}, events
 
 
 def test_a_stalled_producer_times_the_stream_out() -> None:
     read, write = os.pipe()
     feeder = _feed(write, [b"a\n", b"b\n"], 0.9)
     with os.fdopen(read, "r", encoding="utf-8") as stdin:
-        code, events = run(["upper"], stdin)  # type: ignore[arg-type]
+        code, events = run(["upper", "--timeout", "0.5"], stdin)  # type: ignore[arg-type]
         feeder.join()  # the abandoned worker still reads; close the pipe after the writer
     assert code == 10 and events[-1]["error"]["code"] == "TIMEOUT"
     assert "next event" in events[-1]["error"]["message"]
@@ -254,7 +255,7 @@ def test_a_line_mode_stream_is_a_filter_in_a_real_pipe() -> None:
         [sys.executable, str(LINECTL), "upper"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        env={"PATH": os.environ["PATH"]},
+        env={"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")},
     )
     assert proc.stdin is not None and proc.stdout is not None
     try:
@@ -262,12 +263,12 @@ def test_a_line_mode_stream_is_a_filter_in_a_real_pipe() -> None:
             proc.stdin.write(word + b"\n")
             proc.stdin.flush()
             event = json.loads(proc.stdout.readline())
-            assert event["data"] == {"n": n, "text": word.decode().upper()}
+            assert event["data"] == {"n": n, "text": word.decode().upper()}, event
         proc.stdin.write(b"\xff\n")  # not UTF-8, read through sys.stdin's bytes
         proc.stdin.close()
         last = json.loads(proc.stdout.readline())
-        assert last["error"]["code"] == "LINE_NOT_UTF8"
-        assert last["error"]["context"]["line"] == 3
+        assert last["error"]["code"] == "LINE_NOT_UTF8", last
+        assert last["error"]["context"]["line"] == 3, last
         assert proc.wait(timeout=10) == 1
     finally:
         proc.kill()

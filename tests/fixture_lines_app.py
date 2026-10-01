@@ -5,7 +5,9 @@ from dataclasses import dataclass
 
 from treaty import App, Ctx, NoArgs
 
-app = App("linectl", version="1.0.0", default_timeout=0.5, max_line_bytes=64)
+# A 0.5 s idle limit was outlasted on a loaded Windows runner (#172); the idle-timeout
+# tests pass a short --timeout of their own
+app = App("linectl", version="1.0.0", default_timeout=30, max_line_bytes=64)
 
 
 @dataclass(frozen=True, slots=True)
