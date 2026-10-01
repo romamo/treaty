@@ -220,6 +220,40 @@ def test_descriptor_1_is_the_tools_under_main() -> None:
     assert envelope["ok"] is True and envelope["warnings"] == []
 
 
+SWITCHING = """
+import sys, threading
+from treaty._stdout import intercept_stdout
+sys.setswitchinterval(1e-6)
+interceptor = intercept_stdout()
+stop = threading.Event()
+def take():
+    while not stop.is_set():
+        interceptor.take()
+taker = threading.Thread(target=take)
+taker.start()
+for _ in range(50_000):
+    interceptor.pause()
+    interceptor.resume()
+stop.set()
+taker.join()
+interceptor.close()
+"""
+
+
+def test_a_concurrent_envelope_sends_no_marker_to_the_tools_stdout() -> None:
+    """Another thread's envelope syncing descriptor 1 while a passthrough run pauses or
+    resumes it writes its marker to the pipe, never to stdout"""
+    proc = subprocess.run(
+        [sys.executable, "-c", SWITCHING],
+        env=BASE_ENV,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == b""
+
+
 @needs_posix_signals
 def test_a_signal_ends_the_run_with_an_envelope_on_stderr() -> None:
     proc = subprocess.Popen(
