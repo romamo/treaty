@@ -286,6 +286,41 @@ def test_stdio_server_turns_a_stray_input_into_exit_4() -> None:
     assert after["ok"] is True
 
 
+def test_stdio_server_redacts_a_handlers_print_on_stderr(tmp_path: Path) -> None:
+    """The server points ``sys.stdout`` at stderr: what a handler prints or writes to
+    stderr during its call lands there redacted, and the protocol on stdout still works
+    (#141)"""
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    token = "sk-live-abcdef123456"
+    errlog = tmp_path / "stderr.txt"
+
+    async def scenario() -> dict[str, object]:
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "treaty._mcp", "fixture_print_app:app"],
+            cwd=str(Path(__file__).resolve().parent),
+            env={"PRINTCTL_API_TOKEN": token, "PRINTCTL_AUDIT_LOG": "0"},
+        )
+        with errlog.open("w", encoding="utf-8") as err:
+            async with (
+                stdio_client(params, errlog=err) as (read, write),
+                ClientSession(read, write) as session,
+            ):
+                await session.initialize()
+                shown = await session.call_tool("show", {})
+                return shown.structured_content  # type: ignore[return-value]
+
+    shown = asyncio.run(scenario())
+    assert shown["ok"] is True and shown["data"] == {"ok": True}
+    written = errlog.read_text(encoding="utf-8")
+    assert token not in written, written
+    assert ["out [REDACTED]", "err [REDACTED]"] == [
+        line for line in written.splitlines() if line.startswith(("out ", "err "))
+    ], written
+
+
 def test_unknown_field_lists_only_flags_a_mapping_accepts() -> None:
     app = App("files", version="1.0.0")
 

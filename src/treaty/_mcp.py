@@ -174,7 +174,8 @@ async def serve(app: App) -> None:
     async with stdio_server() as (read, write):
         # The transport holds the real streams now. For the rest of the process a print()
         # goes to stderr and an input() exits 4, instead of corrupting or stalling the
-        # protocol; App.call swaps no stream itself, since calls run on several threads
+        # protocol. App.call only wraps the streams it finds, redacting its own threads'
+        # writes there, since calls run on several threads
         sys.stdout = sys.stderr
         sys.stdin = cast(TextIO, NoPromptStdin(io.StringIO()))
         await server.run(read, write, server.create_initialization_options())

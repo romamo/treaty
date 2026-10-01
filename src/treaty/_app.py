@@ -1982,8 +1982,11 @@ class App:
         ``idempotency_key``, ``timeout``, and ``dry_run`` are accepted where the command
         declares them. A streaming command returns its buffered envelope, capped like
         stdout (REQ-F-052). Nothing is written to stdout: the caller owns the envelope;
-        handler tracebacks go to stderr. ``unmask=True`` is ``--unmask``: high-entropy
-        values stay raw. Used by the MCP adapter, which never unmasks.
+        handler tracebacks go to stderr. What the handler prints or writes to
+        ``sys.stderr`` stays on that stream, its secrets redacted; other threads' writes
+        pass through untouched, and so do bytes written through ``.buffer`` (#141).
+        ``unmask=True`` is ``--unmask``: high-entropy values stay raw. Used by the MCP
+        adapter, which never unmasks.
         """
         environ = env if env is not None else os.environ
         self._check_fixes()
@@ -2005,7 +2008,7 @@ class App:
                 deferred = exc
         if deferred is not None and not _answers_over(deferred, path):
             return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
-        run.attach_logging()
+        run.attach_logging(call=True)
         try:
             envelope = run.settle(self._call(run, path, arguments, environ))
         finally:
@@ -2745,7 +2748,8 @@ class _Records(logging.Handler):
     while such a thread lives, and with no run attached writes a record where
     ``logging.lastResort`` would, redacted (#118). On the same lifecycle, while a handler
     thread whose run detached lives, ``sys.stdout`` and ``sys.stderr`` redact what that
-    thread writes (#135)"""
+    thread writes (#135), and so they do while an ``App.call`` runs, for its own threads
+    (#141)"""
 
     def __init__(self) -> None:
         super().__init__(logging.NOTSET)
@@ -2756,10 +2760,15 @@ class _Records(logging.Handler):
         ] = []
         """Each handler thread with its invocation's redactor and its run's writer, until
         the thread ends"""
+        self._callers: dict[Callable[[logging.LogRecord], None], threading.Thread] = {}
+        """The thread of each attached ``App.call`` run, by the run's writer"""
         self.late: frozenset[threading.Thread] = frozenset()
         """The live handler threads whose run is no longer attached, rebuilt on a change;
         read without the guard, by every write to the standard streams while it is not
         empty"""
+        self.calls: frozenset[threading.Thread] = frozenset()
+        """The threads of the attached ``App.call`` runs, each calling thread and its live
+        handler threads, rebuilt on a change and read as ``late`` is"""
         self._redactors: tuple[Callable[[str], str], ...] = ()
         """The attached runs' and live handler threads' redactors, rebuilt on a change"""
         self._guard = threading.Lock()
@@ -2769,15 +2778,20 @@ class _Records(logging.Handler):
         write: Callable[[logging.LogRecord], None],
         redact: Callable[[str], str],
         lowest: int | None,
+        caller: threading.Thread | None = None,
     ) -> None:
         """Route records to ``write`` until ``detach``, the root lowered to ``lowest``, the
-        least level the run shows, when it stands above it"""
+        least level the run shows, when it stands above it. ``caller`` is the thread of an
+        ``App.call`` run: until ``detach``, it and the handler threads held for the run are
+        in ``calls``"""
         root = logging.getLogger()
         with self._guard:
             if not self._runs:
                 # Already there while a held thread lives; adding is idempotent
                 root.addHandler(self)
             self._runs.append((write, redact, root.level))
+            if caller is not None:
+                self._callers[write] = caller
             self._changed()
             if lowest is not None and lowest < root.level:
                 root.setLevel(lowest)
@@ -2789,6 +2803,7 @@ class _Records(logging.Handler):
         with self._guard:
             index = next(i for i, (w, _, _) in enumerate(self._runs) if w == write)
             *_, level = self._runs.pop(index)
+            self._callers.pop(write, None)
             if index < len(self._runs):
                 self._runs[index] = (*self._runs[index][:2], level)
             else:
@@ -2898,30 +2913,45 @@ class _Records(logging.Handler):
         self._workers = [held for held in self._workers if held[0].is_alive()]
         self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r, _ in self._workers))
         attached = [w for w, _, _ in self._runs]
+        # ``late`` first: a thread whose call detached is in both a moment, never in
+        # neither, so its writes stay redacted as they move from its call's stream to stderr
         self.late = frozenset(w for w, _, owner in self._workers if owner not in attached)
+        self.calls = frozenset(
+            (
+                *self._callers.values(),
+                *(w for w, _, owner in self._workers if owner in self._callers),
+            )
+        )
 
 
 _RECORDS = _Records()
 
 
 class _LateStream:
-    """Stands in for ``sys.stdout`` or ``sys.stderr`` while a handler thread whose run
-    detached still lives, as after a host's ``App.call`` that timed out returned (#135).
-    What that thread writes is redacted of every attached run's and live handler thread's
-    secrets, and its stdout text goes to stderr, so a late write never lands in a host's
-    own output. Every other thread's write reaches the stream it wraps untouched, and so
-    does a write through ``.buffer``, as bytes"""
+    """Stands in for ``sys.stdout`` or ``sys.stderr`` while an ``App.call`` runs (#141), or
+    a handler thread whose run detached still lives, as after a host's ``App.call`` that
+    timed out returned (#135). What the call's threads write, the calling thread and its
+    handler threads, is redacted of every attached run's and live handler thread's
+    secrets, on the stream it was written to: the host's output stays where it was. What a
+    late thread writes is redacted too, and its stdout text goes to stderr, so a late
+    write never lands in a host's own output. Every other thread's write reaches the
+    stream it wraps untouched, and so does a write through ``.buffer``, as bytes"""
 
     def __init__(self, inner: TextIO, *, stdout: bool) -> None:
         self.inner = inner
         self._stdout = stdout
 
     def write(self, text: str, /) -> int:
-        if threading.current_thread() not in _RECORDS.late:
+        thread = threading.current_thread()
+        target: TextIO | None
+        if thread in _RECORDS.late:
+            target = sys.stderr if self._stdout else self.inner
+            if isinstance(target, _LateStream):
+                target = target.inner
+        elif thread in _RECORDS.calls:
+            target = self.inner
+        else:
             return self.inner.write(text)
-        target: TextIO | None = sys.stderr if self._stdout else self.inner
-        if isinstance(target, _LateStream):
-            target = target.inner
         if target is not None:
             shown = _RECORDS.redact_late(text)
             # A secret an escape splits, such as ``hun\x1b[0mter2``, is whole without it
@@ -2950,13 +2980,13 @@ def _settle_streams() -> None:
 
 
 def _settle_streams_locked() -> None:
-    """Wrap ``sys.stdout`` and ``sys.stderr`` in a ``_LateStream`` while a handler thread
-    whose run detached lives, and unwrap them once none does. ``sys.stdout`` waits while
-    a run's guard holds it, whose stand-in redacts already. A stream the host replaced in
-    between is its own: it is left as it is, and a wrapper the host kept passes every
-    write through. The caller holds ``_guard_lock``."""
+    """Wrap ``sys.stdout`` and ``sys.stderr`` in a ``_LateStream`` while an ``App.call``
+    runs or a handler thread whose run detached lives, and unwrap them once neither does.
+    ``sys.stdout`` waits while a run's guard holds it, whose stand-in redacts already. A
+    stream the host replaced in between is its own: it is left as it is, and a wrapper
+    the host kept passes every write through. The caller holds ``_guard_lock``."""
     global _late_out, _late_err
-    if _RECORDS.late:
+    if _RECORDS.late or _RECORDS.calls:
         if _late_err is None and sys.stderr is not None:
             _late_err = _LateStream(sys.stderr, stdout=False)
             sys.stderr = cast(TextIO, _late_err)
@@ -4118,15 +4148,21 @@ class _Run:
         self.err.write(line + "\n", level)
         self.err.flush()
 
-    def attach_logging(self) -> None:
+    def attach_logging(self, *, call: bool = False) -> None:
         """Every log record on stderr through the redacting writer until
         ``detach_logging``, at its own level: the framework's trace and libraries' debug
         records, such as urllib3's and httpx's requests, under ``--debug``, info records
-        where ``ctx.log`` shows, warnings and errors unless ``--quiet`` (REQ-O-008)"""
+        where ``ctx.log`` shows, warnings and errors unless ``--quiet`` (REQ-O-008).
+        ``call``, for ``App.call``: until then, the standard streams redact what this
+        thread and the run's handler threads write (#141)"""
         if self._logging:
             return
         self._logging = True
-        _RECORDS.attach(self._log_record, self._redact_now, _lowest_shown(self.err.verbosity))
+        lowest = _lowest_shown(self.err.verbosity)
+        caller = threading.current_thread() if call else None
+        _RECORDS.attach(self._log_record, self._redact_now, lowest, caller)
+        if call:
+            _settle_streams()
 
     def detach_logging(self) -> None:
         if not self._logging:
