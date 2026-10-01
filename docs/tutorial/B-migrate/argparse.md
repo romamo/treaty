@@ -481,6 +481,25 @@ command have to move root options such as `--db` after the command already; that
 order they will need once the shim is gone. Delete the shim when `MIGRATED` covers every
 command.
 
+## Scaffolding a large CLI
+
+`treaty scaffold-from argparse` writes the first draft of the commands, as the [click and
+typer chapter](click-typer.md#scaffold-the-commands-of-a-large-cli) describes: an args
+dataclass per subcommand, root options on a base class, and a handler that returns its
+arguments until you give it a body. It reads the parser, so point it at the parser object,
+or at a function that only builds and returns it:
+
+```bash
+uv run treaty scaffold-from argparse todo.cli:build_parser --out todo/cli_treaty.py
+```
+
+A parser built inside `main()`, next to `parse_args()`, has to move into such a function
+first; pointed at `main`, the scaffold exits 4 rather than run the CLI. argparse keeps a
+parser's arguments in the private `ArgumentParser._actions` list, which the scaffold reads
+and checks; a Python whose argparse lacks it exits 4 with that name. `type=` converters,
+`argparse.FileType`, and `store_const` arguments get a comment saying what to do, and an
+alias from `add_parser(aliases=...)` is listed with the `app.redirect` that answers it.
+
 ## argparse to treaty at a glance
 
 | argparse | treaty |

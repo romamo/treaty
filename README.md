@@ -1697,6 +1697,16 @@ uv run treaty conformance shop_tool.cli:app --run
 The new project depends on `treaty` from PyPI; `--treaty-source /path/to/treaty` pins a local
 checkout instead.
 
+To move an existing CLI instead, `treaty scaffold-from typer|click|argparse module:obj`
+imports it, walks its command tree, and writes a treaty module: an args dataclass per
+command, with group options on base classes, and a handler that returns its arguments with
+`effect: "noop"` until you give it a body. Every command starts as `mutating` with no exit
+codes, which `treaty audit` reports until you declare them. `--out FILE` writes the module
+(exit `6` with `CONFLICT` over an existing file without `--force`); without it the module is
+in `data.source`. The [migration
+chapter](https://github.com/romamo/treaty/blob/main/docs/tutorial/B-migrate/click-typer.md#scaffold-the-commands-of-a-large-cli)
+walks through it.
+
 `init` scaffolds a package with one command per danger level, typed outputs, declared exit
 codes, a test using `app.run()`, and a conformance profile. `conformance` derives probes
 from each command's first example and danger level, writes the profile, and with `--run`
