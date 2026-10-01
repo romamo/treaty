@@ -942,8 +942,9 @@ def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
   `SideEffect("{project_root}/tmp/dashboard/", "cache")`, on a command declaring
   `project_root=` markers (without them it is a `RegistrationError`). `cleanup` and
   `status` find the project from their own cwd (or `--cwd`) up, as the command does; with
-  no marker found they touch nothing of it and warn `PROJECT_ROOT_NOT_FOUND`, never taking
-  the cwd for the project, and a match whose directory resolves outside the project
+  no marker found (one at `/`, in the home directory, or above it counts as none) they
+  touch nothing of it and warn `PROJECT_ROOT_NOT_FOUND`, never taking the cwd for the
+  project, and a match whose directory resolves outside the project
   through a symlink is left alone. A safe command whose writes are all declared, this way
   or another, passes the `fs-side-effects` audit rule
 - `status` (safe, exits 0 whatever exists) lists every declared side effect with the

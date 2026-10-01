@@ -203,3 +203,28 @@ def test_a_brace_in_the_project_directory_is_literal(tmp_path: Path) -> None:
     assert code == 0, envelope
     assert not (root / "tmp" / "dashboard").exists()
     assert (sibling / "tmp" / "dashboard").is_dir()
+
+
+@pytest.mark.parametrize("marked", ["home", "above"])
+def test_a_marker_in_or_above_the_home_directory_is_no_project(tmp_path: Path, marked: str) -> None:
+    # A dotfiles repository's marker in ~ would otherwise turn cleanup, run from any
+    # directory under ~, on the user's own ~/tmp/dashboard
+    home = tmp_path / "home"
+    precious = home / "tmp" / "dashboard" / "notes.txt"
+    precious.parent.mkdir(parents=True)
+    precious.write_text("keep")
+    (home / "Downloads").mkdir()
+    (tmp_path if marked == "above" else home).joinpath(".cfproject").write_text("")
+    out = io.StringIO()
+    code = dashboard().run(
+        ["cleanup", "--confirm-destructive", "--cwd", str(home / "Downloads")],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={**BASE_ENV, "HOME": str(home), "TMPDIR": str(tmp_path)},
+    )
+    envelope = json.loads(out.getvalue())
+    assert code == 0, envelope
+    assert data(envelope)["effect"] == "noop"
+    assert precious.read_text() == "keep"
+    assert "PROJECT_ROOT_NOT_FOUND" in warnings(envelope)

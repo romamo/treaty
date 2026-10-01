@@ -334,7 +334,8 @@ def declared(app: App, home: str | None, cwd: Path) -> Iterator[Declared]:
     native form (declarations use ``/``, which Windows would leave mixed with ``\\``);
     a ``~/`` one is left out without a home. A ``{project_root}/`` one resolves against
     the command's ``project_root=`` markers from ``cwd`` up, never the cwd itself: with no
-    marker found it has no pattern and no matches, and a match whose directory resolves
+    marker found it has no pattern and no matches, nor with one found at ``/``, the home
+    directory, or above it (see ``_cleanable``), and a match whose directory resolves
     outside the project, through a symlink, is left out"""
     roots: dict[tuple[str, ...], Path | None] = {}
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
@@ -343,7 +344,7 @@ def declared(app: App, home: str | None, cwd: Path) -> Iterator[Declared]:
             if effect.in_project:
                 markers = command.project_root
                 if markers not in roots:
-                    roots[markers] = find_project_root(cwd, markers)
+                    roots[markers] = _cleanable(find_project_root(cwd, markers), home)
                 project = roots[markers]
                 if project is None:
                     yield Declared(path, effect, None, [])
@@ -360,6 +361,18 @@ def declared(app: App, home: str | None, cwd: Path) -> Iterator[Declared]:
             yield Declared(path, effect, pattern, sorted(matches))
 
 
+def _cleanable(root: Path | None, home: str | None) -> Path | None:
+    """``root`` unless it is ``/``, the home directory, or a directory above it: a stray
+    marker there, such as a dotfiles repository's ``.git`` in ``~``, is no project, and
+    cleanup would remove the user's own ``~/tmp/...`` from any directory under it"""
+    if root is None:
+        return None
+    real = root.resolve()
+    if real == Path(real.anchor) or (home and Path(home).resolve().is_relative_to(real)):
+        return None
+    return root
+
+
 def unresolved(app: App, found: Sequence[Declared]) -> list[Unresolved]:
     """The ``{project_root}/`` declarations no project was found for"""
     return [
@@ -374,7 +387,7 @@ def _warn_unresolved(ctx: Ctx, missing: Sequence[Unresolved], what: str) -> None
         ctx.warn(
             "PROJECT_ROOT_NOT_FOUND",
             f"{len(missing)} declared paths are under a project no marker locates from "
-            f"{ctx.cwd} up; {what}",
+            f"{ctx.cwd} up (one at /, the home directory, or above it is not taken); {what}",
             paths=[m.to_json() for m in missing],
             cwd=str(ctx.cwd),
         )

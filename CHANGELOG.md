@@ -49,7 +49,7 @@ Apps built on treaty keep their own, structured schema changelog with
   "cache")` on a command declaring `project_root=` markers, so a safe command that writes
   its regenerated reports under the project can declare them and pass `fs-side-effects`.
   `cleanup` and `status` resolve the project from their own cwd up; with no marker found
-  they leave its paths alone with a `PROJECT_ROOT_NOT_FOUND` warning instead of guessing
+  (one at `/`, in the home directory, or above it counts as none) they leave its paths alone with a `PROJECT_ROOT_NOT_FOUND` warning instead of guessing
   the cwd, and `cleanup` never follows a symlink out of the project. A project path on a
   command without markers, or one reaching out with `..`, is a `RegistrationError`. The
   manifest carries the template as declared (#184)
