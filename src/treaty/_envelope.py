@@ -58,12 +58,10 @@ _C1 = re.compile(r"\x9d[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?|\x9b[0-?]*[ -/]*[@-
 _SGR = re.compile(r"\x1b\[[0-9;:]*m")
 # Controls a terminal still acts on once the escapes are gone: a bell, a backspace that
 # overprints, a carriage return that rewrites the line. Tab and newline are text. The
-# Unicode bidirectional controls too (ALM, LRM, RLM, the embeddings and overrides, the
-# isolates): one in a value reorders how the rest of its line displays (#177)
-_CONTROLS = re.compile(
-    r"[\x00-\x08\x0b-\x1f\x7f-\x9f"
-    r"\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]"
-)
+# Unicode bidirectional embeddings, overrides, and isolates too: one in a value reorders
+# how the rest of its line displays (#177). The marks (LRM, RLM, ALM) stay text, since
+# right-to-left prose uses them and they reverse no run
+_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
 def strip_escapes(text: str) -> str:
@@ -73,7 +71,7 @@ def strip_escapes(text: str) -> str:
 
 def visible(text: str, keep: str = "", *, rewrite: bool = False) -> str:
     """``text`` with every control character but tab, newline, and those in ``keep``
-    written as its escape (``\\x1b``, ``\\r``, ``\\u202e`` for a bidirectional control), as
+    written as its escape (``\\x1b``, ``\\r``, ``\\u202e`` for a bidirectional override), as
     ``repr`` writes it: a line for a person shows what a value held, and the terminal acts
     on none of it. A carriage return in ``keep`` stays only as part of a CRLF, since a
     lone one rewrites the line, unless ``rewrite`` lets it, as a progress line printed to

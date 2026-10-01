@@ -349,8 +349,9 @@ def test_a_c1_osc_in_printed_text_is_not_held_past_its_line() -> None:
 
 # #177: Unicode bidirectional controls reorder how the rest of a line displays
 
-BIDI = "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
-BIDI_SHOWN = "\\u061c\\u200e\\u200f\\u202a\\u202b\\u202c\\u202d\\u202e\\u2066\\u2067\\u2068\\u2069"
+BIDI = "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+BIDI_SHOWN = "\\u202a\\u202b\\u202c\\u202d\\u202e\\u2066\\u2067\\u2068\\u2069"
+MARKS = "\u200e\u200f\u061c"  # LRM, RLM, ALM: right-to-left prose uses them
 
 
 def no_bidi(text: str) -> bool:
@@ -383,7 +384,7 @@ def test_a_plain_error_shows_bidi_controls_and_json_keeps_them() -> None:
         raise Exit.PRECONDITION(
             "No host \u202eexe.txt",
             context={"host": "web\u2066x\u2069"},
-            suggestion="run probe \u200fhosts",
+            suggestion="run probe \u202dhosts",
         )
 
     err = io.StringIO()
@@ -391,7 +392,7 @@ def test_a_plain_error_shows_bidi_controls_and_json_keeps_them() -> None:
     assert no_bidi(err.getvalue()), repr(err.getvalue())
     assert "No host \\u202eexe.txt" in err.getvalue()
     assert "  host: web\\u2066x\\u2069\n" in err.getvalue()
-    assert "hint: run probe \\u200fhosts\n" in err.getvalue()
+    assert "hint: run probe \\u202dhosts\n" in err.getvalue()
     out = io.StringIO()
     app.run(["fail", "--format", "json"], stdout=out, stderr=io.StringIO(), env={})
     error = json.loads(out.getvalue())["error"]
@@ -422,3 +423,10 @@ def test_printed_text_and_log_lines_show_bidi_controls() -> None:
         assert no_bidi(err.getvalue()), repr(err.getvalue())
         assert "printed \\u202eab" in err.getvalue()
         assert "logged \\u2066cd\\u2069" in err.getvalue()
+
+
+def test_bidi_marks_stay_text_in_plain_output() -> None:
+    # An RLM after a Hebrew word keeps the punctuation after it in place; it reverses no run
+    text = render_plain({"name": "\u05e9\u05dc\u05d5\u05dd\u200f!", "marks": MARKS})
+    assert text == "name: \u05e9\u05dc\u05d5\u05dd\u200f!\nmarks: \u200e\u200f\u061c\n"
+    assert "\\u200f" not in text
