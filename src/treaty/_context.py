@@ -13,7 +13,7 @@ from ._cache import Cache
 from ._cap import MARKER, TRUNCATED_CODE
 from ._config import ConfigFile
 from ._errors import RegistrationError
-from ._http import Http
+from ._http import Http, NetworkSettings
 from ._lifecycle import Teardown
 from ._lines import Lines
 from ._locks import Locks
@@ -166,6 +166,17 @@ class Ctx:
         if self._http is None:
             raise RegistrationError("ctx.http needs has_network_io=True on the command")
         return self._http
+
+    @property
+    def network(self) -> NetworkSettings:
+        """The proxy and CA bundle ``ctx.http`` goes out with, for a client of the
+        handler's own, such as a library's ``requests.Session``: ``proxies``, a
+        ``{"http": ..., "https": ...}`` mapping honoring ``--proxy`` and ``--no-proxy``;
+        ``proxy_for(url)``, with ``NO_PROXY`` applied; and ``ca_bundle``. Needs
+        ``has_network_io=True`` (REQ-F-036, REQ-O-019)."""
+        if self._http is None:
+            raise RegistrationError("ctx.network needs has_network_io=True on the command")
+        return NetworkSettings(self._http.proxies)
 
     def walk(self, root: Path | str) -> Walk:
         """Every entry under ``root``, depth first in name order, as ``treaty.WalkEntry``;

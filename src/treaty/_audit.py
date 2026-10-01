@@ -1003,11 +1003,34 @@ def direct_http_calls(handler: Callable[..., object]) -> list[str]:
     return found
 
 
+_NETWORK_ROUTES = frozenset({"http", "network", "run", "pipeline", "spawn"})
+"""What carries --proxy and --no-proxy: ctx.http, ctx.network, and the children ctx.run,
+ctx.pipeline, and ctx.spawn start, whose environment holds them"""
+
+
+def _routes_network(fn: Callable[..., object], *, first: bool) -> bool:
+    """Whether ``fn`` reads one of ``_NETWORK_ROUTES`` off ctx: the handler's second
+    parameter, or a helper's ``ctx`` taken by name"""
+    params = list(signature(fn).parameters)
+    name = (params[1] if len(params) > 1 else None) if first else "ctx"
+    tree = source_tree(fn)
+    if name is None or tree is None:
+        return tree is None  # no source to read: assume it does, rather than advise
+    return any(
+        isinstance(node, ast.Attribute)
+        and node.attr in _NETWORK_ROUTES
+        and isinstance(node.value, ast.Name)
+        and node.value.id == name
+        for node in ast.walk(tree)
+    )
+
+
 def _http_client(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.has_network_io:
             continue
-        found = _first(reached_functions(c.handler), direct_http_calls)
+        units = reached_functions(c.handler)
+        found = _first(units, direct_http_calls)
         if found is not None:
             unit, calls = found
             yield Finding(
@@ -1018,6 +1041,18 @@ def _http_client(app: App) -> Iterator[Finding]:
                 "variables do not reach it and a failure has no error.network_context "
                 f"(REQ-F-036, REQ-F-037){unit.where}",
                 "response = ctx.http.get(url)",
+            )
+        elif not any(_routes_network(u.fn, first=i == 0) for i, u in enumerate(units)):
+            yield Finding(
+                "http-client",
+                Severity.ADVICE,
+                c.path.value,
+                "the handler reaches neither ctx.http, ctx.network, nor ctx.run, so if a "
+                "client of its own goes out, such as a library's requests.Session, the "
+                "--proxy and --no-proxy the command advertises have no effect on it "
+                "(REQ-F-036, REQ-O-019, heuristic)",
+                "hand the client ctx.network.proxies and ctx.network.ca_bundle, as "
+                "session.proxies = ctx.network.proxies; or response = ctx.http.get(url)",
             )
 
 

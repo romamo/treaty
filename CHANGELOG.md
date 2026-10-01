@@ -74,6 +74,19 @@ Apps built on treaty keep their own, structured schema changelog with
   `@app.command(..., child_log=True)`, without which `stream="always"` raises
   `RegistrationError`, and its manifest description then says stderr carries the child's
   log, since the spec's CommandEntry has no key for it. `stream=True` is unchanged (#173)
+### Added
+
+- `ctx.network`, a `treaty.NetworkSettings`, hands a `has_network_io=True` handler's own
+  HTTP client, such as a library's `requests.Session`, the settings `ctx.http` goes out
+  with, so `--proxy` and `--no-proxy` reach it too: `proxies`, a `requests`-style
+  `{"http": ..., "https": ...}` mapping (`--proxy` for both, else `HTTP_PROXY` and
+  `HTTPS_PROXY` in either case, empty under `--no-proxy`); `proxy_for(url)`, the proxy
+  `ctx.http` would use for that URL with `NO_PROXY` applied; and `ca_bundle`, the `Path` of
+  `REQUESTS_CA_BUNDLE` or `SSL_CERT_FILE`. A proxy URL keeps its credentials for the
+  client, and the object's repr removes them. Reading `ctx.network` in a command without
+  `has_network_io=True` is a `RegistrationError`, as `ctx.http` is. The `http-client` audit
+  rule now advises on a network command whose handler reaches none of `ctx.http`,
+  `ctx.network`, and `ctx.run`, since `--proxy` would not reach a client of its own (#171)
 
 ## [1.0.0rc11] - 2026-10-01
 

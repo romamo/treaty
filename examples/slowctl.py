@@ -6,7 +6,7 @@ uv run examples/slowctl.py fetch --seconds 5 --timeout 0 &  kill -TERM $!
 
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
 from treaty import App, Ctx, Flag
@@ -30,6 +30,12 @@ def release_resources() -> None:
 _cleanup_seconds = [0.0]
 
 
+def fake_upstream(seconds: float, *, proxies: Mapping[str, str]) -> None:
+    """Stands in for a library's own HTTP client, which takes the proxies --proxy and
+    --no-proxy resolved"""
+    time.sleep(seconds)
+
+
 @app.command(
     "fetch",
     description="Pretend to call a slow upstream",
@@ -41,7 +47,7 @@ _cleanup_seconds = [0.0]
 def fetch(args: Fetch, ctx: Ctx) -> dict[str, object]:
     _cleanup_seconds[0] = args.cleanup_seconds
     ctx.log("fetching", seconds=args.seconds)  # with --verbose, tests wait for it to signal
-    time.sleep(args.seconds)
+    fake_upstream(args.seconds, proxies=ctx.network.proxies)
     return {"slept": args.seconds, "timeout_s": ctx.timeout.seconds}
 
 

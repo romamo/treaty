@@ -289,6 +289,7 @@
         "lock",
         "log",
         "log_error",
+        "network",
         "open_url",
         "output_file",
         "pipeline",
@@ -607,6 +608,14 @@
       "kind": "class",
       "methods": [
         "to_json"
+      ]
+    },
+    "NetworkSettings": {
+      "kind": "class",
+      "methods": [
+        "ca_bundle",
+        "proxies",
+        "proxy_for"
       ]
     },
     "NoArgs": {

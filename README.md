@@ -827,6 +827,30 @@ return Release(**response.json())
   `--retries`, counted in `meta.retries`; a failure that outlasts those retries is not
   retryable, so an agent does not retry on top of them
 
+A client of the handler's own, such as the `requests.Session` of a library the CLI wraps,
+goes out the same way through `ctx.network`, a `treaty.NetworkSettings`:
+
+```python
+session = requests.Session()
+session.trust_env = False  # treaty already read the environment
+session.proxies = ctx.network.proxies  # {"http": ..., "https": ...}, {} under --no-proxy
+bundle = ctx.network.ca_bundle
+session.verify = True if bundle is None else str(bundle)
+```
+
+- `proxies` is the `requests`-style mapping of the schemes that go through a proxy:
+  `--proxy` for both, else `HTTP_PROXY` and `HTTPS_PROXY` (either case); empty under
+  `--no-proxy` or a `NO_PROXY` of `*`. A `host:port` value reads as `http://host:port`, and
+  a value that is no http proxy URL exits `4` `PROXY_INVALID`
+- `proxy_for(url)` is the proxy `ctx.http` would use for that URL, `NO_PROXY` applied, or
+  `None` for a direct connection: for `httpx.Client(proxy=...)` or a per-request choice
+- `ca_bundle` is the `Path` of `REQUESTS_CA_BUNDLE`, else `SSL_CERT_FILE`, or `None` for
+  the system store
+- A proxy URL keeps its `user:password@` for the client to authenticate with; the repr of
+  `ctx.network` removes it
+- The `http-client` audit rule advises on a network command whose handler reaches none of
+  `ctx.http`, `ctx.network`, and `ctx.run`: a client of its own would not see `--proxy`
+
 A `recursive_traversal=True` command gets `ctx.walk(root)`, which yields a
 `treaty.WalkEntry(path, depth, is_dir, is_symlink)` per entry, depth first in name order,
 plus `--no-follow-symlinks` and `--max-depth N` (default 50):
