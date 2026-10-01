@@ -841,15 +841,10 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
         if f.name not in values:
             values[f.name] = None if f.default is MISSING else f.default
     try:
-        args = command.args_type(**values)
+        args = built_args(command, lambda: command.args_type(**values), values)
     except ParseError as exc:
         errors.errors.extend(exc.errors or (exc,))
         errors.fail()
-    except InvalidValue as exc:  # a value object built in __post_init__ refused its input
-        errors.add(ParseError(str(exc), context={"command": command.path.value}))
-        errors.fail()
-    except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
-        raise ArgsCrashed(exc, values) from exc
     errors.finish()
     return args
 
@@ -860,6 +855,24 @@ def _field_of(location: str | None, objects: Collection[str]) -> str | None:
         return None
     head = re.split(r"[.\[]", location, maxsplit=1)[0]
     return head if head in objects else location
+
+
+def built_args(
+    command: Command, build: Callable[[], object], values: Mapping[str, object]
+) -> object:
+    """The args ``build`` returns, running their ``__post_init__``: a ``ParseError`` or
+    ``InvalidValue`` it raises is phase 1, exit 2; anything else is ``ArgsCrashed``, a
+    bug in user code (exit 1). Parsing and every later rebuild of the args, such as a
+    forced dry run's, go through here (#161); ``values`` are the field values, for the
+    crash report's redaction."""
+    try:
+        return build()
+    except ParseError:
+        raise
+    except InvalidValue as exc:  # a value object built in __post_init__ refused its input
+        raise ParseError(str(exc), context={"command": command.path.value}) from None
+    except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
+        raise ArgsCrashed(exc, values) from exc
 
 
 def build_from_mapping(

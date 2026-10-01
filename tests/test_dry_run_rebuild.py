@@ -1,5 +1,6 @@
-"""A dry run treaty switches on rebuilds the args, which reruns ``__post_init__``: a
-refusal there is a phase-1 validation error, exit 2, before the handler starts (#161)."""
+"""A dry run treaty switches on rebuilds the args in phase 1, which reruns
+``__post_init__``; whatever it raises is answered as at parse time, before the handler
+starts: ``ParseError`` exit 2, anything else ``HANDLER_CRASHED`` exit 1 (#161)."""
 
 import io
 import json
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from treaty import Affects, App, Arg, Ctx, Envelope, Flag
+from treaty import Affects, App, Arg, Ctx, Envelope, Flag, ParseError
 from treaty._mcp import call_tool
 from treaty._tools import tool_entries
 
@@ -19,11 +20,17 @@ REFUSAL = "--force makes no sense with --dry-run"
 @dataclass(frozen=True, slots=True)
 class WipeArgs:
     force: bool = Flag(default=False, description="Skip the safety check")
+    strict: bool = Flag(default=False, description="Refuse a dry run with ValueError")
+    typed: bool = Flag(default=False, description="Refuse a dry run with TypeError")
     dry_run: bool = Flag(default=False, description="Preview only")
 
     def __post_init__(self) -> None:
         if self.force and self.dry_run:
-            raise ValueError(REFUSAL)
+            raise ParseError(REFUSAL)
+        if self.strict and self.dry_run:
+            raise ValueError("--strict makes no sense with --dry-run")
+        if self.typed and self.dry_run:
+            raise TypeError("--typed makes no sense with --dry-run")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +46,7 @@ class PruneArgs:
 
     def __post_init__(self) -> None:
         if self.target.is_absolute():
-            raise ValueError("target must stay relative to the project")
+            raise ParseError("target must stay relative to the project")
 
 
 def wipe_app(*, safe_default: bool = False) -> App:
@@ -81,7 +88,17 @@ def assert_refused(code: int, envelope: dict[str, object], message: str = REFUSA
     error = envelope["error"]
     assert isinstance(error, dict)
     assert error["code"] == "ARG_ERROR" and error["phase"] == "validation"
-    assert [e["message"] for e in error["errors"]] == [message]  # type: ignore[index, union-attr]
+    assert [e["message"] for e in error["errors"]] == [message]
+    assert RAN == []
+
+
+def assert_crashed(code: int, envelope: dict[str, object], exception: str) -> None:
+    assert code == 1
+    assert envelope["ok"] is False
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "HANDLER_CRASHED"
+    assert error["context"]["exception"] == exception
     assert RAN == []
 
 
@@ -93,14 +110,31 @@ def assert_refused_envelope(envelope: Envelope) -> None:
     assert RAN == []
 
 
-def test_issue_repro_destructive_preview_refusal_is_exit_2() -> None:
-    code, out = run(wipe_app(), ["wipe", "--force", "--format", "json"])
+@pytest.mark.parametrize("safe_default", [False, True])
+def test_issue_repro_value_error_answers_as_an_explicit_dry_run_does(safe_default: bool) -> None:
+    """A ValueError is a bug in __post_init__ at parse time; a forced dry run agrees"""
+    app = wipe_app(safe_default=safe_default)
+    code, out = run(app, ["wipe", "--strict", "--format", "json"])
+    assert_crashed(code, out[-1], "ValueError")
+    explicit_code, explicit = run(app, ["wipe", "--strict", "--dry-run"])
+    assert_crashed(explicit_code, explicit[-1], "ValueError")
+    assert out[-1]["error"] == explicit[-1]["error"]
+
+
+@pytest.mark.parametrize("safe_default", [False, True])
+def test_a_type_error_from_the_rebuild_is_a_crash_envelope(safe_default: bool) -> None:
+    code, out = run(wipe_app(safe_default=safe_default), ["wipe", "--typed"])
+    assert_crashed(code, out[-1], "TypeError")
+
+
+def test_destructive_preview_parse_error_is_exit_2_naming_confirm_destructive() -> None:
+    code, out = run(wipe_app(), ["wipe", "--force"])
     assert_refused(code, out[-1])
     error = out[-1]["error"]
     assert isinstance(error, dict) and "--confirm-destructive" in str(error["suggestion"])
 
 
-def test_safe_default_dry_run_refusal_is_exit_2_with_meta_dry_run() -> None:
+def test_safe_default_parse_error_is_exit_2_naming_live() -> None:
     code, out = run(wipe_app(safe_default=True), ["wipe", "--force"])
     assert_refused(code, out[-1])
     meta = out[-1]["meta"]
@@ -110,10 +144,11 @@ def test_safe_default_dry_run_refusal_is_exit_2_with_meta_dry_run() -> None:
 
 
 def test_the_runs_that_need_no_rebuild_are_unchanged() -> None:
-    code, out = run(wipe_app(), ["wipe", "--force", "--confirm-destructive"])
-    assert code == 0 and out[-1]["data"]["effect"] == "deleted"  # type: ignore[index]
-    code, out = run(wipe_app(safe_default=True), ["wipe", "--force", "--live"])
-    assert code == 0 and out[-1]["data"]["effect"] == "deleted"  # type: ignore[index]
+    for flags in (["--force"], ["--strict"], ["--typed"]):
+        code, out = run(wipe_app(), ["wipe", *flags, "--confirm-destructive"])
+        assert code == 0 and out[-1]["data"]["effect"] == "deleted"  # type: ignore[index]
+        code, out = run(wipe_app(safe_default=True), ["wipe", *flags, "--live"])
+        assert code == 0 and out[-1]["data"]["effect"] == "deleted"  # type: ignore[index]
     code, out = run(wipe_app(), ["wipe"])
     assert code == 2 and out[-1]["error"]["code"] == "CONFIRMATION_REQUIRED"  # type: ignore[index]
     assert RAN == ["wipe"]
@@ -122,26 +157,34 @@ def test_the_runs_that_need_no_rebuild_are_unchanged() -> None:
     assert out[-1]["data"]["effect"] == "would_delete"  # type: ignore[index]
 
 
-def test_validate_only_reports_the_dry_run_refusal() -> None:
-    code, out = run(wipe_app(), ["wipe", "--force", "--validate-only"])
+@pytest.mark.parametrize("safe_default", [False, True])
+def test_validate_only_answers_the_dry_run_rebuild(safe_default: bool) -> None:
+    app = wipe_app(safe_default=safe_default)
+    code, out = run(app, ["wipe", "--force", "--validate-only"])
     assert_refused(code, out[-1])
-    code, out = run(wipe_app(safe_default=True), ["wipe", "--force", "--validate-only"])
-    assert_refused(code, out[-1])
+    code, out = run(app, ["wipe", "--strict", "--validate-only"])
+    assert_crashed(code, out[-1], "ValueError")
 
 
-def test_exec_line_refusal_is_exit_2() -> None:
+def test_exec_line_answers_the_dry_run_rebuild() -> None:
     code, out = run(wipe_app(), ["exec"], '{"_cmd": "wipe", "force": true}\n')
     assert code == 1  # the plan's own exit: a line failed
     assert_refused(2, out[0])
+    code, out = run(wipe_app(), ["exec"], '{"_cmd": "wipe", "typed": true}\n')
+    assert_crashed(code, out[0], "TypeError")
 
 
-def test_app_call_refusal_is_exit_2() -> None:
+def test_app_call_answers_the_dry_run_rebuild() -> None:
     RAN.clear()
     assert_refused_envelope(wipe_app().call("wipe", {"force": True}))
     assert_refused_envelope(wipe_app(safe_default=True).call("wipe", {"force": True}))
+    crashed = wipe_app().call("wipe", {"strict": True})
+    assert crashed.exit_code == 1
+    assert crashed.error is not None and crashed.error.code == "HANDLER_CRASHED"
+    assert RAN == []
 
 
-def test_mcp_tool_call_refusal_is_exit_2() -> None:
+def test_mcp_tool_call_answers_the_dry_run_rebuild() -> None:
     RAN.clear()
     app = wipe_app()
     entries = {e.name: e for e in tool_entries(app)}

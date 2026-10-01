@@ -182,6 +182,7 @@ from ._parse import (
     Route,
     bind_values,
     build_from_mapping,
+    built_args,
     format_hint,
     misplaced_flag_target,
     parse_command_args,
@@ -1877,6 +1878,8 @@ class App:
                 invocation = run.rooted(command, invocation)
             except ParseError as exc:
                 return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
+            except ArgsCrashed as exc:
+                return run.emit(mode, run.args_crashed(command, exc))
             if run.unprotected:
                 run.unprotected_record()
             if command.path == EXEC_PATH:
@@ -2618,9 +2621,9 @@ def _dry_run_requested(command: Command, args: object) -> bool:
 def _as_dry_run(command: Command, args: object) -> object:
     """``args`` with the command's dry-run switch turned on, built in phase 1
 
-    The rebuild reruns the args ``__post_init__``; a ``ParseError`` or ``ValueError`` it
-    raises refuses the dry run, a phase-1 ``ParseError`` naming the flag that applies
-    instead (#161)."""
+    The rebuild reruns the args ``__post_init__``, handled as at parse time: a refusal
+    is a phase-1 ``ParseError`` naming the flag that applies instead, anything else
+    ``ArgsCrashed`` (#161)."""
     field = command.dry_run_field
     assert field is not None
     return _rebuilt(
@@ -2637,19 +2640,17 @@ def _as_dry_run(command: Command, args: object) -> object:
 def _rebuilt(
     command: Command, args: object, changes: Mapping[str, object], suggestion: str | None
 ) -> object:
-    """``args`` with ``changes``: ``dataclasses.replace`` reruns its ``__post_init__``, so a
-    refusal is a phase-1 ``ParseError``, as at parse time (REQ-F-015, #161)"""
+    """``args`` with ``changes``: ``dataclasses.replace`` reruns its ``__post_init__``,
+    handled by ``built_args`` as at parse time: ``ParseError`` (exit 2, with
+    ``suggestion``) or ``ArgsCrashed`` (exit 1) (REQ-F-015, #161)"""
     assert dataclasses.is_dataclass(args) and not isinstance(args, type)
+    values = {**{f.name: getattr(args, f.name) for f in dataclasses.fields(args)}, **changes}
     try:
-        return dataclasses.replace(args, **changes)
+        return built_args(command, lambda: dataclasses.replace(args, **changes), values)
     except ParseError as exc:
         if exc.suggestion is None and suggestion is not None and not exc.errors:
             exc.suggestion = suggestion
         raise
-    except ValueError as exc:  # InvalidValue too: a value object built in __post_init__
-        raise ParseError(
-            str(exc), context={"command": command.path.value}, suggestion=suggestion
-        ) from None
 
 
 _END = object()
@@ -3218,8 +3219,8 @@ class _Run:
 
     def rooted(self, command: Command, invocation: Invocation) -> Invocation:
         """Relative ``Path`` arguments, ``--input-file``, and ``--output`` under ``--cwd``,
-        once they passed ``check_path`` (REQ-O-017); ``ParseError`` when the args
-        ``__post_init__`` refuses the rebased paths"""
+        once they passed ``check_path`` (REQ-O-017); the rebuild raises as parsing does:
+        ``ParseError`` or ``ArgsCrashed`` from the args ``__post_init__``"""
         if not self.cwd_given:
             return invocation
 
@@ -3237,7 +3238,7 @@ class _Run:
         output = invocation.output
         return dataclasses.replace(
             invocation,
-            # A ParseError: __post_init__ refused the paths under --cwd (#161)
+            # ParseError or ArgsCrashed from __post_init__, as at parse time (#161)
             args=_rebuilt(command, args, changed, None) if changed else args,
             # --input-file - is stdin, not a file named '-'
             input_file=stdin_file
@@ -3706,6 +3707,8 @@ class _Run:
             invocation = _dry_run_switched(command, invocation)
         except ParseError as exc:
             return self.arg_error(exc, meta={**(meta or {}), **_mode_meta(command)})
+        except ArgsCrashed as exc:
+            return self.args_crashed(command, exc, meta=meta)
         if invocation.validate_only:
             return self.validated(meta)
         if command.auth is not None:
