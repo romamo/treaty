@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import contextvars
 import dataclasses
@@ -2892,9 +2893,10 @@ class _Run:
         """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
-        self.ndjson_shown = 0
-        """How many warnings ``ndjson`` wrote to stderr so far: a stream's envelopes carry
-        every warning before theirs, so only those past this count are new, a repeat too"""
+        self.ndjson_shown: collections.Counter[str] = collections.Counter()
+        """How often ``ndjson`` wrote each warning to stderr so far, by its JSON: a stream's
+        envelopes repeat the run's warnings, and add their own (masking) that later ones
+        drop, so a warning is new only where an envelope holds it more often than that"""
         self._logging = False
         """Whether the root logger routes records to this run (``attach_logging``)"""
         self._redaction: tuple[tuple[object, ...], Callable[[str], str]] | None = None
@@ -5376,8 +5378,14 @@ class _Run:
         if settle:
             envelope = self.settle(envelope)
         if mode is Format.NDJSON:
-            fresh = list(envelope.warnings[self.ndjson_shown :])
-            self.ndjson_shown = max(self.ndjson_shown, len(envelope.warnings))
+            fresh = []
+            held: collections.Counter[str] = collections.Counter()
+            for warning in envelope.warnings:
+                key = json.dumps(warning.to_json(), sort_keys=True)
+                held[key] += 1
+                if held[key] > self.ndjson_shown[key]:
+                    fresh.append(warning)
+                    self.ndjson_shown[key] += 1
         else:
             fresh = list(envelope.warnings[before:]) if settle else []
             # That line says it: the warning lines after the result skip it (#152)

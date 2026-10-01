@@ -1,7 +1,9 @@
 """``--format ndjson``: ``data`` alone as JSON lines, status on stderr and the exit code (#34)"""
 
+import base64
 import io
 import json
+import random
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -202,6 +204,30 @@ def test_a_stream_warning_given_twice_is_written_twice() -> None:
     # The envelope carries both, so the stderr lines do too
     assert code == 0 and len(lines(out.getvalue())) == 2
     assert [w["code"] for w in lines(err.getvalue()) if isinstance(w, dict)] == [
+        "ROW_SKIPPED",
+        "ROW_SKIPPED",
+    ]
+
+
+def test_an_event_local_warning_does_not_hide_a_later_run_warning() -> None:
+    app = App("probe", version="1.0.0")
+    # 256 random base64 characters: masked, so this event alone warns of it
+    blob = base64.b64encode(random.Random(7).randbytes(192)).decode()
+
+    @app.command("mixed", description="Mixed", streaming=True, danger_level="safe", exit_codes=())
+    def mixed(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, object]]:
+        yield {"n": 1}
+        yield {"n": 2, "payload": blob}
+        ctx.warn("ROW_SKIPPED", "a row was skipped")
+        yield {"n": 3}
+        ctx.warn("ROW_SKIPPED", "a row was skipped")
+        yield {"n": 4}
+
+    out, err = io.StringIO(), io.StringIO()
+    code = app.run(["mixed", "--format", "ndjson"], stdout=out, stderr=err, env={}, isatty=False)
+    assert code == 0 and len(lines(out.getvalue())) == 4
+    assert [w["code"] for w in lines(err.getvalue()) if isinstance(w, dict)] == [
+        "HIGH_ENTROPY_MASKED",
         "ROW_SKIPPED",
         "ROW_SKIPPED",
     ]
