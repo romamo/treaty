@@ -847,6 +847,7 @@ class App:
         id_field: str | None = None,
         passthrough: bool = False,
         help_command: Sequence[str] | None = None,
+        idempotent: bool = False,
     ) -> Callable[[H], H]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -972,6 +973,10 @@ class App:
         ``help_command=("help",)`` is the argv the tool gets instead of a lone ``--help``
         or ``-h`` after the path. Exec lines and ``App.call`` pass the tool's arguments as
         ``"argv": [...]``; MCP lists no passthrough command.
+        ``idempotent=True`` says a repeat of the mutating command with the same arguments
+        leaves the same state, so the ``retryable`` audit rule passes its retryable codes,
+        and its manifest description says so; it changes no run, and ``--idempotency-key``
+        still replays the first result. A safe or destructive command refuses it.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -1154,6 +1159,7 @@ class App:
                             id_field=id_field,
                             passthrough=passthrough,
                             help_command=help_command,
+                            idempotent=idempotent,
                         )
                     )
                 )

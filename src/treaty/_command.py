@@ -265,6 +265,9 @@ class Command:
     help_command: tuple[str, ...] | None = None
     """The ``ctx.argv_rest`` a passthrough command gets for a lone ``--help`` or ``-h``
     after its path; None hands those to the tool verbatim"""
+    idempotent: bool = False
+    """A repeat with the same arguments leaves the same state, so its retryable codes are
+    safe to retry; the manifest description says so (#210)"""
 
     def handler_args(self, args: object) -> object:
         """What the handler, its resources, and its rollback receive for parsed ``args``"""
@@ -386,6 +389,9 @@ CHILD_LOG_NOTE = (
 )
 """What a ``child_log=True`` command's manifest description adds: the spec's CommandEntry
 has no key for a command whose stderr carries a child's log (#173)"""
+IDEMPOTENT_NOTE = "Idempotent: a repeat with the same arguments leaves the same state"
+"""What an ``idempotent=True`` command's manifest description adds: the spec's CommandEntry
+has no key that says a mutating command is safe to repeat (#210)"""
 ARGV_KEY = "argv"
 """A passthrough command's argv for its tool in an exec line or ``App.call``"""
 HELP_TOKENS = ("--help", "-h")
@@ -470,9 +476,11 @@ def build_command(
     args_adapters: ArgsAdapters | None = None,
     passthrough: bool = False,
     help_command: Sequence[str] | None = None,
+    idempotent: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
+    _check_idempotent(path, danger_level, idempotent)
     help_argv = _check_help_command(path, help_command, passthrough)
     if passthrough:
         _check_passthrough(
@@ -844,7 +852,25 @@ def build_command(
         is_async=is_async,
         passthrough=passthrough,
         help_command=help_argv,
+        idempotent=idempotent,
     )
+
+
+def _check_idempotent(path: CommandPath, danger_level: DangerLevel, idempotent: bool) -> None:
+    """``idempotent=True`` is for a mutating command: a safe one changes nothing, and a
+    destructive one's repeat after a partial run cannot be assumed safe (#210)"""
+    if not idempotent:
+        return
+    if danger_level is DangerLevel.SAFE:
+        raise RegistrationError(
+            f"{path}: a safe command changes nothing, so it is idempotent already; "
+            "drop idempotent=True"
+        )
+    if danger_level is DangerLevel.DESTRUCTIVE:
+        raise RegistrationError(
+            f"{path}: a destructive command's repeat after a partial run cannot be assumed "
+            "safe; drop idempotent=True, or declare it mutating"
+        )
 
 
 def _check_help_command(

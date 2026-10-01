@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `@app.command(..., idempotent=True)` declares that a repeat of a mutating command with
+  the same arguments leaves the same state: the `retryable` audit rule passes its
+  retryable codes, and its manifest description says so, as the spec's CommandEntry has
+  no key for it. The rule's fix names the option instead of asking to "confirm" the
+  command is idempotent. A safe or destructive command refuses it, and it changes no run:
+  `--idempotency-key` still replays the first result (#210)
+
 ## [1.0.0rc13] - 2026-10-02
 
 The thirteenth 1.0 release candidate: 2 additions and 3 fixes.
