@@ -121,6 +121,29 @@ Apps built on treaty keep their own, structured schema changelog with
   so its text never reaches the agent unmasked. The `external-data` audit rule also warns when a
   `context=` value is built from a `ctx.run` result's `stdout` or `stderr` without
   `External`, whatever the command declares (#174)
+### Breaking
+
+- A plain flag that declares `Flag(env=(...))` reads its own `<APP>_<NAME>` first, then the
+  declared names in order, as a secret and a setting already do: with both
+  `CLOUDFALL_PROJECT` and `DEPLOYCTL_PROJECT` set, `--project` takes `DEPLOYCTL_PROJECT`,
+  where rc11 read only `CLOUDFALL_PROJECT`. The spec's REQ-F-073 allows a variable outside
+  the prefix only after the prefixed name. A flag without `env=` still reads no variable.
+  The flag's `<APP>_<NAME>` is now a variable it reads, so a registration where a setting,
+  a framework option, or another command's secret or token reads it too is a
+  `RegistrationError`, as is naming it in `env=`; a deprecated name's warning names it as
+  the replacement instead of the flag (#178)
+
+### Added
+
+- The manifest is ManifestResponse 3.5. A flag that reads variables lists them in
+  `env_vars`, `{name, deprecated?}` in precedence order with `<APP>_<NAME>` first, in place
+  of the "(read from $A or $B when not passed)" prose in its description; `--format`,
+  `--max-output`, `--config`, `--context`, `--instance-id`, and `--no-update-check` list
+  their `<APP>_*` variable too. The new root `env_vars` lists, each with a `description`, the
+  variables that back no flag: `<APP>_MAX_STDIN_BYTES`, `<APP>_STATE_DIR`,
+  `<APP>_SESSION`, `<APP>_AUDIT_LOG`, and each plain setting's `<APP>_<NAME>` and declared
+  names. A secret setting is left out, since root `env_vars` holds no secret. `--help` and
+  AGENTS.md list a plain flag's `<APP>_<NAME>` (#178)
 
 ## [1.0.0rc11] - 2026-10-01
 

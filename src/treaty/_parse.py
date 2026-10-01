@@ -865,16 +865,17 @@ def _apply_env(
     errors: _Collector,
 ) -> dict[str, str]:
     """Phase 1, for each field the caller left out: a secret's named source, else its
-    ``<APP>_<NAME>``, else its ``Flag(env=)`` names in order; a plain flag's ``Flag(env=)``
-    names. A value read from a variable is checked as strictly as one passed, and its
-    error names the variable. Returns the variable each field was read from"""
+    ``<APP>_<NAME>``, else its ``Flag(env=)`` names in order; a plain flag that declares
+    ``Flag(env=)`` reads its ``<APP>_<NAME>`` and then those names too. A value read
+    from a variable is checked as strictly as one passed, and its error names the
+    variable. Returns the variable each field was read from"""
     sources: dict[str, str] = {}
     for f in command.fields:
         if f.name in values:
             continue
         ref = secrets.get(f.name)
         if ref is None:
-            found = read_env(command.secret_env_vars.get(f.name), f.spec.env, env)
+            found = read_env(command.own_env_var(f.name), f.spec.env, env)
             if found is None:
                 continue
             var, raw = found

@@ -140,6 +140,9 @@ class Command:
     """Per-format overrides of the app's renderers"""
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
+    flag_env_vars: Mapping[str, str]
+    """Field name to ``<APP>_<FIELD>``, for each plain field that declares ``Flag(env=)``:
+    read before the declared names (REQ-F-073)"""
     session_env_var: str
     """``<APP>_SESSION``, whose value deduplicates repeated mutating calls"""
     streaming: bool
@@ -329,6 +332,11 @@ class Command:
         if self.has_network_io or self.streaming:
             return True
         return self.outlasts_default and self.field_by_flag("timeout") is None
+
+    def own_env_var(self, field: str) -> str | None:
+        """The ``<APP>_<FIELD>`` a field reads first, when it reads any variable: every
+        secret, and a plain field that declares ``Flag(env=)``"""
+        return self.secret_env_vars.get(field) or self.flag_env_vars.get(field)
 
     def field_by_flag(self, flag: str) -> FieldInfo | None:
         for f in self.fields:
@@ -649,7 +657,8 @@ def build_command(
             "the default (REQ-O-048)"
         )
     for f in fields:
-        f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
+        # A default the manifest cannot list fails now, not on --help
+        f.to_flag_entries(default_env_var(app_name, f.name) if f.spec.env else None)
     if danger_level is not DangerLevel.SAFE:
         # A passthrough command's data is treaty's own Delegated, whose replay says noop
         if not passthrough and not _carries(path, output_type, "effect", scalars.adapters):
@@ -758,6 +767,9 @@ def build_command(
         cleanup=cleanup,
         renderers=dict(renderers),
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
+        flag_env_vars={
+            f.name: default_env_var(app_name, f.name) for f in fields if not f.secret and f.spec.env
+        },
         session_env_var=app_var(app_name, SESSION.key),
         streaming=streaming,
         resources=resources,

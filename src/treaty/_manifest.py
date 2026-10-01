@@ -15,7 +15,17 @@ from ._command import (
     Command,
     DangerLevel,
 )
-from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, NO_UPDATE, app_var
+from ._env import (
+    CONFIG,
+    CONTEXT,
+    FORMAT,
+    INSTANCE_ID,
+    KNOWN,
+    MAX_OUTPUT_BYTES,
+    NO_UPDATE,
+    EnvVar,
+    app_var,
+)
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import (
     NO_INJECTION_FLAG,
@@ -30,9 +40,21 @@ from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "3.3"  # 3.1: CommandEntry.builtin (REQ-O-041)
+SCHEMA_VERSION = "3.5"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.2: ConditionalRule any_of and one_of, which the manifest does not emit (--schema does)
 # 3.3: CommandEntry.output_file (REQ-O-001)
+# 3.4: FlagEntry.env_vars; 3.5: the root env_vars of variables that back no flag (REQ-F-073)
+
+# The framework variables a root flag reads when it is not passed (REQ-O-042); the rest of
+# KNOWN back no flag and are listed in the root env_vars
+_FLAG_VARS: dict[str, EnvVar] = {
+    "format": FORMAT,
+    "max-output": MAX_OUTPUT_BYTES,
+    "config": CONFIG,
+    "context": CONTEXT,
+    "instance-id": INSTANCE_ID,
+    "no-update-check": NO_UPDATE,
+}
 # TIMEOUT is shared: every handler runs under a deadline unless it is set to 0.
 # PRECONDITION too: a stray input() no one can answer exits 4 on any command (REQ-F-047)
 _ALWAYS = (
@@ -65,8 +87,8 @@ def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
 
 def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, object]:
     """REQ-F-079: split_globals accepts these anywhere on every command path; a flag with
-    an environment variable default names it (REQ-O-042)"""
-    return {
+    an environment variable default names it, and lists it in ``env_vars`` (REQ-O-042)"""
+    entries: dict[str, object] = {
         "format": {
             "type": "enum",
             "required": False,
@@ -131,6 +153,22 @@ def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, o
             f"${app_var(app_name, NO_UPDATE.key)}. Off a terminal or under CI no check runs",
         },
     }
+    for flag, var in _FLAG_VARS.items():
+        entry = entries[flag]
+        assert isinstance(entry, dict), flag
+        entry["env_vars"] = [{"name": app_var(app_name, var.key)}]
+    return entries
+
+
+def framework_env_vars(app_name: str) -> list[dict[str, object]]:
+    """Root ``env_vars`` entries of the framework variables that back no flag, such as
+    ``<APP>_AUDIT_LOG`` and ``<APP>_SESSION`` (ManifestResponse 3.5, REQ-O-030)"""
+    backing = set(_FLAG_VARS.values())
+    return [
+        {"name": app_var(app_name, v.key), "description": v.description}
+        for v in KNOWN
+        if v not in backing
+    ]
 
 
 # REQ-O-037, REQ-O-023: argv only; no environment variable, config file, exec line, or
@@ -305,7 +343,7 @@ def command_entry(
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
     flags: dict[str, object] = {}
     for f in command.fields:
-        flags.update(f.to_flag_entries())
+        flags.update(f.to_flag_entries(command.own_env_var(f.name)))
     flags.update((f.name, f.to_entry(command)) for f in framework_flags(command))
     description = command.description
     if (old := command.deprecated) is not None:
@@ -535,14 +573,17 @@ def build_manifest(
     dependencies: Sequence[Mapping[str, str]] = (),
     audit_log_path: str | None = None,
     unlogged: Collection[CommandPath] = (),
+    settings_env_vars: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, object]:
     """The manifest tree with the shared exit-code table hoisted to the root, each of
     ``builtins`` marked ``builtin: true`` (REQ-O-041); the app's
     declared ``dependencies`` too, when it has any (REQ-O-031). ``framework_version`` is
     treaty's own version; the app's is ``meta.tool_version`` of the response. While the
     audit log is on, ``audit_log_path`` is a ``log`` side effect of every command it
-    records, those not ``unlogged`` (REQ-O-030)"""
+    records, those not ``unlogged`` (REQ-O-030). The root ``env_vars`` lists the
+    framework's variables that back no flag, then ``settings_env_vars`` (REQ-F-073)"""
     shared = shared_exit_codes(exits)
+    root_env = [*framework_env_vars(app_name), *(dict(e) for e in settings_env_vars)]
     flags = global_flag_entries(formats, app_name)
     entries = {
         path.value: command_entry(cmd, exits, commands, builtin=path in builtins, shared=shared)
@@ -563,6 +604,7 @@ def build_manifest(
         "schema_version": SCHEMA_VERSION,
         "flags": flags,
         "exit_codes": shared,
+        "env_vars": root_env,
         "commands": entries,
     }
     if dependencies:
@@ -575,6 +617,7 @@ def build_manifest(
         "etag": etag.value,
         "flags": flags,
         "exit_codes": shared,
+        "env_vars": root_env,
         "commands": entries,
     }
     if dependencies:

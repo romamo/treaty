@@ -1,12 +1,12 @@
 """Declared variable names: ``Flag(env=(...))`` on a settings field (#7) or a command's
 flag (#9).
 
-A settings field or a secret flag is read from ``<APP>_<NAME>`` first, then from each
-declared name in order, so a tool keeps a variable its users already export, such as
-``BEANCOUNT_FILE`` or ``IBKR_FLEX_TOKEN``; a flag passed on the command line, or a secret's
-``--x-from-env``/``--x-from-file``, comes before both. The prefixed name always wins over
-a declared one: it is the one treaty documents, and a stale shared variable must not
-shadow it. A plain flag reads no ``<APP>_<NAME>``, only its declared names.
+A settings field or a flag that declares names is read from ``<APP>_<NAME>`` first, then
+from each declared name in order, so a tool keeps a variable its users already export,
+such as ``BEANCOUNT_FILE`` or ``IBKR_FLEX_TOKEN``; a flag passed on the command line, or a
+secret's ``--x-from-env``/``--x-from-file``, comes before both. The prefixed name always
+wins over a declared one: it is the one treaty documents, and a stale shared variable
+must not shadow it (REQ-F-073). A plain flag without ``env=`` reads no variable.
 
 A declared name may be ``EnvName(..., deprecated=Deprecated(...))``: still read, with a
 ``DEPRECATED_ENV_VAR`` warning naming what to use instead.
@@ -125,6 +125,18 @@ def declared_text(name: EnvName, what: str, after: str | None, default: str) -> 
     if old is not None:
         text += f" (deprecated since {old.since}; use {replacement(name, default)})"
     return text
+
+
+def env_var_entries(own: str, names: tuple[EnvName, ...]) -> list[dict[str, object]]:
+    """``EnvVarEntry`` items (ManifestResponse 3.4) in precedence order: ``own``, the
+    tool-prefixed name, then the declared names, each deprecated one marked"""
+    entries: list[dict[str, object]] = [{"name": own}]
+    for n in names:
+        entry: dict[str, object] = {"name": n.name}
+        if n.deprecated is not None:
+            entry["deprecated"] = True
+        entries.append(entry)
+    return entries
 
 
 def deprecated_name(names: tuple[EnvName, ...], var: str) -> EnvName | None:
