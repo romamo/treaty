@@ -138,6 +138,13 @@ def test_heartbeats_and_trust_tags_are_not_record_fields() -> None:
     assert code == 0 and envelope["data"]["tickers"] == ["VWRL"]
 
 
+def test_a_heartbeat_naming_its_step_is_skipped() -> None:
+    # A producer inside ctx.step adds the step to its heartbeat lines (REQ-C-008)
+    beat = json.dumps({"status": "running", "heartbeat": True, "elapsed_ms": 10, "step": "1"})
+    code, [envelope] = run(["summary"], beat + "\n" + bare(VWRL))
+    assert code == 0 and envelope["data"]["tickers"] == ["VWRL"]
+
+
 def test_call_and_exec_take_records_as_input_lines() -> None:
     lines = [json.dumps(VWRL), json.dumps(GOLD)]
     assert app.call("summary", {"input_lines": lines}).data == {

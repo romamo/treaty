@@ -48,6 +48,8 @@ UPSTREAM_TRUNCATED = "UPSTREAM_TRUNCATED"
 
 ENVELOPE_KEYS = frozenset({"ok", "data", "error", "meta", "warnings"})
 _HEARTBEAT_KEYS = frozenset({"status", "heartbeat", "elapsed_ms"})
+_HEARTBEAT_STEP = "step"
+"""A heartbeat inside ``ctx.step`` names the step in progress (REQ-C-008)"""
 _TRUST_KEYS = frozenset({SOURCE_KEY, TRUSTED_KEY})
 """Trust tags an external upstream adds (REQ-F-035); not fields of the record"""
 _GENERAL = ExitCodeName("GENERAL_ERROR")
@@ -283,7 +285,8 @@ def _is_envelope(value: dict[str, object]) -> bool:
 
 
 def _is_heartbeat(value: dict[str, object]) -> bool:
-    return value.keys() == _HEARTBEAT_KEYS and value["heartbeat"] is True
+    keys = value.keys() - {_HEARTBEAT_STEP}
+    return keys == _HEARTBEAT_KEYS and value["heartbeat"] is True
 
 
 def _upstream_failed(envelope: dict[str, object], meta: dict[str, object], line: int) -> CliExit:
