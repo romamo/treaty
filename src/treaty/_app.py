@@ -2616,6 +2616,40 @@ def _lowest_shown(verbosity: Verbosity) -> int | None:
     return min(shown, default=None)
 
 
+@dataclass(frozen=True, slots=True)
+class Crashed:
+    """What ``user_code`` returns when the code it ran raised"""
+
+    exc: BaseException
+
+
+_HANDLER_SIGNALS: tuple[type[BaseException], ...] = (
+    CliExit,
+    NotModified,
+    ParseError,
+    TimeoutExpired,
+    Cancelled,
+    KeyboardInterrupt,
+    InputRequired,
+    StepError,
+)
+"""What a handler raises to answer, and the run's own interruptions: not crashes"""
+
+
+def user_code[T](fn: Callable[[], T], *, passing: tuple[type[BaseException], ...]) -> T | Crashed:
+    """The handler boundary: user code's result, or what it raised as ``Crashed``, so every
+    exit still carries an envelope (``sys.exit()`` included); ``passing`` and
+    ``GeneratorExit`` propagate. A handler and ``App(exec_fallback=)`` both run here."""
+    try:
+        return fn()
+    except GeneratorExit:
+        raise
+    except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
+        if isinstance(exc, passing):
+            raise
+        return Crashed(exc)
+
+
 def _masked_warning(masked: Sequence[str]) -> WarningDetail:
     return WarningDetail(
         MASKED_CODE,
@@ -4425,15 +4459,18 @@ class _Run:
         try:
             self.cancellation.check()
             try:
-                result = call_with_timeout(
-                    (lambda: self.app._gate(command, ctx))
-                    if replay is not None
-                    else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
-                    timeout,
-                    self._held(self._redactor(command, args), running.append),
-                    self.cancellation.armed,
-                    heartbeats=self._heartbeats(command, invocation, mode, started),
-                    ended=_RECORDS.forget,
+                outcome = user_code(
+                    lambda: call_with_timeout(
+                        (lambda: self.app._gate(command, ctx))
+                        if replay is not None
+                        else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
+                        timeout,
+                        self._held(self._redactor(command, args), running.append),
+                        self.cancellation.armed,
+                        heartbeats=self._heartbeats(command, invocation, mode, started),
+                        ended=_RECORDS.forget,
+                    ),
+                    passing=_HANDLER_SIGNALS,
                 )
             finally:
                 self._restore_cwd(before)
@@ -4465,11 +4502,10 @@ class _Run:
         except StepError as exc:
             message = f"Command {command.path} broke its step manifest: {exc}"
             return self._broken(command, "INVALID_STEP", message, started, full_meta)
-        except GeneratorExit:
-            raise
-        except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
+        if isinstance(outcome, Crashed):
             # asyncio.CancelledError, SystemExit, trio.Cancelled: user code, not a signal
-            return self._crashed(command, args, exc, started, full_meta)
+            return self._crashed(command, args, outcome.exc, started, full_meta)
+        result = outcome
         if replay is not None:
             return replay()
         page_meta: dict[str, object] = {}
@@ -5285,18 +5321,19 @@ class _Run:
         payload = types.MappingProxyType(_fallback_payload(request))
         trace("exec fallback", command=cmd)
         try:
-            result = fallback(cmd, payload)
+            # The handler boundary: SystemExit too, as from a handler
+            result = user_code(lambda: fallback(cmd, payload), passing=(ParseError,))
         except ParseError as exc:
             context = {k: scrub(k, v, redact) for k, v in exc.context.items()}
             refused = ParseError(
                 redact(exc.message), context=context, suggestion=exc.suggestion, code=exc.code
             )
             return self.arg_error(refused, started=started, meta=meta)
-        except BaseException as exc:  # noqa: BLE001 - the fallback is the old CLI's handler
-            # SystemExit too: the old CLI's dispatcher may exit where it means to fail
-            return self._fallback_failed(cmd, exc, redact, started, meta)
+        if isinstance(result, Crashed):
+            return self._fallback_failed(cmd, result.exc, redact, started, meta)
         try:
-            data = self._payload(result)
+            # A registered scalar's serialize= is user code too
+            data = user_code(lambda: self._payload(result), passing=(SchemaError,))
         except SchemaError as exc:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
             return self._envelope(
@@ -5312,8 +5349,8 @@ class _Run:
                 started=started,
                 meta=meta,
             )
-        except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
-            return self._fallback_failed(cmd, exc, redact, started, meta)
+        if isinstance(data, Crashed):
+            return self._fallback_failed(cmd, data.exc, redact, started, meta)
         data = _redact_strings(data, redact)
         envelope = self._envelope(0, data=data, started=started, meta=meta)
         warnings = list(envelope.warnings)
