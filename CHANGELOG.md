@@ -39,7 +39,10 @@ Apps built on treaty keep their own, structured schema changelog with
   `Out(ordered=True)`, as it does for dataclasses: treaty re-sorts such an array by its
   items' JSON text, so a ranking such as search results lost its order with a clean audit.
   The fix names `sort_key=` for a stable listing and `ordered=True` for a ranking; a
-  dataclass array's fix now says the same (#182)
+  dataclass array's fix now says the same. `treaty audit --strict` may now flag an adapted
+  list whose order is not declared, including one nested in a dataclass field or a dict;
+  `ordered=True` or `sort_key=` on the command (or `treaty.Out(...)` on the field) clears
+  it (#182)
 
 ## [1.0.0rc11] - 2026-10-01
 
