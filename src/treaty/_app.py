@@ -33,7 +33,7 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, NoReturn, TextIO, TypeGuard, cast
+from typing import IO, Any, Literal, NoReturn, TextIO, TypeGuard, cast
 
 from ._adapters import OutputAdapter
 from ._aio import Loop, within
@@ -147,6 +147,7 @@ from ._journal import (
     resolve,
 )
 from ._lifecycle import Teardown
+from ._lines import DEFAULT_LINE_CAP, INPUT_LINES_KEY, LineCap, Lines, StdinInput, stdin_input_of
 from ._locks import LockHeld, Locks
 from ._manifest import (
     build_manifest,
@@ -371,6 +372,7 @@ class App:
         default_timeout: float | None = DEFAULT_TIMEOUT.seconds,
         max_output_bytes: int = DEFAULT_CAP.bytes,
         max_stdin_bytes: int = DEFAULT_STDIN_CAP.bytes,
+        max_line_bytes: int = DEFAULT_LINE_CAP.bytes,
         state_dir: str | Path | None = None,
         enable_exec: bool = True,
         credentials: Credentials | None = None,
@@ -410,7 +412,9 @@ class App:
         ``<APP>_AUDIT_LOG``, which wins either way. ``audit-log`` queries it on every app
         (REQ-O-030). ``schema_changelog`` is the JSON file ``treaty
         changelog-add`` writes, shipped with the package; it adds the ``changelog``
-        built-in (REQ-O-029).
+        built-in (REQ-O-029). ``max_stdin_bytes`` caps the payload a ``stdin_input=True``
+        command or ``exec`` reads from stdin; ``max_line_bytes`` caps each line of a
+        ``stdin_input="lines"`` command's input, which has no total cap.
 
         ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
         ``mcp-validate``, ``audit-log``, and ``completion`` are built-ins that yield: an app
@@ -431,6 +435,7 @@ class App:
         self.default_timeout = Timeout(default_timeout)
         self.max_output = OutputCap(max_output_bytes)
         self.max_stdin = StdinCap(max_stdin_bytes)
+        self.max_line = LineCap(max_line_bytes)
         self.state_dir = None if state_dir is None else Path(state_dir)
         self.exits = ExitCodeRegistry()
         self.scalars = ScalarRegistry()
@@ -678,7 +683,7 @@ class App:
         default_limit: int = DEFAULT_LIMIT,
         cursor_check: Callable[[str], None] | None = None,
         heartbeat: bool = False,
-        stdin_input: bool = False,
+        stdin_input: bool | Literal["lines"] = False,
         output_file: bool = False,
         requires_auth: bool = False,
         auth: str | None = None,
@@ -724,7 +729,10 @@ class App:
         ``heartbeat=True`` writes a heartbeat line to stdout every ``--heartbeat-ms``
         (10 s) while the handler runs, in JSON mode. ``stdin_input=True`` reads a payload
         into ``ctx.stdin_text`` before the handler runs: stdin up to the stdin cap, or any
-        size from ``--input-file``. ``output_file=True`` adds ``--output PATH``, which
+        size from ``--input-file``. ``stdin_input="lines"`` reads nothing up front:
+        ``ctx.stdin_lines`` yields stdin's lines as the handler iterates, with no total cap
+        and each line within ``App(max_line_bytes=)``; with ``streaming=True`` the command is
+        a filter, writing each event as it goes. ``output_file=True`` adds ``--output PATH``, which
         writes ``data`` there in the ``--format`` representation and the envelope to stdout.
         ``requires_auth=True`` checks the app's ``credentials`` for ``required_scopes``
         before the handler runs. ``auth="browser"`` or ``"device"`` marks a login command:
@@ -837,6 +845,10 @@ class App:
                 f"{cmd_path}: requires_auth=True needs App(credentials=...), which tells "
                 "treaty the scopes of the active credential"
             )
+        try:
+            stdin_mode = stdin_input_of(stdin_input)
+        except InvalidValue as exc:
+            raise RegistrationError(f"{cmd_path}: {exc}") from None
         if auth is not None and auth not in AuthKind:
             kinds = ", ".join(k.value for k in AuthKind)
             raise RegistrationError(f"{cmd_path}: auth={auth!r} is not one of {kinds}")
@@ -932,7 +944,7 @@ class App:
                         default_limit=default_limit,
                         cursor_check=cursor_check,
                         heartbeat=heartbeat,
-                        stdin_input=stdin_input,
+                        stdin_input=stdin_mode,
                         output_file=output_file,
                         requires_auth=requires_auth,
                         auth=None if auth is None else AuthKind(auth),
@@ -3138,6 +3150,7 @@ class _Run:
             _warn_sink=self._warn,
             idempotency_key=idempotency_key,
             stdin_text=invocation.stdin_text,
+            _stdin_lines=invocation.lines,
             page=page,
             token=invocation.token,
             _config_file=self.config_file if command.config_write_scope is not None else None,
@@ -3712,16 +3725,26 @@ class _Run:
             if isinstance(config, Envelope):
                 return config
             self.config_file = config
-        if command.stdin_input:
-            try:
-                payload = self._read_input(invocation.input_file, meta=meta)
-            except Cancelled as exc:
-                return self._cancelled(
-                    command, exc.signal, self.started, meta or {}, handler_started=False
-                )
-            if isinstance(payload, Envelope):
-                return payload
-            invocation = dataclasses.replace(invocation, stdin_text=payload)
+        if command.stdin_input is not None:
+            given = self._with_input(command, invocation, meta)
+            if isinstance(given, Envelope):
+                return given
+            invocation = given
+        try:
+            return self._applied(command, invocation, mode, meta)
+        finally:
+            if invocation.lines is not None:
+                invocation.lines.close()
+
+    def _applied(
+        self,
+        command: Command,
+        invocation: Invocation,
+        mode: Format,
+        meta: Mapping[str, object] | None,
+    ) -> Envelope:
+        """``_answer`` once the input is read: a ``safe_default`` command's dry run unless
+        ``--live``, then the run through the idempotency layer"""
         if not command.safe_default:
             return self._keyed(command, invocation, mode, meta=meta)
         dry_run = not invocation.confirmed
@@ -4436,6 +4459,13 @@ class _Run:
         if invocation.validate_only:
             yield self._present(command, self.validated(meta))
             return
+        if command.stdin_input is not None:
+            given = self._with_input(command, invocation, meta)
+            if isinstance(given, Envelope):
+                yield self._present(command, given)
+                return
+            invocation = self.invocation = given
+        lines = invocation.lines
         started = time.perf_counter()
         waiting_since = started
         timeout = self.app._effective_timeout(command, invocation.timeout)
@@ -4454,6 +4484,12 @@ class _Run:
             if left <= 0:
                 raise TimeoutExpired(timeout)
             return Timeout(left)
+
+        def read_since() -> float | None:
+            """The idle deadline a stdin line read during the wait restarted (#33)"""
+            if lines is None or lines.last_read is None or timeout.seconds is None:
+                return None
+            return lines.last_read + timeout.seconds
 
         def partial() -> dict[str, object]:
             """Partial means some events were delivered before the failure"""
@@ -4503,6 +4539,7 @@ class _Run:
                     self.cancellation.armed,
                     stream_context,
                     ended=_RECORDS.forget,
+                    extended=None if whole else read_since,
                 )
                 if event is _END:
                     self.in_flight = None  # the handler finished; its teardown follows here
@@ -4563,6 +4600,8 @@ class _Run:
             # timeout or on a signal is still inside next(), on it as next() returns (#128)
             if not stepping.abandon(any(p.worker.is_alive() for p in running)):
                 close()
+            if lines is not None:
+                lines.close()
             if self.teardown is not None:
                 self.teardown.run(GRACE_SECONDS)  # beside a held worker, past its grace (06-D3)
             self._restore_cwd(before)
@@ -5455,6 +5494,75 @@ class _Run:
             return self._read_input(args.input_file)
         except Cancelled as exc:
             return self._plan_cancelled(exc.signal, 0)
+
+    def _with_input(
+        self, command: Command, invocation: Invocation, meta: Mapping[str, object] | None
+    ) -> Invocation | Envelope:
+        """``invocation`` with the input of a ``stdin_input`` command: the payload read
+        whole, or the lines to read as the handler iterates; an envelope when there is
+        none to read, which nothing has run before"""
+        if command.stdin_input is StdinInput.LINES:
+            lines = self._lines(invocation, meta)
+            if isinstance(lines, Envelope):
+                return lines
+            return dataclasses.replace(invocation, lines=lines)
+        try:
+            payload = self._read_input(invocation.input_file, meta=meta)
+        except Cancelled as exc:
+            return self._cancelled(
+                command, exc.signal, self.started, meta or {}, handler_started=False
+            )
+        if isinstance(payload, Envelope):
+            return payload
+        return dataclasses.replace(invocation, stdin_text=payload)
+
+    def _lines(self, invocation: Invocation, meta: Mapping[str, object] | None) -> Lines | Envelope:
+        """The input of a line-mode command, nothing read yet: ``input_lines`` of a JSON
+        payload, ``--input-file``, else stdin, which must be a pipe or a file"""
+        cap = self.app.max_line
+        input_file = invocation.input_file
+        if invocation.input_lines is not None:
+            if input_file is not None:
+                return self.arg_error(
+                    ParseError(
+                        "input_lines and input_file both give the input; pass one",
+                        context={"field": INPUT_LINES_KEY},
+                    ),
+                    meta=meta,
+                )
+            return Lines.given(invocation.input_lines, cap)
+        if input_file is not None and input_file != Path("-"):
+            try:
+                handle = input_file.open("rb")
+            except OSError as exc:
+                return self._stream_error(
+                    "INPUT_FILE_UNREADABLE",
+                    f"cannot read --input-file: {exc}",
+                    context={"input_file": str(input_file)},
+                    fix_required="pass a readable file, or - to read stdin",
+                    meta=meta,
+                )
+            return Lines(handle.readline, cap, source=str(input_file), close=handle.close)
+        stdin = self.payload_stdin
+        if stdin is None:
+            return self._stream_error(
+                "STDIN_UNAVAILABLE",
+                self.no_payload,
+                context={},
+                fix_required="pass input_lines, an array of the lines, or input_file with "
+                "the path of a file holding them",
+                meta=meta,
+            )
+        if stdin.isatty():
+            # Reading a terminal would block until the user types EOF
+            return self._stream_error(
+                "STDIN_IS_TTY",
+                "the input lines are read from stdin, not a terminal",
+                context={"lines": 0},
+                fix_required="pipe the input into stdin, or pass --input-file",
+                meta=meta,
+            )
+        return Lines.of(stdin, cap, source="stdin")
 
     def _read_input(
         self, input_file: Path | None, *, meta: Mapping[str, object] | None = None

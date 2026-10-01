@@ -78,6 +78,25 @@ Apps built on treaty keep their own, structured schema changelog with
   The `THIRD_PARTY_STDOUT` warning still counts the bytes as written. `ctx.run`'s
   `stream=True` lines and a failed child's stderr already reached stderr cleaned, now
   covered by tests; `Completed.stdout` and `stderr` stay as the child wrote them (#117)
+### Added
+
+- `stdin_input="lines"` reads a command's input one line at a time: `ctx.stdin_lines`
+  yields each line as the producer writes it, with no total cap, so an NDJSON pipeline
+  streams instead of hitting the 64 KiB `STDIN_TOO_LARGE` cap of `stdin_input=True`,
+  which is unchanged. Each line is capped by `App(max_line_bytes=...)`, 1 MiB by default:
+  a longer line exits 1 with `LINE_TOO_LARGE`, and one that is not UTF-8 with
+  `LINE_NOT_UTF8`, each with the 1-based line number in `error.context.line`. CRLF, a
+  final line without a newline, and a leading BOM are read as text lines. With
+  `streaming=True` the command is a filter, writing each event as it goes, and every line
+  read restarts the idle timeout. `--input-file` reads the lines from a file, a terminal
+  on stdin exits 2 with `STDIN_IS_TTY`, and in `exec`, `App.call`, and MCP the request
+  gives them as `input_lines`, an array of strings. `--schema` adds `"stdin_mode":
+  "lines"` (#33)
+
+### Fixed
+
+- A `streaming=True` command with `stdin_input=True` gets its payload: `ctx.stdin_text`
+  was always None, as the stream never read stdin (#33)
 
 ## [1.0.0rc9] - 2026-10-01
 

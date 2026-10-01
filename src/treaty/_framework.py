@@ -28,6 +28,7 @@ from ._config import GLOBAL_FLAG, ConfigScope
 from ._errors import ParseError
 from ._http import NO_PROXY_FLAG, PROXY_FLAG, parse_proxy
 from ._idempotency import IdempotencyKey
+from ._lines import StdinInput
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path
 from ._retry import RETRIES_FLAG, RETRY_DELAY_FLAG, parse_delay, parse_retries
@@ -443,9 +444,13 @@ FLAGS: tuple[FrameworkFlag, ...] = (
     FrameworkFlag(
         INPUT_FILE_FLAG,
         "input_file",
-        lambda c: c.stdin_input,
+        lambda c: c.stdin_input is not None,
         "string",
-        "Read the input from this file, of any size, instead of stdin; - is stdin, capped",
+        lambda c: (
+            "Read the input lines from this file instead of stdin; - is stdin"
+            if c.stdin_input is StdinInput.LINES
+            else "Read the input from this file, of any size, instead of stdin; - is stdin, capped"
+        ),
         parse=lambda v, c: check_path(str(v), INPUT_FILE_FLAG),
         from_json=_text(lambda v: check_path(v, INPUT_FILE_FLAG), "input_file"),
         metavar="PATH",

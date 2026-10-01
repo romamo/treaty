@@ -248,6 +248,25 @@ the text in `ctx.stdin_text` before the handler runs; over the cap (`<APP>_MAX_S
 also sets it) the run exits `2` with `STDIN_TOO_LARGE` and a `hint` naming `--input-file`.
 In `exec` and MCP, where stdin is taken, such a command needs `input_file`.
 
+A command that reads a record stream takes `stdin_input="lines"` instead: nothing is read
+before the handler runs, and `ctx.stdin_lines` yields one line at a time (without its `\n`
+or `\r\n`) as the producer writes it, so there is no total cap. Each line has a cap of its
+own, `App(max_line_bytes=...)` (1 MiB by default): a longer line ends the run with exit `1`
+and `LINE_TOO_LARGE`, and a line that is not UTF-8 with `LINE_NOT_UTF8`, each with the
+line number in `error.context.line`. With `streaming=True` the command is a filter, one
+event out as each line comes in, so `a | b | c` runs concurrently; every line read restarts
+the stream's idle timeout, as every event does. `--input-file` reads the lines from a file,
+and in `exec`, `App.call`, and MCP the request gives them as `input_lines`, an array of
+strings. `--schema` says `"stdin_mode": "lines"`.
+
+```python
+@app.command("resolve", description="Resolve each ISIN", danger_level="safe",
+             exit_codes=(), streaming=True, stdin_input="lines")
+def resolve(args: NoArgs, ctx: Ctx) -> Iterator[Resolved]:
+    for line in ctx.stdin_lines:
+        yield lookup(json.loads(line))
+```
+
 ## Flag order
 
 `--format`, `--help`, `--schema` (alias `--print-schema`), `--output-schema`,
