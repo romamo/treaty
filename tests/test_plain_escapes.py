@@ -412,8 +412,8 @@ def test_printed_text_and_log_lines_show_bidi_controls() -> None:
 
     @app.command("speak", description="Print and log", danger_level="safe", exit_codes=())
     def speak(args: NoArgs, ctx: Ctx) -> dict[str, str]:
-        print("printed ‮ab")
-        ctx.log("logged ⁦cd⁩")
+        print("printed \u202eab")
+        ctx.log("logged \u2066cd\u2069")
         return {}
 
     for isatty in (True, False):
