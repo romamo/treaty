@@ -282,3 +282,24 @@ def test_a_secret_default_is_not_written_into_the_module() -> None:
     assert "https://example.test" not in source and "$ENDPOINT" in source
     assert 'default="eu-west-1"' in source
     check_module(source, "secretcli:cli")
+
+
+def test_options_that_spell_one_field_get_distinct_names() -> None:
+    import click
+
+    @click.group()
+    def cli() -> None:
+        pass
+
+    @cli.command()
+    @click.option("--format")  # renamed --output-format
+    @click.option("--output-format")
+    @click.option("--a-b")
+    @click.option("--a_b", "a_b2")
+    def ls(**kwargs: object) -> None:
+        pass
+
+    source = render_module(scaffold("click", cli, "dupcli:cli", None, env={}))
+    fields = [line.split(":")[0].strip() for line in source.splitlines() if "= Flag(" in line]
+    assert len(fields) == len(set(fields)) == 4, fields
+    check_module(source, "dupcli:cli")

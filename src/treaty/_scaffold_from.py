@@ -316,12 +316,36 @@ def _collides(name: str, switch: bool, reserved: frozenset[str]) -> bool:
 
 
 def _fields(params: Sequence[_Param], where: str, walk: _Walk) -> tuple[FieldSpec, ...]:
-    out = [f for p in params if (f := _field(p, where, walk)) is not None]
+    fields = [f for p in params if (f := _field(p, where, walk)) is not None]
+    out = _distinct(fields, where, walk)
     # Required positionals before optional ones, as treaty reads them
     positionals = [f for f in out if f.positional]
     ordered = [f for f in positionals if f.default is None]
     ordered += [f for f in positionals if f.default is not None]
     return (*[f for f in out if not f.positional], *ordered)
+
+
+def _distinct(specs: list[FieldSpec], where: str, walk: _Walk) -> list[FieldSpec]:
+    """``specs`` with a field that repeats an earlier one's name renamed, such as
+    ``--a_b`` after ``--a-b``, or ``--format`` renamed onto the CLI's own
+    ``--output-format``"""
+    taken = {s.name for s in specs}
+    seen: set[str] = set()
+    out: list[FieldSpec] = []
+    for spec in specs:
+        if spec.name in seen:
+            stem, n = spec.name.rstrip("_"), 2
+            while f"{stem}_{n}" in taken:
+                n += 1
+            name = f"{stem}_{n}"
+            taken.add(name)
+            if not spec.positional:
+                walk.renamed.append((where, flag_of(spec.name), flag_of(name)))
+            note = f"another option is also {flag_of(spec.name)}; renamed {flag_of(name)}"
+            spec = replace(spec, name=name, notes=(*spec.notes, note))
+        seen.add(spec.name)
+        out.append(spec)
+    return out
 
 
 def _command_word(name: str, parent: tuple[str, ...]) -> str:
