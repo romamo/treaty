@@ -3158,7 +3158,11 @@ def _dry_run_switched(command: Command, invocation: Invocation) -> Invocation:
 
 def _dry_run_requested(command: Command, args: object) -> bool:
     """True when the command's dry-run switch is on: ``Flag(dry_run=True)`` or ``dry_run``,
-    which a destructive command always has (REQ-C-004)"""
+    which a destructive command always has (REQ-C-004), or its ``Flag(confirm=True)``
+    switch is off, so the run is a preview under the same contract (#197)"""
+    confirming = command.confirm_field
+    if confirming is not None:
+        return getattr(args, confirming.name) is not True
     field = command.dry_run_field
     value = False if field is None else getattr(args, field.name)
     return isinstance(value, bool) and value
@@ -3628,6 +3632,14 @@ class _Run:
             parameters["validate_only"] = True
         if invocation is not None and invocation.confirmed:
             parameters["confirm_destructive"] = True
+        if (
+            command is not None
+            and args is not None
+            and command.confirm_field is not None
+            and _dry_run_requested(command, args)
+        ):
+            # An unconfirmed run is a preview: logged as the dry run it is (#197)
+            parameters["dry_run"] = True
         if self.unprotected:
             parameters["no_injection_protection"] = True
         entry: dict[str, object] = {
@@ -6925,7 +6937,10 @@ class _Run:
                     context={"line": line_no, "_cmd": command.path.value, "field": key},
                 )
             mapping[name] = value
-        if dry_run and command.danger_level is not DangerLevel.SAFE:
+        if dry_run and command.confirm_field is not None:
+            # --dry-run wins over a confirmation the line passes: a preview is safe (#197)
+            mapping[command.confirm_field.name] = False
+        elif dry_run and command.danger_level is not DangerLevel.SAFE:
             switch = command.dry_run_field
             if switch is None:
                 raise ParseError(

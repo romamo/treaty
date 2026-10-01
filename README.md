@@ -1525,6 +1525,18 @@ that reports the wrong kind of value exits `1` with `INVALID_EFFECT`. A run that
 `would_*` effect also carries `meta.dry_run: true`, so an agent knows nothing changed
 without reading `data`.
 
+A mutating command whose own flag runs it, such as `--yes`, marks it
+`yes: bool = Flag(confirm=True, description="Apply it")`: without the flag the run is a dry
+run under the same contract (a `would_*` effect, `meta.dry_run: true`, not stored under an
+idempotency key), and with it the command runs. The flag keeps its name, its default is
+`False`, and a missing value is a preview on every input path: argv, `--raw-payload`,
+`exec` lines, and `App.call` and MCP. `exec --dry-run` previews even a line that passes
+it. The manifest's description of the flag says the command previews without it, and the
+audit log records the preview with `dry_run: true`. A safe or destructive command, a
+non-boolean field, `env=` (it is passed on each run, never read from a variable), or a
+command that also declares a dry-run switch is a `RegistrationError`; a destructive command previews through `dry_run` and
+`--confirm-destructive`, or `safe_default=True`.
+
 The framework gives those commands `--idempotency-key` (also `idempotency_key` in `exec`
 lines and `--raw-payload`). A successful live run is stored under the key; repeating the
 call returns the stored `data` with `effect: "noop"` and `meta.idempotency_hit: true`

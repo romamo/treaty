@@ -33,7 +33,7 @@ from ._deps import Version, check_required_tools
 from ._effect import can_carry, lists_unrequired, with_replay_effect
 from ._env import SESSION, app_var
 from ._errors import ParseError, RegistrationError
-from ._flags import FieldInfo, dry_run_field, inspect_fields
+from ._flags import FieldInfo, confirm_field, dry_run_field, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._lines import INPUT_LINES_FLAG, StdinInput
 from ._mode import FormatName
@@ -357,6 +357,11 @@ class Command:
         """The dry-run switch: the ``Flag(dry_run=True)`` field, else a boolean ``dry_run``"""
         return dry_run_field(self.fields)
 
+    @property
+    def confirm_field(self) -> FieldInfo | None:
+        """The ``Flag(confirm=True)`` field: unset, the run is a preview (#197)"""
+        return confirm_field(self.fields)
+
     def field_by_short(self, short: str) -> FieldInfo | None:
         for f in self.fields:
             if f.spec.short == short:
@@ -672,6 +677,18 @@ def build_command(
                 f"{path}: --idempotency-key is supplied by the framework for "
                 f"{danger_level.value} commands; read ctx.idempotency_key instead"
             )
+    confirming = confirm_field(fields)
+    if confirming is not None and danger_level is DangerLevel.SAFE:
+        raise RegistrationError(
+            f"{path}: --{confirming.flag} is marked confirm=True, which makes the command "
+            "preview unless it is passed; a safe command changes nothing to preview"
+        )
+    if confirming is not None and danger_level is DangerLevel.DESTRUCTIVE:
+        raise RegistrationError(
+            f"{path}: --{confirming.flag} is marked confirm=True, and a destructive command "
+            "is confirmed by --confirm-destructive (REQ-O-021); declare dry_run, or "
+            "safe_default=True to preview unless --live (REQ-O-048)"
+        )
     if danger_level is DangerLevel.DESTRUCTIVE:
         if dry_run_field(fields) is None:
             raise RegistrationError(
