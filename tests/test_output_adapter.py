@@ -426,3 +426,20 @@ def test_a_union_of_models_writes_the_branch_the_value_is() -> None:
     assert code == 0, env["error"]
     assert env["data"]["pet"]["barks"] == 2 and env["data"]["tagged"]["kind"] == "dog"
     assert "plain words here" not in json.dumps(env)
+
+
+def test_a_dump_that_adds_a_key_its_schema_does_not_list_fails_the_run() -> None:
+    app = App("probe", version="0.1.0")
+    app.output_adapter(
+        BaseModel,
+        schema=lambda cls: cls.model_json_schema(mode="serialization"),
+        dump=lambda obj: {**obj.model_dump(mode="json"), "debug": 1},
+    )
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: ShowArgs, ctx: Ctx) -> Invoice:
+        return Invoice(number=args.ident, total=1.5)
+
+    code, env = run(app, ["show", "X1"])
+    assert code != 0 and not env["ok"]
+    assert "'debug'" in env["error"]["message"]

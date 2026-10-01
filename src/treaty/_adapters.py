@@ -459,6 +459,13 @@ def _fit(value: object, node: JsonSchema, where: str, none_as_empty: bool) -> ob
                     f"{where}: the output adapter's dump() left out {key!r}, which its schema "
                     "says is always written"
                 )
+        if node.get("additionalProperties") is False:
+            for key in value:
+                if key not in properties:
+                    raise SchemaError(
+                        f"{where}: the output adapter's dump() wrote {key!r}, which its "
+                        "schema does not list"
+                    )
     extra = node.get("additionalProperties")
     rest = extra if isinstance(extra, dict) else {}
     props = properties if isinstance(properties, dict) else {}

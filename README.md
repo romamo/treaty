@@ -1118,7 +1118,7 @@ app.output_adapter(
 `schema(cls)` gives the output schema and `dump(obj)` the value in `data`. treaty inlines
 the schema's `$defs`, writes a fixed tuple's `prefixItems` as draft-07 `items`, and makes it
 read as a dataclass's does: every key required and no other key allowed. A dump that leaves
-out a key fails the run. The stable-output rules are checked on the schema when a command
+out a key, or writes one a closed schema does not list, fails the run. The stable-output rules are checked on the schema when a command
 names the class: a null list or dict is a registration error (REQ-F-074) unless the adapter
 passes `none_as_empty=True`, which writes it as `[]` or `{}` and drops `null` from the
 schema. A property declares the `Out` options as schema keys, for pydantic through
