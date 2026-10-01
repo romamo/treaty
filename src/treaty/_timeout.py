@@ -123,8 +123,9 @@ def call_with_timeout[T](
 ) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
 
-    ``running`` receives the worker as it starts, so a caller interrupted while it
-    waits (a signal) can still wait for the handler or hold its locks until it ends.
+    ``running`` receives the worker as it starts, before the handler runs, so a caller
+    interrupted while it waits (a signal) can still wait for the handler or hold its locks
+    until it ends.
     Only the handler itself, or the wait for its worker, runs inside ``interruptible()``:
     an exception raised while ``Thread.start`` holds its internal locks corrupts them.
     The worker runs in ``context``, or a copy of the caller's: contextvars the host set
@@ -141,8 +142,12 @@ def call_with_timeout[T](
         with interruptible():
             return run_in.run(fn)
     slot = Outcome()
+    # The handler waits until ``running`` has the worker: one that ended at once would
+    # otherwise release what was kept for it, in ``ended``, before it was kept (#128)
+    registered = threading.Event()
 
     def target() -> None:
+        registered.wait()
         try:
             slot.result = run_in.run(fn)
         except BaseException as exc:  # noqa: BLE001 - re-raised on the calling thread below
@@ -154,8 +159,11 @@ def call_with_timeout[T](
     worker = threading.Thread(target=target, name="treaty-handler", daemon=True)
     pending = Pending(worker, slot)
     worker.start()
-    if running is not None:
-        running(pending)
+    try:
+        if running is not None:
+            running(pending)
+    finally:
+        registered.set()
     start = clock()
     deadline = None if timeout.seconds is None else start + timeout.seconds
     due = [start + h.seconds for h in heartbeats]

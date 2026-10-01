@@ -530,6 +530,80 @@ def test_a_handler_that_logs_after_its_app_call_returned_leaks_no_secret(
     assert proc.stderr.splitlines() == written, proc.stderr
 
 
+@pytest.mark.parametrize("before_first_event", [True, False])
+def test_a_stream_abandoned_at_its_timeout_closes_on_its_worker_and_leaks_no_secret(
+    before_first_event: bool,
+) -> None:
+    """A stream that times out waiting for an event: its generator is closed on the
+    worker as ``next()`` returns, while the worker is still held, so a secret logged in
+    its ``finally`` is redacted, rather than closed at garbage collection once the worker
+    was forgotten and ``_Records`` had left the root, which wrote it raw through
+    ``logging.lastResort`` (#128). A subprocess, since pytest's own capture handlers sit
+    on the root logger"""
+    script = (
+        "import logging, threading\n"
+        "from collections.abc import Iterator\n"
+        "from dataclasses import dataclass\n"
+        "from treaty import App, Ctx, Flag\n"
+        "from treaty._app import _RECORDS\n"
+        "@dataclass(frozen=True, slots=True)\n"
+        "class Login:\n"
+        "    api_token: str = Flag(description='API token', secret=True)\n"
+        "go, closed, workers, closers = threading.Event(), threading.Event(), [], []\n"
+        "app = App('libctl', version='1.0.0')\n"
+        "@app.command('tail', description='Stream', timeout=0.05, danger_level='safe',\n"
+        "             exit_codes=(), streaming=True)\n"
+        "def tail(args: Login, ctx: Ctx) -> Iterator[dict[str, int]]:\n"
+        "    try:\n"
+        f"        if not {before_first_event!r}:\n"
+        "            yield {'n': 0}\n"
+        "        workers.append(threading.current_thread())\n"
+        "        go.wait(timeout=10)  # released only after the call answered TIMEOUT\n"
+        "        yield {'n': 1}\n"
+        "        yield {'n': 2}\n"
+        "    finally:\n"
+        "        closers.append(threading.current_thread())\n"
+        "        logging.getLogger('somelib').warning('closing for %s', args.api_token)\n"
+        "        closed.set()\n"
+        f"env = {{'LIBCTL_API_TOKEN': {TOKEN!r}, 'LIBCTL_AUDIT_LOG': '0'}}\n"
+        "print(app.call('tail', {}, env=env).error.code)\n"
+        "go.set()\n"
+        "assert closed.wait(timeout=10)\n"
+        "workers[-1].join(timeout=10)\n"
+        "assert not workers[-1].is_alive()\n"
+        "on_root = any(h is _RECORDS for h in logging.getLogger().handlers)\n"
+        "print(closers == workers[-1:], on_root)\n"
+    )
+    env = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert TOKEN not in proc.stderr and TOKEN not in proc.stdout
+    assert proc.stdout.splitlines() == ["TIMEOUT", "True False"], proc.stdout
+    assert proc.stderr.splitlines() == ["closing for [REDACTED]"], proc.stderr
+
+
+def test_a_handler_that_ends_at_once_under_a_timeout_leaves_the_root_logger() -> None:
+    """A handler on a worker thread that returns before the caller registered it: its
+    ``forget`` must not come before its ``hold``, which would keep ``_Records`` on the
+    root logger, and ``logging.basicConfig()`` a no-op, with no run attached (#128)"""
+    app = App("libctl", version="1.0.0")
+
+    @app.command("now", description="Return", timeout=30, danger_level="safe", exit_codes=())
+    def now(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        return {"ok": True}
+
+    for _ in range(50):
+        assert app.call("now", {}, env={"LIBCTL_AUDIT_LOG": "0"}).ok
+        assert not records_left_on_root()
+
+
 def test_a_record_written_as_last_resort_never_takes_the_logging_module_lock() -> None:
     """A record written where ``logging.lastResort`` would, with a held thread ended
     unforgotten, as when its ``hold`` came after its ``forget``: emitting holds the

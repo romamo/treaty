@@ -26,6 +26,14 @@ Apps built on treaty keep their own, structured schema changelog with
   one byte over it; this held for a command's response, each stream event, and each
   `exec` line. `meta.total_bytes` counts the same bytes, so it is one more than before
   (#129)
+- Security: a stream abandoned at its timeout or on a signal no longer leaks a secret its
+  generator logs from `finally`. The generator was never closed, so it was finalized at
+  garbage collection, after its worker was forgotten and the framework's handler had left
+  the root logger, and the record went to `logging.lastResort` unredacted. Now the worker
+  closes the generator as soon as its `next()` returns, while its secrets are still
+  redacted. A handler on a worker thread also runs only once the worker is registered, so
+  one that returns at once can no longer leave the framework's handler on the root logger,
+  and `logging.basicConfig()` a no-op, until the next `App.call` (#128)
 
 ## [1.0.0rc7] - 2026-09-30
 

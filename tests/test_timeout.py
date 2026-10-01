@@ -222,6 +222,26 @@ def test_call_with_timeout_reraises_handler_exception() -> None:
         call_with_timeout(lambda: time.sleep(1), Timeout(0.01))
 
 
+def test_the_handler_runs_only_once_its_worker_is_registered() -> None:
+    """``running`` has the worker before the handler runs, so ``ended`` never comes
+    first for a handler that returns at once: what ``running`` keeps for it, such as the
+    redacting log handler, would then be kept with no thread left to release it (#128)"""
+    order: list[str] = []
+    ran = threading.Event()
+
+    def fn() -> None:
+        order.append("fn")
+        ran.set()
+
+    def running(pending: object) -> None:
+        # Long enough for an unregistered handler to run and end; the fixed order times out
+        ran.wait(timeout=0.2)
+        order.append("running")
+
+    call_with_timeout(fn, Timeout(5), running, ended=lambda worker: order.append("ended"))
+    assert order == ["running", "fn", "ended"]
+
+
 def test_a_late_wake_skips_the_missed_heartbeats_rather_than_bursting() -> None:
     # Issue #56: a wait that wakes several intervals late ticked once per missed
     # interval in the same instant; the clock jumps 5.5 intervals to stall the wait

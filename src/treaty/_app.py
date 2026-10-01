@@ -2465,6 +2465,45 @@ def _as_dry_run(command: Command, args: object) -> object:
 _END = object()
 
 
+class _Stepping:
+    """Which thread closes a stream's generator: the stream, or, when the stream ends
+    while a worker is still inside ``next()``, as at its timeout, that worker as soon as
+    ``next()`` returns. So the generator's ``finally`` runs while the worker is held and
+    its secrets redacted, never later at garbage collection, after it was forgotten
+    (#128). A worker never closes it while another thread runs ``next()``, nor the
+    stream while the worker does."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._inside = False
+        self._abandoned = False
+
+    def begin(self) -> None:
+        """Called by the stream before it hands ``next()`` to a worker"""
+        with self._lock:
+            self._inside = True
+
+    def step(self, events: Iterator[object], close: Callable[[], None]) -> object:
+        """``next(events)`` on the worker, closing ``events`` there once abandoned"""
+        try:
+            with self._lock:
+                abandoned = self._abandoned
+            return _END if abandoned else next(events, _END)
+        finally:
+            with self._lock:
+                self._inside = False
+                abandoned = self._abandoned
+            if abandoned:
+                close()
+
+    def abandon(self, worker_alive: bool) -> bool:
+        """Whether the worker closes the generator: it is alive and not past ``next()``;
+        otherwise the caller closes it"""
+        with self._lock:
+            self._abandoned = worker_alive and self._inside
+            return self._abandoned
+
+
 def drain(envelopes: Generator[Envelope]) -> Iterator[Envelope]:
     """Iterate a stream; a signal that lands between events is thrown back into it
 
@@ -4215,6 +4254,11 @@ class _Run:
             running[:] = [pending]  # only the current worker matters; a stream may be endless
 
         secret_free = self._redactor(command, args)
+        stepping = _Stepping()
+
+        def close() -> None:
+            if isinstance(events, Generator):
+                self._close_events(events, secret_free)
 
         try:
             self.cancellation.check()
@@ -4238,8 +4282,9 @@ class _Run:
             while True:
                 self.cancellation.check()
                 waiting_since = time.perf_counter()
+                stepping.begin()
                 event = call_with_timeout(
-                    lambda: next(produced, _END),
+                    lambda: stepping.step(produced, close),
                     remaining(),
                     self._held(secret_free, latest),
                     self.cancellation.armed,
@@ -4301,14 +4346,10 @@ class _Run:
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
             terminal = functools.partial(self._crashed, command, args, exc, started, partial())
         finally:
-            # Run the handler's finally blocks now, unless a timed-out worker still holds it
-            held = any(p.worker.is_alive() for p in running)
-            if events is not None and not held and isinstance(events, Generator):
-                try:
-                    events.close()
-                except Exception as exc:  # noqa: BLE001 - the handler's finally is user code
-                    # The terminal envelope is already decided; the failure goes to stderr
-                    self.err.write(self._redactor(command, args)(_traceback(exc)))
+            # Run the handler's finally blocks now, or, when a worker abandoned at its
+            # timeout or on a signal is still inside next(), on it as next() returns (#128)
+            if not stepping.abandon(any(p.worker.is_alive() for p in running)):
+                close()
             if self.teardown is not None:
                 self.teardown.run(GRACE_SECONDS)  # beside a held worker, past its grace (06-D3)
             self._restore_cwd(before)
@@ -4416,6 +4457,14 @@ class _Run:
             "paths from ctx.cwd instead",
             {"from": before, "to": after},
         )
+
+    def _close_events(self, events: Generator[object], redact: Callable[[str], str]) -> None:
+        """Close a stream's generator, running its ``finally`` blocks; a failure there goes
+        to stderr redacted, the terminal envelope already decided"""
+        try:
+            events.close()
+        except Exception as exc:  # noqa: BLE001 - the handler's finally is user code
+            self.err.write(redact(_traceback(exc)))
 
     def _grace(self, running: Sequence[Pending]) -> None:
         """Past its timeout, a handler with something to tear down gets the children's
