@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, NoReturn, TextIO, TypeGuard, cast
 
+from ._adapters import OutputAdapter
 from ._aio import Loop, within
 from ._atomic import write_atomic
 from ._auth import (
@@ -547,6 +548,33 @@ class App:
         # Settings already inspected are inspected again on next use, with this class known
         self._settings = None
         return spec
+
+    def output_adapter(
+        self,
+        base: type,
+        *,
+        schema: Callable[[type], Mapping[str, Any]],
+        dump: Callable[[Any], object],
+        none_as_empty: bool = False,
+    ) -> OutputAdapter:
+        """Let every subclass of ``base`` be command output; declare it before the commands
+        returning one
+
+        ``schema(cls)`` gives a subclass's JSON Schema and ``dump(obj)`` an instance's JSON
+        value; for pydantic, ``app.output_adapter(BaseModel, schema=lambda cls:
+        cls.model_json_schema(mode="serialization"), dump=lambda obj:
+        obj.model_dump(mode="json", by_alias=True))``, as the schema names a field by its
+        alias. A model may be returned, held in a list, or nested in a dataclass field. Its
+        properties may declare the ``Out`` options as
+        ``x-sort-key``, ``x-ordered``, ``x-volatile``, ``x-high-entropy``, and
+        ``x-external``. An output list or dict is never null; ``none_as_empty=True`` writes
+        a null one as ``[]`` or ``{}``, so a ``list[T] | None`` field is allowed.
+        """
+        for fn, name in ((schema, "schema"), (dump, "dump")):
+            refuse_async(fn, f"output_adapter {name}")
+        return self.scalars.register_adapter(
+            OutputAdapter(base=base, schema=schema, dump=dump, none_as_empty=none_as_empty)
+        )
 
     def suppress_update_notifier(
         self, fn: Callable[[MutableMapping[str, str]], None]
@@ -3542,11 +3570,18 @@ class _Run:
             )
             if batch:
                 assert isinstance(data, dict)
-                protected = protect_batch(data, command.output_type, unmask=self.unmask)
+                protected = protect_batch(
+                    data,
+                    command.output_type,
+                    unmask=self.unmask,
+                    adapters=self.app.scalars.adapters,
+                )
             else:
                 # Exit data is not the declared output type
                 tp = self._output(command)[0] if envelope.ok else object
-                protected = protect(data, tp, unmask=self.unmask)
+                protected = protect(
+                    data, tp, unmask=self.unmask, adapters=self.app.scalars.adapters
+                )
             data = protected.data
             if protected.masked:
                 warnings.append(
@@ -4923,7 +4958,12 @@ class _Run:
             return items
         item_type = (typing.get_args(command.output_type) or (object,))[0]
         jsonable = [
-            arrange(to_jsonable(i, self.app.scalars, base=self.cwd), item_type) for i in items
+            arrange(
+                to_jsonable(i, self.app.scalars, base=self.cwd),
+                item_type,
+                adapters=self.app.scalars.adapters,
+            )
+            for i in items
         ]
         return [items[i] for i in sorted_indices(jsonable, command.order.sort_key)]
 
@@ -4931,7 +4971,11 @@ class _Run:
         """A result or exit ``data`` as envelope data: an object, an array, or null, with
         relative paths made absolute and arrays sorted as ``tp`` declares"""
         data = arrange(
-            to_jsonable(value, self.app.scalars, base=self.cwd), tp, order, stable=self.stable
+            to_jsonable(value, self.app.scalars, base=self.cwd),
+            tp,
+            order,
+            adapters=self.app.scalars.adapters,
+            stable=self.stable,
         )
         if isinstance(value, Job) and isinstance(data, dict):
             data = with_links(data, self.app.name)  # REQ-C-022

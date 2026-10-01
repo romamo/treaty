@@ -421,7 +421,9 @@ def build_command(
             f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
         )
     paginated_asked = bool(paginated)
-    args_type, output_type, resources, paginated = _inspect_handler(fn, path, streaming, paginated)
+    args_type, output_type, resources, paginated = _inspect_handler(
+        fn, path, streaming, paginated, scalars
+    )
     item_type = batch_item(resolve_alias(output_type))
     batch = item_type is not None
     if item_type is not None:
@@ -559,16 +561,16 @@ def build_command(
             f"{path}: sort_key orders the output array, ordered=True keeps it; pick one"
         )
     order = OutSpec(sort_key=sort_key, ordered=ordered)
-    check_order(output_type, str(path), order)
+    check_order(output_type, str(path), order, adapters=scalars.adapters)
     if ordered:
         output_schema = {**output_schema, "x-ordered": True}
     if external is not None and not isinstance(external, bool):
         raise RegistrationError(f"{path}: external is True, False, or None (undeclared)")
-    check_trust(output_type, str(path), external=bool(external))
+    check_trust(output_type, str(path), external=bool(external), adapters=scalars.adapters)
     # A field's Out(external=True) tags data too, and the tags go on data as served, after
     # any batch or job wrapper: a schema without them fails a client that validates
     # structured content, as MCP clients do
-    trust_tags = bool(external) or declares_external(output_type)
+    trust_tags = bool(external) or declares_external(output_type, scalars.adapters)
     shims = _compat(
         path, compat or {}, schema_version, output_type, scalars, trust_tags, danger_level
     )
@@ -890,17 +892,17 @@ def _compat(
                 f"{output_type!r}, the command's output"
             )
         returned = hints.get("return")
-        if returned is None or not is_payload_type(returned):
+        if returned is None or not is_payload_type(returned, scalars):
             raise RegistrationError(
                 f"{path}: compat[{key!r}] needs a return annotation that serializes to a JSON "
                 "object, array, or null, for its output schema"
             )
-        check_order(returned, f"{path}: compat[{key!r}]")
+        check_order(returned, f"{path}: compat[{key!r}]", adapters=scalars.adapters)
         schema = schema_for(returned, scalars, output=True)
         if danger_level is not DangerLevel.SAFE:
             # A replayed idempotency key answers noop in the older shape too
             schema = with_replay_effect(schema)
-        if trust_tags or declares_external(returned):
+        if trust_tags or declares_external(returned, scalars.adapters):
             schema = with_trust_tags(schema)
         out.append(Compat(version, shim, returned, schema))
     return tuple(sorted(out, key=lambda c: c.version.key))
@@ -1065,7 +1067,11 @@ def _check_ctx_calls(
 
 
 def _inspect_handler(
-    fn: Handler, path: CommandPath, streaming: bool, paginated: bool | None
+    fn: Handler,
+    path: CommandPath,
+    streaming: bool,
+    paginated: bool | None,
+    scalars: ScalarRegistry,
 ) -> tuple[type, object, tuple[type, ...], bool]:
     resources = dependency_params(fn, f"{path}: handler", allow_async=True)
     if streaming and inspect.iscoroutinefunction(fn):
@@ -1088,9 +1094,13 @@ def _inspect_handler(
         assert isinstance(args_type, type)
         return args_type, output_type, resources, False  # checked by _check_batch
     output_type, paginated = _page_output(output_type, path, paginated)
-    if not is_payload_type(output_type):
+    if not is_payload_type(output_type, scalars):
         what = "each yielded event" if streaming else "return type"
-        raise RegistrationError(f"{path}: {what} must serialize to a JSON object, array, or null")
+        raise RegistrationError(
+            f"{path}: {what} must serialize to a JSON object, array, or null; a model class "
+            "is written once its family is registered with app.output_adapter(...) before "
+            "the commands returning it"
+        )
     assert isinstance(args_type, type)
     return args_type, output_type, resources, paginated
 

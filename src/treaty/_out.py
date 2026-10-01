@@ -13,11 +13,12 @@ import dataclasses
 import datetime as dt
 import json
 import typing
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from typing import Any
 
+from ._adapters import OutputAdapters, branch, untyped
 from ._errors import RegistrationError
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
@@ -118,20 +119,37 @@ def canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def arrange(value: object, tp: object, spec: OutSpec = NO_ORDER, *, stable: bool = False) -> object:
+def arrange(
+    value: object,
+    tp: object,
+    spec: OutSpec = NO_ORDER,
+    *,
+    adapters: OutputAdapters,
+    stable: bool = False,
+) -> object:
     """``value``, the JSON form of an instance of ``tp``, with its arrays sorted and, when
-    ``stable``, its volatile fields dropped; ``spec`` declares the array ``value`` is"""
+    ``stable``, its volatile fields dropped; ``spec`` declares the array ``value`` is. A
+    class an output adapter writes is arranged by its schema's ``x-`` options."""
     base, _ = strip_optional(resolve_alias(tp))
+    if adapters.for_type(base) is not None:
+        assert isinstance(base, type)
+        return arrange_node(value, adapters.node(base), spec, stable=stable)
     # Untyped content declares nothing of its own, so an ordered declaration covers it
     inner = spec if spec.ordered else NO_ORDER
     if isinstance(value, list):
         origin = typing.get_origin(base)
         args = typing.get_args(base)
         if origin is tuple and args and args[-1] is not Ellipsis:
-            return [arrange(v, a, stable=stable) for v, a in zip(value, args, strict=False)]
+            return [
+                arrange(v, a, adapters=adapters, stable=stable)
+                for v, a in zip(value, args, strict=False)
+            ]
         item = args[0] if origin in (list, tuple) and args else object
         items = [
-            arrange(v, item, inner if _untyped(item) else NO_ORDER, stable=stable) for v in value
+            arrange(
+                v, item, inner if _untyped(item) else NO_ORDER, adapters=adapters, stable=stable
+            )
+            for v in value
         ]
         return items if spec.ordered else [items[i] for i in sorted_indices(items, spec.sort_key)]
     if not isinstance(value, dict) or is_binary(value):
@@ -147,13 +165,58 @@ def arrange(value: object, tp: object, spec: OutSpec = NO_ORDER, *, stable: bool
             if stable and fspec.volatile:
                 del out[f.name]
                 continue
-            out[f.name] = arrange(out[f.name], hints[f.name], fspec, stable=stable)
+            out[f.name] = arrange(
+                out[f.name], hints[f.name], fspec, adapters=adapters, stable=stable
+            )
         return out
     item = typing.get_args(base)[1] if typing.get_origin(base) is dict else object
     return {
-        k: arrange(v, item, inner if _untyped(item) else NO_ORDER, stable=stable)
+        k: arrange(v, item, inner if _untyped(item) else NO_ORDER, adapters=adapters, stable=stable)
         for k, v in value.items()
     }
+
+
+def arrange_node(
+    value: object, node: Mapping[str, Any], spec: OutSpec = NO_ORDER, *, stable: bool
+) -> object:
+    """``arrange`` by a JSON Schema: a property's ``x-sort-key`` and ``x-ordered`` order
+    its array, and ``x-volatile`` drops it under ``stable``"""
+    sort_key = node.get("x-sort-key")
+    if isinstance(sort_key, str):
+        spec = OutSpec(sort_key=sort_key)
+    elif node.get("x-ordered") is True:
+        spec = OutSpec(ordered=True)
+    node = branch(dict(node), value)
+    if isinstance(value, list):
+        items = node.get("items")
+        if isinstance(items, list):
+            extra = node.get("additionalItems")
+            rest = extra if isinstance(extra, dict) else {}
+            return [
+                arrange_node(v, items[i] if i < len(items) else rest, stable=stable)
+                for i, v in enumerate(value)
+            ]
+        item = items if isinstance(items, dict) else {}
+        inner = spec if spec.ordered and untyped(item) else NO_ORDER
+        arranged = [arrange_node(v, item, inner, stable=stable) for v in value]
+        if spec.ordered:
+            return arranged
+        return [arranged[i] for i in sorted_indices(arranged, spec.sort_key)]
+    if not isinstance(value, dict) or is_binary(value):
+        return value
+    properties = node.get("properties")
+    props = properties if isinstance(properties, dict) else {}
+    extra = node.get("additionalProperties")
+    rest = extra if isinstance(extra, dict) else {}
+    inner = spec if spec.ordered and untyped(rest) else NO_ORDER
+    out: dict[str, object] = {}
+    for key, v in value.items():
+        prop = props.get(key)
+        if prop is None:
+            out[key] = arrange_node(v, rest, inner, stable=stable)
+        elif not (stable and prop.get("x-volatile") is True):
+            out[key] = arrange_node(v, prop, stable=stable)
+    return out
 
 
 def _untyped(tp: object) -> bool:
@@ -218,7 +281,9 @@ def can_sort_by(tp: object) -> bool:
     )
 
 
-def check_order(tp: object, where: str, spec: OutSpec = NO_ORDER) -> None:
+def check_order(
+    tp: object, where: str, spec: OutSpec = NO_ORDER, *, adapters: OutputAdapters
+) -> None:
     """Each ``sort_key`` of an output type names a scalar field of the array's items"""
     base, _ = strip_optional(resolve_alias(tp))
     origin = typing.get_origin(base)
@@ -229,26 +294,46 @@ def check_order(tp: object, where: str, spec: OutSpec = NO_ORDER) -> None:
             item = resolve_alias(args[0])
         elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
             item = resolve_alias(args[0])  # a fixed tuple is never sorted
-        if not is_dataclass_type(item):
+        if adapters.for_type(item) is not None:
+            assert isinstance(item, type)
+            _check_adapted_key(adapters.node(item), item, where, spec.sort_key)
+        elif not is_dataclass_type(item):
             raise RegistrationError(
                 f"{where}: sort_key={spec.sort_key!r} orders an array of dataclasses, not {tp!r}"
             )
-        assert isinstance(item, type)
-        hints = type_hints(item)
-        if spec.sort_key not in {f.name for f in dataclasses.fields(item)} or not can_sort_by(
-            hints.get(spec.sort_key)
-        ):
-            raise RegistrationError(
-                f"{where}: sort_key={spec.sort_key!r} must name a str, int, Enum, or date "
-                f"field of {item.__qualname__}"
-            )
+        else:
+            assert isinstance(item, type)
+            hints = type_hints(item)
+            if spec.sort_key not in {f.name for f in dataclasses.fields(item)} or not can_sort_by(
+                hints.get(spec.sort_key)
+            ):
+                raise RegistrationError(
+                    f"{where}: sort_key={spec.sort_key!r} must name a str, int, Enum, or date "
+                    f"field of {item.__qualname__}"
+                )
     if spec.ordered and origin not in (list, tuple, dict) and not _untyped(base):
         raise RegistrationError(f"{where}: ordered=True is for arrays, not {tp!r}")
     for arg in args:
         if arg is not Ellipsis:
-            check_order(arg, where)
+            check_order(arg, where, adapters=adapters)
     if is_dataclass_type(base):
         assert isinstance(base, type)
         hints = type_hints(base)
         for f in dataclasses.fields(base):
-            check_order(hints[f.name], f"{where}: {base.__qualname__}.{f.name}", out_spec(f))
+            check_order(
+                hints[f.name],
+                f"{where}: {base.__qualname__}.{f.name}",
+                out_spec(f),
+                adapters=adapters,
+            )
+
+
+def _check_adapted_key(node: Mapping[str, Any], item: type, where: str, sort_key: str) -> None:
+    properties = node.get("properties")
+    prop = properties.get(sort_key) if isinstance(properties, dict) else None
+    kind = prop.get("type") if isinstance(prop, dict) else None
+    if kind not in ("string", "integer"):
+        raise RegistrationError(
+            f"{where}: sort_key={sort_key!r} must name a string or integer property of "
+            f"{item.__qualname__}"
+        )

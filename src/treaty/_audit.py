@@ -25,6 +25,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ._adapters import branches, untyped
 from ._command import Command, DangerLevel, OptionPlacement
 from ._deps import Endpoint
 from ._env import AUDIT_LOG, FORMAT, UNPREFIXED, app_var
@@ -1562,6 +1563,7 @@ def _holds_untyped(tp: object) -> bool:
 
 def _stable_order(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
+        yield from _adapted_order(app, c)
         if not c.order.ordered and _holds_untyped(c.output_type):
             # REQ-F-020 sorts arrays it cannot see into too, so a model_dump()'s line
             # items come back in another order than the handler built them in
@@ -1619,6 +1621,74 @@ def _stable_order(app: App) -> Iterator[Finding]:
                     f"type {f.name} with a frozen dataclass, or {f.name}: ... = "
                     "treaty.Out(ordered=True) to keep the handler's order of every array inside",
                 )
+
+
+def _adapted_classes(app: App, c: Command) -> Iterator[tuple[str, type]]:
+    """Each class an output adapter writes in the command's output, with where it sits"""
+    adapters = app.scalars.adapters
+    if not len(adapters):
+        return
+    hints = [("", c.output_type)] + [(w, h) for w, _, h in output_fields(c.output_type)]
+    for where, hint in hints:
+        pending = [hint]
+        while pending:
+            base, _ = strip_optional(resolve_alias(pending.pop()))
+            if adapters.for_type(base) is not None:
+                assert isinstance(base, type)
+                yield where, base
+            elif not is_dataclass_type(base):
+                pending += [a for a in typing.get_args(base) if a is not Ellipsis]
+
+
+def _schema_gaps(node: Mapping[str, Any], where: str) -> Iterator[tuple[str, str]]:
+    """The arrays of objects with no declared order, and the untyped values, in an
+    adapted class's schema: ``("array", path)`` or ``("untyped", path)``"""
+    properties = node.get("properties")
+    for name, prop in (properties if isinstance(properties, dict) else {}).items():
+        path = f"{where}.{name}" if where else name
+        if prop.get("x-ordered") or prop.get("x-sort-key"):
+            continue
+        for option in branches(prop):
+            items = option.get("items")
+            if untyped(option):
+                yield "untyped", path
+            elif option.get("type") == "array" and isinstance(items, dict):
+                if isinstance(items.get("properties"), dict):
+                    yield "array", path
+                    yield from _schema_gaps(items, f"{path}[]")
+            elif isinstance(option.get("properties"), dict):
+                yield from _schema_gaps(option, path)
+
+
+def _adapted_order(app: App, c: Command) -> Iterator[Finding]:
+    """Advice, not a warning: the app may not own the model, and the defaults are sound"""
+    seen: set[str] = set()
+    for where, cls in _adapted_classes(app, c):
+        for kind, path in _schema_gaps(app.scalars.adapters.node(cls), ""):
+            name = f"{where}.{path}" if where else path
+            label = f"output field {name} of {cls.__qualname__}"
+            if label in seen:
+                continue
+            seen.add(label)
+            if kind == "array":
+                message = (
+                    f"{label} is an array of objects with no declared order, so treaty sorts "
+                    "it by each item's JSON text, not the order the handler built (REQ-F-020)"
+                )
+                fix = (
+                    'declare it on the model field: json_schema_extra={"x-sort-key": "<field>"} '
+                    'to order it by a field, or {"x-ordered": True} to keep the handler\'s order'
+                )
+            else:
+                message = (
+                    f"{label} is untyped, so every array inside it is re-sorted by each "
+                    "item's JSON text, whatever order the handler built (REQ-F-020)"
+                )
+                fix = (
+                    'type it with a model, or declare json_schema_extra={"x-ordered": True} '
+                    "on the field to keep the handler's order of every array inside"
+                )
+            yield Finding("stable-order", Severity.ADVICE, c.path.value, message, fix)
 
 
 def _inner_array(c: Command, where: str, item: type) -> Finding:

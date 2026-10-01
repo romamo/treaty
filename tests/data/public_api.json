@@ -138,6 +138,7 @@
         "group",
         "main",
         "manifest",
+        "output_adapter",
         "redirect",
         "redirected_paths",
         "run",
@@ -592,6 +593,16 @@
     "Out": {
       "kind": "function",
       "signature": "(*, default: 'Any' = <dataclasses._MISSING_TYPE object>, default_factory: 'Callable[[], Any] | Any' = <dataclasses._MISSING_TYPE object>, sort_key: 'str | None' = None, ordered: 'bool' = False, volatile: 'bool' = False, high_entropy: 'bool | None' = None, external: 'bool' = False) -> 'Any'"
+    },
+    "OutputAdapter": {
+      "fields": [
+        "base",
+        "schema",
+        "dump",
+        "none_as_empty"
+      ],
+      "kind": "class",
+      "methods": []
     },
     "Page": {
       "fields": [

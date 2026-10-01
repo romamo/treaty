@@ -25,6 +25,7 @@ from treaty import (
     ParseError,
     RegistrationError,
 )
+from treaty._adapters import OutputAdapters
 from treaty._audit import audit
 from treaty._protect import base64_summary, jwt_summary, key_summary, protect, public_key
 from treaty._redact import REDACTED, scrub, secret_field, secret_name
@@ -673,7 +674,9 @@ def test_public_before_another_word_does_not_exempt_a_credential_name() -> None:
     # Only the word right before key names a public key: these hold secrets
     for name in ("pub_sub_key", "public_repo_deploy_key", "non_public_api_key"):
         assert secret_field(name), name
-        out = protect({name: "sk_live_abc123456789abcdef"}, object, unmask=False)
+        out = protect(
+            {name: "sk_live_abc123456789abcdef"}, object, unmask=False, adapters=OutputAdapters()
+        )
         assert out.masked == (f"data.{name}",), name
 
 

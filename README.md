@@ -1098,6 +1098,39 @@ make it a top-level flag, read from `--x-from-env` or `--x-from-file`, or declar
 setting, and a value class meant to travel as one string, such as an id, still needs
 `app.scalar(...)`: an unregistered frozen dataclass on a flag is an object.
 
+## Output adapters
+
+A handler may return a class treaty does not know, such as a pydantic model, once the app
+registers how that class family is described and written. One registration covers every
+subclass of `base`, wherever it sits: the return value, a dataclass field, `list[Model]`,
+`tuple[Model, ...]`, or `Model | None`. treaty imports nothing from the library:
+
+```python
+from pydantic import BaseModel
+
+app.output_adapter(
+    BaseModel,
+    schema=lambda cls: cls.model_json_schema(mode="serialization"),
+    dump=lambda obj: obj.model_dump(mode="json", by_alias=True),
+)
+```
+
+`schema(cls)` gives the output schema and `dump(obj)` the value in `data`; the dump passes
+`by_alias=True` because `model_json_schema` names a field by its alias. treaty inlines
+the schema's `$defs`, writes a fixed tuple's `prefixItems` as draft-07 `items`, and makes it
+read as a dataclass's does: every key required and no other key allowed. A dump that leaves
+out a key, or writes one a closed schema does not list, fails the run. The stable-output rules are checked on the schema when a command
+names the class: a null list or dict is a registration error (REQ-F-074) unless the adapter
+passes `none_as_empty=True`, which writes it as `[]` or `{}` and drops `null` from the
+schema. A property declares the `Out` options as schema keys, for pydantic through
+`Field(json_schema_extra={...})`: `x-sort-key` (the item field an array is sorted by),
+`x-ordered`, `x-volatile`, `x-high-entropy` (`True` or `False`), and `x-external`. Each is
+optional: an undeclared array is sorted by its items' JSON text and `treaty audit` advises
+declaring its order, and a credential-named or `format: password` string is masked unless
+`--unmask`. A field type with its own JSON schema, such as a constrained `str`, needs no
+`app.scalar`. Register the adapter before the commands returning the class; two adapters
+whose bases overlap, or an adapted class registered as a scalar, are registration errors.
+
 ## Resources
 
 A handler can take more parameters after `ctx`. Each one is annotated with a class that has
