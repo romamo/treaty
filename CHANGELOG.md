@@ -132,8 +132,6 @@ Apps built on treaty keep their own, structured schema changelog with
   a framework option, or another command's secret or token reads it too is a
   `RegistrationError`, as is naming it in `env=`; a deprecated name's warning names it as
   the replacement instead of the flag (#178)
-- `App.formats` holds `treaty.FormatName` values, not `Format` members, so it can list the
-  names an app registers: compare `n.value`, or `FormatName.of(Format.CSV)` (#179)
 
 ### Added
 
@@ -154,7 +152,11 @@ Apps built on treaty keep their own, structured schema changelog with
   format name. `media_type` is stated in the `--format` description, as `FlagEntry` has no
   key for it. A string naming a `Format` member is that member, and `json`, `jsonl`,
   `ndjson`, and `id` still take no renderer. The new `treaty.FormatName` is one `--format`
-  value (#179)
+  value: `App.formats` holds them, and a member's equals and hashes like the member, so
+  `Format.CSV in app.formats` still holds. The new `ctx.format_name` is the value asked
+  for, so a handler tells `html` from `plain`, whose `ctx.mode` is `Format.PLAIN` for both.
+  `--output` is argv only (an `exec` line and `App.call` refuse an `output` key), so the
+  refusal of `--output html` covers every path that writes a file (#179)
 
 ## [1.0.0rc11] - 2026-10-01
 

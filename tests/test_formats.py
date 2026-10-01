@@ -132,10 +132,17 @@ def test_a_value_outside_format_is_unknown() -> None:
 
 def test_manifest_and_help_list_the_offered_formats() -> None:
     app = formats_app()
-    assert app.formats == tuple(
-        FormatName.of(m)
-        for m in (Format.PLAIN, Format.JSON, Format.JSONL, Format.NDJSON, Format.CSV, Format.TSV)
+    # A FormatName equals and hashes like its member, so code comparing members still works
+    assert app.formats == (
+        Format.PLAIN,
+        Format.JSON,
+        Format.JSONL,
+        Format.NDJSON,
+        Format.CSV,
+        Format.TSV,
     )
+    assert Format.CSV in app.formats and Format.YAML not in app.formats
+    assert {Format.CSV: 1}[FormatName("csv")] == 1 and hash(FormatName("csv")) == hash(Format.CSV)
     offered = app.manifest()["flags"]["format"]["enum_values"]  # type: ignore[index]
     assert offered == ["plain", "json", "jsonl", "ndjson", "csv", "tsv"]
     _, out, _ = run(app, ["--help"])
@@ -223,6 +230,7 @@ def html_app() -> App:
         description="Why it happened",
         renderers={"html": lambda d: f"<h1>{d['tag']}</h1>\n"},
         output_file=True,
+        supports_raw_payload=True,
         danger_level="safe",
         exit_codes=(),
     )
@@ -324,3 +332,57 @@ def test_a_command_renderer_for_a_custom_name_needs_it_registered_first() -> Non
             danger_level="safe",
             exit_codes=(),
         )
+
+
+def test_a_handler_tells_a_custom_name_from_plain() -> None:
+    """``ctx.mode`` is plain's for a custom name; ``ctx.format_name`` is what was asked"""
+    app = html_app()
+    seen: list[tuple[Format, FormatName]] = []
+
+    @app.command("peek", description="Peek", danger_level="safe", exit_codes=())
+    def peek(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        seen.append((ctx.mode, ctx.format_name))
+        return {}
+
+    run(app, ["peek", "--format", "html"])
+    run(app, ["peek", "--format", "plain"])
+    run(app, ["peek", "--format", "csv"])
+    run(app, ["peek", "--format", "jsonl"])
+    app.call("peek", {})
+    assert seen == [
+        (Format.PLAIN, FormatName("html")),
+        (Format.PLAIN, FormatName("plain")),
+        (Format.CSV, FormatName("csv")),
+        (Format.JSON, FormatName("json")),
+        (Format.JSON, FormatName("json")),
+    ]
+
+
+def test_output_is_argv_only_so_no_other_path_can_name_a_format_file() -> None:
+    """The ``--output html`` refusal runs on argv, ``--raw-payload`` included; an ``exec``
+    line and ``App.call`` take no ``output`` key at all, so they cannot write a file"""
+    app = html_app()
+    called = app.call("why", {"output": "html"})
+    assert called.error is not None and called.error.code == "ARG_ERROR"
+    assert "Unknown field 'output'" in called.error.message
+    out = io.StringIO()
+    code = app.run(
+        ["exec"],
+        stdin=io.StringIO('{"_cmd": "why", "output": "html"}\n'),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    line = json.loads(out.getvalue())
+    assert code != 0 and line["error"]["code"] == "ARG_ERROR"
+    assert "Unknown field 'output'" in line["error"]["message"]
+    out = io.StringIO()
+    code = app.run(
+        ["why", "--raw-payload", "{}", "--output", "html"],
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    assert code == 2 and json.loads(out.getvalue())["error"]["context"]["value"] == "html"

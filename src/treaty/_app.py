@@ -2119,7 +2119,7 @@ class App:
             run.budget = self._budget(globals_)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
-        run.mode = mode
+        run.mode, run.format_name = mode, selected
         run.attach_logging()
         trace(
             "run",
@@ -3356,6 +3356,9 @@ class _Run:
         """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
+        self.format_name = FormatName.of(Format.JSON)
+        """The ``--format`` value asked for, which ``ctx.format_name`` reports: a custom
+        name, whose mode is plain, or ``mode``'s member"""
         self.ndjson_shown: collections.Counter[str] = collections.Counter()
         """How often ``ndjson`` wrote each warning to stderr so far, by its JSON: a stream's
         envelopes repeat the run's warnings, and add their own (masking) that later ones
@@ -3727,6 +3730,8 @@ class _Run:
             app_name=self.app.name,
             version=self.app.version,
             mode=mode,
+            # An exec line or App.call runs in JSON whatever the run's --format said
+            format_name=self.format_name if self.format_name.mode is mode else FormatName.of(mode),
             request_id=self.request_id,
             env=self.env,
             state=self.app._state,

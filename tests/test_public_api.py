@@ -88,6 +88,7 @@ def inventory() -> dict[str, object]:
         "keywords": {
             "App": _keywords(App.__init__),
             "App.command": _keywords(App.command),
+            "App.format": _keywords(App.format),
             "App.run": _keywords(App.run),
             "Group.command": ["name", "**App.command"],
             "Flag": _keywords(treaty.Flag),

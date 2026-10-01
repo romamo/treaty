@@ -43,13 +43,24 @@ _FORMAT_NAME_MAX = 32
 _MEDIA_TYPE = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class FormatName:
     """One ``--format`` value: a ``Format`` member's, or a name an app registers with
     ``app.format("html", render=...)``. A custom name runs as ``plain`` does: its
-    renderer writes stdout, and errors go to stderr as prose"""
+    renderer writes stdout, and errors go to stderr as prose. A member's name equals and
+    hashes like the member, so ``Format.CSV in app.formats`` holds"""
 
     value: str
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, FormatName):
+            return self.value == other.value
+        if isinstance(other, Format):
+            return self.value == other.value
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.value)  # a StrEnum member hashes as its value
 
     def __post_init__(self) -> None:
         if (
