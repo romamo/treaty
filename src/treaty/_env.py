@@ -2,7 +2,8 @@
 
 A variable treaty reads for an app is ``<APP>_<KEY>``: the app name uppercased, every
 run of other characters an underscore, so ``my-tool`` reads ``MY_TOOL_FORMAT``. Nothing
-unprefixed is read except the conventions every tool shares (``CI``, ``NO_COLOR``,
+unprefixed is read except the names a settings field declares with ``Flag(env=)``,
+the conventions every tool shares (``CI``, ``NO_COLOR``,
 ``TERM``, ``HOME``, ``XDG_*``, proxies) and ``TOOL_TRACE_ID``, which crosses tools.
 """
 

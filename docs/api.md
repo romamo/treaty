@@ -44,6 +44,7 @@ review), **rename**, **remove**.
 | `OutputBase` | keep | `output_file=`: where a relative `--output` lands (#68) |
 | `Check`, `Dependency`, `endpoint` | keep | `App(checks=)`, `App(dependencies=)` |
 | `Deprecated` | keep | `deprecated=` on a command or `Flag` |
+| `EnvName` | keep | A declared variable of `Flag(env=)`, optionally deprecated |
 | `DefaultWhenAbsent`, `Excludes`, `RequiredWhen`, `RequiresAny`, `RequiresOne` | keep | `requires=` |
 | `Retry`, `RetryStrategy` | keep | `retry=`, exit code retry hints |
 | `Rollback`, `StepName` | keep | `rollback=`, `steps=` |
@@ -119,7 +120,7 @@ that no app or example called.
 same keywords.
 
 `Flag`: `description`, `default`, `short`, `pattern`, `secret`, `multiline`, `max_bytes`,
-`pattern_type`, `from_stdin`, `deprecated`, `audit`, `dry_run`. `Arg`: `description`,
+`pattern_type`, `from_stdin`, `deprecated`, `audit`, `dry_run`, `env`. `Arg`: `description`,
 `default`, `pattern`, `secret`, `pattern_type`, `from_stdin`, `multiline`, `audit`. `Out`:
 `default`, `default_factory`, `sort_key`, `ordered`, `volatile`, `high_entropy`, `external`. All keep.
 
