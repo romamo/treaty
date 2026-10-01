@@ -36,6 +36,14 @@ WarnSink = Callable[[str, str, Mapping[str, object]], None]
 T = TypeVar("T")
 
 
+@dataclass(slots=True)
+class OutputSlot:
+    """Where a relative ``--output`` lands, once the run resolved the command's
+    ``output_file=`` resource or function, before the handler runs (#68)"""
+
+    directory: Path | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class Ctx:
     app_name: str
@@ -84,6 +92,8 @@ class Ctx:
     _http: Http | None = field(default=None, repr=False, compare=False)
     _traversal: Traversal | None = field(default=None, repr=False, compare=False)
     _deadline: float | None = field(default=None, repr=False, compare=False)
+    _output: OutputSlot | None = field(default=None, repr=False, compare=False)
+    """Set when a relative ``--output`` lands in a directory the run resolves (#68)"""
     """``time.monotonic()`` when the command times out, else None"""
     _stdin_lines: Lines | None = field(default=None, repr=False, compare=False)
     _stdin_records: Records | None = field(default=None, repr=False, compare=False)

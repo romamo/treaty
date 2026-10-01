@@ -29,6 +29,7 @@ from ._errors import ParseError
 from ._http import NO_PROXY_FLAG, PROXY_FLAG, parse_proxy
 from ._idempotency import IdempotencyKey
 from ._lines import StdinInput
+from ._output_base import OutputBase
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path
 from ._retry import RETRIES_FLAG, RETRY_DELAY_FLAG, parse_delay, parse_retries
@@ -263,6 +264,20 @@ def output_path(raw: str) -> Path:
     return check_path(raw, OUTPUT_FLAG)
 
 
+def _output_description(command: Command) -> str:
+    """The ``--output`` help, naming where a relative path lands unless it is the cwd (#68)"""
+    text = "Write the result to this file in the --format representation; stdout gets the envelope"
+    root = command.output_root
+    if root is None or root.is_cwd:
+        return text
+    where = (
+        "the project root"
+        if root.label == OutputBase.PROJECT_ROOT
+        else f"the {root.label} directory"
+    )
+    return f"{text}; a relative path lands in {where}"
+
+
 def resume_step(raw: object, command: Command) -> StepName:
     """``--resume-from``: one of the command's declared steps (REQ-O-010)"""
     available = [s.value for s in command.steps]
@@ -436,7 +451,7 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         "output",
         lambda c: c.output_file,
         "string",
-        "Write the result to this file in the --format representation; stdout gets the envelope",
+        _output_description,
         parse=lambda v, c: output_path(str(v)),
         metavar="PATH",
         entry=lambda c: {"pattern_type": "filepath"},

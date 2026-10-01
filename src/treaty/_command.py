@@ -10,6 +10,7 @@ import typing
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._args_adapter import ArgsAdapters, ArgsModel
@@ -36,6 +37,7 @@ from ._jobs import Job, descriptor_schema
 from ._lines import INPUT_LINES_FLAG, StdinInput
 from ._mode import Format
 from ._out import NO_ORDER, OutSpec, check_order
+from ._output_base import OutputBase, OutputRoot, output_root
 from ._page import DEFAULT_LIMIT, Limit, Page
 from ._protect import check_trust, declares_external, with_trust_tags
 from ._resources import ResourceSpec, dependency_params, refuse_async, resource_graph
@@ -188,6 +190,8 @@ class Command:
     """Older majors still served, oldest first (REQ-O-014)"""
     project_root: tuple[str, ...] = ()
     """Marker files whose directory, found walking up from the cwd, is the project root"""
+    output_root: OutputRoot | None = None
+    """Where a relative ``--output`` lands, when ``output_file`` is declared (#68)"""
     retry: Retry | None = None
     """How ``ctx.retry`` retries (REQ-F-078); adds ``--retries`` and ``--retry-delay``"""
     order: OutSpec = NO_ORDER
@@ -371,7 +375,7 @@ def build_command(
     heartbeat: bool = False,
     stdin_input: StdinInput | None = None,
     stdin_records: RecordSpec | None = None,
-    output_file: bool = False,
+    output_file: bool | OutputBase | type | Callable[..., Path] = False,
     requires_auth: bool = False,
     auth: AuthKind | None = None,
     token_env_vars: Sequence[str] = (),
@@ -494,6 +498,7 @@ def build_command(
         raise RegistrationError(
             f"{path}: project_root names marker files, such as project_root=('.git',)"
         )
+    out_root = output_root(output_file, str(path), project_root)
     if retry is not None and not isinstance(retry, Retry):
         raise RegistrationError(f"{path}: retry takes treaty.Retry(...), not {retry!r}")
     returns_job = isinstance(output_type, type) and issubclass(output_type, Job)
@@ -626,8 +631,9 @@ def build_command(
         output_schema = _with_step_fields(output_schema, step_names)
     if trust_tags:
         output_schema = with_trust_tags(output_schema)
+    roots = tuple(dict.fromkeys((*resources, *(() if out_root is None else out_root.deps))))
     graph = resource_graph(
-        resources,
+        roots,
         str(path),
         args_type if args_model is None else args_model.model,
         provided,
@@ -675,7 +681,8 @@ def build_command(
         heartbeat=heartbeat,
         stdin_input=stdin_input,
         stdin_records=stdin_records,
-        output_file=output_file,
+        output_file=out_root is not None,
+        output_root=out_root,
         requires_auth=requires_auth,
         auth=auth,
         token_env_vars=tuple(

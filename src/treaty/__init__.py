@@ -32,6 +32,7 @@ from ._jobs import Job, JobStore
 from ._journal import AuditLog
 from ._mode import Format
 from ._out import Binary, Out
+from ._output_base import OutputBase
 from ._page import Page, PageRequest
 from ._retry import Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen, RequiresAny, RequiresOne
@@ -90,6 +91,7 @@ __all__ = [
     "NoArgs",
     "Out",
     "OutputAdapter",
+    "OutputBase",
     "Format",
     "Page",
     "PageRequest",
