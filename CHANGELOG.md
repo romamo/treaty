@@ -18,6 +18,15 @@ Apps built on treaty keep their own, structured schema changelog with
   README's links are absolute, so they resolve on pypi.org, and a test fails on a relative
   one (#122)
 
+### Fixed
+
+- `--max-output` and `<APP>_MAX_OUTPUT_BYTES` now bound the line as written, its newline
+  included. The cut measured the JSON envelope without the newline that ends every line
+  on stdout, so a cut that filled the cap exactly, which a string cut always does, wrote
+  one byte over it; this held for a command's response, each stream event, and each
+  `exec` line. `meta.total_bytes` counts the same bytes, so it is one more than before
+  (#129)
+
 ## [1.0.0rc7] - 2026-09-30
 
 The seventh 1.0 release candidate: 2 fixes.
