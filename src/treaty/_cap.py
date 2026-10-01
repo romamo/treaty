@@ -10,7 +10,8 @@ Each cut is reported as a ``FIELD_TRUNCATED`` warning, and ``meta.truncation_hin
 is the command that gets the rest: the next page of a list command, else the same
 command with a larger ``--max-output``. The cap governs ``data`` only: when error or meta alone
 exceed it, ``data`` still gets the cap as its own budget, so the envelope is at most
-that oversized base plus the cap.
+that oversized base plus the cap. Sizes are of the line as written, its newline
+included, so ``meta.total_bytes`` and the cap count the same bytes.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ._env import MAX_OUTPUT_BYTES, MAX_STDIN_BYTES, app_var
-from ._envelope import Envelope, WarningDetail, serialize
+from ._envelope import Envelope, WarningDetail, written_size
 from ._errors import ParseError
 from ._out import data_path, is_binary
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Position
@@ -169,10 +170,10 @@ def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
     """``envelope`` within ``cap``, with the command that gets the rest in its ``meta``;
     ``data`` is cleaned of terminal escapes first, as every envelope written is"""
     envelope = envelope.cleaned()
-    total = len(serialize(envelope).encode())
+    total = written_size(envelope)
     if total <= cap.bytes or envelope.data is None:
         return envelope
-    base = len(serialize(dataclasses.replace(envelope, data=None)).encode())
+    base = written_size(dataclasses.replace(envelope, data=None))
     if base > cap.bytes:
         # Error or meta alone exceed the cap, which cutting data cannot fix; data still
         # gets the cap as its own budget, so the envelope stays bounded
@@ -180,7 +181,8 @@ def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
 
     def fits(candidate: object, pending: list[Cut]) -> bool:
         trial = _truncated(envelope, candidate, pending, total, rerun)
-        return len(serialize(trial).encode()) <= cap.bytes
+        # The envelope as written, newline included (#129)
+        return written_size(trial) <= cap.bytes
 
     shrunk = shrink(envelope.data, fits)
     if shrunk is None:

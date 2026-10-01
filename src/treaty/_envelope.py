@@ -412,7 +412,16 @@ def serialize(envelope: Envelope) -> str:
     return json.dumps(envelope.to_json(), separators=(",", ":"), sort_keys=True)
 
 
+_LINE_END = "\n"
+
+
+def written_size(envelope: Envelope) -> int:
+    """Bytes ``write_envelope`` puts on stdout for ``envelope``: the JSON line and its
+    newline, which ``--max-output`` bounds (REQ-F-052)"""
+    return len(serialize(envelope).encode()) + len(_LINE_END)
+
+
 def write_envelope(envelope: Envelope, stream: IO[str]) -> None:
     stream.write(serialize(envelope))
-    stream.write("\n")
+    stream.write(_LINE_END)
     stream.flush()

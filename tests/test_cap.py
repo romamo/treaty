@@ -1,6 +1,7 @@
 import io
 import json
 import shlex
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import pytest
@@ -78,7 +79,7 @@ def test_under_cap_is_untouched() -> None:
 def test_list_is_cut_to_the_longest_prefix_that_fits() -> None:
     code, out = run(big_app(), ["items"])
     env = envelope(out)
-    assert code == 0 and len(out.rstrip("\n").encode()) <= MIN_BYTES
+    assert code == 0 and len(out.encode()) <= MIN_BYTES
     meta = env["meta"]
     assert meta["truncated"] is True and meta["total_count"] == 1000
     assert meta["returned_count"] == len(env["data"]) > 1
@@ -120,10 +121,77 @@ def test_wide_object_loses_trailing_keys() -> None:
     code, out = run(big_app(), ["table"])
     env = envelope(out)
     assert code == 0 and env["meta"]["truncated"] is True
-    assert len(out.rstrip("\n").encode()) <= MIN_BYTES
+    assert len(out.encode()) <= MIN_BYTES
     rows = env["data"]["rows"]
     assert env["data"]["name"] == "t" and set(rows) == {f"k{i}" for i in range(len(rows))}
     assert [w["context"]["field"] for w in env["warnings"]] == ["data.rows"]
+
+
+def sized_app(width: int) -> App:
+    """Fixed data whose size steps with ``width``, so a sweep lands each cut on every
+    byte offset of the cap, as the length of ``meta.cwd`` did in #129"""
+    app = App("sizectl", version="1.0.0")
+
+    @app.command("ls", description="List", danger_level="safe", exit_codes=(), paginated=False)
+    def ls(args: NoArgs, ctx: Ctx) -> list[str]:
+        return ["x" * width for _ in range(2000)]
+
+    @app.command("log", description="One long field", danger_level="safe", exit_codes=())
+    def log(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"log": "y" * (20_000 + width), "name": "n"}
+
+    @app.command("tail", description="Stream", danger_level="safe", exit_codes=(), streaming=True)
+    def tail(args: NoArgs, ctx: Ctx) -> Iterator[list[str]]:
+        yield ["x" * width for _ in range(2000)]
+
+    return app
+
+
+CAP = 8192
+EXEC = '{"_cmd": "ls"}\n{"_cmd": "log"}\n'
+
+
+@pytest.mark.parametrize(
+    ("argv", "stdin", "slack"),
+    [
+        # A string is cut to the character, so the line fills the cap
+        (["log"], "", 0),
+        # A list keeps whole items: at most one item and its comma short of the cap
+        (["ls"], "", None),
+        (["ls", "--warnings-as-errors"], "", None),
+        (["tail"], "", None),
+        (["exec"], EXEC, None),
+    ],
+)
+def test_the_written_line_newline_included_never_exceeds_the_cap(
+    argv: list[str], stdin: str, slack: int | None
+) -> None:
+    """#129: the cut measured the envelope without the newline write_envelope adds, so a
+    cut that filled the cap exactly wrote cap + 1 bytes"""
+    for width in range(1, 25):
+        env = {"SIZECTL_MAX_OUTPUT_BYTES": str(CAP)}
+        _, out = run(sized_app(width), argv, env=env, stdin=stdin)
+        lines = out.splitlines(keepends=True)
+        assert all(line.endswith("\n") and len(line.encode()) <= CAP for line in lines)
+        # A stream's closing event is small and uncut; every cut line keeps what fits
+        cut = [line for line in lines if json.loads(line)["meta"].get("truncated")]
+        assert cut, (argv, width)
+        room = width + 3 if slack is None else slack
+        for line in cut:
+            assert CAP - room <= len(line.encode()), (argv, width, len(line.encode()))
+
+
+def test_total_bytes_counts_the_line_as_written() -> None:
+    """``meta.total_bytes`` and the cap count the same bytes: the full line rerun under a
+    cap of exactly ``total_bytes`` is not cut"""
+    _, out = run(sized_app(10), ["ls"], env={"SIZECTL_MAX_OUTPUT_BYTES": str(CAP)})
+    total = envelope(out)["meta"]["total_bytes"]
+    _, full = run(sized_app(10), ["ls", "--max-output", str(total + SLACK)])
+    assert len(full.encode()) <= total + SLACK and "truncated" not in envelope(full)["meta"]
+    _, cut = run(sized_app(10), ["ls", "--max-output", str(len(full.encode()) - 1)])
+    assert envelope(cut)["meta"]["truncated"] is True
+    _, exact = run(sized_app(10), ["ls", "--max-output", str(len(full.encode()))])
+    assert "truncated" not in envelope(exact)["meta"]
 
 
 def test_env_var_raises_the_cap_and_flag_overrides_it() -> None:

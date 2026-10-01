@@ -4,7 +4,6 @@ import base64
 import datetime as dt
 import io
 import json
-import os
 import random
 import time
 from collections.abc import Iterator
@@ -427,7 +426,9 @@ def test_external_data_audit_flags_network_commands_without_a_declaration() -> N
 
 def test_masking_many_values_keeps_the_response_under_the_byte_cap() -> None:
     app = App("maskctl", version="1.0.0", description="Masking")
-    blobs = tuple(base64.b64encode(os.urandom(40)).decode() for _ in range(5000))
+    # Fixed data: random blobs made the response size, and so the cut, vary per run (#129)
+    rng = random.Random(129)
+    blobs = tuple(base64.b64encode(rng.randbytes(40)).decode() for _ in range(5000))
 
     @dataclass(frozen=True, slots=True)
     class Blobs:
