@@ -3,7 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # A pull request runs on Ubuntu only, unless it carries the full-ci label; pushes to
+  # main and the release workflows that call this one run every OS
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_call:
     inputs:
       ref:
@@ -62,13 +65,9 @@ jobs:
   test:
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.14"]
-        include:
-          # Free-threaded CPython (PEP 779): the same suite with the GIL off
-          - os: ubuntu-latest
-            python: "3.14t"
+      # Every OS, plus free-threaded CPython (PEP 779, the GIL off); Ubuntu alone on a pull
+      # request without the full-ci label
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && '{"os":["ubuntu-latest"],"python":["3.14"]}' || '{"os":["ubuntu-latest","macos-latest","windows-latest"],"python":["3.14"],"include":[{"os":"ubuntu-latest","python":"3.14t"}]}') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -102,8 +101,7 @@ jobs:
     # The documented path for a new project: init beside a spec checkout, then the kit
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && '{"os":["ubuntu-latest"]}' || '{"os":["ubuntu-latest","macos-latest","windows-latest"]}') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
