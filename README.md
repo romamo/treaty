@@ -416,9 +416,11 @@ stderr, so a stray `print()` from the handler or a library lands there and the e
 gets a `THIRD_PARTY_STDOUT` warning with the text (first 4 KiB) and the byte count; lines
 of JSON go to stderr unreported. Under `App.main()` file descriptor 1 is a pipe to
 stderr, so a child process or a C extension cannot write ahead of the envelope and its
-text is in the warning too; `App.run()` swaps only `sys.stdout`. A library that prints on
-import is caught when the entry module calls `treaty.intercept_stdout()` before importing
-the app, as the `entry.py` of `treaty init` does (REQ-F-060). Under
+text is in the warning too; on stderr that text is cleaned as a stray `print()` is, so
+only colors (where the run may color) of its terminal escapes stay. `App.run()` swaps
+only `sys.stdout`. A library that prints on import is caught when the entry module calls
+`treaty.intercept_stdout()` before importing the app, as the `entry.py` of `treaty init`
+does (REQ-F-060). Under
 `treaty-mcp` the swap lasts the whole process. Handlers log with
 `ctx.log("connecting", host=host)`: one line on stderr, a JSON object with `level`,
 `message`, and `fields` in JSON mode and `message key=value` otherwise. Declared secrets

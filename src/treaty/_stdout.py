@@ -6,6 +6,10 @@ the first 4 KiB and a byte count; before an envelope is written, a marker sent t
 the pipe makes sure nothing written earlier is still on its way. A C extension, a child
 that inherited the descriptor, or an import-time ``print`` is caught the same way, the
 last once ``intercept_stdout()`` runs before the app is imported.
+
+What reaches stderr is cleaned as printed text is (#105, #117): colors (SGR) stay where
+the run may color, every other escape goes, and other controls but tab, newline, and
+carriage return are shown as escapes. Bytes that are not UTF-8 pass through unchanged.
 """
 
 from __future__ import annotations
@@ -17,6 +21,9 @@ import os
 import sys
 import threading
 import uuid
+
+from ._envelope import open_escape, terminal_text
+from ._mode import color_allowed
 
 TEXT_CAP = 4096
 """Bytes of captured text a ``THIRD_PARTY_STDOUT`` warning carries"""
@@ -33,6 +40,13 @@ class Interceptor:
             sys.stdout.flush()
         self.saved = os.dup(1)
         self._marker = f"\0treaty-sync-{uuid.uuid4().hex}\0".encode()
+        self.color = color_allowed(os.environ, os.isatty(self.saved))
+        """Colors (SGR) stay on what is passed on to stderr, as on a ``ctx.log`` line;
+        decided as the run decides, from the environment and whether stdout is a
+        terminal"""
+        self._decoder = codecs.getincrementaldecoder("utf-8")("surrogateescape")
+        self._held = ""
+        """The unfinished escape the last read ended with, until the next completes it"""
         read, write = os.pipe()
         os.dup2(write, 1)
         os.close(write)
@@ -84,6 +98,7 @@ class Interceptor:
             pending += chunk
             while (at := pending.find(marker)) >= 0:
                 self._pass_on(pending[:at])
+                self._release()  # what was written before the envelope is out whole
                 pending = pending[at + len(marker) :]
                 with self._cond:
                     self._synced += 1
@@ -100,17 +115,35 @@ class Interceptor:
             self._pass_on(pending[: len(pending) - keep])
             pending = pending[len(pending) - keep :]
         self._pass_on(pending)
+        self._release(final=True)
         os.close(self._read)
 
     def _pass_on(self, data: bytes) -> None:
         if not data:
             return
-        view = memoryview(data)
-        while view:
-            view = view[os.write(2, view) :]
+        # A character or an escape the read split waits for the rest of it
+        text = self._held + self._decoder.decode(data)
+        cut = open_escape(text)
+        self._held = text[cut:]
+        self._show(text[:cut])
         with self._cond:
             self._bytes += len(data)
             self._text += data[: max(TEXT_CAP - len(self._text), 0)]
+
+    def _release(self, *, final: bool = False) -> None:
+        """An unfinished escape still held, cleaned as it stands; with ``final``, a
+        character the descriptor's last bytes left unfinished too"""
+        held = self._held + self._decoder.decode(b"", final=final)
+        self._held = ""
+        self._show(held)
+
+    def _show(self, text: str) -> None:
+        if not text:
+            return
+        shown = terminal_text(text, color=self.color, keep="\r", rewrite=True)
+        view = memoryview(shown.encode("utf-8", "surrogateescape"))
+        while view:
+            view = view[os.write(2, view) :]
 
 
 _active: Interceptor | None = None

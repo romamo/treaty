@@ -96,6 +96,28 @@ def terminal_text(text: str, *, color: bool, keep: str = "", rewrite: bool = Fal
     return visible(joined, keep + "\x1b", rewrite=rewrite)
 
 
+# An escape a write ends inside of, 7-bit or C1: print() may write one in two parts, and a
+# child's output may arrive split across reads; the second part, cleaned on its own, would
+# reach stderr as text (#105, #117). An OSC is held only within its line: a stray \x9d, as
+# in mojibake, would otherwise take the next lines
+_OPEN_ESCAPE = re.compile(
+    r"(?:\x1b(?:\][^\x07\x1b\n]*\x1b?|\[[0-?]*[ -/]*)?|\x9d[^\x07\x1b\x9c\n]*\x1b?"
+    r"|\x9b[0-?]*[ -/]*)\Z"
+)
+HELD_CAP = 4096
+"""Characters of an unfinished escape held for the next write; past them it is cleaned as
+it stands, and the rest of it arrives as text"""
+
+
+def open_escape(text: str) -> int:
+    """Where the unfinished escape ``text`` ends with starts, to be held until the next
+    write completes it; ``len(text)`` when there is none, or it is past ``HELD_CAP``"""
+    unfinished = _OPEN_ESCAPE.search(text)
+    if unfinished is not None and len(text) - unfinished.start() <= HELD_CAP:
+        return unfinished.start()
+    return len(text)
+
+
 def clean(value: object) -> object:
     """Every string value of a JSON value without terminal escapes, and valid UTF-8 once
     encoded: whatever a handler or a library returned, the envelope stays plain text. Keys
