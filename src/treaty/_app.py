@@ -928,7 +928,8 @@ class App:
         minimum versions, each a ``doctor`` check (REQ-C-018).
         ``filesystem_side_effects=[SideEffect("~/.cache/tool/", "cache")]`` declares where
         the command writes on disk, in the manifest; the ``cleanup`` built-in removes the
-        ``temp`` and ``cache`` paths (REQ-C-011).
+        ``temp`` and ``cache`` paths (REQ-C-011). A ``{project_root}/`` path is under the
+        project the command's ``project_root=`` markers find.
         ``background=Background("tool stop-watcher", max_lifetime_seconds=3600)`` lets
         ``ctx.spawn`` start a process that outlives the run; the output carries
         ``background_pid`` and ``cleanup_command`` (REQ-C-010).

@@ -579,7 +579,7 @@ def build_command(
         # REQ-C-011: where the cache is, for the manifest and the cleanup built-in
         cached = SideEffect(f"~/.cache/{app_name}/{path}/", "cache", ttl_seconds=cache.ttl_seconds)
         filesystem_side_effects = (
-            *check_side_effects(str(path), filesystem_side_effects),
+            *check_side_effects(str(path), filesystem_side_effects, project_root),
             cached,
         )
     step_names = _check_steps(path, steps, resumable, rollback, streaming, output_type)
@@ -830,7 +830,9 @@ def build_command(
         shell_checked=() if declared_child is None else declared_child.user_controlled_args,
         platform=check_platform(str(path), platform),
         required_tools=check_required_tools(str(path), required_tools or {}),
-        filesystem_side_effects=check_side_effects(str(path), filesystem_side_effects),
+        filesystem_side_effects=check_side_effects(
+            str(path), filesystem_side_effects, project_root
+        ),
         background=background,
         preserve_locale=preserve_locale,
         child_log=child_log,

@@ -938,6 +938,14 @@ def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
   in `data.failed` with a `CLEANUP_INCOMPLETE` warning. `credential` and `config` paths
   are never removed, nor a match reached through a symlink a placeholder matched; a path
   of just `/` or `~/` plus a placeholder, or with a `..` segment, is refused
+- A path under the project starts with `{project_root}/`, such as
+  `SideEffect("{project_root}/tmp/dashboard/", "cache")`, on a command declaring
+  `project_root=` markers (without them it is a `RegistrationError`). `cleanup` and
+  `status` find the project from their own cwd (or `--cwd`) up, as the command does; with
+  no marker found they touch nothing of it and warn `PROJECT_ROOT_NOT_FOUND`, never taking
+  the cwd for the project, and a match whose directory resolves outside the project
+  through a symlink is left alone. A safe command whose writes are all declared, this way
+  or another, passes the `fs-side-effects` audit rule
 - `status` (safe, exits 0 whatever exists) lists every declared side effect with the
   absolute paths it matches and their sizes (`--show-side-effects`), and the state files,
   config files, idempotency records, the audit log, and declared `credential` and `config`
