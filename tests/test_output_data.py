@@ -267,7 +267,7 @@ def test_10_the_manifest_describes_the_raw_write_and_stays_valid() -> None:
     manifest = download_app().manifest()
     spec_validator("manifest-response").validate(manifest)
     commands = manifest["commands"]
-    assert manifest["schema_version"] == "3.3"
+    assert manifest["schema_version"] == "3.5"
     assert "sha256" in commands["png"]["flags"]["output"]["description"]
     assert "--format" in commands["rows"]["flags"]["output"]["description"]
     # REQ-O-001: output_file on exactly the commands that take --output

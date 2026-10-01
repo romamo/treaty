@@ -108,11 +108,14 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
 
 
 def declared_env_rows(path: CommandPath, command: Command) -> list[tuple[str, FieldInfo, str]]:
-    """Each ``Flag(env=)`` name of the command's flags, the field it sets, and what it is"""
+    """Each variable of the command's flags that declare ``Flag(env=)``, the field it sets,
+    and what it is: a plain flag's ``<APP>_<NAME>``, then the declared names"""
     rows: list[tuple[str, FieldInfo, str]] = []
     for f in command.fields:
-        own = command.secret_env_vars.get(f.name)
+        own = command.own_env_var(f.name)
         what = f"Default of --{f.flag} of {path.value}"
+        if not f.secret and own is not None:
+            rows.append((own, f, what))
         default = own or f"--{f.flag}"
         rows += [(n.name, f, declared_text(n, what, own, default)) for n in f.spec.env]
     return rows
@@ -171,7 +174,11 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
             each = "repeat it, one JSON object each" if repeated else "a JSON object"
             text += f"; {each}: {object_shape(shape)}"
         rows.append((label, text))
-        rows += _declared_rows(f, f"when --{f.flag} is not given", f"--{f.flag}")
+        own = command.own_env_var(f.name)
+        if own is None:
+            continue
+        rows.append((f"${own}", f"{f.spec.description}: read when --{f.flag} is not given"))
+        rows += _declared_rows(f, f"when --{f.flag} is not given and ${own} is not set", own)
     rows.extend(_framework_rows(command))
     lines += _section("Flags", rows)
     if command.requires:  # REQ-C-026

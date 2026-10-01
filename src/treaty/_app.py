@@ -1349,24 +1349,31 @@ class App:
     def _check_flag_env(self, command: Command) -> None:
         """``Flag(env=)`` names read one value each: no framework variable, no setting's
         variable or declared name, no other flag's variable in the same command, and not
-        the flag's own ``<APP>_<NAME>``. Flags of different commands may share a name,
-        unless one reads it as a secret and the other as a plain value, which would echo it"""
+        the flag's own ``<APP>_<NAME>``, which a plain flag that declares names reads first
+        and which no framework or setting variable may be either (REQ-F-073). Flags of
+        different commands may share a name, unless one reads it as a secret and the other
+        as a plain value, which would echo it"""
         if not any(f.spec.env for f in command.fields):
             return
         taken = {app_var(self.name, v.key): f"the framework's {v.key}" for v in KNOWN}
         taken |= settings_env_taken(self._settings_cls, self.name)
         where = command.path.value
-        taken |= {
-            v: f"--{k.replace('_', '-')} of {where}" for k, v in command.secret_env_vars.items()
-        }
         taken |= {v: f"the token of {where}" for v in command.token_env_vars}
+        for k, v in command.flag_env_vars.items():
+            if v in taken:
+                raise RegistrationError(
+                    f"{where}: --{k.replace('_', '-')} reads {v} before its env= names, "
+                    f"which is already read for {taken[v]}; rename the flag or drop env="
+                )
+        own_vars = {**command.secret_env_vars, **command.flag_env_vars}
+        taken |= {v: f"--{k.replace('_', '-')} of {where}" for k, v in own_vars.items()}
         for f in command.fields:
             if f.spec.env and f.flag_type is FlagType.ARRAY and f.object_type is not None:
                 raise RegistrationError(
                     f"{where}: --{f.flag} takes a list of JSON objects, which a variable "
                     "cannot carry as comma-separated text; drop env= or take one object"
                 )
-            own = command.secret_env_vars.get(f.name)
+            own = command.own_env_var(f.name)
             others = {k: v for k, v in taken.items() if k != own}
             check_env_names(
                 f"{where}: --{f.flag}", own, f.spec.env, others, default=own or f"--{f.flag}"
@@ -1390,6 +1397,8 @@ class App:
                 elif c is command:
                     continue
                 else:
+                    plain_own = c.flag_env_vars.get(f.name)
+                    names = [*([] if plain_own is None else [plain_own]), *names]
                     plain |= dict.fromkeys(names, f"plain --{f.flag} of {where}")
         for var in command.token_env_vars:
             if var in plain:
@@ -1403,7 +1412,12 @@ class App:
                 clash = next((n for n in names if n in plain), None)
                 read_as = None if clash is None else plain[clash]
             else:
-                clash = next((n.name for n in f.spec.env if n.name in secret), None)
+                plain_own = command.flag_env_vars.get(f.name)
+                names = [
+                    *([] if plain_own is None else [plain_own]),
+                    *(n.name for n in f.spec.env),
+                ]
+                clash = next((n for n in names if n in secret), None)
                 read_as = None if clash is None else secret[clash]
             if clash is not None:
                 raise RegistrationError(
@@ -1802,7 +1816,29 @@ class App:
             dependencies=[d.to_json() for d in self.dependencies],
             audit_log_path=None if audit_log_path is None else str(audit_log_path),
             unlogged=UNLOGGED & self._builtins,
+            settings_env_vars=self._settings_env_vars(),
         )
+
+    def _settings_env_vars(self) -> list[dict[str, object]]:
+        """Root ``env_vars`` entries of the settings (ManifestResponse 3.5): each plain
+        setting's ``<APP>_<NAME>``, then the names it declares. A secret setting is left
+        out, since root ``env_vars`` holds no secret and a setting has no command whose
+        ``secret_env_vars`` could list it"""
+        entries: list[dict[str, object]] = []
+        for f in () if self.settings is None else self.settings.fields:
+            if f.secret:
+                continue
+            own = app_var(self.name, f.name)
+            entries.append({"name": own, "description": f"Setting {f.name}, over the config files"})
+            for n in f.env:
+                entry: dict[str, object] = {
+                    "name": n.name,
+                    "description": declared_text(n, f"Setting {f.name}", own, own),
+                }
+                if n.deprecated is not None:
+                    entry["deprecated"] = True
+                entries.append(entry)
+        return entries
 
     def environment(self) -> list[tuple[str, str]]:
         """Every variable the app reads, by its exact name, with what it sets
@@ -4473,7 +4509,7 @@ class _Run:
             var = invocation.env_sources.get(f.name, "")
             name = deprecated_name(f.spec.env, var)
             if name is not None and name.deprecated is not None:
-                instead = env_replacement(name, command.secret_env_vars.get(f.name, f"--{f.flag}"))
+                instead = env_replacement(name, command.own_env_var(f.name) or f"--{f.flag}")
                 found.append((DEPRECATED_ENV_VAR, var, name.deprecated, instead))
         spec = self.app.settings
         for s in () if spec is None else spec.fields:
@@ -6383,6 +6419,7 @@ class _Run:
                 self.app.formats,
                 self.app.name,
                 builtins=self.app.builtins,
+                settings_env_vars=self.app._settings_env_vars(),
             )
         return self.emit(
             mode, self._envelope(0, data=data), render=_machine_text(mode), settle=False

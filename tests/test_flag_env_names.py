@@ -182,24 +182,110 @@ def test_a_deprecated_name_warns_naming_the_replacement() -> None:
 def test_the_manifest_lists_the_names_and_validates_against_the_spec() -> None:
     manifest = make_app().manifest()
     spec_validator("manifest-response").validate(manifest)
+    assert manifest["schema_version"] == "3.5"
     entry = manifest["commands"]["download"]
     assert entry["secret_env_vars"] == ["PY_IBKR_TOKEN", "IBKR_FLEX_TOKEN", "IBKR_TOKEN"]
-    query = entry["flags"]["query-id"]
+    flags = entry["flags"]
+    query = flags["query-id"]
     assert query["required"] is False
-    assert query["description"] == (
-        "Flex Query ID (read from $IBKR_FLEX_QUERY_ID or $IBKR_QUERY when not passed)"
-    )
+    # ManifestResponse 3.4: the names in precedence order, the prefixed one first, and no
+    # prose in the description
+    assert query["description"] == "Flex Query ID"
+    assert query["env_vars"] == [
+        {"name": "PY_IBKR_QUERY_ID"},
+        {"name": "IBKR_FLEX_QUERY_ID"},
+        {"name": "IBKR_QUERY"},
+    ]
+    assert flags["project"]["env_vars"] == [
+        {"name": "PY_IBKR_PROJECT"},
+        {"name": "CLOUDFALL_PROJECT"},
+    ]
+    # A secret's variables are in secret_env_vars only (REQ-C-016)
+    assert all("env_vars" not in flags[f] for f in ("token-from-env", "token-from-file"))
+
+
+def test_a_deprecated_name_is_marked_in_env_vars() -> None:
+    @dataclass(frozen=True)
+    class Args:
+        region: str = Flag(
+            default="eu",
+            description="Region",
+            env=("AWS_REGION", EnvName("REGION", deprecated=Deprecated("1.0.0"))),
+        )
+
+    app = App("py-ibkr", version="1.0.0")
+
+    @app.command("where", description="Where", danger_level="safe", exit_codes=())
+    def where(args: Args, ctx: Ctx) -> NoArgs:
+        return NoArgs()
+
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    assert manifest["commands"]["where"]["flags"]["region"]["env_vars"] == [
+        {"name": "PY_IBKR_REGION"},
+        {"name": "AWS_REGION"},
+        {"name": "REGION", "deprecated": True},
+    ]
+
+
+@dataclass(frozen=True)
+class Configured:
+    endpoint: str = Flag(default="https://x.test", description="Endpoint", env=("ENDPOINT",))
+    api_key: str = Flag(default="", description="API key")
+
+
+def test_every_recognized_variable_has_exactly_one_home() -> None:
+    """REQ-F-073 (ManifestResponse 3.5): a flag's env_vars, a command's secret_env_vars, or
+    the root env_vars, which lists the variables that back no flag, each described"""
+    app = App("py-ibkr", version="1.0.0", settings=Configured)
+
+    @app.command("download", description="Download", danger_level="safe", exit_codes=())
+    def download(args: Download, ctx: Ctx) -> NoArgs:
+        return NoArgs()
+
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    root = manifest["env_vars"]
+    assert all(e["description"] for e in root)
+    names = [e["name"] for e in root]
+    assert names == [
+        "PY_IBKR_MAX_STDIN_BYTES",
+        "PY_IBKR_STATE_DIR",
+        "PY_IBKR_SESSION",
+        "PY_IBKR_AUDIT_LOG",
+        "PY_IBKR_ENDPOINT",
+        "ENDPOINT",
+    ]
+    # A secret setting has no home of its own: root env_vars holds no secret
+    assert "PY_IBKR_API_KEY" not in names
+    assert manifest["flags"]["format"]["env_vars"] == [{"name": "PY_IBKR_FORMAT"}]
+    flagged = [
+        e["name"]
+        for entry in [manifest, *manifest["commands"].values()]
+        for flag in entry["flags"].values()
+        for e in flag.get("env_vars", [])
+    ]
+    secrets = [v for c in manifest["commands"].values() for v in c.get("secret_env_vars", [])]
+    assert not set(names) & set(flagged) and not set(names) & set(secrets)
+    assert not set(flagged) & set(secrets)
+    assert {"PY_IBKR_FORMAT", "PY_IBKR_MAX_OUTPUT_BYTES", "PY_IBKR_NO_UPDATE"} <= set(flagged)
 
 
 def test_help_and_agents_md_list_the_names() -> None:
     _, _, err = run(["download", "--help"], {})
     assert "$IBKR_FLEX_TOKEN" in err and "read when $PY_IBKR_TOKEN is not set" in err
-    assert "$IBKR_QUERY" in err and "Flex Query ID: read when --query-id is not given" in err
+    assert "$PY_IBKR_QUERY_ID" in err and "Flex Query ID: read when --query-id is not given" in err
+    assert "$IBKR_QUERY" in err
+    assert "read when --query-id is not given and $PY_IBKR_QUERY_ID is not set" in err
     assert "(deprecated since 0.9.0; use PY_IBKR_TOKEN)" in err
     _, _, root = run(["--help"], {})
     assert "CLOUDFALL_PROJECT" in root.split("Environment\n", 1)[1]
     docs = {d.name: d for d in env_vars(make_app())}
     assert docs["IBKR_FLEX_QUERY_ID"].type == "integer"
+    assert docs["PY_IBKR_QUERY_ID"].description == "Default of --query-id of download"
+    assert docs["IBKR_FLEX_QUERY_ID"].description == (
+        "Default of --query-id of download, when PY_IBKR_QUERY_ID is not set"
+    )
     assert docs["IBKR_FLEX_TOKEN"].description == (
         "Default of --token of download, when PY_IBKR_TOKEN is not set"
     )
@@ -304,26 +390,118 @@ def test_a_bad_declared_name_is_refused_at_registration(
             return NoArgs()
 
 
-def test_a_plain_flag_may_name_its_prefixed_variable_and_a_deprecation_names_the_flag() -> None:
+def test_a_plain_flag_reads_its_prefixed_variable_first_and_a_deprecation_names_it() -> None:
+    """REQ-F-073: a plain flag that declares names reads ``<APP>_<NAME>`` before them, as a
+    secret and a setting do; a flag without ``env=`` reads no variable"""
+
     @dataclass(frozen=True)
     class Args:
         region: str = Flag(
             default="eu",
             description="Region",
-            env=("PY_IBKR_REGION", EnvName("REGION", deprecated=Deprecated("1.0.0"))),
+            env=("AWS_REGION", EnvName("REGION", deprecated=Deprecated("1.0.0"))),
         )
+        zone: str = Flag(default="a", description="Zone")
 
     app = App("py-ibkr", version="1.0.0")
 
     @app.command("where", description="Where", danger_level="safe", exit_codes=())
     def where(args: Args, ctx: Ctx) -> dict[str, str]:
-        return {"region": args.region}
+        return {"region": args.region, "zone": args.zone}
 
-    result = app.call("where", {}, env={"REGION": "us", "PY_IBKR_AUDIT_LOG": "0"})
-    assert result.data == {"region": "us"}
+    env = {"PY_IBKR_AUDIT_LOG": "0", "PY_IBKR_ZONE": "b"}
+    result = app.call("where", {}, env={**env, "REGION": "us"})
+    assert result.data == {"region": "us", "zone": "a"}
     [warning] = result.warnings
-    assert warning.context["replacement"] == "--region"
-    assert app.call("where", {}, env={"PY_IBKR_REGION": "ap"}).data == {"region": "ap"}
+    assert warning.context["replacement"] == "PY_IBKR_REGION"
+    both = {**env, "PY_IBKR_REGION": "ap", "AWS_REGION": "sa", "REGION": "us"}
+    assert app.call("where", {}, env=both).data == {"region": "ap", "zone": "a"}
+    assert app.call("where", {"region": "me"}, env=both).data == {"region": "me", "zone": "a"}
+
+
+def test_the_prefixed_name_beats_a_family_name_on_every_input_path() -> None:
+    """REQ-F-073's criterion: with both set, the prefixed name wins; with only the family
+    name set, it is read; the flag beats both"""
+    family = {"IBKR_FLEX_TOKEN": TOKEN, "IBKR_QUERY": "1", "CLOUDFALL_PROJECT": "/w/web"}
+    both = {**family, "PY_IBKR_PROJECT": "/w/api"}
+    for env, want in ((both, "api"), (family, "web")):
+        _, argv, _ = envelope(["download"], env)
+        _, payload, _ = envelope(["download", "--raw-payload", "{}"], env)
+        _, out, _ = run(["exec"], env, stdin='{"_cmd": "download"}\n')
+        called = make_app().call("download", {}, env={"PY_IBKR_AUDIT_LOG": "0", **env})
+        assert argv["data"]["project"] == payload["data"]["project"] == want
+        assert json.loads(out)["data"]["project"] == called.data["project"] == want
+    _, passed, _ = envelope(["download", "--project", "/w/cli"], both)
+    assert passed["data"]["project"] == "cli"
+    # A bad value read from the prefixed name names it, as one read from a declared name does
+    code, result, _ = envelope(["download"], {**both, "PY_IBKR_QUERY_ID": "x"})
+    assert code == 2 and result["error"]["context"]["source"] == "PY_IBKR_QUERY_ID"
+
+
+@dataclass(frozen=True)
+class Region:
+    region: str = Flag(default="eu", description="Region", env=("AWS_REGION",))
+
+
+@dataclass(frozen=True)
+class StateDir:
+    state_dir: str = Flag(default="", description="State", env=("STATE",))
+
+
+@dataclass(frozen=True)
+class PlainProject:
+    project: str = Flag(default="", description="Project", env=("CLOUDFALL_PROJECT",))
+
+
+@dataclass(frozen=True)
+class SecretProject:
+    project: str = Flag(default="", description="Project key", secret=True)
+
+
+@dataclass(frozen=True)
+class Shared:
+    region: str = Flag(default="eu", description="Region")
+
+
+@pytest.mark.parametrize(
+    ("settings", "first", "second", "match"),
+    [
+        (Shared, None, Region, "setting 'region'"),
+        (None, None, StateDir, "framework's state_dir"),
+        (None, SecretProject, PlainProject, "secret"),
+        (None, PlainProject, SecretProject, "secret"),
+    ],
+)
+def test_a_plain_flags_prefixed_name_read_elsewhere_is_refused(
+    settings: type | None, first: type | None, second: type, match: str
+) -> None:
+    """The ``<APP>_<NAME>`` a plain flag now reads first is one more variable that sets
+    one value: no setting's or framework variable, and never a secret elsewhere"""
+    app = App("py-ibkr", version="1.0.0", settings=settings)
+    if first is not None:
+
+        @app.command("one", description="One", danger_level="safe", exit_codes=())
+        def one(args: first, ctx: Ctx) -> NoArgs:  # type: ignore[valid-type]
+            return NoArgs()
+
+    with pytest.raises(RegistrationError, match=match):
+
+        @app.command("two", description="Two", danger_level="safe", exit_codes=())
+        def two(args: second, ctx: Ctx) -> NoArgs:  # type: ignore[valid-type]
+            return NoArgs()
+
+
+def test_a_plain_flag_cannot_declare_its_own_prefixed_name() -> None:
+    @dataclass(frozen=True)
+    class Args:
+        region: str = Flag(default="eu", description="Region", env=("PY_IBKR_REGION",))
+
+    app = App("py-ibkr", version="1.0.0")
+    with pytest.raises(RegistrationError, match="own variable"):
+
+        @app.command("where", description="Where", danger_level="safe", exit_codes=())
+        def where(args: Args, ctx: Ctx) -> NoArgs:
+            return NoArgs()
 
 
 @dataclass(frozen=True, slots=True)

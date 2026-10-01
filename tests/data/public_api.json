@@ -1060,6 +1060,7 @@
     ],
     "keys": [
       "commands",
+      "env_vars",
       "etag",
       "exit_codes",
       "flags",

@@ -1054,15 +1054,20 @@ class Download:
 ```
 
 When the flag is not passed (on argv, in `--raw-payload`, an `exec` line, or an MCP call),
-a secret reads `<APP>_<NAME>` and then the declared names in order; a plain flag reads only
-its declared names. A value read so is validated like a passed one, its error names the
-variable in `context.source`, and a secret's stays redacted everywhere. A secret's names
-join `secret_env_vars` in the manifest; a plain flag's are named in its description, and a
-required one is listed `required: false`, as a variable may supply it. `--help`, AGENTS.md,
+it reads `<APP>_<NAME>` and then the declared names in order, so the variable set for this
+tool always beats one shared across tools (REQ-F-073); a flag without `env=` reads no
+variable. A value read so is validated like a passed one, its error names the variable in
+`context.source`, and a secret's stays redacted everywhere. A secret's names join
+`secret_env_vars` in the manifest; a plain flag lists its names in `env_vars`,
+`<APP>_<NAME>` first and each deprecated one marked, and a required one is listed
+`required: false`, as a variable may supply it. The manifest's root `env_vars` lists the
+variables that back no flag, such as `<APP>_AUDIT_LOG` and each setting's. `--help`, AGENTS.md,
 and the `env-prefix` audit rule know them all, and `EnvName(..., deprecated=Deprecated(...))`
 works as on a setting. Flags of different commands may share a name, unless one reads it
 as a secret or token and the other as a plain value; two flags of one command, a flag and
-a setting, or a name treaty reads itself may not.
+a setting, or a name treaty reads itself may not, and that holds for a flag's own
+`<APP>_<NAME>` too: a `--state-dir` with `env=` or a `--region` beside a `region` setting
+is refused.
 
 ## Credentials
 

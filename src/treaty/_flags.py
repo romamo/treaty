@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ._deprecation import Deprecated
-from ._envnames import EnvName, env_names
+from ._envnames import EnvName, env_names, env_var_entries
 from ._errors import ParseError, RegistrationError, SchemaError
 from ._paths import PATTERN_TYPE, check_path
 from ._redact import REDACTED, secret_name
@@ -132,8 +132,8 @@ def Flag(
     ``dry_run=True`` on a boolean makes it the command's dry run in place of a field
     named ``dry_run``, so a wrapper keeps the tool's own ``--check`` or ``--noop``.
     ``env=("IBKR_FLEX_TOKEN",)`` reads those variables, in order, when the flag is not
-    passed: after ``<APP>_<NAME>`` for a settings field or a secret, which read that one
-    too. ``EnvName("OLD", deprecated=Deprecated("1.4.0"))`` still reads one, with a
+    passed, after ``<APP>_<NAME>``, which a flag or setting that declares ``env`` reads
+    first (REQ-F-073). ``EnvName("OLD", deprecated=Deprecated("1.4.0"))`` still reads one, with a
     warning naming what to use instead.
     """
     spec = FlagSpec(
@@ -320,10 +320,11 @@ class FieldInfo:
                 suggestion=_PRESET_HINTS[preset],
             )
 
-    def to_flag_entries(self) -> dict[str, dict[str, object]]:
-        """Manifest entries keyed by exposed flag; a secret shows only its two sources"""
+    def to_flag_entries(self, own_env: str | None) -> dict[str, dict[str, object]]:
+        """Manifest entries keyed by exposed flag; a secret shows only its two sources.
+        ``own_env`` is the ``<APP>_<NAME>`` a plain flag that declares ``env`` reads first"""
         if not self.secret:
-            return {self.flag: self.to_flag_entry()}
+            return {self.flag: self.to_flag_entry(own_env)}
         what = self.spec.description
         return {
             self.env_flag: {
@@ -339,7 +340,7 @@ class FieldInfo:
             },
         }
 
-    def to_flag_entry(self) -> dict[str, object]:
+    def to_flag_entry(self, own_env: str | None) -> dict[str, object]:
         description = self.spec.description
         if self.spec.multiline:
             # FlagEntry allows no extra keys, so the opt-out is stated in the description
@@ -350,10 +351,6 @@ class FieldInfo:
             description = f"{description} (- reads it from stdin)"
         if not self.spec.audit:
             description = f"{description} ({UNAUDITED})"
-        if self.spec.env:
-            # FlagEntry allows no extra keys, so the variables are named in the description
-            names = " or ".join(f"${n.name}" for n in self.spec.env)
-            description = f"{description} (read from {names} when not passed)"
         if (old := self.spec.deprecated) is not None:
             instead = "" if old.replacement is None else f"; use --{old.replacement}"
             description = f"{description} (deprecated since {old.since}{instead})"
@@ -369,6 +366,11 @@ class FieldInfo:
             "required": self.required and not self.spec.env,
             "description": description,
         }
+        if self.spec.env:
+            # ManifestResponse 3.4: in precedence order, the prefixed name first (REQ-F-073)
+            if own_env is None:
+                raise RegistrationError(f"--{self.flag} declares env= but reads no <APP>_<NAME>")
+            entry["env_vars"] = env_var_entries(own_env, self.spec.env)
         if self.default is not MISSING and self.default is not None:
             entry["default"] = jsonable_value(self.default, self.classified)
         if self.flag_type is FlagType.ENUM:
