@@ -113,6 +113,28 @@ def test_a_resource_or_function_base_holds_a_relative_output(
     assert not list((tmp_path / "elsewhere").iterdir())
 
 
+def cwd(ctx: Ctx, project: Project) -> Path:
+    return project.directory / "inventory"
+
+
+def project_root(ctx: Ctx, project: Project) -> Path:
+    return project.directory / "inventory"
+
+
+@pytest.mark.parametrize("base", [cwd, project_root])
+def test_a_function_named_like_a_builtin_base_still_resolves_the_output(
+    project: Path, tmp_path: Path, base: object
+) -> None:
+    # A function base named cwd or project_root is the function, not the built-in base
+    argv = ["render", "--cwd", str(tmp_path / "elsewhere"), "--project", str(project)]
+    code, envelope = run(make_app(base, project_root=(".cloud",)), [*argv, "--output", "r"])
+    assert code == 0 and envelope["data"]["path"] == str(project / "inventory" / "r")
+    assert not list((tmp_path / "elsewhere").iterdir())
+    manifest = make_app(base, project_root=(".cloud",)).manifest()
+    flag = manifest["commands"]["render"]["flags"]["output"]
+    assert flag["description"].endswith(f"lands in the {base.__name__} directory")  # type: ignore[attr-defined]
+
+
 def test_a_relative_base_is_under_the_cwd(tmp_path: Path, project: Path) -> None:
     argv = ["render", "--cwd", str(tmp_path), "--project", "proj", "--output", "x"]
     code, envelope = run(make_app(Project), argv)

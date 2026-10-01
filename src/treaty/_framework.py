@@ -29,7 +29,7 @@ from ._errors import ParseError
 from ._http import NO_PROXY_FLAG, PROXY_FLAG, parse_proxy
 from ._idempotency import IdempotencyKey
 from ._lines import StdinInput
-from ._output_base import OutputBase
+from ._output_base import PROJECT_ROOT
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path
 from ._retry import RETRIES_FLAG, RETRY_DELAY_FLAG, parse_delay, parse_retries
@@ -270,11 +270,7 @@ def _output_description(command: Command) -> str:
     root = command.output_root
     if root is None or root.is_cwd:
         return text
-    where = (
-        "the project root"
-        if root.label == OutputBase.PROJECT_ROOT
-        else f"the {root.label} directory"
-    )
+    where = "the project root" if root is PROJECT_ROOT else f"the {root.label} directory"
     return f"{text}; a relative path lands in {where}"
 
 

@@ -43,7 +43,8 @@ class OutputRoot:
 
     @property
     def is_cwd(self) -> bool:
-        return self.label == OutputBase.CWD
+        # A function or resource class named cwd is not the working directory
+        return self is CWD_ROOT
 
     def directory(self, ctx: Ctx, resources: Sequence[object], where: str) -> Path:
         """The base this run resolved; a relative one is under ``ctx.cwd``"""
