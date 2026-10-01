@@ -1,6 +1,7 @@
 """#68: where a relative --output lands: the cwd, the project root, or a directory a
 resource or function of the run resolves (REQ-O-001)"""
 
+import hashlib
 import io
 import json
 from collections.abc import Callable
@@ -11,7 +12,16 @@ from typing import Any, Self
 import pytest
 from conftest import spec_validator
 
-from treaty import App, CliExit, Ctx, ExitCodeName, Flag, OutputBase, RegistrationError
+from treaty import (
+    App,
+    Binary,
+    CliExit,
+    Ctx,
+    ExitCodeName,
+    Flag,
+    OutputBase,
+    RegistrationError,
+)
 from treaty._audit import audit
 
 TEXT = "Write the result to this file in the --format representation; stdout gets the envelope"
@@ -294,3 +304,94 @@ def test_a_replayed_result_with_an_unresolved_base_writes_no_file(
     assert not (project / "m.json").exists()
     code, again = run(app, [*argv[:-1], str(project / "m.json")])
     assert code == 0 and (project / "m.json").exists()
+
+
+# #10 with #68: raw bytes from a treaty.Binary land in the declared base too
+
+PNG = b"\x89PNG\r\n\x1a\n\x00\x01binary\xff"
+
+
+def snapshot(args: ProjectArgs, ctx: Ctx) -> Binary:
+    if args.fail:
+        raise CliExit(ExitCodeName("NOT_FOUND"), "nothing to snapshot")
+    return Binary(PNG, content_type="image/png")
+
+
+def binary_app(output_file: object, project_root: tuple[str, ...] = ()) -> App:
+    app = App("cloud", version="1.0.0")
+    app.command(
+        "snapshot",
+        description="Snapshot",
+        danger_level="safe",
+        exit_codes=("NOT_FOUND",),
+        output_file=output_file,
+        project_root=project_root,
+    )(snapshot)
+    return app
+
+
+@pytest.mark.parametrize(
+    ("base", "landed"),
+    [
+        (OutputBase.PROJECT_ROOT, "snap.png"),
+        (Project, "snap.png"),
+        (inventory_dir, "inventory/snap.png"),
+    ],
+)
+def test_binary_raw_bytes_land_in_the_declared_base(
+    project: Path, base: object, landed: str
+) -> None:
+    app = binary_app(base, project_root=(".cloud",))
+    argv = ["snapshot", "--cwd", str(project / "sub"), "--project", str(project)]
+    code, envelope = run(app, [*argv, "--format", "plain", "--output", "snap.png"])
+    target = project / landed
+    assert code == 0 and target.read_bytes() == PNG
+    assert envelope["data"] == {
+        "path": str(target),
+        "bytes": len(PNG),
+        "content_type": "image/png",
+        "sha256": hashlib.sha256(PNG).hexdigest(),
+    }
+    assert not (project / "sub" / "snap.png").exists()
+
+
+def test_binary_raw_bytes_stay_cwd_relative_with_output_file_true(project: Path) -> None:
+    cwd = project / "sub"
+    code, envelope = run(binary_app(True), ["snapshot", "--cwd", str(cwd), "--output", "s.png"])
+    assert code == 0 and (cwd / "s.png").read_bytes() == PNG
+    assert envelope["data"]["path"] == str(cwd / "s.png")
+
+
+def test_binary_in_a_base_writes_no_file_on_failure_or_a_missing_parent(project: Path) -> None:
+    argv = ["snapshot", "--project", str(project)]
+    code, envelope = run(binary_app(Project), [*argv, "--fail", "--output", "s.png"])
+    assert code != 0 and envelope["error"]["code"] == "NOT_FOUND"
+    assert not (project / "s.png").exists()
+    code, envelope = run(binary_app(Project), [*argv, "--output", "missing/s.png"])
+    assert code == 1 and envelope["error"]["code"] == "OUTPUT_UNWRITABLE"
+    assert envelope["data"]["value"] and not (project / "missing").exists()
+
+
+def test_binary_with_a_base_names_both_in_the_description_and_marks_the_manifest() -> None:
+    def entry(app: App, path: str) -> dict[str, Any]:
+        manifest = app.manifest()
+        spec_validator("manifest-response").validate(manifest)
+        return dict(manifest["commands"][path])
+
+    plain = entry(binary_app(True), "snapshot")
+    assert plain["output_file"] == "binary"
+    assert "sha256" in plain["flags"]["output"]["description"]
+    assert "lands in" not in plain["flags"]["output"]["description"]
+    for base, where in [
+        (OutputBase.PROJECT_ROOT, "the project root"),
+        (Project, "the Project directory"),
+        (inventory_dir, "the inventory_dir directory"),
+    ]:
+        binary = entry(binary_app(base, project_root=(".cloud",)), "snapshot")
+        description = binary["flags"]["output"]["description"]
+        assert binary["output_file"] == "binary"
+        assert description.startswith("Write the returned bytes to this file as they are")
+        assert "sha256" in description and description.endswith(f"lands in {where}")
+        formatted = entry(make_app(base, project_root=(".cloud",)), "render")
+        assert formatted["output_file"] == "formatted"
+        assert formatted["flags"]["output"]["description"].startswith(TEXT)

@@ -284,8 +284,7 @@ def _output_description(command: Command) -> str:
         )
     else:
         text = (
-            "Write the result to this file in the --format representation; stdout gets the "
-            "envelope"
+            "Write the result to this file in the --format representation; stdout gets the envelope"
         )
     root = command.output_root
     if root is None or root.is_cwd:

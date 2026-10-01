@@ -241,15 +241,17 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   in the `--format` representation; `data` is `{path, bytes, content_type, sha256}`, with
   `sha256` in lowercase hex and `content_type` only when the command declared one. A
   failed run still writes no file, the output cap bounds the envelope and never the file,
-  and without `--output` the bytes stay base64 in `data`. `--output -` on such a command exits `2`, as stdout carries only the
-  envelope; other commands still write a file named `-`. The new `binary-output-file`
-  audit rule, an advice, suggests `output_file=True` for a command returning bytes without
-  it (#10)
+  and without `--output` the bytes stay base64 in `data`. A relative `--output` lands in
+  the base `output_file=` declares, as for the `--format` representation, and the
+  `--output` description names both the raw write and that base. `--output -` on such a
+  command exits `2`, as stdout carries only the envelope; other commands still write a
+  file named `-`. The new `binary-output-file` audit rule, an advice, suggests
+  `output_file=True` for a command returning bytes without it (#10)
 - The manifest is ManifestResponse 3.2: the `CommandEntry` of a command declared
-  `output_file=True` carries `output_file`, `"binary"` when it returns `treaty.Binary` and
-  its `--output` gets the raw bytes, `"formatted"` when the file gets the `--format`
-  representation; any other command has no key. `schema_version` is `"3.2"`
-  (#10)
+  `output_file=`, with any base, carries `output_file`, `"binary"` when it returns
+  `treaty.Binary` and its `--output` gets the raw bytes, `"formatted"` when the file gets
+  the `--format` representation; any other command, a passthrough one included, has no
+  key. `schema_version` is `"3.2"` (#10)
 
 ## [1.0.0rc9] - 2026-10-01
 
