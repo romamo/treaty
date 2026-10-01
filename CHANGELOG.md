@@ -234,6 +234,17 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   go to the delegated tool. Exec lines and `App.call` take `"argv": [...]`, MCP lists no
   passthrough command, and completion offers file paths after the path. COMPLIANCE.md lists
   the spec requirements a passthrough command departs from (#35)
+### Added
+
+- A command declared `output_file=True` that returns `treaty.Binary` writes the raw bytes
+  to `--output`, atomically and whatever the `--format`, instead of their base64 wrapper
+  in the `--format` representation; `data` is `{path, bytes, content_type, sha256}`, with
+  `content_type` null when the command gave none. A failed run still writes no file, the
+  output cap bounds the envelope and never the file, and without `--output` the bytes stay
+  base64 in `data`. `--output -` on such a command exits `2`, as stdout carries only the
+  envelope; other commands still write a file named `-`. The new `binary-output-file`
+  audit rule, an advice, suggests `output_file=True` for a command returning bytes without
+  it (#10)
 
 ## [1.0.0rc9] - 2026-10-01
 

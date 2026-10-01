@@ -1,6 +1,7 @@
 """Output data contract: REQ-F-017, F-020, F-040, F-064, F-072, F-074, O-007"""
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -163,6 +164,122 @@ def test_binary_output_rule_flags_a_handler_that_encodes_base64_itself() -> None
     (finding,) = findings(app, "binary-output")
     assert "treaty.Binary" in finding.fix
     assert findings(image_app(), "binary-output") == []
+
+
+# Issue #10: output_file=True with bytes writes the raw bytes to --output
+
+
+@dataclass(frozen=True, slots=True)
+class FailArgs:
+    fail: bool = Flag(default=False, description="Fail instead")
+
+
+def download_app() -> App:
+    app = App("dlctl", version="1.0.0", max_output_bytes=MIN_BYTES)
+
+    @app.command("png", description="Png", danger_level="safe", exit_codes=(), output_file=True)
+    def png(args: FailArgs, ctx: Ctx) -> Binary:
+        if args.fail:
+            raise ValueError("no image")
+        return Binary(PNG, content_type="image/png")
+
+    @app.command("blob", description="Blob", danger_level="safe", exit_codes=(), output_file=True)
+    def blob(args: NoArgs, ctx: Ctx) -> Binary | None:
+        return Binary(bytes(range(256)) * 256)  # 64 KiB, far past the output cap
+
+    @app.command("rows", description="Rows", danger_level="safe", exit_codes=(), output_file=True)
+    def rows(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
+        return [{"a": "1"}]
+
+    return app
+
+
+def test_10_output_file_writes_the_raw_bytes_and_describes_them(tmp_path: Path) -> None:
+    target = tmp_path / "logo.png"
+    code, env = run(download_app(), ["png", "--output", str(target)])
+    spec_validator("response-envelope").validate(env)
+    assert code == 0 and target.read_bytes() == PNG
+    assert env["data"] == {
+        "path": str(target),
+        "bytes": len(PNG),
+        "content_type": "image/png",
+        "sha256": hashlib.sha256(PNG).hexdigest(),
+    }
+
+
+@pytest.mark.parametrize("mode", ["json", "plain", "tsv", "jsonl"])
+def test_10_the_bytes_land_as_they_are_whatever_the_format(tmp_path: Path, mode: str) -> None:
+    target = tmp_path / "logo.png"
+    code, env = run(download_app(), ["png", "--format", mode, "--output", str(target)])
+    assert code == 0 and target.read_bytes() == PNG and env["data"]["bytes"] == len(PNG)
+
+
+def test_10_the_cap_bounds_the_envelope_never_the_file(tmp_path: Path) -> None:
+    target = tmp_path / "blob.bin"
+    code, env = run(download_app(), ["blob", "--output", str(target)])
+    blob = bytes(range(256)) * 256
+    assert code == 0 and target.read_bytes() == blob and "truncated" not in env["meta"]
+    assert env["data"]["content_type"] is None and env["data"]["bytes"] == len(blob)
+    assert env["data"]["sha256"] == hashlib.sha256(blob).hexdigest()
+
+
+def test_10_an_existing_file_is_replaced_atomically(tmp_path: Path) -> None:
+    target = tmp_path / "logo.png"
+    target.write_bytes(b"old")
+    code, _ = run(download_app(), ["png", "--output", str(target)])
+    assert code == 0 and target.read_bytes() == PNG
+    assert [p.name for p in tmp_path.iterdir()] == ["logo.png"]  # no temporary file left
+
+
+def test_10_a_failed_run_writes_no_file(tmp_path: Path) -> None:
+    target = tmp_path / "logo.png"
+    code, env = run(download_app(), ["png", "--fail", "--output", str(target)])
+    assert code != 0 and env["ok"] is False and not target.exists()
+
+
+def test_10_an_unwritable_output_keeps_the_bytes_in_data(tmp_path: Path) -> None:
+    target = tmp_path / "missing" / "logo.png"
+    code, env = run(download_app(), ["png", "--output", str(target)])
+    assert code == 1 and env["error"]["code"] == "OUTPUT_UNWRITABLE"
+    assert base64.b64decode(env["data"]["value"]) == PNG
+
+
+def test_10_without_output_the_bytes_stay_base64_in_data() -> None:
+    code, env = run(download_app(), ["png"])
+    assert code == 0 and base64.b64decode(env["data"]["value"]) == PNG
+    assert env["data"]["content_type"] == "image/png"
+
+
+def test_10_output_dash_is_refused_for_bytes_and_unchanged_otherwise(tmp_path: Path) -> None:
+    code, env = run(download_app(), ["png", "--cwd", str(tmp_path), "--output", "-"])
+    assert code == 2 and env["error"]["errors"][0]["context"]["value"] == "-"
+    assert list(tmp_path.iterdir()) == []
+    # A command returning anything else writes a file named '-', as before
+    code, env = run(download_app(), ["rows", "--cwd", str(tmp_path), "--output", "-"])
+    assert code == 0 and json.loads((tmp_path / "-").read_text()) == [{"a": "1"}]
+    assert set(env["data"]) == {"path", "bytes"}
+
+
+def test_10_the_manifest_describes_the_raw_write_and_stays_valid() -> None:
+    manifest = download_app().manifest()
+    spec_validator("manifest-response").validate(manifest)
+    commands = manifest["commands"]
+    assert "sha256" in commands["png"]["flags"]["output"]["description"]
+    assert "--format" in commands["rows"]["flags"]["output"]["description"]
+
+
+def test_binary_output_file_rule_suggests_output_file_for_bytes() -> None:
+    # A dataclass holding bytes, or a list of them, is not one file
+    assert findings(image_app(), "binary-output-file") == []
+    app = App("rawctl", version="1.0.0")
+
+    @app.command("get", description="Get", danger_level="safe", exit_codes=())
+    def get(args: NoArgs, ctx: Ctx) -> Binary | None:
+        return None
+
+    (finding,) = findings(app, "binary-output-file")
+    assert finding.command == "get" and "output_file=True" in finding.fix
+    assert findings(download_app(), "binary-output-file") == []
 
 
 # REQ-F-020

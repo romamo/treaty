@@ -91,7 +91,13 @@ def retry_sharing_violation[T](
 
 
 def write_atomic(path: Path, text: str, *, new_mode: int = 0o600) -> None:
-    """Replace ``path`` with ``text``: a new file gets ``new_mode``, owner-only by default,
+    """Replace ``path`` with ``text`` in UTF-8, byte for byte: no ``\\r\\n`` translation on
+    Windows. See ``write_atomic_bytes``."""
+    write_atomic_bytes(path, text.encode("utf-8"), new_mode=new_mode)
+
+
+def write_atomic_bytes(path: Path, data: bytes, *, new_mode: int = 0o600) -> None:
+    """Replace ``path`` with ``data``: a new file gets ``new_mode``, owner-only by default,
     and an existing one keeps its mode. Any failure before the rename leaves the old file
     as it was, and the temporary file is removed. A symlink stays a symlink: its target
     is what gets replaced."""
@@ -101,9 +107,8 @@ def write_atomic(path: Path, text: str, *, new_mode: int = 0o600) -> None:
     tmp = Path(name)
     replaced = False
     try:
-        # newline="": the text lands byte for byte, with no \r\n translation on Windows
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, mode)

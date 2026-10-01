@@ -471,6 +471,11 @@ class with a `directory`, or a function `(ctx: Ctx, *resources) -> Path`. The re
 function is resolved before the handler runs, and the `--output` description in `--help`
 and the manifest names where a relative path lands. A failed run still writes no file, and
 a path with `..` exits `2` whatever the base.
+A command returning `treaty.Binary` writes the raw bytes instead, whatever the `--format`,
+and `data` is `{"path": ..., "bytes": N, "content_type": ..., "sha256": ...}`, with
+`content_type` null when the command gave none. Without `--output` the bytes stay base64
+in `data`, and the `binary-output-file` audit rule suggests `output_file=True`.
+`--output -` exits `2` there, as stdout carries only the envelope.
 
 Without a renderer, `plain` prints flat lines, one item each: `key: value`, with dotted
 paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. A

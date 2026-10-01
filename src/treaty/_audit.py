@@ -1850,6 +1850,20 @@ def _binary_output(app: App) -> Iterator[Finding]:
             )
 
 
+def _binary_output_file(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        if c.returns_binary and not c.output_file:
+            yield Finding(
+                "binary-output-file",
+                Severity.ADVICE,
+                c.path.value,
+                "returns bytes, which callers get only base64-encoded in data, a third larger "
+                "and through the output cap",
+                "output_file=True: --output PATH then writes the raw bytes to the file, and "
+                "data gives its path, bytes, content_type, and sha256",
+            )
+
+
 def _encodes_base64(fn: Callable[..., object]) -> bool:
     tree = source_tree(fn)
     return tree is not None and any(
@@ -2854,6 +2868,12 @@ RULES: tuple[Rule, ...] = (
         "Binary output is returned as bytes, not encoded by hand",
         Severity.ADVICE,
         _binary_output,
+    ),
+    Rule(
+        "binary-output-file",
+        "Commands returning bytes can write them to a file",
+        Severity.ADVICE,
+        _binary_output_file,
     ),
     Rule(
         "field-limits",
