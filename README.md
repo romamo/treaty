@@ -183,7 +183,7 @@ uv tool install --reinstall /path/to/treaty
 uv add --editable /path/to/treaty
 ```
 
-The [tutorial](docs/tutorial/index.md) takes a CLI, new or migrated from argparse, click, or
+The [tutorial](https://github.com/romamo/treaty/blob/main/docs/tutorial/index.md) takes a CLI, new or migrated from argparse, click, or
 typer, through every audit rule to a tested, documented release.
 
 ## Built-ins
@@ -1570,7 +1570,7 @@ never followed, nor are methods of objects or callbacks, which the report's `sco
 ## Stability
 
 treaty follows semantic versioning from 1.0. The frozen surface is listed in
-[`docs/api.md`](docs/api.md) and snapshotted by `tests/test_public_api.py`: every name
+[`docs/api.md`](https://github.com/romamo/treaty/blob/main/docs/api.md) and snapshotted by `tests/test_public_api.py`: every name
 exported from `treaty`, every keyword of `App`, `App.command`, `Group.command`, `Flag`,
 `Arg`, and `Out`, the public fields and methods of `Ctx`, every envelope and manifest key,
 every framework exit code and error code, and every environment variable name. Modules
@@ -1592,8 +1592,8 @@ with the first deprecation after 1.0, built on the same `treaty.Deprecated` meta
 `treaty audit --baseline` (see [Renamed commands](#renamed-commands)).
 
 treaty 1.0 claims CLI Agent Spec Level 2 conformance; the Level 3 score is in
-[`COMPLIANCE.md`](COMPLIANCE.md). Changes are listed in [`CHANGELOG.md`](CHANGELOG.md),
-and [`docs/guide.md`](docs/guide.md) covers the design calls the audit cannot make.
+[`COMPLIANCE.md`](https://github.com/romamo/treaty/blob/main/COMPLIANCE.md). Changes are listed in [`CHANGELOG.md`](https://github.com/romamo/treaty/blob/main/CHANGELOG.md),
+and [`docs/guide.md`](https://github.com/romamo/treaty/blob/main/docs/guide.md) covers the design calls the audit cannot make.
 
 ## Development
 
