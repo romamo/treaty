@@ -31,6 +31,7 @@ review), **rename**, **remove**.
 | `table` | function | keep | Delimited renderer factory |
 | `ScalarSpec` | class | keep | Returned by `app.scalar` |
 | `OutputAdapter` | class | keep | Returned by `app.output_adapter` |
+| `ArgsAdapter` | class | keep | Returned by `app.args_adapter` |
 | `ExecArgs` | class | private | Arguments of the `exec` built-in; no app constructs it |
 
 ### Declarations
@@ -93,7 +94,7 @@ Keywords: `name`, `version` (semver, or a PEP 440 release with optional `a`, `b`
 `schema_changelog`. All keep.
 
 Public methods (keep): `command`, `group`, `redirect`, `exit_code`, `scalar`,
-`output_adapter`, `format`,
+`output_adapter`, `args_adapter`, `format`,
 `tokenizer`, `suppress_update_notifier`, `run`, `main`, `call`, `manifest`,
 `environment`, and the read-only properties `commands`, `builtins`, `formats`,
 `redirected_paths`, `settings`, `shadowed_builtins`. The `Command` objects `commands` maps to are opaque: their

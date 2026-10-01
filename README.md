@@ -1181,6 +1181,36 @@ declaring its order, and a credential-named or `format: password` string is mask
 `app.scalar`. Register the adapter before the commands returning the class; two adapters
 whose bases overlap, or an adapted class registered as a scalar, are registration errors.
 
+## Args models
+
+A handler's arguments can be a model class other than a dataclass, such as a pydantic
+`BaseModel` a shared package already defines, once an args adapter covers it. treaty
+imports no model library; the two functions are the contract:
+
+```python
+app.args_adapter(
+    BaseModel,
+    schema=lambda cls: cls.model_json_schema(by_alias=False),
+    validate=lambda cls, data: cls.model_validate(data, by_name=True, by_alias=False),
+)
+```
+
+`schema` returns the class's JSON Schema, and its properties become the flags: `required`,
+`default`, `description` (else `title`), string `enum` and `const`, arrays of these,
+`format: path` as a `Path`, a number-or-string union as a `Decimal`, `format: password` or
+`writeOnly` as a secret, and a `treaty` key for what JSON Schema has no word for, such as
+`{"treaty": {"positional": true}}` or `{"treaty": {"short": "q"}}`. A property neither
+required nor defaulted, such as a `default_factory`, is left to the model. Phase 1 parses
+argv, `--raw-payload`, `exec` lines, `app.call(...)`, and MCP calls as it parses an args
+dataclass, then hands the values to `validate` as JSON values; the handler, its resources,
+and its rollback receive what it returns. A `ValueError` it raises exits 2 with one
+`error.errors` entry per item of its `errors()` list (pydantic's `ValidationError` has one),
+at the item's `loc` with its `type` and `input`, never a secret's; one with no `loc`, such
+as a `model_validator`'s, names no field. `--schema`, `--help`, the manifest, and completion
+come from the same flags. A nested model, a dict, or a union of two types has no flag form
+and fails registration, as do two adapters covering one class and an adapter's class
+registered with `app.scalar`.
+
 ## Resources
 
 A handler can take more parameters after `ctx`. Each one is annotated with a class that has

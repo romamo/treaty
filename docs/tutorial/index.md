@@ -197,7 +197,7 @@ file rather than the one before it, so `todo_pages.py`, for example, has no `imp
 | [`todo_v2.py`](../../examples/tutorial/todo_v2.py) | release 1.1.0: `done` renamed `complete`, `--all` deprecated | [stability](ship/stability.md) |
 | [`new_cli/test_cli.py`](../../examples/tutorial/new_cli/test_cli.py) | the tests a new project writes for `todo` | [new CLI](A-new/start.md), [testing](ship/testing.md) |
 | [`new_cli/test_contract.py`](../../examples/tutorial/new_cli/test_contract.py), [`new_cli/agent-contract.yml`](../../examples/tutorial/new_cli/agent-contract.yml) | contract tests for any treaty app, and a CI job with every gate | [testing](ship/testing.md) |
-| [`market_args.py`](../../examples/tutorial/market_args.py), [`market_prices.py`](../../examples/tutorial/market_prices.py), [`market_funds.py`](../../examples/tutorial/market_funds.py) | not `todo`: two CLIs sharing argument models | [pydantic-settings](B-migrate/pydantic-settings.md) |
+| [`market_args.py`](../../examples/tutorial/market_args.py), [`market_prices.py`](../../examples/tutorial/market_prices.py), [`market_funds.py`](../../examples/tutorial/market_funds.py), [`market_quotes.py`](../../examples/tutorial/market_quotes.py) | not `todo`: CLIs sharing argument models, as dataclasses or as pydantic models | [pydantic-settings](B-migrate/pydantic-settings.md) |
 | [`conformance/`](../../examples/tutorial/conformance/) | the profile and the launchers the conformance kit runs | [conformance](ship/conformance.md) |
 
 [Release what a run holds](core/cleanup.md) also uses

@@ -37,6 +37,7 @@ from typing import IO, Any, Literal, NoReturn, TextIO, TypeGuard, cast
 
 from ._adapters import OutputAdapter
 from ._aio import Loop, within
+from ._args_adapter import ArgsAdapter, ArgsAdapters
 from ._atomic import write_atomic
 from ._auth import (
     OVER_PRIVILEGED,
@@ -441,6 +442,7 @@ class App:
         self.state_dir = None if state_dir is None else Path(state_dir)
         self.exits = ExitCodeRegistry()
         self.scalars = ScalarRegistry()
+        self.args_adapters = ArgsAdapters()
         self._state: Mapping[str, object] = dict(state or {})
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
@@ -542,6 +544,12 @@ class App:
         entry in ``error.errors``. ``serialize`` turns an instance back into the base value
         and defaults to its ``value`` field. A settings field may name it too.
         """
+        if (adapter := self.args_adapters.for_class(cls)) is not None:
+            raise RegistrationError(
+                f"{getattr(cls, '__qualname__', cls)} is covered by "
+                f"args_adapter({adapter.base.__qualname__}); a class is a scalar or an args "
+                "model, not both"
+            )
         spec = self.scalars.register(
             ScalarSpec(
                 cls=cls,
@@ -584,6 +592,35 @@ class App:
         return self.scalars.register_adapter(
             OutputAdapter(base=base, schema=schema, dump=dump, none_as_empty=none_as_empty)
         )
+
+    def args_adapter(
+        self,
+        base: type,
+        *,
+        schema: Callable[[type], Mapping[str, Any]],
+        validate: Callable[[type, dict[str, object]], object],
+    ) -> ArgsAdapter:
+        """Let a handler's first parameter be annotated with a subclass of ``base``, such as
+        a pydantic ``BaseModel``, instead of an args dataclass; declare it before the
+        commands using it. The input-side counterpart of ``output_adapter``.
+
+        ``schema(cls)`` returns the class's JSON Schema, whose properties become the flags:
+        required-ness, ``default``, ``description`` (else ``title``), ``enum``, arrays,
+        ``format: path`` as a ``Path``, ``format: password`` as a secret, and a ``treaty``
+        key for the rest, such as ``{"treaty": {"positional": true, "short": "s"}}``.
+        Once phase 1 has parsed the arguments, ``validate(cls, data)`` gets them as JSON
+        values and returns what the handler receives. A ``ValueError`` it raises exits 2,
+        one ``error.errors`` entry per item of its ``errors()`` list (``loc``, ``msg``,
+        ``type``, ``input``, as pydantic's ``ValidationError`` has), else one with its
+        message::
+
+            app.args_adapter(
+                BaseModel,
+                schema=lambda cls: cls.model_json_schema(by_alias=False),
+                validate=lambda cls, data: cls.model_validate(data, by_name=True),
+            )
+        """
+        return self.args_adapters.register(ArgsAdapter(base, schema, validate), self.scalars)
 
     def suppress_update_notifier(
         self, fn: Callable[[MutableMapping[str, str]], None]
@@ -948,6 +985,7 @@ class App:
                         cleanup=cleanup,
                         renderers=overrides,
                         scalars=self.scalars,
+                        args_adapters=self.args_adapters,
                         streaming=streaming,
                         safe_default=safe_default,
                         gui_operations=gui_operations,
@@ -1969,6 +2007,7 @@ def _invoke(
     follows here, on the handler's thread, however it ended; a stream's follows its
     generator instead (REQ-C-017)."""
     teardown, steps = ctx._teardown, ctx._steps
+    args = command.handler_args(args)
     if teardown is None:
         return _call(app, command, args, ctx, provided)
     teardown.begin()

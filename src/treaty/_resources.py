@@ -13,7 +13,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import typing
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -140,6 +140,8 @@ def resource_graph(
     where: str,
     args_type: type | None = None,
     provided: Sequence[type] = (),
+    *,
+    fields: Collection[str] = (),
 ) -> dict[type, ResourceSpec]:
     """Every resource reachable from ``roots``; fails on a cycle, a class without acquire,
     or an ``acquire`` that reads an args class the command's args do not extend.
@@ -158,8 +160,14 @@ def resource_graph(
         wanted = spec.args_type
         if args_type is not None and wanted is not None and typing.is_protocol(wanted):
             # Structural: the args need the protocol's members, not a base class
-            fields = {f.name for f in dataclasses.fields(args_type)}
-            missing = sorted(typing.get_protocol_members(wanted) - fields - set(dir(args_type)))
+            # The parsed fields: an args model's, which ``fields`` names, are not attributes
+            # of its class
+            names = set(fields) | (
+                {f.name for f in dataclasses.fields(args_type)}
+                if dataclasses.is_dataclass(args_type)
+                else set()
+            )
+            missing = sorted(typing.get_protocol_members(wanted) - names - set(dir(args_type)))
             if missing:
                 raise RegistrationError(
                     f"{where}: {cls.__qualname__}.acquire reads {wanted.__qualname__}, but "
