@@ -229,9 +229,11 @@ from ._protect import (
     MASKED_PATHS_SHOWN,
     UNPROTECTED_CODE,
     UNTRUSTED_CODE,
+    UNTRUSTED_LINE,
     protect,
     protect_batch,
     tagged,
+    untagged,
 )
 from ._records import Records, RecordSpec
 from ._redact import (
@@ -4412,7 +4414,7 @@ class _Run:
         data, error, warnings = envelope.data, envelope.error, list(envelope.warnings)
         extra = dict(envelope.extra_meta)
         masked: list[str] = []
-        untrusted = False
+        untrusted = tagged_data = False
         if data is not None:
             # A batch keeps its items, and their content, when some items failed: its data
             # is protected item by item whether or not the run succeeded
@@ -4440,7 +4442,7 @@ class _Run:
             if (command.external or protected.external) and data not in ([], {}):
                 untrusted = True
                 if not self.unprotected:
-                    data = tagged(data)
+                    data, tagged_data = tagged(data), True
         if error is not None and error._external:
             # REQ-F-035: context values the handler marked treaty.External
             outside = {k: v for k, v in error.context.items() if k in error._external}
@@ -4474,7 +4476,12 @@ class _Run:
                 )
             )
         return dataclasses.replace(
-            envelope, data=data, error=error, warnings=tuple(warnings), extra_meta=extra
+            envelope,
+            data=data,
+            error=error,
+            warnings=tuple(warnings),
+            extra_meta=extra,
+            _tagged=tagged_data,
         )
 
     def _answer(
@@ -6174,7 +6181,13 @@ class _Run:
         else:
             data = clean(data)  # values as the JSON envelope has them (REQ-F-007)
             try:
-                text = _rendered(render, data) if render is not None else render_plain(data, layout)
+                if render is not None:
+                    text = _rendered(render, data)
+                elif envelope._tagged:
+                    # As on stdout: one line instead of the trust tags (#198)
+                    text = f"{UNTRUSTED_LINE}\n{render_plain(untagged(data), layout)}"
+                else:
+                    text = render_plain(data, layout)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
                 self.err.write(self._redact_now(_traceback(exc)))
                 return self._file_error(
@@ -6187,7 +6200,7 @@ class _Run:
                 envelope, "OUTPUT_UNWRITABLE", f"cannot write --output: {exc.strerror}", path
             )
         written = {"path": str(path), "bytes": len(text.encode("utf-8"))}
-        return dataclasses.replace(envelope, data=written)
+        return dataclasses.replace(envelope, data=written, _tagged=False)
 
     def output_unresolved(self, command: Command, output: Path, envelope: Envelope) -> Envelope:
         """A relative ``--output`` whose base the handler never resolved, as when a stored
@@ -6220,7 +6233,7 @@ class _Run:
         if "content_type" in wrapper:  # only when the command declared one, as in the wrapper
             written["content_type"] = wrapper["content_type"]
         written["sha256"] = hashlib.sha256(raw).hexdigest()  # lowercase hex
-        return dataclasses.replace(envelope, data=written)
+        return dataclasses.replace(envelope, data=written, _tagged=False)
 
     def _file_error(self, envelope: Envelope, code: str, message: str, path: Path) -> Envelope:
         """The result stays in ``data``, so a run that could not write its file loses nothing"""
@@ -6359,6 +6372,10 @@ class _Run:
                 color = color_allowed(self.env, self.tty)
                 self.out.write(terminal_text(text, color=color, keep="\r"))
         elif data is not None:
+            if envelope._tagged:
+                # A person reads one line saying so, not the tags as data lines (#198)
+                data = untagged(data)
+                self.out.write(UNTRUSTED_LINE + "\n")
             self.out.write(fallback(data))
         if mode is not Format.NDJSON:
             # ndjson wrote each warning as its JSON line above
@@ -6389,12 +6406,19 @@ class _Run:
                     where = f"{item['field']}: " if "field" in item else ""
                     self.err.write(visible(f"  - {where}{item['message']}") + "\n")
             else:
+                context = envelope.error.context
+                if error._external and not self.unprotected:
+                    # The context _protected tagged: one line instead of the tags (#198)
+                    context = cast(dict[str, object], untagged(context))
+                    self.err.write(f"  {UNTRUSTED_LINE}\n")
                 # REQ-F-034: a context key named like a credential prints [REDACTED],
                 # except treaty's own fields that hold names
-                for key, value in envelope.error.context.items():
+                for key, value in context.items():
                     printed: object = (
                         value if (error.code, key) in NAME_CONTEXT else scrub(key, value)
                     )
+                    if isinstance(printed, bool):
+                        printed = "true" if printed else "false"  # as plain output spells it
                     self.err.write(visible(f"  {key}: {printed}") + "\n")
             if envelope.error.suggestion is not None:
                 self.err.write(visible(f"hint: {envelope.error.suggestion}") + "\n")

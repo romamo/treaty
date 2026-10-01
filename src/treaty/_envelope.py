@@ -425,6 +425,9 @@ class Envelope:
     warnings: Sequence[WarningDetail] = ()
     extra_meta: Mapping[str, object] = field(default_factory=dict)
     """Keys a response adds besides the framework's, such as ``pagination``"""
+    _tagged: bool = field(default=False, repr=False, compare=False)
+    """``data`` carries the trust tags of external content, which plain output prints as
+    one line instead (#198); not part of the envelope"""
 
     def __post_init__(self) -> None:
         if (self.exit_code == 0) != (self.error is None):

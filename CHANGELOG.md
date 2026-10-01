@@ -102,6 +102,15 @@ Not additive over rc11: see Breaking.
   and a `host:port` entry matches a URL that names no port when the port is the scheme's
   own, as `example.com:443` does `https://example.com/`; `ctx.http` and `ctx.network` both
   follow it
+- Plain output no longer prints the trust tags of external content as data: the data
+  block of an `external=True` command, and the stderr error block of a context with
+  `treaty.External`, show one `(external content, untrusted)` line instead of
+  `_source: external` and `_trusted: false`, in a table too, and so does a plain
+  `--output` file. JSON, jsonl, ndjson, and tsv keep the tags, and a field named
+  `_source` on a command that is not external still prints. A boolean in the stderr error
+  block reads `true` or `false`, as in the rest of plain output, not Python's `True` or
+  `False` (#198)
+
 ### Breaking
 
 - `SUBPROCESS_FAILED` marks its `context.stderr` as content from outside the tool:

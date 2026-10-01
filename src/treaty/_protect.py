@@ -130,6 +130,31 @@ def tagged(data: object) -> object:
     return data
 
 
+UNTRUSTED_LINE = "(external content, untrusted)"
+"""What plain output prints for a person in place of the trust tags (#198)"""
+
+
+def untagged(data: object) -> object:
+    """``data`` that ``tagged`` tagged, without the tags: plain output says it in one
+    ``UNTRUSTED_LINE`` instead. A key of the data that ``tagged`` let override a tag holds
+    another value, and stays"""
+
+    def one(item: object) -> object:
+        if not isinstance(item, dict):
+            return item
+        return {k: v for k, v in item.items() if not (k in TRUST_TAGS and _tag(k, v))}
+
+    if isinstance(data, list):
+        return [one(i) for i in data]
+    return one(data)
+
+
+def _tag(key: str, value: object) -> bool:
+    """``value`` is the tag ``key`` holds: ``False`` is not ``0``, which compares equal"""
+    tag = TRUST_TAGS[key]
+    return type(value) is type(tag) and value == tag
+
+
 class _Walk:
     def __init__(self, unmask: bool, adapters: OutputAdapters) -> None:
         self.unmask = unmask
