@@ -2892,8 +2892,9 @@ class _Run:
         """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
-        self.ndjson_shown: list[WarningDetail] = []
-        """The warnings ``ndjson`` wrote to stderr so far: a stream's envelopes repeat them"""
+        self.ndjson_shown = 0
+        """How many warnings ``ndjson`` wrote to stderr so far: a stream's envelopes carry
+        every warning before theirs, so only those past this count are new, a repeat too"""
         self._logging = False
         """Whether the root logger routes records to this run (``attach_logging``)"""
         self._redaction: tuple[tuple[object, ...], Callable[[str], str]] | None = None
@@ -5375,8 +5376,8 @@ class _Run:
         if settle:
             envelope = self.settle(envelope)
         if mode is Format.NDJSON:
-            fresh = [w for w in envelope.warnings if w not in self.ndjson_shown]
-            self.ndjson_shown.extend(fresh)
+            fresh = list(envelope.warnings[self.ndjson_shown :])
+            self.ndjson_shown = max(self.ndjson_shown, len(envelope.warnings))
         else:
             fresh = list(envelope.warnings[before:]) if settle else []
             # That line says it: the warning lines after the result skip it (#152)

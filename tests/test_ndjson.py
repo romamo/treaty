@@ -187,6 +187,26 @@ def test_a_stream_warning_is_written_once() -> None:
     assert [w["code"] for w in lines(err) if isinstance(w, dict)] == ["STALE_QUOTE"]
 
 
+def test_a_stream_warning_given_twice_is_written_twice() -> None:
+    app = App("probe", version="1.0.0")
+
+    @app.command("skips", description="Skips", streaming=True, danger_level="safe", exit_codes=())
+    def skips(args: NoArgs, ctx: Ctx) -> Iterator[Sec]:
+        yield SECS[0]
+        ctx.warn("ROW_SKIPPED", "a row was skipped")
+        yield SECS[1]
+        ctx.warn("ROW_SKIPPED", "a row was skipped")
+
+    out, err = io.StringIO(), io.StringIO()
+    code = app.run(["skips", "--format", "ndjson"], stdout=out, stderr=err, env={}, isatty=False)
+    # The envelope carries both, so the stderr lines do too
+    assert code == 0 and len(lines(out.getvalue())) == 2
+    assert [w["code"] for w in lines(err.getvalue()) if isinstance(w, dict)] == [
+        "ROW_SKIPPED",
+        "ROW_SKIPPED",
+    ]
+
+
 def test_logs_are_json_lines_on_stderr() -> None:
     code, out, err = run(["tick", "--format", "ndjson", "--verbose"])
     assert code == 0 and len(lines(out)) == 2
