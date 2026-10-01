@@ -47,12 +47,14 @@ def run(argv: list[str], env: dict[str, str], cwd: Path | None = None) -> tuple[
     return code, json.loads(out.getvalue()) if out.getvalue() else None, err.getvalue()
 
 
-def test_a_declared_name_supplies_the_setting_and_show_config_names_it() -> None:
-    code, shown, _ = run(["--show-config"], {"BEANCOUNT_FILE": "/books/a.beancount"})
+def test_a_declared_name_supplies_the_setting_and_show_config_names_it(tmp_path: Path) -> None:
+    # An absolute path on every platform: "/books" has no drive on Windows
+    ledger = str(tmp_path / "a.beancount")
+    code, shown, _ = run(["--show-config"], {"BEANCOUNT_FILE": ledger})
     data = shown["data"]
     assert code == 0 and data["sources"]["file"] == "env:BEANCOUNT_FILE"
-    assert data["effective_config"]["file"] == "/books/a.beancount"
-    code, ran, _ = run(["show"], {"BEANCOUNT_FILE": "/books/a.beancount"})
+    assert data["effective_config"]["file"] == ledger
+    code, ran, _ = run(["show"], {"BEANCOUNT_FILE": ledger})
     assert code == 0 and ran["data"]["file"] == "a.beancount"
 
 
