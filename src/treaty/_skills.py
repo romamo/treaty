@@ -13,7 +13,7 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from ._command import PASSTHROUGH, Command, DangerLevel
+from ._command import Command, DangerLevel
 from ._manifest import payload_schema
 from ._values import CommandPath
 
@@ -43,12 +43,14 @@ def _placeholder(name: str, spec: Mapping[str, object]) -> str:
     return f"<{name}>"
 
 
-def examples(app_name: str, path: CommandPath, entry: Mapping[str, object]) -> list[str]:
+def examples(
+    app_name: str, path: CommandPath, entry: Mapping[str, object], *, passthrough: bool = False
+) -> list[str]:
     """The declared examples, a minimal call with the required arguments, the ``--schema``
     call, and ``--help``: always at least three"""
     base = _invocation(app_name, path)
     found = [str(e["command"]) for e in entry.get("examples", ())]  # type: ignore[attr-defined]
-    if entry.get("arguments") == PASSTHROUGH:
+    if passthrough:
         # #35: after the path every token is the tool's, --help too; treaty's go before
         schema = " ".join((app_name, "--schema", *path.parts))
         return list(dict.fromkeys((*found, f"{base} <tool arguments>", schema, f"{base} --help")))
@@ -106,7 +108,7 @@ def render_skill(app: App, command: Command, entry: Mapping[str, object]) -> str
             "args": payload_schema(command, stream_key=False),
         }
     )
-    usage = "\n".join(examples(app.name, path, entry))
+    usage = "\n".join(examples(app.name, path, entry, passthrough=command.passthrough))
     flags = entry.get("flags", {})
     assert isinstance(flags, dict)
     rows = [

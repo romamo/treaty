@@ -350,9 +350,12 @@ well. Treaty's own flags go before the path: `tool --output env.json --timeout 6
 extract statement.csv`. The timeout, signals, session deduplication, and the audit log
 apply as to any other command; the log records `argv` as `[OMITTED]`, since treaty cannot
 tell a secret in it. `help_command=("help",)` hands the tool that argv in place of a lone
-`--help` or `-h` after the path. The manifest entry carries `arguments: "passthrough"` and
-`help_command`, exec lines and `App.call` pass the tool's tokens as `"argv": [...]`, and
-`treaty-mcp` lists no passthrough command. A passthrough command cannot be destructive.
+`--help` or `-h` after the path. The manifest entry stays within the spec's schema: it
+has `option_placement: "strict"`, and its description ends with "Arguments after the
+command path go to the delegated tool unparsed; the envelope is the last stderr line".
+Exec lines and `App.call` pass the tool's tokens as `"argv": [...]`, and `treaty-mcp`
+lists no passthrough command. A passthrough command cannot be destructive, and departs
+from a few spec requirements by design; COMPLIANCE.md lists them.
 
 A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
 words resolve to in `context.command`, and puts the corrected order in `suggestion`. Plain

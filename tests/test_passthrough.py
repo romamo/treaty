@@ -269,19 +269,29 @@ def test_mcp_lists_no_passthrough_command() -> None:
 # Schema, manifest, completion, audit, and agent docs
 
 
-def test_the_manifest_and_schema_say_the_arguments_are_the_tools() -> None:
-    entry = ledger.manifest()["commands"]["ingest"]
-    assert entry["arguments"] == "passthrough"
-    assert entry["help_command"] == ["extract", "--help"]
-    assert entry["option_placement"] == "strict"
+def test_the_manifest_marks_it_within_the_spec_schema() -> None:
+    manifest = ledger.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    entry = manifest["commands"]["ingest"]
+    assert entry["option_placement"] == "strict" and "positionals" not in entry
+    assert entry["description"].endswith(
+        ". Arguments after the command path go to the delegated tool unparsed; the envelope "
+        "is the last stderr line"
+    )
     assert "output" in entry["flags"] and "validate-only" in entry["flags"]
+    out = io.StringIO()
+    assert ledger.run(["--schema"], stdout=out, stderr=io.StringIO(), env={}) == 0
+    spec_validator("manifest-response").validate(json.loads(out.getvalue())["data"])
+
+
+def test_schema_goes_before_the_path() -> None:
     ran = run(["ingest", "--schema"])
-    assert echoed(run(["ingest", "echo", "--schema"])) == ("echo", "--schema")
     assert ran.code == 2  # --schema after the path is the tool's: argparse refuses it
+    assert echoed(run(["ingest", "echo", "--schema"])) == ("echo", "--schema")
     out = io.StringIO()
     assert ledger.run(["--schema", "ingest"], stdout=out, stderr=io.StringIO(), env={}) == 0
     schema = json.loads(out.getvalue())["data"]
-    assert schema["arguments"] == "passthrough"
+    assert schema["option_placement"] == "strict"
     assert schema["output_schema"]["properties"]["exit_code"]["type"] == "integer"
 
 

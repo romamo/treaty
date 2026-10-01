@@ -348,8 +348,12 @@ INPUT_FILE_FLAG = "input-file"
 OUTPUT_FLAG = "output"
 DEFAULT_HEARTBEAT_MS = 10_000
 
-PASSTHROUGH = "passthrough"
-"""The manifest's ``arguments`` of a passthrough command: argv belongs to another tool"""
+PASSTHROUGH_NOTE = (
+    "Arguments after the command path go to the delegated tool unparsed; the envelope is the "
+    "last stderr line"
+)
+"""What a passthrough command's manifest description adds: the spec's CommandEntry has
+no key that says so, and ``option_placement: strict`` alone does not (#35)"""
 ARGV_KEY = "argv"
 """A passthrough command's argv for its tool in an exec line or ``App.call``"""
 HELP_TOKENS = ("--help", "-h")

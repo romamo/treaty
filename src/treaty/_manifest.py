@@ -7,7 +7,7 @@ import json
 from collections.abc import Collection, Mapping, Sequence
 from importlib.metadata import version
 
-from ._command import ARGV_KEY, DEFAULT_HEARTBEAT_MS, PASSTHROUGH, Command, DangerLevel
+from ._command import ARGV_KEY, DEFAULT_HEARTBEAT_MS, PASSTHROUGH_NOTE, Command, DangerLevel
 from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, NO_UPDATE, app_var
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import (
@@ -303,6 +303,9 @@ def command_entry(
         # CommandEntry has no deprecation keys (04-D2); a baseline audit reads this marker
         instead = "" if old.replacement is None else f"; use {old.replacement}"
         description = f"{description} (deprecated since {old.since}{instead})"
+    if command.passthrough:
+        # #35: CommandEntry has no key for it; option_placement says strict, this says why
+        description = f"{description}. {PASSTHROUGH_NOTE}"
     out: dict[str, object] = {
         "description": description,
         "danger_level": command.danger_level.value,
@@ -370,11 +373,6 @@ def command_entry(
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret
         ]
-    if command.passthrough:
-        # #35: not CommandEntry keys; the tokens after the path are another tool's
-        out["arguments"] = PASSTHROUGH
-        if command.help_command is not None:
-            out["help_command"] = list(command.help_command)
     return out
 
 

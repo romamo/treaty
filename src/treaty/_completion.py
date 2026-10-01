@@ -10,7 +10,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ._command import PASSTHROUGH
 from ._values import CommandPath
 
 COMPLETION_PATH = CommandPath("completion")
@@ -107,13 +106,14 @@ def _node(
     )
     if entry is None:
         return Node(words, children, (), (), False, False)
-    if entry.get("arguments") == PASSTHROUGH:
-        # #35: every word after the path is the delegated tool's, offered as a file path
-        return Node(words, children, (), (Takes((), True),), True, True)
     flags = entry["flags"]
     assert isinstance(flags, dict)
     positionals = entry.get("positionals", [])
     assert isinstance(positionals, list)
+    if entry.get("option_placement") == "strict" and not positionals:
+        # #35: strict without the variadic positional it needs is a passthrough command;
+        # every word after the path is the delegated tool's, offered as a file path
+        return Node(words, children, (), (Takes((), True),), True, True)
     slots = tuple(_takes({**flags.get(p["name"], {}), **p}) for p in positionals)
     variadic = bool(positionals) and bool(positionals[-1].get("variadic"))
     strict = entry.get("option_placement") == "strict"

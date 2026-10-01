@@ -181,9 +181,11 @@ Apps built on treaty keep their own, structured schema changelog with
   the final envelope is the last line on stderr, and goes to `--output PATH` too.
   Treaty's flags go before the path; the timeout, signals, session deduplication by argv,
   and the audit log (with `argv` `[OMITTED]`) apply. `help_command=` is the argv the tool
-  gets for a lone `--help`. The manifest entry adds `arguments: "passthrough"` and
-  `help_command`, exec lines and `App.call` take `"argv": [...]`, MCP lists no passthrough
-  command, and completion offers file paths after the path (#35)
+  gets for a lone `--help`. The manifest stays within the spec's schema: the entry has
+  `option_placement: "strict"` and a description ending in a sentence saying the arguments
+  go to the delegated tool. Exec lines and `App.call` take `"argv": [...]`, MCP lists no
+  passthrough command, and completion offers file paths after the path. COMPLIANCE.md lists
+  the spec requirements a passthrough command departs from (#35)
 
 ## [1.0.0rc9] - 2026-10-01
 
