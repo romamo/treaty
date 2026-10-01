@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ._args_adapter import ArgsAdapters, ArgsModel
 from ._auth import AuthKind, check_declaration
 from ._batch import ITEM_KEYS, batch_item, batch_schema
 from ._cache import CachePolicy
@@ -242,6 +243,13 @@ class Command:
     """The output's primary identifier, which ``--format id`` writes (REQ-O-005)"""
     is_async: bool = False
     """The handler is ``async def``: it runs on the run's event loop (REQ-F-049)"""
+    args_model: ArgsModel | None = None
+    """The handler's args model, taken through ``app.args_adapter``: ``args_type`` is
+    then the dataclass phase 1 parses its arguments into"""
+
+    def handler_args(self, args: object) -> object:
+        """What the handler, its resources, and its rollback receive for parsed ``args``"""
+        return args if self.args_model is None else self.args_model.instance(args)
 
     @property
     def min_schema_version(self) -> SchemaVersion:
@@ -395,6 +403,7 @@ def build_command(
     cache: CachePolicy | None = None,
     recursive_traversal: bool = False,
     id_field: str | None = None,
+    args_adapters: ArgsAdapters | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -430,8 +439,14 @@ def build_command(
         )
     paginated_asked = bool(paginated)
     args_type, output_type, resources, paginated = _inspect_handler(
-        fn, path, streaming, paginated, scalars
+        fn, path, streaming, paginated, scalars, args_adapters
     )
+    args_model: ArgsModel | None = None
+    if not is_dataclass_type(args_type):
+        adapter = None if args_adapters is None else args_adapters.for_class(args_type)
+        assert adapter is not None, "_inspect_handler checked the args type"
+        args_model = ArgsModel.build(args_type, adapter)
+        args_type = args_model.fields_type
     item_type = batch_item(resolve_alias(output_type))
     batch = item_type is not None
     if item_type is not None:
@@ -611,7 +626,13 @@ def build_command(
         output_schema = _with_step_fields(output_schema, step_names)
     if trust_tags:
         output_schema = with_trust_tags(output_schema)
-    graph = resource_graph(resources, str(path), args_type, provided)
+    graph = resource_graph(
+        resources,
+        str(path),
+        args_type if args_model is None else args_model.model,
+        provided,
+        fields=[f.name for f in fields],
+    )
     is_async = inspect.iscoroutinefunction(fn)
     needs_loop = sorted(s.cls.__qualname__ for s in graph.values() if s.is_async)
     if needs_loop and not is_async:
@@ -688,6 +709,7 @@ def build_command(
         recursive_traversal=recursive_traversal,
         batch=batch,
         id_field=id_field,
+        args_model=args_model,
         is_async=is_async,
     )
 
@@ -1086,6 +1108,7 @@ def _inspect_handler(
     streaming: bool,
     paginated: bool | None,
     scalars: ScalarRegistry,
+    args_adapters: ArgsAdapters | None = None,
 ) -> tuple[type, object, tuple[type, ...], bool]:
     resources = dependency_params(fn, f"{path}: handler", allow_async=True)
     if streaming and inspect.iscoroutinefunction(fn):
@@ -1096,8 +1119,12 @@ def _inspect_handler(
     params = list(signature(fn).parameters.values())
     hints = type_hints(fn)
     args_type = hints.get(params[0].name)
-    if not is_dataclass_type(args_type):
-        raise RegistrationError(f"{path}: first parameter must be annotated with an args dataclass")
+    adapted = args_adapters is not None and args_adapters.for_class(args_type) is not None
+    if not is_dataclass_type(args_type) and not adapted:
+        raise RegistrationError(
+            f"{path}: first parameter must be annotated with an args dataclass, or a class "
+            "app.args_adapter(...) covers"
+        )
     if "return" not in hints:
         raise RegistrationError(f"{path}: handler needs a return annotation for output_schema")
     output_type = hints["return"]

@@ -521,6 +521,56 @@ funds lookup "world index" --currency EUR | jq -e '.data == {"name": "world inde
 funds lookup x --report-price | jq -e '.meta.exit_code == 2'
 ```
 
+## Keep the shared pydantic models with an args adapter
+
+When the shared package cannot move yet, because other consumers still run on
+pydantic-settings, a treaty CLI can take its models as they are. Register an args adapter
+for `BaseModel` once, before the commands: `schema` hands treaty the model's JSON Schema,
+which becomes the flags, and `validate` builds the model from the parsed arguments:
+
+<!-- file: examples/tutorial/market_quotes.py -->
+```python
+def model_schema(cls: type[BaseModel]) -> dict[str, Any]:
+    return cls.model_json_schema(by_alias=False)
+
+
+def model_validate(cls: type[BaseModel], data: dict[str, object]) -> BaseModel:
+    return cls.model_validate(data, by_name=True, by_alias=False)
+
+
+app.args_adapter(BaseModel, schema=model_schema, validate=model_validate)
+```
+
+A handler then annotates its first parameter with the model, and receives an instance of it:
+
+<!-- file: examples/tutorial/market_quotes.py -->
+```python
+def lookup(args: LookupCommand, ctx: Ctx) -> dict[str, object]:
+    price = 187.5 if args.report_price else None
+    return {"symbol": args.query.upper(), "currency": args.currency, "price": price}
+```
+
+treaty parses argv, `--raw-payload`, `exec` lines, and MCP calls against the schema first,
+as strictly as a dataclass's flags, so `"3"` for an integer exits 2 before pydantic sees it;
+`validate` then runs the model's own constraints and validators, and each entry of a
+`ValidationError` is one `error.errors` item at its field, exit 2. A `model_validator`'s
+error names no field. Each field is a flag named after the field, not its alias
+(`by_alias=False`, so `report_price` is `--report-price`); a `SecretStr` is a treaty secret,
+read from `--<name>-from-env`, `--<name>-from-file`, or its variable, never argv. pydantic
+has no word for a positional or a short flag, so the model says it in
+`json_schema_extra={"treaty": {"positional": True}}` (or `{"short": "q"}`), as `query` does
+above. A field that is a nested model or a dict has no flag form and is refused when the
+command registers.
+
+**Check:** the shared positional and the subclass's flag come from the pydantic models
+
+<!-- check -->
+```bash
+quotes() { uv run python -m examples.tutorial.market_quotes "$@"; }
+quotes lookup aapl --report-price | jq -e '.data == {"symbol": "AAPL", "currency": "USD", "price": 187.5}'
+quotes lookup aapl --currency usd | jq -e '.error.errors[0].field == "currency"'
+```
+
 ## pydantic-settings to treaty at a glance
 
 | pydantic-settings | treaty |

@@ -4,6 +4,7 @@ from importlib.metadata import version
 
 from ._adapters import OutputAdapter
 from ._app import App, Group, NoArgs
+from ._args_adapter import ArgsAdapter
 from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
 from ._cache import CachePolicy
@@ -50,6 +51,7 @@ __all__ = [
     "Affects",
     "App",
     "Arg",
+    "ArgsAdapter",
     "AuditLog",
     "Background",
     "Batch",

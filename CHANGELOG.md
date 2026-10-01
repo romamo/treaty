@@ -115,6 +115,16 @@ Apps built on treaty keep their own, structured schema changelog with
   dry run or under `--cwd`, and for an object flag's own `__post_init__`, whose crash
   report is now redacted of the run's secrets too. treaty's own phase 1 errors, which
   never echo a secret, read as before (#165)
+- Args models: `app.args_adapter(base, schema=..., validate=...)`, returning a
+  `treaty.ArgsAdapter`, lets a handler's arguments be a subclass of `base`, such as a
+  pydantic `BaseModel`, instead of a dataclass; the input-side counterpart of
+  `app.output_adapter`. The model's JSON Schema becomes the flags (a `treaty` key carries
+  `positional`, `short`, and the other `Flag` options), so argv, `--raw-payload`, `exec`,
+  `app.call(...)`, MCP, `--help`, completion, `--schema`, and `--validate-only` take it
+  as they take an args dataclass. Phase 1 then calls `validate` with the parsed values,
+  and each entry of a `ValueError`'s `errors()`, such as a pydantic `ValidationError`'s,
+  is one `error.errors` item, exit 2; a password-format field is a treaty secret. treaty
+  imports no pydantic (#102)
 
 ## [1.0.0rc9] - 2026-10-01
 
