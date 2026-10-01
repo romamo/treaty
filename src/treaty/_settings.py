@@ -4,7 +4,7 @@
 handler asks for it by annotating a parameter with the class. Each field takes the first
 value found, highest precedence first:
 
-1. ``<APP>_<FIELD>`` in the environment
+1. ``<APP>_<FIELD>`` in the environment, then the field's ``Flag(env=(...))`` names in order
 2. The config files: ``--config PATH`` alone, or else the project file ``./.<app>.toml``
    and then the user file (``$XDG_CONFIG_HOME/<app>/config.toml``)
 3. The field's default
@@ -28,6 +28,7 @@ from pathlib import Path
 from ._atomic import retry_sharing_violation
 from ._config import local_config, user_config
 from ._env import CONFIG, CONTEXT, INSTANCE_ID, KNOWN, app_var
+from ._envnames import EnvName, check_env_names, read_env
 from ._errors import ParseError, RegistrationError, SchemaError, UserCodeError, user_code
 from ._flags import FLAG_META, apply_scalar, coerce_text
 from ._parse import check_json_base
@@ -50,6 +51,8 @@ class Setting:
     default: object
     declared_secret: bool | None = None
     """``Flag(..., secret=...)`` on the field; None infers it from the name"""
+    env: tuple[EnvName, ...] = ()
+    """``Flag(..., env=...)``: variables read after ``<APP>_<NAME>``, in order"""
 
     @property
     def secret(self) -> bool:
@@ -74,10 +77,10 @@ class SettingsSpec:
     fields: tuple[Setting, ...]
 
     @staticmethod
-    def check(settings: object) -> str:
+    def check(settings: object, app_name: str) -> str:
         """What ``App(settings=)`` checks before any scalar is registered: a frozen
-        dataclass whose fields have defaults and no framework names. Returns how its
-        errors name it"""
+        dataclass whose fields have defaults, no framework names, and ``env`` names no
+        other field or framework option reads. Returns how its errors name it"""
         where = f"App(settings={getattr(settings, '__qualname__', settings)!r})"
         if not (isinstance(settings, type) and dataclasses.is_dataclass(settings)):
             raise RegistrationError(f"{where}: settings is a frozen dataclass type")
@@ -118,15 +121,32 @@ class SettingsSpec:
             ]
             if ignored:
                 raise RegistrationError(
-                    f"{where}: field {f.name!r}: a setting takes default, description, and "
-                    f"secret from Flag(...), not {', '.join(ignored)}"
+                    f"{where}: field {f.name!r}: a setting takes default, description, "
+                    f"secret, and env from Flag(...), not {', '.join(ignored)}"
                 )
+        SettingsSpec._check_env(where, settings, app_name)
         return where
 
+    @staticmethod
+    def _check_env(where: str, settings: type, app_name: str) -> None:
+        """Each variable sets one value: a declared name is no field's ``<APP>_<NAME>``,
+        no framework variable, and not declared by two fields"""
+        fields = dataclasses.fields(settings)
+        taken = {app_var(app_name, v.key): f"the framework's {v.key}" for v in KNOWN}
+        taken |= {app_var(app_name, f.name): f"setting {f.name!r}" for f in fields}
+        for f in fields:
+            declared = f.metadata.get(FLAG_META)
+            if declared is None or not declared.env:
+                continue
+            own = app_var(app_name, f.name)
+            others = {k: v for k, v in taken.items() if k != own}
+            check_env_names(f"{where}: field {f.name!r}", own, declared.env, others)
+            taken |= {n.name: f"setting {f.name!r}" for n in declared.env}
+
     @classmethod
-    def inspect(cls, settings: type, scalars: ScalarRegistry) -> SettingsSpec:
+    def inspect(cls, settings: type, scalars: ScalarRegistry, app_name: str) -> SettingsSpec:
         """The shape, then each field's type, a class registered in ``scalars`` included"""
-        where = cls.check(settings)
+        where = cls.check(settings, app_name)
         hints = type_hints(settings)
         fields: list[Setting] = []
         for f in dataclasses.fields(settings):
@@ -136,12 +156,26 @@ class SettingsSpec:
                 raise RegistrationError(f"{where}: field {f.name!r}: {exc}") from None
             declared = f.metadata.get(FLAG_META)
             secret = None if declared is None else declared.secret
+            env = () if declared is None else declared.env
             if secret and classified.flag_type is FlagType.BOOLEAN:
                 raise RegistrationError(
                     f"{where}: field {f.name!r}: a boolean cannot hold a secret"
                 )
-            fields.append(Setting(f.name, classified, f.default, secret))
+            fields.append(Setting(f.name, classified, f.default, secret, env))
         return cls(settings, tuple(fields))
+
+
+def settings_env_names(settings: type | None) -> frozenset[str]:
+    """Every name the settings fields declare with ``Flag(env=)``, read without
+    inspecting the field types, so an audit runs even when one names an unknown class"""
+    if settings is None:
+        return frozenset()
+    return frozenset(
+        n.name
+        for f in dataclasses.fields(settings)
+        if (declared := f.metadata.get(FLAG_META)) is not None
+        for n in declared.env
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,9 +331,10 @@ def resolve(
     values: dict[str, object] = {}
     sources: dict[str, str] = {}
     for s in spec.fields:
-        var = app_var(app_name, s.name)
-        if env.get(var):
-            values[s.name] = _from_text(s, env[var], var)
+        found_env = read_env(app_var(app_name, s.name), s.env, env)
+        if found_env is not None:
+            var, text = found_env
+            values[s.name] = _from_text(s, text, var)
             sources[s.name] = f"env:{var}"
             continue
         found = next(((p, layer[s.name]) for p, layer in layers if s.name in layer), None)

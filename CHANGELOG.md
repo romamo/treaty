@@ -10,6 +10,19 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- A settings field can keep a variable its users already export, outside the app's prefix:
+  `Flag(default=..., description=..., env=("BEANCOUNT_FILE",))` reads the declared names in
+  order after `<APP>_<FIELD>` and before the config files. `--show-config` reports the
+  source as `env:BEANCOUNT_FILE`, `--help` and AGENTS.md list the names, a bad value is
+  `CONFIG_INVALID` naming the variable it came from, and the `env-prefix` audit rule
+  accepts them. The new `EnvName("OLD", deprecated=Deprecated("1.4.0"))` keeps reading an
+  old name with a `DEPRECATED_ENV_VAR` warning naming the variable to use instead; a name is
+  not deprecated unless declared so. A name that is not a variable name, repeats, is the
+  field's own `<APP>_<FIELD>`, or is read for another field or a framework option is a
+  `RegistrationError` (#7)
+
 ## [1.0.0rc10] - 2026-10-01
 
 The tenth 1.0 release candidate: 5 fixes and 11 additions.

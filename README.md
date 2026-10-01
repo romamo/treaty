@@ -1077,6 +1077,17 @@ file, and env vars still apply. An unknown key, a wrong type, or bad TOML exits 
 `CONTEXT_UNKNOWN` and `context.available`. `DEPLOYCTL_CONFIG`, `DEPLOYCTL_CONTEXT`, and
 `DEPLOYCTL_INSTANCE_ID` stand in for the flags, as they must for `App.call` and MCP.
 
+A field can also read a variable its users already export, outside the prefix:
+`Flag(default=..., description=..., env=("BEANCOUNT_FILE",))` reads the names in order
+after `<APP>_<FIELD>` and before the config files. The prefixed name still wins. Such a
+name shows in `--help`, in AGENTS.md, and as `env:BEANCOUNT_FILE` in `--show-config`, is
+validated as strictly as the prefixed one, with errors naming it, and satisfies the
+`env-prefix` audit rule. `EnvName("OLD_NAME", deprecated=Deprecated("1.4.0"))` keeps reading
+an old name, with a `DEPRECATED_ENV_VAR` warning naming the replacement: `<APP>_<FIELD>`, or
+the declared name `Deprecated(replacement=)` gives. A name is refused at registration when it
+is not a variable name, repeats, is the field's own `<APP>_<FIELD>`, or is read for another
+field or a framework option.
+
 Every response carries `meta.config_sources` (the files read, highest first; `[]` when
 none) and `meta.effective_config_hash` (12 hex of the merged settings), plus
 `meta.context` and `meta.instance_id` when set. `tool --show-config` answers with

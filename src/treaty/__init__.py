@@ -15,6 +15,7 @@ from ._deprecation import Deprecated
 from ._deps import Check, Dependency, endpoint
 from ._effect import Affects
 from ._envelope import Envelope, ErrorDetail, Meta, NetworkContext, Redirect, WarningDetail
+from ._envnames import EnvName
 from ._errors import (
     CliExit,
     Exit,
@@ -70,6 +71,7 @@ __all__ = [
     "Ctx",
     "DangerLevel",
     "Envelope",
+    "EnvName",
     "ErrorDetail",
     "Example",
     "Excludes",

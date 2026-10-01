@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from ._auth import HEADLESS_FLAG
 from ._command import INPUT_FILE_FLAG, Command
 from ._env import KNOWN, UNPREFIXED, app_var
+from ._envnames import declared_text
 from ._errors import Exit, RegistrationError
 from ._framework import (
     CONFIRM_FLAG,
@@ -84,8 +85,8 @@ class EnvVarDoc:
 
 
 def env_vars(app: App) -> tuple[EnvVarDoc, ...]:
-    """Every variable the app reads under its prefix, sorted by name: treaty's own, each
-    setting, each secret flag's default, and each command's token variables"""
+    """Every variable the app reads, sorted by name: treaty's own, each setting and the
+    names it declares, each secret flag's default, and each command's token variables"""
     found: dict[str, EnvVarDoc] = {}
 
     def add(doc: EnvVarDoc) -> None:
@@ -99,7 +100,11 @@ def env_vars(app: App) -> tuple[EnvVarDoc, ...]:
     if app.settings is not None:
         for s in app.settings.fields:
             text = f"Setting {s.name}, over the config files"
-            add(EnvVarDoc(app_var(app.name, s.name), s.classified.flag_type.value, False, text))
+            own = app_var(app.name, s.name)
+            add(EnvVarDoc(own, s.classified.flag_type.value, False, text))
+            for n in s.env:
+                text = declared_text(n, f"Setting {s.name}", own)
+                add(EnvVarDoc(n.name, s.classified.flag_type.value, False, text))
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         for f in command.fields:
             if f.secret:

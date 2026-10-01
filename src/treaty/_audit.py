@@ -47,6 +47,7 @@ from ._scan import (
     source_tree,
     unread_records,
 )
+from ._settings import settings_env_names
 from ._types import (
     FlagType,
     is_dataclass_type,
@@ -2167,6 +2168,8 @@ def env_reads(fn: Callable[..., object]) -> list[str]:
 
 def _env_prefix(app: App) -> Iterator[Finding]:
     prefix = app_var(app.name, "") + "_"
+    # A name a setting declares with Flag(env=) is read on purpose, and documented
+    declared = settings_env_names(app._settings_cls)
     for c in user_commands(app):
         code = [c.handler, *(spec.acquire for spec in c.resource_graph.values())]
         seen: dict[str, Reached] = {}
@@ -2174,7 +2177,12 @@ def _env_prefix(app: App) -> Iterator[Finding]:
             for unit in reached_functions(fn):
                 seen.update((n, unit) for n in env_reads(unit.fn) if n not in seen)
         for name, unit in sorted(seen.items()):
-            if name.startswith(prefix) or name in UNPREFIXED or name in c.token_env_vars:
+            if (
+                name.startswith(prefix)
+                or name in UNPREFIXED
+                or name in c.token_env_vars
+                or name in declared
+            ):
                 continue
             yield Finding(
                 "env-prefix",

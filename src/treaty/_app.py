@@ -120,6 +120,8 @@ from ._envelope import (
     visible,
     write_envelope,
 )
+from ._envnames import DEPRECATED_ENV_VAR, declared_text, deprecated_name
+from ._envnames import replacement as env_replacement
 from ._errors import (
     ArgsCrashed,
     ArgsRefused,
@@ -485,7 +487,7 @@ class App:
         self.credentials = credentials
         self.jobs = jobs
         if settings is not None:
-            SettingsSpec.check(settings)
+            SettingsSpec.check(settings, name)
         self._settings_cls = settings
         self._settings: SettingsSpec | None = None
         """Inspected on first use, so a field may name a class ``app.scalar`` registers"""
@@ -1689,7 +1691,7 @@ class App:
         if self._settings_cls is None:
             return None
         if self._settings is None:
-            self._settings = SettingsSpec.inspect(self._settings_cls, self.scalars)
+            self._settings = SettingsSpec.inspect(self._settings_cls, self.scalars, self.name)
         return self._settings
 
     def manifest(self) -> dict[str, object]:
@@ -1711,14 +1713,15 @@ class App:
         )
 
     def environment(self) -> list[tuple[str, str]]:
-        """Every variable the app reads, by its prefixed name, with what it sets
-        (REQ-F-073): the framework's own, the settings, then each secret flag's default"""
+        """Every variable the app reads, by its exact name, with what it sets
+        (REQ-F-073): the framework's own, the settings and the names they declare, then
+        each secret flag's default"""
         rows = [(app_var(self.name, v.key), v.description) for v in KNOWN]
         if self.settings is not None:
-            rows += [
-                (app_var(self.name, f.name), f"Setting {f.name}, over the config files")
-                for f in self.settings.fields
-            ]
+            for f in self.settings.fields:
+                own = app_var(self.name, f.name)
+                rows.append((own, f"Setting {f.name}, over the config files"))
+                rows += [(n.name, declared_text(n, f"Setting {f.name}", own)) for n in f.env]
         secrets = {
             var: f"Default of --{field.replace('_', '-')} of {path}"
             for path, c in sorted(self._commands.items(), key=lambda kv: kv[0].value)
@@ -4260,9 +4263,9 @@ class _Run:
         return self._envelope(0, meta={**(meta or {}), "validation_only": True})
 
     def _deprecations(self, command: Command, invocation: Invocation) -> None:
-        """REQ-F-075: a deprecated command, or a deprecated flag the caller passed, still
-        runs; stderr gets one structured line and ``warnings`` an entry, each naming the
-        replacement"""
+        """REQ-F-075: a deprecated command, a deprecated flag the caller passed, or a
+        deprecated variable a setting was read from still runs; stderr gets one
+        structured line and ``warnings`` an entry, each naming the replacement"""
         found: list[tuple[str, str, Deprecated, str | None]] = []
         if (old := command.deprecated) is not None:
             instead = old.replacement and shlex.join(
@@ -4274,11 +4277,20 @@ class _Run:
             if (old := f.spec.deprecated) is not None and f.name in invocation.given:
                 instead = old.replacement and f"--{old.replacement}"
                 found.append(("DEPRECATED_FLAG", f"--{f.flag}", old, instead))
+        spec = self.app.settings
+        for s in () if spec is None else spec.fields:
+            var = self.settings.sources.get(s.name, "").removeprefix("env:")
+            name = deprecated_name(s.env, var)
+            if name is not None and name.deprecated is not None:
+                instead = env_replacement(name, app_var(self.app.name, s.name))
+                found.append((DEPRECATED_ENV_VAR, var, name.deprecated, instead))
         for code, what, old, instead in found:
             message = f"{what} is deprecated since {old.since}"
             if instead:
                 message += f"; use {instead} instead"
             context: dict[str, object] = {"since": old.since}
+            if code == DEPRECATED_ENV_VAR:
+                context["variable"] = what
             if instead:
                 context["replacement"] = instead
             if old.removed_in is not None:

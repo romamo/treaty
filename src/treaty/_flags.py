@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ._deprecation import Deprecated
+from ._envnames import EnvName, env_names
 from ._errors import ParseError, RegistrationError, SchemaError
 from ._paths import PATTERN_TYPE, check_path
 from ._redact import REDACTED, secret_name
@@ -58,6 +59,8 @@ class FlagSpec:
     """False writes the value as ``[OMITTED]`` in the audit log; it is still a plain value"""
     dry_run: bool = False
     """The command's dry-run switch under its own name, such as a wrapped tool's ``--check``"""
+    env: tuple[EnvName, ...] = ()
+    """Variables read after ``<APP>_<NAME>``, in order, such as ``BEANCOUNT_FILE``"""
 
     def __post_init__(self) -> None:
         if not self.description:
@@ -110,6 +113,7 @@ def Flag(
     deprecated: Deprecated | None = None,
     audit: bool = True,
     dry_run: bool = False,
+    env: Sequence[str | EnvName] = (),
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
 
@@ -127,6 +131,9 @@ def Flag(
     body too private to keep; unlike ``secret``, argv and error messages still carry it.
     ``dry_run=True`` on a boolean makes it the command's dry run in place of a field
     named ``dry_run``, so a wrapper keeps the tool's own ``--check`` or ``--noop``.
+    ``env=("BEANCOUNT_FILE",)`` on a settings field reads those variables, in order,
+    after ``<APP>_<NAME>``; ``EnvName("OLD", deprecated=Deprecated("1.4.0"))`` still reads
+    one, with a warning naming the variable to use instead.
     """
     spec = FlagSpec(
         description,
@@ -140,6 +147,7 @@ def Flag(
         deprecated=deprecated,
         audit=audit,
         dry_run=dry_run,
+        env=env_names(env),
     )
     return _field(spec, default)
 
@@ -937,6 +945,11 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: from_stdin=True is for value fields; a boolean "
                 "takes no value, and a secret comes from --x-from-env or --x-from-file"
+            )
+        if spec.env:
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: env= is for settings fields; declare the "
+                "value in App(settings=) to read it from those variables"
             )
         if spec.dry_run and info.flag_type is not FlagType.BOOLEAN:
             raise RegistrationError(
