@@ -97,6 +97,17 @@ Apps built on treaty keep their own, structured schema changelog with
   and a `host:port` entry matches a URL that names no port when the port is the scheme's
   own, as `example.com:443` does `https://example.com/`; `ctx.http` and `ctx.network` both
   follow it
+### Breaking
+
+- `SUBPROCESS_FAILED` marks its `context.stderr` as content from outside the tool:
+  `error.context` gets `"_source": "external", "_trusted": false`, a stderr that is a
+  high-entropy value is masked, and a handler that catches the `CliExit` from `ctx.run`
+  finds `treaty.External` in `exc.context["stderr"]`, the text in its `.value` (#174)
+- A failure's `data` on an `external=True` command, from `raise Exit.X(..., data=...)`, a
+  destructive preview, or a partial run of steps, is tagged
+  `"_source": "external", "_trusted": false` with an `UNTRUSTED_CONTENT` warning, as a
+  success's is; before, only a success's `data` and a batch's were (#174)
+
 ### Added
 
 - `treaty.External(value)` marks a top-level value of a failure's `error.context` as
@@ -105,12 +116,10 @@ Apps built on treaty keep their own, structured schema changelog with
   masked as external `data` is (`HIGH_ENTROPY_MASKED` names `error.context.<key>`), the
   other context values are left alone, and `error.context` gets
   `"_source": "external", "_trusted": false` with an `UNTRUSTED_CONTENT` warning, unless
-  `--no-injection-protection`. `SUBPROCESS_FAILED` marks its `context.stderr` itself, so a
-  handler that catches it reads `External` there. `External` nested in a context value or
-  in `data`, or on an `ARG_ERROR`, is `INVALID_EXIT`. The `external-data` audit rule also
-  warns when a `context=` value is built from a `ctx.run` result's `stdout` or `stderr`
-  without `External`, whatever the command declares. A failure's `data` on an
-  `external=True` command is now tagged as a success's is (#174)
+  `--no-injection-protection`. `External` nested in a context value or in `data`, or on an
+  `ARG_ERROR`, is `INVALID_EXIT`. The `external-data` audit rule also warns when a
+  `context=` value is built from a `ctx.run` result's `stdout` or `stderr` without
+  `External`, whatever the command declares (#174)
 
 ## [1.0.0rc11] - 2026-10-01
 
