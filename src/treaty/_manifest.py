@@ -338,9 +338,11 @@ def command_entry(
     all_paths: Mapping[CommandPath, Command],
     *,
     builtin: bool,
+    offered: Collection[FormatName],
     shared: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """One CommandEntry; ``builtin`` when treaty registered the command, not the app. With
+    """One CommandEntry; ``builtin`` when treaty registered the command, not the app.
+    ``offered`` is the app's ``--format`` values, which the root flag lists. With
     ``shared`` given, entries equal to the shared table are hoisted"""
     exit_codes: dict[str, object] = dict(shared_exit_codes(exits))
     for name in command.exit_codes:
@@ -407,10 +409,11 @@ def command_entry(
         out["output_file"] = "binary" if command.returns_binary else "formatted"
     if command.streaming:
         out["streaming_default"] = True
-    # REQ-O-049: the values beyond the defaults: id (REQ-O-005), then the command's own
-    # renderers', among them a format only it offers (#209)
+    # REQ-O-049: the values beyond the defaults: id (REQ-O-005), then the formats only this
+    # command offers (#209). Its override of an app format is listed by the root flag, as
+    # for every other command
     beyond = [Format.ID.value] if command.id_field is not None else []
-    beyond += (n.value for n in command.renderers if n not in _DEFAULT_FORMATS)
+    beyond += (n.value for n in command.renderers if n not in _DEFAULT_FORMATS and n not in offered)
     if beyond:
         out["output_formats"] = beyond
     if command.safe_default:
@@ -464,9 +467,10 @@ def command_schema(
     all_paths: Mapping[CommandPath, Command],
     *,
     builtin: bool,
+    offered: Collection[FormatName],
 ) -> dict[str, object]:
     """``--schema`` output for one command (REQ-C-015, REQ-O-032)"""
-    entry = command_entry(command, exits, all_paths, builtin=builtin)
+    entry = command_entry(command, exits, all_paths, builtin=builtin, offered=offered)
     entry["parameters"] = entry["flags"]
     # REQ-O-014; not ManifestResponse keys
     entry["schema_version"] = command.schema_version.value
@@ -610,7 +614,9 @@ def build_manifest(
     root_env = [*framework_env_vars(app_name), *(dict(e) for e in settings_env_vars)]
     flags = global_flag_entries(formats, app_name, media_types)
     entries = {
-        path.value: command_entry(cmd, exits, commands, builtin=path in builtins, shared=shared)
+        path.value: command_entry(
+            cmd, exits, commands, builtin=path in builtins, offered=formats, shared=shared
+        )
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
     if audit_log_path is not None:

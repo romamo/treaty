@@ -6546,6 +6546,7 @@ class _Run:
                 self.app.exits,
                 self.app.commands,
                 builtin=path in self.app.builtins,
+                offered=self.app.formats,
             )
         else:
             subtree = {

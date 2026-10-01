@@ -469,10 +469,20 @@ def test_the_manifest_lists_a_commands_own_formats_on_its_entry() -> None:
     commands: Any = manifest["commands"]
     assert commands["why"]["output_formats"] == ["html"]
     assert commands["label"]["output_formats"] == ["yaml"]
-    assert commands["tag"]["output_formats"] == ["csv"]
+    # Overriding the app's csv leaves the entry as it was: the root flag lists csv
+    assert "output_formats" not in commands["tag"]
     assert "output_formats" not in commands["show"]
     # output_formats holds names only, so the entry's description states the media type
     assert commands["why"]["description"] == "Why it happened. --format html writes text/html"
+
+
+def test_schema_lists_only_a_commands_own_formats() -> None:
+    """An override of an app format adds nothing to --schema, as in the manifest"""
+    app = page_app()
+    _, why = run_json(app, ["why", "--schema"])
+    _, tag = run_json(app, ["tag", "--schema"])
+    assert why["data"]["output_formats"] == ["html"]
+    assert "output_formats" not in tag["data"]
 
 
 def test_help_and_completion_offer_a_format_on_its_command_only() -> None:

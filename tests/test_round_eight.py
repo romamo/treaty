@@ -222,7 +222,7 @@ def test_every_framework_flag_surface_agrees() -> None:
         "heartbeat-interval",
         "validate-only",
     ]
-    entry = command_entry(command, app.exits, app.commands, builtin=False)
+    entry = command_entry(command, app.exits, app.commands, builtin=False, offered=app.formats)
     assert set(names) <= set(entry["flags"])  # type: ignore[arg-type]
     assert known_flags(command)[-6:] == names
     json_keys = {n.replace("-", "_") for n in known_flags(command, argv=False)}
