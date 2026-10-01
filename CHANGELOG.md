@@ -105,6 +105,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 - A `streaming=True` command with `stdin_input=True` gets its payload: `ctx.stdin_text`
   was always None, as the stream never read stdin (#33)
+- Security: a phase 1 error written by app code no longer carries a secret value it
+  quotes. A `ParseError` or `InvalidValue` raised from an args `__post_init__` sees every
+  secret argument in the clear, and its message, suggestion, `errors[]` items, and context
+  values reached the envelope as written. They are now redacted of the run's secret
+  values, as a handler's error is, on every path that answers with that envelope: JSON,
+  the plain rendering on stderr, `exec` lines, `--raw-payload`, `--validate-only`,
+  `App.call`, and MCP tool calls. That holds at parse time, for the rebuild of a forced
+  dry run or under `--cwd`, and for an object flag's own `__post_init__`, whose crash
+  report is now redacted of the run's secrets too. treaty's own phase 1 errors, which
+  never echo a secret, read as before (#165)
 
 ## [1.0.0rc9] - 2026-10-01
 

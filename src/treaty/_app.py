@@ -114,6 +114,7 @@ from ._envelope import (
 )
 from ._errors import (
     ArgsCrashed,
+    ArgsRefused,
     CliExit,
     ParseError,
     RegistrationError,
@@ -3541,18 +3542,31 @@ class _Run:
     def arg_error(self, exc: ParseError, *, code: str | None = None, **kw: Any) -> Envelope:
         rebase_suggestions(exc, self.cwd)
         entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
-        corrected = exc.context.get("corrected_input")
+        message, context, suggestion = exc.message, exc.context, exc.suggestion
+        items = exc.items()
+        if isinstance(exc, ArgsRefused):
+            # An args __post_init__ or a scalar's parse= is user code: its message may
+            # quote a secret value it was given, which stdout never carries (#165)
+            command = self.current
+            assert command is not None, "arguments are only built for a routed command"
+            redact = self._redactor(command, types.SimpleNamespace(**exc.values))
+            message = redact(message)
+            suggestion = None if suggestion is None else redact(suggestion)
+            # json_safe bounds the depth the redaction walks, as the envelope's own does
+            context = cast(dict[str, object], redacted(json_safe(context), redact))
+            items = cast(list[dict[str, object]], redacted(json_safe(items), redact))
+        corrected = context.get("corrected_input")
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
                 code=code or exc.code or "ARG_ERROR",
-                message=exc.message,
+                message=message,
                 retryable=False,
-                context=exc.context,
-                suggestion=exc.suggestion,
+                context=context,
+                suggestion=suggestion,
                 phase="validation",
                 fix_required="correct the arguments and reissue",
-                errors=exc.items(),
+                errors=items,
                 corrected_input=corrected if isinstance(corrected, str) else None,
             ),
             **kw,
