@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc11] - 2026-10-01
+
+The eleventh 1.0 release candidate: 4 additions and 1 change.
+
 ### Added
 
 - A settings field can keep a variable its users already export, outside the app's prefix:
@@ -1166,7 +1170,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc10...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc11...HEAD
+[1.0.0rc11]: https://github.com/romamo/treaty/compare/v1.0.0rc10...v1.0.0rc11
 [1.0.0rc10]: https://github.com/romamo/treaty/compare/v1.0.0rc9...v1.0.0rc10
 [1.0.0rc9]: https://github.com/romamo/treaty/compare/v1.0.0rc8...v1.0.0rc9
 [1.0.0rc8]: https://github.com/romamo/treaty/compare/v1.0.0rc7...v1.0.0rc8
