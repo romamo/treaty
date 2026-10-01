@@ -36,6 +36,7 @@ from ._framework import (
 )
 from ._idempotency import IdempotencyKey
 from ._json5 import JsonFloat, Unreadable, loads_forgiving
+from ._lines import INPUT_LINES_FLAG, INPUT_LINES_KEY, Lines, StdinInput, input_lines
 from ._page import Limit, Position
 from ._paths import check_path
 from ._rules import check_rules
@@ -100,6 +101,10 @@ class Invocation:
     """``--input-file`` of a ``stdin_input`` command; None or ``-`` reads stdin"""
     stdin_text: str | None = None
     """The payload of a ``stdin_input`` command, read before the handler runs"""
+    input_lines: tuple[str, ...] | None = None
+    """``input_lines`` of a line-mode command's JSON payload, in place of stdin"""
+    lines: Lines | None = None
+    """The input of a line-mode command, read as its handler iterates"""
     output: Path | None = None
     """``--output`` of an ``output_file`` command: where the rendered ``data`` goes"""
     headless: bool = False
@@ -800,7 +805,10 @@ def known_flags(command: Command, *, argv: bool = True) -> list[str]:
     the unknown-field error of ``exec``, MCP, and ``--raw-payload``"""
     flags = [name for f in command.fields for name in f.exposed_flags()]
     flags += [f.name for f in framework_flags(command, json=not argv)]
-    return flags if argv else [*flags, STABLE_OUTPUT_FLAG, FIELDS_FLAG]
+    if argv:
+        return flags
+    lines = [INPUT_LINES_FLAG] if command.stdin_input is StdinInput.LINES else []
+    return [*flags, STABLE_OUTPUT_FLAG, FIELDS_FLAG, *lines]
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
@@ -894,6 +902,9 @@ def build_from_mapping(
                 continue
             if key == FIELDS_KEY:
                 framework["fields"] = parse_fields(value)
+                continue
+            if key == INPUT_LINES_KEY and command.stdin_input is StdinInput.LINES:
+                framework["input_lines"] = input_lines(value)
                 continue
             flag = key.replace("_", "-")
             spec = flag_named(command, flag, json=True)

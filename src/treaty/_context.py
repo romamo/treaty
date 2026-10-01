@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +15,7 @@ from ._config import ConfigFile
 from ._errors import RegistrationError
 from ._http import Http
 from ._lifecycle import Teardown
+from ._lines import Lines
 from ._locks import Locks
 from ._mode import Format
 from ._page import PageRequest
@@ -81,6 +82,19 @@ class Ctx:
     _traversal: Traversal | None = field(default=None, repr=False, compare=False)
     _deadline: float | None = field(default=None, repr=False, compare=False)
     """``time.monotonic()`` when the command times out, else None"""
+    _stdin_lines: Lines | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def stdin_lines(self) -> Iterator[str]:
+        """The input of a ``stdin_input="lines"`` command, one line per item as it arrives:
+        stdin, ``--input-file``, or ``input_lines`` in ``exec`` and MCP. Each line comes
+        without its ``\\n`` or ``\\r\\n``; there is no total cap, but a line over
+        ``App(max_line_bytes=)`` ends the run with exit 1 ``LINE_TOO_LARGE``, and one that is
+        not UTF-8 with ``LINE_NOT_UTF8``, each with the line number in ``context.line``. In a
+        stream, the wait for each line restarts the idle timeout, as each event does"""
+        if self._stdin_lines is None:
+            raise RegistrationError('ctx.stdin_lines needs stdin_input="lines" on the command')
+        return self._stdin_lines
 
     @property
     def remaining(self) -> float | None:

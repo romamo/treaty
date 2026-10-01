@@ -120,6 +120,7 @@ def call_with_timeout[T](
     heartbeats: Sequence[Heartbeat] = (),
     clock: Callable[[], float] = time.monotonic,
     ended: Callable[[threading.Thread], None] | None = None,
+    extended: Callable[[], float | None] | None = None,
 ) -> T:
     """Run ``fn`` under ``timeout``; re-raise its exception or ``TimeoutExpired``
 
@@ -136,6 +137,9 @@ def call_with_timeout[T](
     beats are never closer than their interval. ``clock`` reads the time in seconds.
     ``ended`` receives the worker on the worker itself as the handler ends, abandoned or
     not, so what was kept for it can be released without polling.
+    ``extended`` returns a later deadline, on ``clock``, that the handler earned by making
+    progress, such as reading a stdin line, or None: an idle limit checks it as the
+    deadline passes and waits on until the later one.
     """
     run_in = context if context is not None else contextvars.copy_context()
     if timeout.seconds is None and not heartbeats:
@@ -176,6 +180,10 @@ def call_with_timeout[T](
         if not worker.is_alive():
             break
         now = clock()
+        if deadline is not None and now >= deadline and extended is not None:
+            later = extended()
+            if later is not None and later > deadline:
+                deadline = later
         if deadline is not None and now >= deadline:
             raise TimeoutExpired(timeout, pending)
         for i, heartbeat in enumerate(heartbeats):

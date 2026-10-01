@@ -17,6 +17,7 @@ from ._framework import (
     UNMASK_FLAG,
     framework_flags,
 )
+from ._lines import INPUT_LINES_KEY, StdinInput
 from ._mode import Format
 from ._schema import JsonSchema
 from ._select import FIELDS_KEY
@@ -408,8 +409,10 @@ def command_schema(
             constraints = [r.json_schema() for r in groups]
             raw.update(constraints[0] if len(constraints) == 1 else {"allOf": constraints})
         entry["raw_payload_schema"] = raw
-    if command.stdin_input:
+    if command.stdin_input is not None:
         entry["stdin_input"] = True  # REQ-F-054; not a ManifestResponse key
+    if command.stdin_input is StdinInput.LINES:
+        entry["stdin_mode"] = StdinInput.LINES.value  # #33: read lazily, a cap per line
     if command.heartbeat:
         # REQ-F-053: lines an agent skips before the envelope; not a ManifestResponse key
         entry["heartbeat_ms"] = DEFAULT_HEARTBEAT_MS
@@ -456,6 +459,13 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
         "default": False,
         "description": "Byte-identical output for identical calls (--stable-output)",
     }
+    if command.stdin_input is StdinInput.LINES:
+        properties[INPUT_LINES_KEY] = {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "The input lines, one per item without its line break, in place "
+            "of stdin, which an exec line or an MCP call does not have",
+        }
     properties[FIELDS_KEY] = {
         "type": "string",
         "description": "Comma-separated top-level keys of data to keep, such as id,name "

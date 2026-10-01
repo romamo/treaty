@@ -88,7 +88,7 @@ review), **rename**, **remove**.
 Keywords: `name`, `version` (semver, or a PEP 440 release with optional `a`, `b`, or `rc`,
 `.post`, and `.dev` parts, reported in its semver spelling: `1.0.0.dev0` is `1.0.0-dev.0`,
 `1.0.0.post1` is `1.0.0+post.1`; epochs and local versions are refused), `description`, `state`, `default_timeout`,
-`max_output_bytes`, `max_stdin_bytes`, `state_dir`, `enable_exec`, `credentials`, `jobs`,
+`max_output_bytes`, `max_stdin_bytes`, `max_line_bytes`, `state_dir`, `enable_exec`, `credentials`, `jobs`,
 `settings`, `init`, `companions`, `dependencies`, `checks`, `update_check`, `audit_log`,
 `schema_changelog`. All keep.
 
@@ -129,7 +129,7 @@ Fields (keep): `app_name`, `version`, `mode`, `request_id`, `env`, `state`, `tim
 Methods and properties (keep): `log`, `warn`, `debug`, `progress`, `log_error`, `run`,
 `pipeline`, `spawn`, `open_url`, `prompt`, `confirm`, `edit`, `retry`, `lock`, `step`,
 `http`, `walk`, `cache`, `tmp_dir`, `temp_file`, `output_file`, `truncated`,
-`config_path`, `write_config`.
+`config_path`, `write_config`, `stdin_lines`.
 
 Made private in the review: `log_sink`, `warn_sink`, `processes`, `prompter`, `retrier`,
 `locks`, `teardown`, `steps`, `session` (the run's plumbing, reached through the methods

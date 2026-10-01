@@ -32,6 +32,7 @@ from ._env import SESSION, app_var
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, dry_run_field, inspect_fields
 from ._jobs import Job, descriptor_schema
+from ._lines import INPUT_LINES_FLAG, StdinInput
 from ._mode import Format
 from ._out import NO_ORDER, OutSpec, check_order
 from ._page import DEFAULT_LIMIT, Limit, Page
@@ -160,8 +161,9 @@ class Command:
     """Validates the handler's own cursor from a ``--cursor`` token; raises ``ParseError``"""
     heartbeat: bool = False
     """JSON runs write heartbeat lines to stdout while the handler runs (REQ-F-053)"""
-    stdin_input: bool = False
-    """The handler reads a payload, ``ctx.stdin_text``, from stdin or ``--input-file``"""
+    stdin_input: StdinInput | None = None
+    """The handler reads stdin or ``--input-file``: the payload in ``ctx.stdin_text``, or
+    its lines through ``ctx.stdin_lines``"""
     output_file: bool = False
     """``--output PATH`` writes the rendered ``data`` to a file (REQ-O-001)"""
     requires_auth: bool = False
@@ -354,7 +356,7 @@ def build_command(
     default_limit: int = DEFAULT_LIMIT,
     cursor_check: Callable[[str], None] | None = None,
     heartbeat: bool = False,
-    stdin_input: bool = False,
+    stdin_input: StdinInput | None = None,
     output_file: bool = False,
     requires_auth: bool = False,
     auth: AuthKind | None = None,
@@ -484,10 +486,15 @@ def build_command(
             f'{path}: a command that writes config is mutating; set danger_level="mutating"'
         )
     fields = inspect_fields(args_type, scalars)
-    if stdin_input and any(f.spec.from_stdin for f in fields):
+    if stdin_input is not None and any(f.spec.from_stdin for f in fields):
         raise RegistrationError(
-            f"{path}: stdin_input=True reads the payload from stdin, so no field can also "
+            f"{path}: stdin_input reads the command's input from stdin, so no field can also "
             "take from_stdin=True"
+        )
+    if stdin_input is StdinInput.LINES and any(f.flag == INPUT_LINES_FLAG for f in fields):
+        raise RegistrationError(
+            f'{path}: stdin_input="lines" takes {INPUT_LINES_FLAG.replace("-", "_")} in exec '
+            "and MCP, so no field can have that name"
         )
     rules = bind_rules(requires, fields, f"{path}")
     declared_child = check_subprocess(str(path), subprocess, fields)
