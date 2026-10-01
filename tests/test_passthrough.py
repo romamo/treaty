@@ -46,6 +46,21 @@ def run(argv: list[str], *, app: App = ledger, env: dict[str, str] | None = None
     return Ran(code, out.getvalue(), err.getvalue())
 
 
+def run_main(argv: list[str]) -> Ran:
+    """The ledger under its own __main__, in an environment with no FORCE_COLOR or
+    PYTHON_COLORS: the delegated argparse runs in-process and follows its own colour
+    rules, so a test reading its text must not inherit a colour request (#170)"""
+    proc = subprocess.run(
+        [sys.executable, str(LEDGER), *argv],
+        env=BASE_ENV,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    return Ran(proc.returncode, proc.stdout, proc.stderr)
+
+
 def echoed(ran: Ran) -> tuple[str, ...]:
     value: tuple[str, ...] = eval(ran.stdout)  # noqa: S307 - the fixture prints a repr
     return value
@@ -122,20 +137,20 @@ def test_the_tool_exit_code_is_the_process_exit_code() -> None:
     assert envelope["error"]["code"] == "DELEGATED_EXIT"
 
 
-def test_a_parser_exiting_on_its_own_is_its_exit_code_not_a_crash(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    ran = run(["ingest", "bogus"])
+def test_a_parser_exiting_on_its_own_is_its_exit_code_not_a_crash() -> None:
+    ran = run_main(["ingest", "bogus"])
     assert ran.code == 2
-    assert "invalid choice: 'bogus'" in capsys.readouterr().err  # argparse's, on sys.stderr
+    assert "invalid choice: 'bogus'" in ran.stderr  # argparse's, before the envelope
     assert ran.envelope["error"]["code"] == "DELEGATED_EXIT"
-    ran = run(["ingest", "extract", "--help"])
+    ran = run_main(["ingest", "extract", "--help"])
     assert ran.code == 0 and "usage: ledger ingest extract" in ran.stdout
+    ran = run(["ingest", "bogus"])  # in-process too: the code, not argparse's coloured text
+    assert ran.code == 2 and ran.envelope["error"]["code"] == "DELEGATED_EXIT"
 
 
 def test_help_command_stands_in_for_a_lone_help_after_the_path() -> None:
     for token in ("--help", "-h"):
-        ran = run(["ingest", token])
+        ran = run_main(["ingest", token])
         assert ran.code == 0 and "usage: ledger ingest extract" in ran.stdout
 
 

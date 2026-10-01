@@ -354,8 +354,10 @@ tell a secret in it. `help_command=("help",)` hands the tool that argv in place 
 has `option_placement: "strict"`, and its description ends with "Arguments after the
 command path go to the delegated tool unparsed; the envelope is the last stderr line".
 Exec lines and `App.call` pass the tool's tokens as `"argv": [...]`, and `treaty-mcp`
-lists no passthrough command. A passthrough command cannot be destructive, and departs
-from a few spec requirements by design; COMPLIANCE.md lists them.
+lists no passthrough command. The delegated parser follows its own colour rules, not
+treaty's: Python 3.14's argparse colours its help and errors when `FORCE_COLOR` is set,
+even off a terminal, and `NO_COLOR` turns that off. A passthrough command cannot be
+destructive, and departs from a few spec requirements by design; COMPLIANCE.md lists them.
 
 A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
 words resolve to in `context.command`, and puts the corrected order in `suggestion`. Plain

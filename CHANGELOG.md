@@ -10,6 +10,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Changed
+
+- The README says a passthrough command's delegated parser follows its own colour rules:
+  Python 3.14's argparse colours its help when `FORCE_COLOR` is set, even off a terminal,
+  and `NO_COLOR` turns that off (#170)
+
 ## [1.0.0rc11] - 2026-10-01
 
 The eleventh 1.0 release candidate: 4 additions and 1 change.
