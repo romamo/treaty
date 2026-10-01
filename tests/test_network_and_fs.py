@@ -712,6 +712,49 @@ def test_an_invalid_proxy_never_shows_its_password(value: str) -> None:
         assert "s3cret" not in json.dumps(envelope)
 
 
+_P = "http://proxy.internal:3128"
+
+
+@pytest.mark.parametrize(
+    ("env", "flags", "url", "expected"),
+    [
+        ({"HTTP_PROXY": _P}, {}, "http://a.org/", _P),
+        ({"HTTP_PROXY": _P}, {}, "https://a.org/", None),  # no HTTPS_PROXY
+        ({"https_proxy": _P}, {}, "https://a.org/", _P),
+        ({"HTTPS_PROXY": "", "https_proxy": _P}, {}, "https://a.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "no_proxy": "A.ORG"}, {}, "https://x.a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": ".a.org"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org"}, {}, "https://ba.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "b.org, a.org"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "*"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "*.a.org"}, {}, "https://x.a.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org:8443"}, {}, "https://a.org:8443/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org:8443"}, {}, "https://a.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org:443"}, {}, "https://a.org/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "::1"}, {}, "http://[::1]:8080/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "[::1]"}, {}, "http://[::1]:8080/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "[::1]:8080"}, {}, "http://[::1]:8080/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "[::1]:9"}, {}, "http://[::1]:8080/", _P),
+        (
+            {"HTTP_PROXY": _P, "NO_PROXY": "a.org"},
+            {"flag_proxy": _P + "9"},
+            "http://a.org/",
+            _P + "9",
+        ),
+        ({"HTTP_PROXY": _P}, {"no_proxy_flag": True}, "http://a.org/", None),
+    ],
+)
+def test_ctx_network_routes_each_url_as_ctx_http_does(
+    env: dict[str, str], flags: dict[str, object], url: str, expected: str | None
+) -> None:
+    config = ProxyConfig(env, **flags)  # type: ignore[arg-type]
+    settings = NetworkSettings(config)
+    assert settings.proxy_for(url) == config.route(url).proxy == expected
+    if expected is not None:  # not bypassed: the mapping names the same proxy
+        assert settings.proxies[url.partition(":")[0]] == expected
+
+
 def test_ctx_network_needs_has_network_io() -> None:
     app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match=r"ctx\.network .*has_network_io"):

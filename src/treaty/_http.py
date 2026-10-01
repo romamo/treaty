@@ -96,18 +96,29 @@ def _env(env: Mapping[str, str], name: str) -> tuple[str, str] | None:
 
 def bypassed(url: SplitResult, no_proxy: str) -> bool:
     """``NO_PROXY`` lists the URL's host: ``*``, the host, a domain it is under (with or
-    without a leading dot), or ``host:port``"""
+    without a leading dot), or ``host:port``, the scheme's port when the URL names none;
+    an IPv6 address is bare or in brackets, ``[::1]:8080`` with a port"""
     host = (url.hostname or "").lower()
+    url_port = url.port if url.port is not None else _DEFAULT_PORTS.get(url.scheme)
     for item in no_proxy.lower().replace(" ", "").split(","):
         if item == "*":
             return True
-        name, _, port = item.partition(":")
+        if item.startswith("["):  # [::1] or [::1]:8080
+            name, _, rest = item[1:].partition("]")
+            port = rest.removeprefix(":")
+        elif item.count(":") > 1:  # a bare IPv6 address, which takes no port
+            name, port = item, ""
+        else:
+            name, _, port = item.partition(":")
         name = name.lstrip(".")
-        if not name or (port and str(url.port) != port):
+        if not name or (port and str(url_port) != port):
             continue
         if host == name or host.endswith("." + name):
             return True
     return False
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 @dataclass(frozen=True, slots=True)

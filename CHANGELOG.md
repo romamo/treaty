@@ -93,6 +93,10 @@ Apps built on treaty keep their own, structured schema changelog with
 - A malformed proxy setting no longer shows its password in the `PROXY_INVALID` or
   `--proxy` error: one written without a scheme (`user:pass@host:port`), or whose password
   holds a `/`, `?`, or `#`, now loses everything up to its last `@`
+- `NO_PROXY` matches an IPv6 host, bare (`::1`) or in brackets (`[::1]`, `[::1]:8080`),
+  and a `host:port` entry matches a URL that names no port when the port is the scheme's
+  own, as `example.com:443` does `https://example.com/`; `ctx.http` and `ctx.network` both
+  follow it
 
 ## [1.0.0rc11] - 2026-10-01
 
