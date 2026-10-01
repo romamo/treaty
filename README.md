@@ -236,7 +236,10 @@ envelope per line with `_cmd` and `_line` in `meta`. A stream with no lines exit
 single `EMPTY_STREAM` envelope, a piped plan over 64 KiB (`App(max_stdin_bytes=...)` or
 `<APP>_MAX_STDIN_BYTES`) exits `2` with `STDIN_TOO_LARGE` before anything runs, and
 `--input-file PATH` reads a plan of any size from a file (`-` is stdin, capped). A terminal on
-stdin exits `2` with `STDIN_IS_TTY` instead of waiting for input:
+stdin exits `2` with `STDIN_IS_TTY` instead of waiting for input. A line whose `_cmd` is no
+registered command is `UNKNOWN_COMMAND`, unless `App(exec_fallback=)` passes it to the
+dispatcher of a CLI being migrated (see the [migration
+chapter](https://github.com/romamo/treaty/blob/main/docs/tutorial/B-migrate/click-typer.md#migrating-a-large-cli-one-command-at-a-time)):
 
 ```bash
 printf '%s\n' '{"_cmd":"deploy.rollback","service":"api","_opts":{"to":"1.3.9"}}' \

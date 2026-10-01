@@ -722,23 +722,80 @@ ways.
 
 ## Migrating a large CLI one command at a time
 
-A CLI with dozens of commands does not have to move in one change. Keep the click group and
-send the commands you have migrated to treaty:
+A CLI with dozens of commands does not have to move in one change. Register on the app only
+the commands you have migrated, keep the click group, and let `app.resolves` route each command
+line:
 
 ```python
-MIGRATED = {"done", "manifest"}
-
 if __name__ == "__main__":
-    if sys.argv[1:2] and sys.argv[1] in MIGRATED:
-        sys.exit(app.run(sys.argv[1:]))
+    if app.resolves(sys.argv[1:]):
+        app.main()
     cli()
 ```
 
-Register only migrated commands on the app, so the manifest never lists a command that
-still runs through click. The shim matches on the first word, so callers of a migrated
-command have to move group options such as `--db` after the command already; that is the
-order they will need once the shim is gone. Delete the shim when `MIGRATED` covers every
-command.
+`app.resolves(argv)` is true when the words of `argv` name a command the app registered. The
+longest registered path wins, so a half-migrated group splits: with `transaction list` on
+treaty and `transaction add` still on click, `bean transaction list` runs on treaty and
+`bean transaction add` on click. The rest of the command line:
+
+- Global options before or between the words are skipped: `--format json transaction list`
+  resolves
+- `--help` goes with the command: `transaction list --help` is treaty's help, while
+  `transaction --help`, root `--help`, and the bare program stay with click, whose help
+  still lists every command
+- `--version` stays with click; the `version` command is treaty's
+- The built-ins resolve: `manifest`, `version`, `exec`, and the others the root `--help`
+  lists. A click command named like a built-in that yields, such as `status` or `doctor`,
+  reaches treaty's built-in until it is migrated, so route it to click by name in the shim
+  until then
+- A path retired with `app.redirect` resolves, so callers of the old name get exit 13 and
+  the new one
+- A group option such as `--db` before the command does not resolve; callers of a
+  migrated command move it after the command already, the order they need once the shim
+  is gone
+
+**The manifest lists only migrated commands.** During the transition it describes the part
+of the CLI treaty runs: an agent reading it does not see `transaction add` until that
+command moves. Say so in the CLI's agent docs while the shim is in place.
+
+### Batch plans that mix both
+
+If the old CLI has its own `exec` reading `_cmd` lines, as agentyper apps do, a plan that
+mixes migrated and unmigrated commands still runs in one call: give the app an
+`exec_fallback`, and a line whose `_cmd` is no registered command goes to the old
+dispatcher.
+
+```python
+def old_exec(cmd: str, payload: Mapping[str, object]) -> object:
+    return legacy.dispatch({"_cmd": cmd, **payload})
+
+
+app = App("bean", version="1.0.0", exec_fallback=old_exec)
+```
+
+- `payload` is the line's object without `_cmd`; `_opts` is kept
+- What the fallback returns, an object, an array, or None, is the line's `data` in a
+  success envelope with `meta.exec_fallback: true`. Anything else, such as a string, is
+  exit 1 `INVALID_OUTPUT`
+- Raise `treaty.ParseError` for a line the old dispatcher does not know or cannot read,
+  before it changes anything: exit 2, with `code=` as `error.code` (`UNKNOWN_COMMAND`, say).
+  A `KeyboardInterrupt` is `CANCELLED`, as from a handler. Any other exception,
+  `SystemExit` included, is exit 1 `FALLBACK_FAILED`, with the traceback on stderr
+- The result passes through what a migrated command's does: values under credential names
+  in the line (`token`, `password`, `api_key`) are redacted from the data, the error, the
+  traceback, and the audit log entry; high-entropy values are masked; `--fields`, the token
+  budget, and the byte cap apply
+- treaty knows nothing of what an unmigrated command changes, so a fallback line is never
+  deduplicated by an idempotency key or the session variable, runs without a timeout, and
+  is refused with exit 2 under `exec --dry-run`
+- Text the old dispatcher prints to stdout becomes a `THIRD_PARTY_STDOUT` warning; return
+  the data instead
+
+`exec` resolves, so the shim sends every plan to treaty. Without `exec_fallback`, keep
+`exec` on the old CLI until every command is migrated: build the app with
+`enable_exec=False`, and `exec` no longer resolves.
+
+Delete the shim and `exec_fallback` once every command is on treaty.
 
 ## click and typer to treaty at a glance
 

@@ -142,6 +142,7 @@
         "output_adapter",
         "redirect",
         "redirected_paths",
+        "resolves",
         "run",
         "scalar",
         "settings",
@@ -880,7 +881,8 @@
       "checks",
       "update_check",
       "audit_log",
-      "schema_changelog"
+      "schema_changelog",
+      "exec_fallback"
     ],
     "App.command": [
       "path",

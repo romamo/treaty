@@ -398,6 +398,32 @@ def _command_at(
     return (known.get(CommandPath(".".join(consumed))) if consumed else None), i
 
 
+def path_words(argv: list[str]) -> list[str]:
+    """The leading words of ``argv`` that may name a command: global options before and
+    between them skipped, as ``_command_at`` skips them, up to the first other option or
+    ``--``"""
+    words: list[str] = []
+    i = 0
+    while i < len(argv) and argv[i] != "--":
+        tok = argv[i]
+        if tok.startswith("-") and tok != "-":
+            name, eq, _ = tok[2:].partition("=")
+            if (
+                tok in ("-h", "--help", "--schema", "--print-schema")
+                or name in SWITCH_GLOBALS
+                or short_verbosity(tok)
+            ):
+                i += 1
+            elif tok.startswith("--") and name in VALUED_GLOBALS:
+                i += 1 if eq else 2
+            else:
+                break  # a command's own option, or --version: no more path words
+            continue
+        words.append(tok)
+        i += 1
+    return words
+
+
 def bind_values(argv: list[str], known: Mapping[CommandPath, Command]) -> list[str]:
     """``--flag -h`` as ``--flag=-h`` when the command's own ``--flag`` takes a value, so
     ``split_globals`` reads the value as the flag's, not as ``--help`` (REQ-F-079); a short
