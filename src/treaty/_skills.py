@@ -13,7 +13,7 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from ._command import Command, DangerLevel
+from ._command import PASSTHROUGH, Command, DangerLevel
 from ._manifest import payload_schema
 from ._values import CommandPath
 
@@ -48,6 +48,10 @@ def examples(app_name: str, path: CommandPath, entry: Mapping[str, object]) -> l
     call, and ``--help``: always at least three"""
     base = _invocation(app_name, path)
     found = [str(e["command"]) for e in entry.get("examples", ())]  # type: ignore[attr-defined]
+    if entry.get("arguments") == PASSTHROUGH:
+        # #35: after the path every token is the tool's, --help too; treaty's go before
+        schema = " ".join((app_name, "--schema", *path.parts))
+        return list(dict.fromkeys((*found, f"{base} <tool arguments>", schema, f"{base} --help")))
     positionals = entry.get("positionals", [])  # absent for a command without any
     assert isinstance(positionals, list)
     words = [_placeholder(p["name"], p) for p in positionals if p.get("required")]
@@ -112,6 +116,33 @@ def render_skill(app: App, command: Command, entry: Mapping[str, object]) -> str
     ]
     table = "\n".join(["| Flag | Type | Required | Description |", "|---|---|---|---|", *rows])
     rails = "\n".join(f"- {r}" for r in _guardrails(app.name, command, entry))
+    invocation = _invocation(app.name, path)
+    if command.passthrough:
+        # #35: the tool owns stdout and every token after the path
+        before = " ".join((app.name, "--validate-only", *path.parts))
+        patterns = (
+            "- The tool's output is on stdout; the envelope is the last line on stderr: read "
+            "its `ok`, then `meta.exit_code`, the tool's own exit code\n"
+            f"- Treaty's flags go before the path: `{before} ...`; `--output PATH` writes the "
+            "envelope there too"
+        )
+        avoid = (
+            "- Putting treaty's flags after the path, where the tool gets them\n"
+            f"- Guessing the tool's arguments instead of reading `{invocation} --help`"
+        )
+    else:
+        patterns = (
+            "- Read `ok` first, then `data`; on failure act on `error.code` and "
+            "`error.fix_required`\n"
+            "- Pass `--format json` when stdout may be a terminal; off a terminal it is the "
+            "default\n"
+            f"- Check arguments without running: `{invocation} ... --validate-only`"
+        )
+        avoid = (
+            "- Parsing the text of `--format plain` instead of the JSON envelope\n"
+            "- Retrying an exit code whose `retryable` is false\n"
+            f"- Guessing flags instead of reading `{invocation} --schema`"
+        )
     return f"""{front}
 # {_invocation(app.name, path)}
 
@@ -133,15 +164,11 @@ def render_skill(app: App, command: Command, entry: Mapping[str, object]) -> str
 
 ## Patterns
 
-- Read `ok` first, then `data`; on failure act on `error.code` and `error.fix_required`
-- Pass `--format json` when stdout may be a terminal; off a terminal it is the default
-- Check arguments without running: `{_invocation(app.name, path)} ... --validate-only`
+{patterns}
 
 ## Anti-patterns
 
-- Parsing the text of `--format plain` instead of the JSON envelope
-- Retrying an exit code whose `retryable` is false
-- Guessing flags instead of reading `{_invocation(app.name, path)} --schema`
+{avoid}
 """
 
 

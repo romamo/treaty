@@ -270,6 +270,7 @@
         "cwd",
         "idempotency_key",
         "stdin_text",
+        "argv_rest",
         "page",
         "token",
         "trace_id",
@@ -945,7 +946,9 @@
       "preserve_locale",
       "cache",
       "recursive_traversal",
-      "id_field"
+      "id_field",
+      "passthrough",
+      "help_command"
     ],
     "App.run": [
       "argv",

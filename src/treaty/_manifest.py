@@ -7,7 +7,7 @@ import json
 from collections.abc import Collection, Mapping, Sequence
 from importlib.metadata import version
 
-from ._command import DEFAULT_HEARTBEAT_MS, Command, DangerLevel
+from ._command import ARGV_KEY, DEFAULT_HEARTBEAT_MS, PASSTHROUGH, Command, DangerLevel
 from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, NO_UPDATE, app_var
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import (
@@ -370,6 +370,11 @@ def command_entry(
         out["secret_env_vars"] = [
             command.secret_env_vars[f.name] for f in command.fields if f.secret
         ]
+    if command.passthrough:
+        # #35: not CommandEntry keys; the tokens after the path are another tool's
+        out["arguments"] = PASSTHROUGH
+        if command.help_command is not None:
+            out["help_command"] = list(command.help_command)
     return out
 
 
@@ -469,6 +474,14 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
             "items": {"type": "string"},
             "description": "The input lines, one per item without its line break, in place "
             "of stdin, which an exec line or an MCP call does not have",
+        }
+    if command.passthrough:
+        properties[ARGV_KEY] = {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "The delegated tool's arguments, verbatim, as argv has them after "
+            "the command path",
         }
     properties[FIELDS_KEY] = {
         "type": "string",

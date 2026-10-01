@@ -56,6 +56,8 @@ class Interceptor:
         self._bytes = 0
         self._synced = 0
         self._closed = False
+        self._pipe: int | None = None
+        """The pipe's write end while ``pause`` gave descriptor 1 back to stdout"""
         self._thread = threading.Thread(target=self._pump, name="treaty-stdout", daemon=True)
         self._thread.start()
         atexit.register(self.close)
@@ -65,8 +67,8 @@ class Interceptor:
         count that reached descriptor 1 since the last call, once everything written before
         this call arrived"""
         with self._cond:
-            if self._closed:
-                return "", 0
+            if self._closed or self._pipe is not None:
+                return "", 0  # paused: a marker would reach stdout
             target = self._synced + 1
         os.write(1, self._marker)  # below PIPE_BUF, so no other write splits it
         with self._cond:
@@ -79,8 +81,27 @@ class Interceptor:
         decoded = decoder.decode(text, final=count <= len(text))
         return decoded.replace("\r\n", "\n"), count
 
+    def pause(self) -> None:
+        """Descriptor 1 is stdout until ``resume``: a passthrough command's delegated tool
+        owns stdout, its children and C code included (#35)"""
+        with self._cond:
+            if self._closed or self._pipe is not None:
+                return
+            self._pipe = os.dup(1)
+        os.dup2(self.saved, 1)
+
+    def resume(self) -> None:
+        """Descriptor 1 is the pipe to stderr again, after ``pause``"""
+        with self._cond:
+            pipe, self._pipe = self._pipe, None
+        if pipe is None:
+            return
+        os.dup2(pipe, 1)
+        os.close(pipe)
+
     def close(self) -> None:
         """Descriptor 1 is stdout again; the reader passes on what is left and stops"""
+        self.resume()
         with self._cond:
             if self._closed:
                 return

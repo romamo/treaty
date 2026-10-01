@@ -81,8 +81,10 @@ from ._cap import (
 )
 from ._changelog import load_changelog
 from ._command import (
+    ARGV_KEY,
     DEFAULT_HEARTBEAT_MS,
     OUTPUT_FLAG,
+    HELP_TOKENS,
     Cleanup,
     Command,
     DangerLevel,
@@ -113,6 +115,7 @@ from ._envelope import (
     clean,
     json_safe,
     open_escape,
+    serialize,
     terminal_text,
     visible,
     write_envelope,
@@ -193,7 +196,9 @@ from ._parse import (
     bind_values,
     build_from_mapping,
     built_args,
+    delegated_argv,
     format_hint,
+    known_flags,
     misplaced_flag_target,
     parse_command_args,
     path_words,
@@ -796,6 +801,8 @@ class App:
         cache: CachePolicy | None = None,
         recursive_traversal: bool = False,
         id_field: str | None = None,
+        passthrough: bool = False,
+        help_command: Sequence[str] | None = None,
     ) -> Callable[[H], H]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -902,6 +909,18 @@ class App:
         ``id_field="user_id"`` names the output's primary identifier, which ``--format id``
         writes alone, one per line, for piping; an output with an ``id`` field needs no
         declaration (REQ-O-005).
+        ``passthrough=True`` is for a command that hands its arguments to another tool's
+        parser: its args type is ``NoArgs``, ``ctx.argv_rest`` holds every token after the
+        command path verbatim (``--help`` and ``--`` included), and the handler returns the
+        tool's exit code, or raises ``SystemExit`` with it, as a parser does. Treaty's
+        global options and the command's own flags (``--output``, ``--timeout``,
+        ``--idempotency-key``, ``--validate-only``) go before the path. The tool owns
+        stdout: treaty writes the final envelope as one JSON line on stderr, and to
+        ``--output PATH`` too, with the tool's exit code as the process's; the timeout,
+        signals, idempotency, and the audit log apply as to any command.
+        ``help_command=("help",)`` is the argv the tool gets instead of a lone ``--help``
+        or ``-h`` after the path. Exec lines and ``App.call`` pass the tool's arguments as
+        ``"argv": [...]``; MCP lists no passthrough command.
         """
         cmd_path = CommandPath(path)
         missing = [
@@ -1011,71 +1030,75 @@ class App:
             # A type with no schema is a registration mistake of this command: name it
             try:
                 self._register(
-                    build_command(
-                        fn,
-                        app_name=self.name,
-                        path=cmd_path,
-                        description=description,
-                        danger_level=DangerLevel(danger_level),
-                        required_scopes=[Scope(s) for s in required_scopes],
-                        exit_codes=[ExitCodeName(n) for n in exit_codes],
-                        examples=[Example(d, c) for d, c in pairs],
-                        has_network_io=has_network_io,
-                        timeout=command_timeout,
-                        outlasts_default=outlasts_default,
-                        supports_raw_payload=supports_raw_payload,
-                        cleanup=cleanup,
-                        renderers=overrides,
-                        scalars=self.scalars,
-                        args_adapters=self.args_adapters,
-                        streaming=streaming,
-                        safe_default=safe_default,
-                        gui_operations=gui_operations,
-                        headless_behavior=None
-                        if headless_behavior is None
-                        else HeadlessBehavior(headless_behavior),
-                        interactive=interactive,
-                        editor_alternatives=editor_alternatives,
-                        paginated=paginated,
-                        default_limit=default_limit,
-                        cursor_check=cursor_check,
-                        heartbeat=heartbeat,
-                        stdin_input=stdin_mode,
-                        stdin_records=records,
-                        output_file=output_file,
-                        requires_auth=requires_auth,
-                        auth=None if auth is None else AuthKind(auth),
-                        token_env_vars=token_env_vars,
-                        async_job=async_job,
-                        config_write_scope=None
-                        if config_write_scope is None
-                        else ConfigScope(config_write_scope),
-                        schema_version=contract,
-                        compat=compat,
-                        project_root=project_root,
-                        retry=retry,
-                        sort_key=sort_key,
-                        ordered=ordered,
-                        provided=() if self._settings_cls is None else (self._settings_cls,),
-                        fix_commands=fixes,
-                        refreshes_auth=refreshes_auth,
-                        requires=requires,
-                        option_placement=OptionPlacement(option_placement),
-                        introduced_in=added,
-                        deprecated=deprecated,
-                        steps=steps,
-                        resumable=resumable,
-                        rollback=rollback,
-                        external=external,
-                        subprocess=subprocess,
-                        platform=platform,
-                        required_tools=required_tools,
-                        filesystem_side_effects=filesystem_side_effects,
-                        background=background,
-                        preserve_locale=preserve_locale,
-                        cache=cache,
-                        recursive_traversal=recursive_traversal,
-                        id_field=id_field,
+                    self._passthrough_args(
+                        build_command(
+                            fn,
+                            app_name=self.name,
+                            path=cmd_path,
+                            description=description,
+                            danger_level=DangerLevel(danger_level),
+                            required_scopes=[Scope(s) for s in required_scopes],
+                            exit_codes=[ExitCodeName(n) for n in exit_codes],
+                            examples=[Example(d, c) for d, c in pairs],
+                            has_network_io=has_network_io,
+                            timeout=command_timeout,
+                            outlasts_default=outlasts_default,
+                            supports_raw_payload=supports_raw_payload,
+                            cleanup=cleanup,
+                            renderers=overrides,
+                            scalars=self.scalars,
+                            args_adapters=self.args_adapters,
+                            streaming=streaming,
+                            safe_default=safe_default,
+                            gui_operations=gui_operations,
+                            headless_behavior=None
+                            if headless_behavior is None
+                            else HeadlessBehavior(headless_behavior),
+                            interactive=interactive,
+                            editor_alternatives=editor_alternatives,
+                            paginated=paginated,
+                            default_limit=default_limit,
+                            cursor_check=cursor_check,
+                            heartbeat=heartbeat,
+                            stdin_input=stdin_mode,
+                            stdin_records=records,
+                            output_file=output_file,
+                            requires_auth=requires_auth,
+                            auth=None if auth is None else AuthKind(auth),
+                            token_env_vars=token_env_vars,
+                            async_job=async_job,
+                            config_write_scope=None
+                            if config_write_scope is None
+                            else ConfigScope(config_write_scope),
+                            schema_version=contract,
+                            compat=compat,
+                            project_root=project_root,
+                            retry=retry,
+                            sort_key=sort_key,
+                            ordered=ordered,
+                            provided=() if self._settings_cls is None else (self._settings_cls,),
+                            fix_commands=fixes,
+                            refreshes_auth=refreshes_auth,
+                            requires=requires,
+                            option_placement=OptionPlacement(option_placement),
+                            introduced_in=added,
+                            deprecated=deprecated,
+                            steps=steps,
+                            resumable=resumable,
+                            rollback=rollback,
+                            external=external,
+                            subprocess=subprocess,
+                            platform=platform,
+                            required_tools=required_tools,
+                            filesystem_side_effects=filesystem_side_effects,
+                            background=background,
+                            preserve_locale=preserve_locale,
+                            cache=cache,
+                            recursive_traversal=recursive_traversal,
+                            id_field=id_field,
+                            passthrough=passthrough,
+                            help_command=help_command,
+                        )
                     )
                 )
             except SchemaError as exc:
@@ -1083,6 +1106,17 @@ class App:
             return fn
 
         return register
+
+    @staticmethod
+    def _passthrough_args(command: Command) -> Command:
+        """A passthrough command takes ``NoArgs``: its arguments are the tool's (#35)"""
+        if command.passthrough and command.args_type is not NoArgs:
+            raise RegistrationError(
+                f"{command.path}: a passthrough command's arguments belong to the tool it "
+                f"delegates to; annotate the first parameter treaty.NoArgs, not "
+                f"{command.args_type.__qualname__}, and read ctx.argv_rest"
+            )
+        return command
 
     def _claims_v(self, argv: list[str]) -> bool:
         """Whether the command ``argv`` runs declares its own ``-v``, which ``-v`` for
@@ -1606,6 +1640,15 @@ class App:
             context["command"] = command
         else:
             context["available"] = self._invocations(route.prefix)
+        if target is not None and self._commands[target].passthrough:
+            # #35: before the path is the only place its flags go; this one it lacks
+            context["known"] = known_flags(self._commands[target])
+            return ParseError(
+                f"{command} has no flag {flag!r}; every token after its path goes to the "
+                "tool it delegates to",
+                context=context,
+                suggestion=f"pass the tool's own flags after the path: {command} {flag}",
+            )
         return ParseError(
             f"flag {flag!r} must come after the command path",
             context=context,
@@ -1879,6 +1922,10 @@ class App:
         environ: Mapping[str, str],
     ) -> int:
         out = run.out
+        # #35: a passthrough command's tokens after its path are the tool's, unread here
+        delegation = delegated_argv(argv, self._commands)
+        if delegation is not None:
+            argv = delegation.argv
         try:
             bound = bind_values(strict_argv(argv, self._commands), self._commands)
             globals_, rest = split_globals(bound, short_verbose=not self._claims_v(bound))
@@ -1982,6 +2029,8 @@ class App:
             return run.help_root(mode, route.prefix)
         if globals_.help:
             return run.help_command(mode, command)
+        # The delegated tool owns stdout: every answer about its run is a line on stderr
+        run.delegating = command.passthrough
         if config_error is not None and not _answers_over(config_error, command.path.value):
             return run.emit(mode, run.arg_error(config_error, meta=_mode_meta(command)))
         # Installed before the arguments are read: --flag - waits on stdin (REQ-O-006)
@@ -2017,6 +2066,9 @@ class App:
                 return run.emit(mode, run.args_crashed(command, exc))
             if run.unprotected:
                 run.unprotected_record()
+            if command.passthrough:
+                assert delegation is not None  # argv reaches its path only through it
+                return run.delegate(command, invocation, delegation.rest, mode)
             if command.path == EXEC_PATH:
                 assert isinstance(invocation.args, ExecArgs)
                 run.argv = None  # a line's hint cannot rerun the whole plan
@@ -2171,6 +2223,8 @@ def _located(command: Command, args: object, ctx: Ctx, resources: Sequence[objec
 
 
 CLEANUP_FAILED = "CLEANUP_FAILED"
+DELEGATED_EXIT = "DELEGATED_EXIT"
+"""``error.code`` of a passthrough command whose tool exited non-zero (#35)"""
 STATUS_CHARS = 200
 """Longest ``ctx.progress`` status a ``--heartbeat-interval`` line repeats"""
 WARNINGS_AS_ERRORS = "WARNINGS_AS_ERRORS"
@@ -2231,20 +2285,46 @@ class _StrayStdout(io.TextIOBase):
         self._held = ""
         """The unfinished escape the last write ended with, until the next completes it"""
         self._held_at = ""
+        self._through: IO[str] | None = None
+        """The run's stdout while a passthrough command's delegated tool owns it (#35)"""
+
+    def pass_through(self, stdout: IO[str] | None) -> None:
+        """Writes go to ``stdout`` as written, redacted only of the secrets of every
+        attached run, until ``pass_through(None)``"""
+        self.release()
+        self._through = stdout
+
+    def _target(self) -> IO[str]:
+        return self._err.stream if self._through is None else self._through
 
     def writable(self) -> bool:
         return True
 
     @property
     def buffer(self) -> Any:
-        """Bytes written here reach stderr too, uncounted"""
-        return getattr(self._err.stream, "buffer")  # noqa: B009 - IO[str] does not declare it
+        """Bytes written here reach stderr too, uncounted; stdout while passing through"""
+        return getattr(self._target(), "buffer")  # noqa: B009 - IO[str] does not declare it
 
     @property
     def encoding(self) -> Any:  # type: ignore[override]  # read-only, like a real stream's
-        return getattr(self._err.stream, "encoding", None) or "utf-8"
+        return getattr(self._target(), "encoding", None) or "utf-8"
+
+    def isatty(self) -> bool:
+        """A delegated tool sees whether stdout is a terminal; anything else, that it is not"""
+        return self._through is not None and self._through.isatty()
+
+    def fileno(self) -> int:
+        """Stdout's descriptor while passing through, for a tool that hands it to a child"""
+        if self._through is None:
+            return super().fileno()  # io.UnsupportedOperation: captured text has no descriptor
+        return self._through.fileno()
 
     def write(self, text: str, /) -> int:
+        through = self._through
+        if through is not None:
+            # The tool's own output: neither counted nor cleaned, and never another run's secret
+            through.write(self._redact(text))
+            return len(text)
         written = len(text)
         self._bytes += len(text.encode("utf-8", "surrogatepass"))
         # Redacted as it arrives: the text may be another run's, whose secrets are only
@@ -2289,6 +2369,9 @@ class _StrayStdout(io.TextIOBase):
         self._show(held, where)
 
     def flush(self) -> None:
+        if self._through is not None:
+            self._through.flush()
+            return
         if getattr(self._err.stream, "closed", False):
             # The finalizer's close flushes too, after the run: the stream's owner may
             # have closed it by then, such as pytest's capture
@@ -3101,6 +3184,11 @@ class _Run:
         """A newer release from the app's cached update check (REQ-F-029)"""
         self.fallback: DispatchRequest | None = None
         """The exec line ``App(exec_fallback=)`` is answering"""
+        self.delegating = False
+        """Argv named a passthrough command: its tool owns stdout, so the run's envelope
+        is a line on stderr (#35)"""
+        self.envelope_file: Path | None = None
+        """``--output`` of a passthrough command: where its envelope is written too"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -3155,6 +3243,45 @@ class _Run:
         """One JSON envelope on stdout, warning when text was printed there since the last;
         ``settle`` when it answers an invocation, not a stream event or help. Returns the
         exit code written."""
+        envelope = self._reported_stray(envelope)
+        if self.budget is not None:
+            envelope = self._budgeted(self.budget, envelope)
+        rerun = Rerun(self.argv, self.app.name, self.page)
+        cut, total = cut_envelope(envelope, self.cap, rerun)
+        if settle:
+            # After the budget and the cap: their truncation warnings count (REQ-O-025);
+            # what settling adds may need a second cut, which keeps the first one's report
+            cut = recap(envelope, cut, total, self.settle(cut), self.cap, rerun)
+        envelope = cut
+        write_envelope(envelope, self.out)
+        self.delivered = True
+        return envelope.exit_code
+
+    def _write_delegated(self, envelope: Envelope, *, settle: bool) -> int:
+        """A passthrough command's envelope as one JSON line on stderr, whatever
+        ``--format`` says, since its tool owns stdout; also in its ``--output`` file. No
+        byte cap: the envelope holds treaty's report, never the tool's output (#35)"""
+        envelope = self._reported_stray(envelope)
+        if settle:
+            envelope = self.settle(envelope)
+        path = self.envelope_file
+        if path is not None:
+            try:
+                write_atomic(path, serialize(envelope) + "\n", new_mode=0o644)  # REQ-F-070
+            except OSError as exc:
+                warning = WarningDetail(
+                    "OUTPUT_UNWRITABLE",
+                    f"The envelope could not be written to --output: {exc.strerror or exc}",
+                    context={"output": str(path)},
+                )
+                envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        write_envelope(envelope, self.err.stream)
+        self.delivered = True
+        return envelope.exit_code
+
+    def _reported_stray(self, envelope: Envelope) -> Envelope:
+        """``envelope`` with a ``THIRD_PARTY_STDOUT`` warning holding what was printed to
+        stdout since the last envelope, when anything was"""
         text, written = ("", 0) if self.stray is None else self.stray.take()
         below = active_interceptor()
         if below is not None:
@@ -3175,18 +3302,7 @@ class _Run:
                 context={"text": shown.rstrip("\r\n"), "bytes": written},
             )
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
-        if self.budget is not None:
-            envelope = self._budgeted(self.budget, envelope)
-        rerun = Rerun(self.argv, self.app.name, self.page)
-        cut, total = cut_envelope(envelope, self.cap, rerun)
-        if settle:
-            # After the budget and the cap: their truncation warnings count (REQ-O-025);
-            # what settling adds may need a second cut, which keeps the first one's report
-            cut = recap(envelope, cut, total, self.settle(cut), self.cap, rerun)
-        envelope = cut
-        write_envelope(envelope, self.out)
-        self.delivered = True
-        return envelope.exit_code
+        return envelope
 
     def _budgeted(self, budget: TokenBudget, envelope: Envelope) -> Envelope:
         """The token budget applied; a registered tokenizer that raises or miscounts is a
@@ -3276,6 +3392,9 @@ class _Run:
                 key: scrub(key, value, redact)
                 for key, value in _fallback_payload(self.fallback).items()
             }
+        if command is not None and command.passthrough:
+            # Raw argv, which treaty cannot tell secrets in, is never logged (#35)
+            parameters[ARGV_KEY] = OMITTED
         invocation = self.invocation
         if invocation is not None and invocation.validate_only:
             parameters["validate_only"] = True
@@ -3409,6 +3528,7 @@ class _Run:
             _stdin_records=None
             if command.stdin_records is None or invocation.lines is None
             else Records(invocation.lines, command.stdin_records, self._warn),
+            argv_rest=invocation.argv_rest,
             page=page,
             token=invocation.token,
             _config_file=self.config_file if command.config_write_scope is not None else None,
@@ -3924,6 +4044,75 @@ class _Run:
         self.args, self.invocation = invocation.args, invocation
         return self._present(command, self._answer(command, invocation, mode, meta=meta))
 
+    def delegate(
+        self, command: Command, invocation: Invocation, rest: tuple[str, ...], mode: Format
+    ) -> int:
+        """Run a passthrough command from argv: ``rest`` is its tool's argv, a lone
+        ``--help`` the declared ``help_command``; the envelope goes to stderr (#35)"""
+        if command.help_command is not None and len(rest) == 1 and rest[0] in HELP_TOKENS:
+            rest = command.help_command
+        self.envelope_file = invocation.output
+        envelope = self.execute(command, dataclasses.replace(invocation, argv_rest=rest), mode)
+        return self.emit(mode, envelope)
+
+    @contextlib.contextmanager
+    def _tool_stdout(self, command: Command) -> Iterator[None]:
+        """While a passthrough command's handler runs from argv, stdout is its tool's:
+        ``sys.stdout`` writes reach it, and descriptor 1 is stdout again for children and
+        C code. Exec lines and ``App.call`` keep their own stdout (#35)"""
+        stray = self.stray
+        if not (command.passthrough and self.delegating) or stray is None:
+            yield
+            return
+        below = active_interceptor()
+        stray.pass_through(self.out)
+        if below is not None:
+            below.pause()
+        try:
+            yield
+        finally:
+            try:
+                self.out.flush()
+            finally:
+                if below is not None:
+                    below.resume()
+                stray.pass_through(None)
+
+    def _delegated(
+        self, command: Command, code: object, started: float, meta: Mapping[str, object]
+    ) -> Envelope:
+        """The envelope of a passthrough command whose tool ended with ``code``: its exit
+        code, the process's too, whatever the exit code table says it means (#35)"""
+        if code is None:
+            code = 0
+        if isinstance(code, bool) or not isinstance(code, int) or not 0 <= code <= 255:
+            shown = code if isinstance(code, int) else f"a {type(code).__qualname__}"
+            return self._broken(
+                command,
+                "INVALID_EXIT",
+                f"Command {command.path} returned {shown}; a passthrough handler returns its "
+                "tool's exit code, from 0 to 255",
+                started,
+                meta,
+            )
+        data = {"exit_code": code}
+        if code == 0:
+            return self._envelope(0, data=data, started=started, meta=meta)
+        return self._envelope(
+            code,
+            data=data,
+            error=ErrorDetail(
+                code=DELEGATED_EXIT,
+                message=f"Command {command.path} ended with its tool's exit code {code}; "
+                "the tool's own output on stdout and stderr says why",
+                retryable=False,
+                context={"command": command.path.value, "exit_code": code},
+                phase="execution",
+            ),
+            started=started,
+            meta=meta,
+        )
+
     def _present(self, command: Command, envelope: Envelope) -> Envelope:
         """What every sink writes of a command's envelope: high-entropy values masked
         unless ``--unmask`` (REQ-F-058), then external content tagged unless
@@ -4260,8 +4449,10 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
+        # A passthrough command's call is its tool's argv (#35)
+        subject = {ARGV_KEY: list(invocation.argv_rest)} if command.passthrough else invocation.args
         try:
-            call = fingerprint(command.path, invocation.args, self.app.scalars)
+            call = fingerprint(command.path, subject, self.app.scalars)
         except SchemaError as exc:
             message = f"Command {command.path} has arguments the key cannot fingerprint: {exc}"
             return self._broken(command, "INVALID_ARGS", message, started, full_meta)
@@ -4541,16 +4732,17 @@ class _Run:
 
         def handler() -> object:
             try:
-                return call_with_timeout(
-                    (lambda: self.app._gate(command, ctx))
-                    if replay is not None
-                    else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
-                    timeout,
-                    self._held(self._redactor(command, args), running.append),
-                    self.cancellation.armed,
-                    heartbeats=self._heartbeats(command, invocation, mode, started),
-                    ended=_RECORDS.forget,
-                )
+                with self._tool_stdout(command):
+                    return call_with_timeout(
+                        (lambda: self.app._gate(command, ctx))
+                        if replay is not None
+                        else (lambda: _invoke(self.app, command, args, ctx, self.provided())),
+                        timeout,
+                        self._held(self._redactor(command, args), running.append),
+                        self.cancellation.armed,
+                        heartbeats=self._heartbeats(command, invocation, mode, started),
+                        ended=_RECORDS.forget,
+                    )
             finally:
                 # Inside the boundary: a cwd the handler removed fails here, as a crash
                 self._restore_cwd(before)
@@ -4587,11 +4779,17 @@ class _Run:
             message = f"Command {command.path} broke its step manifest: {exc}"
             return self._broken(command, "INVALID_STEP", message, started, full_meta)
         if isinstance(outcome, Crashed):
+            if command.passthrough and isinstance(outcome.exc, SystemExit):
+                # A delegated parser exits as it would on its own: 2 for usage, 0 for --help
+                status = self._exit_status(outcome.exc)
+                return self._delegated(command, status, started, full_meta)
             # asyncio.CancelledError, SystemExit, trio.Cancelled: user code, not a signal
             return self._crashed(command, args, outcome.exc, started, full_meta)
         result = outcome
         if replay is not None:
             return replay()
+        if command.passthrough:
+            return self._delegated(command, result, started, full_meta)
         page_meta: dict[str, object] = {}
         batch_problem: str | None = None
         data: object
@@ -4665,6 +4863,15 @@ class _Run:
         if command.batch:
             return self._batch_envelope(command, data, started, full_meta)
         return self._envelope(0, data=data, started=started, meta={**full_meta, **page_meta})
+
+    def _exit_status(self, exc: SystemExit) -> object:
+        """The exit status ``exc`` gives, as the interpreter reads it: None is 0, and any
+        other non-integer is printed to stderr and exits 1"""
+        code = exc.code
+        if code is None or isinstance(code, int):
+            return code
+        self.err.write(f"{self._redact_now(_text(exc))}\n")
+        return 1
 
     def _batch_data(
         self, command: Command, args: object, result: object, preview: bool
@@ -5595,6 +5802,8 @@ class _Run:
         settle: bool = True,
     ) -> int:
         """Write the answer; ``settle=False`` for help and schemas, which run no command"""
+        if self.delegating:
+            return self._write_delegated(envelope, settle=settle)
         if mode is Format.JSON:
             return self._write(envelope, settle=settle)
         if mode is Format.NDJSON and render is None:

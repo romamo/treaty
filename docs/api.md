@@ -114,7 +114,8 @@ that no app or example called.
 `sort_key`, `ordered`, `fix_commands`, `refreshes_auth`, `requires`, `option_placement`,
 `introduced_in`, `deprecated`, `steps`, `resumable`, `rollback`, `external`,
 `subprocess`, `platform`, `required_tools`, `filesystem_side_effects`, `background`,
-`preserve_locale`, `cache`, `recursive_traversal`, `id_field`. `Group.command` takes the
+`preserve_locale`, `cache`, `recursive_traversal`, `id_field`, `passthrough`, `help_command`.
+`Group.command` takes the
 same keywords.
 
 `Flag`: `description`, `default`, `short`, `pattern`, `secret`, `multiline`, `max_bytes`,
@@ -125,7 +126,7 @@ same keywords.
 ## `Ctx`
 
 Fields (keep): `app_name`, `version`, `mode`, `request_id`, `env`, `state`, `timeout`,
-`color`, `headless`, `cwd`, `idempotency_key`, `stdin_text`, `page`, `token`,
+`color`, `headless`, `cwd`, `idempotency_key`, `stdin_text`, `argv_rest`, `page`, `token`,
 `trace_id`, `project_root`.
 
 Methods and properties (keep): `log`, `warn`, `debug`, `progress`, `log_error`, `run`,

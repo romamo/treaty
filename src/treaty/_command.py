@@ -6,6 +6,7 @@ import collections.abc
 import dataclasses
 import inspect
 import shlex
+import types
 import typing
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -250,6 +251,12 @@ class Command:
     args_model: ArgsModel | None = None
     """The handler's args model, taken through ``app.args_adapter``: ``args_type`` is
     then the dataclass phase 1 parses its arguments into"""
+    passthrough: bool = False
+    """Delegates its arguments to another tool's parser: ``ctx.argv_rest`` holds every
+    token after the command path, verbatim, and the delegated tool owns stdout (#35)"""
+    help_command: tuple[str, ...] | None = None
+    """The ``ctx.argv_rest`` a passthrough command gets for a lone ``--help`` or ``-h``
+    after its path; None hands those to the tool verbatim"""
 
     def handler_args(self, args: object) -> object:
         """What the handler, its resources, and its rollback receive for parsed ``args``"""
@@ -341,6 +348,22 @@ INPUT_FILE_FLAG = "input-file"
 OUTPUT_FLAG = "output"
 DEFAULT_HEARTBEAT_MS = 10_000
 
+PASSTHROUGH = "passthrough"
+"""The manifest's ``arguments`` of a passthrough command: argv belongs to another tool"""
+ARGV_KEY = "argv"
+"""A passthrough command's argv for its tool in an exec line or ``App.call``"""
+HELP_TOKENS = ("--help", "-h")
+"""What a passthrough command's ``help_command`` stands in for, alone after its path"""
+
+
+@dataclass(frozen=True, slots=True)
+class Delegated:
+    """``data`` of a passthrough command: the exit code of the tool it delegated to,
+    which is also the process exit code"""
+
+    exit_code: int
+
+
 # Consumed by split_globals before any command sees its tokens
 GLOBAL_FLAGS = frozenset({"format", "help", "max-output", "schema"})
 GLOBAL_SHORTS = {"h": "help"}
@@ -408,9 +431,47 @@ def build_command(
     recursive_traversal: bool = False,
     id_field: str | None = None,
     args_adapters: ArgsAdapters | None = None,
+    passthrough: bool = False,
+    help_command: Sequence[str] | None = None,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
+    help_argv = _check_help_command(path, help_command, passthrough)
+    if passthrough:
+        _check_passthrough(
+            path,
+            danger_level,
+            {
+                "streaming=True": streaming,
+                "paginated=True": bool(paginated),
+                "cursor_check=": cursor_check is not None,
+                "safe_default=True": safe_default,
+                "interactive=True": interactive,
+                "editor_alternatives=": bool(editor_alternatives),
+                "gui_operations=": bool(gui_operations),
+                "heartbeat=True": heartbeat,
+                "stdin_input=True": stdin_input,
+                "supports_raw_payload=True": supports_raw_payload,
+                "auth=": auth is not None,
+                "async_job=True": async_job,
+                "config_write_scope=": config_write_scope is not None,
+                "compat=": bool(compat),
+                "sort_key=": sort_key is not None,
+                "ordered=True": ordered,
+                "requires=": bool(requires),
+                "steps=": bool(steps),
+                "resumable=True": resumable,
+                "rollback=": rollback is not None,
+                "external=": external is not None,
+                "subprocess=": subprocess is not None,
+                "background=": background is not None,
+                "cache=": cache is not None,
+                "recursive_traversal=True": recursive_traversal,
+                "id_field=": id_field is not None,
+            },
+        )
+        # REQ-C-027: everything after the path reaches the tool verbatim
+        option_placement = OptionPlacement.STRICT
     if deprecated is not None and not isinstance(deprecated, Deprecated):
         raise RegistrationError(f"{path}: deprecated takes treaty.Deprecated(since=...)")
     if deprecated is not None and deprecated.replacement is not None:
@@ -442,9 +503,12 @@ def build_command(
             f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
         )
     paginated_asked = bool(paginated)
-    args_type, output_type, resources, paginated = _inspect_handler(
-        fn, path, streaming, paginated, scalars, args_adapters
-    )
+    if passthrough:
+        args_type, output_type, resources, paginated = _inspect_passthrough(fn, path)
+    else:
+        args_type, output_type, resources, paginated = _inspect_handler(
+            fn, path, streaming, paginated, scalars, args_adapters
+        )
     args_model: ArgsModel | None = None
     if not is_dataclass_type(args_type):
         adapter = None if args_adapters is None else args_adapters.for_class(args_type)
@@ -525,7 +589,7 @@ def build_command(
     rules = bind_rules(requires, fields, f"{path}")
     declared_child = check_subprocess(str(path), subprocess, fields)
     child = declared_child or derive_subprocess(ctx_calls(fn), fields)
-    if option_placement is OptionPlacement.STRICT:
+    if option_placement is OptionPlacement.STRICT and not passthrough:
         _check_strict(path, fields)
     flags = {f.flag for f in fields}
     unknown = [name for name in editor_alternatives if name not in flags]
@@ -562,7 +626,8 @@ def build_command(
     for f in fields:
         f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
     if danger_level is not DangerLevel.SAFE:
-        if not can_carry(output_type, "effect"):
+        # A passthrough command's data is treaty's own Delegated, whose replay says noop
+        if not passthrough and not can_carry(output_type, "effect"):
             what = "each Batch item's value" if batch else "an object"
             raise RegistrationError(
                 f"{path}: {danger_level.value} commands must return {what} with an "
@@ -718,7 +783,78 @@ def build_command(
         id_field=id_field,
         args_model=args_model,
         is_async=is_async,
+        passthrough=passthrough,
+        help_command=help_argv,
     )
+
+
+def _check_help_command(
+    path: CommandPath, help_command: Sequence[str] | None, passthrough: bool
+) -> tuple[str, ...] | None:
+    """``help_command=`` as the argv tuple it stands for; only a passthrough command,
+    whose ``--help`` would otherwise reach the tool verbatim, takes one"""
+    if help_command is None:
+        return None
+    if not passthrough:
+        raise RegistrationError(
+            f"{path}: help_command= is the argv a passthrough command hands its tool for "
+            "--help; add passthrough=True, or drop it"
+        )
+    if isinstance(help_command, str) or not all(
+        isinstance(token, str) and token for token in help_command
+    ):
+        raise RegistrationError(
+            f"{path}: help_command= is a sequence of non-empty argv tokens, such as "
+            f"help_command=('help',), not {help_command!r}"
+        )
+    if not help_command:
+        raise RegistrationError(
+            f"{path}: help_command=() would hand the tool no arguments for --help; pass the "
+            "tokens it takes, or drop help_command="
+        )
+    return tuple(help_command)
+
+
+def _check_passthrough(
+    path: CommandPath, danger_level: DangerLevel, options: Mapping[str, bool]
+) -> None:
+    """A passthrough command's arguments, output, and stdout belong to the tool it
+    delegates to, so treaty refuses what would need to parse, shape, or preview them"""
+    taken = [name for name, given in options.items() if given]
+    if taken:
+        raise RegistrationError(
+            f"{path}: passthrough=True hands argv and stdout to the delegated tool, which "
+            f"{', '.join(taken)} would need treaty to parse or shape; drop "
+            f"{'it' if len(taken) == 1 else 'them'}"
+        )
+    if danger_level is DangerLevel.DESTRUCTIVE:
+        raise RegistrationError(
+            f"{path}: a passthrough command cannot be destructive: treaty cannot preview "
+            "what the delegated tool would do, which --confirm-destructive needs (REQ-C-004); "
+            'declare danger_level="mutating"'
+        )
+
+
+_EXIT_CODE_TYPES: tuple[object, ...] = (int, None, types.NoneType, int | None)
+
+
+def _inspect_passthrough(
+    fn: Handler, path: CommandPath
+) -> tuple[type, object, tuple[type, ...], bool]:
+    """A passthrough handler returns the delegated tool's exit code, or None for 0"""
+    resources = dependency_params(fn, f"{path}: handler", allow_async=True)
+    params = list(signature(fn).parameters.values())
+    hints = type_hints(fn)
+    args_type = hints.get(params[0].name)
+    if not is_dataclass_type(args_type):
+        raise RegistrationError(f"{path}: first parameter must be annotated with treaty.NoArgs")
+    if "return" not in hints or hints["return"] not in _EXIT_CODE_TYPES:
+        raise RegistrationError(
+            f"{path}: a passthrough handler returns the delegated tool's exit code; annotate "
+            "it -> int, or -> None for a tool that signals failure by raising SystemExit"
+        )
+    assert isinstance(args_type, type)
+    return args_type, Delegated, resources, False
 
 
 _ID_TYPES = ("string", "integer")

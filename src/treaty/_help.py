@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Mapping, Sequence
 
 from ._command import Command
@@ -110,9 +111,23 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
     flags = [f for f in command.fields if not f.positional]
     usage = [name, *command.path.parts]
     usage.extend(f"<{f.flag}>" if f.required else f"[{f.flag}]" for f in positionals)
-    if flags or _framework_rows(command):
+    if command.passthrough:
+        # #35: treaty's flags go before the path; every token after it is the tool's
+        usage[1:1] = ["[flags]"]
+        usage.append("[tool arguments...]")
+    elif flags or _framework_rows(command):
         usage.append("[flags]")
     lines = [f"{' '.join(usage)}", "", command.description, ""]
+    if command.passthrough:
+        lines.append(
+            "Every argument after the command path goes to the delegated tool verbatim, "
+            "--help and -- included; its output is on stdout, and the final envelope is "
+            "the last line on stderr"
+        )
+        if command.help_command is not None:
+            shown = shlex.join([name, *command.path.parts, *command.help_command])
+            lines.append(f"A lone --help or -h after the path runs {shown}")
+        lines.append("")
     if positionals:
         lines.append("Arguments")
         width = max(len(f.flag) for f in positionals)
