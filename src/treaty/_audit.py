@@ -1584,13 +1584,22 @@ def _inner_object_arrays(tp: object, adapters: OutputAdapters) -> Iterator[type]
 
 def _sort_fields(cls: type, adapters: OutputAdapters) -> list[str]:
     """The fields of ``cls`` a ``sort_key`` can name: for an adapted class, the string and
-    integer properties of its schema"""
+    integer properties of its schema. A volatile one is no suggestion: ``--stable-output``
+    drops it before the array is sorted, which then falls back to JSON text."""
     if adapters.for_type(cls) is not None:
         properties = adapters.node(cls).get("properties")
         props = properties if isinstance(properties, dict) else {}
-        return [n for n, p in props.items() if p.get("type") in ("string", "integer")]
+        return [
+            n
+            for n, p in props.items()
+            if p.get("type") in ("string", "integer") and not p.get("x-volatile")
+        ]
     hints = type_hints(cls)
-    return [f.name for f in dataclasses.fields(cls) if can_sort_by(hints[f.name])]
+    return [
+        f.name
+        for f in dataclasses.fields(cls)
+        if can_sort_by(hints[f.name]) and not out_spec(f).volatile
+    ]
 
 
 def _id_like(cls: type, adapters: OutputAdapters) -> str | None:

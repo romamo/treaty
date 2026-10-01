@@ -622,6 +622,34 @@ def test_adapted_arrays_in_dataclass_fields_are_flagged_as_dataclass_ones() -> N
     assert "no field of Unkeyed can be a sort_key" in unkeyed.fix
 
 
+class Stamped(BaseModel):
+    seen: str = Field(json_schema_extra={"x-volatile": True})
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class StampedRow:
+    seen: str = Out(volatile=True)
+    title: str = ""
+
+
+def test_the_suggested_sort_key_is_never_a_volatile_field() -> None:
+    # --stable-output drops a volatile key before sorting, so sorting by it is JSON text
+    app = adapted()
+
+    @app.command("adapted", description="Adapted", danger_level="safe", exit_codes=())
+    def adapted_rows(args: NoArgs, ctx: Ctx) -> list[Stamped]:
+        return []
+
+    @app.command("plain", description="Plain", danger_level="safe", exit_codes=())
+    def plain_rows(args: NoArgs, ctx: Ctx) -> list[StampedRow]:
+        return []
+
+    fixes = {f.command: f.fix for f in findings(app, "stable-order")}
+    assert fixes["adapted"].startswith('sort_key="title"')
+    assert fixes["plain"].startswith('sort_key="title"')
+
+
 def test_an_order_declared_in_the_adapter_schema_is_no_finding() -> None:
     # order_app's model declares x-sort-key and x-ordered on its arrays, and its list
     # commands declare sort_key= and ordered=: only Report.orders is undeclared
