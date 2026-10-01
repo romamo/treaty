@@ -102,7 +102,7 @@ def inventory() -> dict[str, object]:
                 f.name for f in dataclasses.fields(ErrorDetail) if not f.name.startswith("_")
             ],
             "warning": [f.name for f in dataclasses.fields(WarningDetail)],
-            "fields": [f.name for f in dataclasses.fields(Envelope)],
+            "fields": [f.name for f in dataclasses.fields(Envelope) if not f.name.startswith("_")],
         },
         "manifest": {
             "keys": sorted(manifest),

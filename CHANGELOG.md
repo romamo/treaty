@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+- Plain output no longer prints the trust tags of external content as data: the data
+  block of an `external=True` command, and the stderr error block of a context with
+  `treaty.External`, show one `(external content, untrusted)` line instead of
+  `_source: external` and `_trusted: false`, in a table too, and so does a plain
+  `--output` file. JSON, jsonl, ndjson, and tsv keep the tags, and a field named
+  `_source` on a command that is not external still prints. A boolean in the stderr error
+  block reads `true` or `false`, as in the rest of plain output, not Python's `True` or
+  `False` (#198)
+
 ## [1.0.0rc12] - 2026-10-01
 
 The twelfth 1.0 release candidate: 1 change, 7 fixes, 5 additions, and 3 breaking changes.
