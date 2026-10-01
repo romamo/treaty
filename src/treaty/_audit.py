@@ -863,7 +863,20 @@ _UNLINKING_CALLS = frozenset({"shutil.rmtree", "rmtree"})
 # The walks that enter a symlinked directory only when asked, from Python 3.13: the
 # keyword that asks, and its position where the signature also takes it positionally
 _FOLLOW_KEYWORDS = frozenset({"recurse_symlinks", "follow_symlinks", "followlinks"})
-_OS_WALKS: dict[object, int | None] = {os.walk: 3, os.fwalk: None}
+_OS_WALK_FOLLOW_AT: dict[str, int | None] = {"walk": 3, "fwalk": None}
+
+
+def os_walks(module: types.ModuleType) -> dict[object, int | None]:
+    """The module's walk functions with their follow position; one the platform lacks,
+    such as ``os.fwalk`` on Windows, is left out rather than read"""
+    return {
+        getattr(module, name): at
+        for name, at in _OS_WALK_FOLLOW_AT.items()
+        if hasattr(module, name)
+    }
+
+
+_OS_WALKS = os_walks(os)
 _PATH_WALK_FOLLOW_AT = 2
 
 

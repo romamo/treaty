@@ -14,6 +14,7 @@ import ssl
 import sys
 import threading
 import time
+import types
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,7 +24,7 @@ from pathlib import Path
 import pytest
 
 from treaty import App, Ctx, Exit, Flag, HttpResponse, NoArgs, RegistrationError, Retry
-from treaty._audit import Finding, Severity, audit
+from treaty._audit import Finding, Severity, audit, os_walks
 from treaty._http import Http, NetworkFailure, ProxyConfig
 from treaty._profile import probes_for
 from treaty._retry import Retrier
@@ -894,6 +895,18 @@ def test_a_walk_that_cannot_follow_a_symlink_is_advice_not_a_loop_warning() -> N
     assert "no --max-depth bounds this walk" in by_command["rglob"]
     assert "circular symlink can loop" not in by_command["rglob"]
     assert "circular symlink can loop" in by_command["rglob-on"]
+
+
+def test_the_walk_table_leaves_out_a_walk_the_platform_lacks() -> None:
+    # Windows has no os.fwalk: reading it at import broke ``import treaty`` there
+    def fwalk() -> None: ...
+
+    windows_os = types.ModuleType("os")
+    windows_os.walk = os.walk  # type: ignore[attr-defined]
+    assert os_walks(windows_os) == {os.walk: 3}
+    posix_os = types.ModuleType("os")
+    posix_os.walk, posix_os.fwalk = os.walk, fwalk  # type: ignore[attr-defined]
+    assert os_walks(posix_os) == {os.walk: 3, fwalk: None}
 
 
 def test_a_bare_rglob_cannot_loop_on_a_circular_symlink(tree: Path) -> None:
