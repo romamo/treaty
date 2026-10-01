@@ -12,6 +12,7 @@ import pytest
 from conftest import spec_validator
 
 from treaty import App, Arg, Ctx, NoArgs, ParseError, RegistrationError
+from treaty._signals import Cancelled, CancelSignal
 
 
 @dataclass(frozen=True)
@@ -204,6 +205,36 @@ def test_an_exception_from_the_fallback_is_fallback_failed_and_redacted() -> Non
     assert "s3cr3t-value" not in err and "RuntimeError" in err
     assert out[1]["error"]["code"] == "FALLBACK_FAILED"
     assert out[1]["error"]["context"]["exception"] == "SystemExit"
+
+
+@pytest.mark.parametrize(
+    ("raised", "signal_name", "exit_code"),
+    [
+        (KeyboardInterrupt(), "SIGINT", 130),
+        (Cancelled(CancelSignal("SIGTERM", 143)), "SIGTERM", 143),
+    ],
+)
+def test_a_cancellation_in_the_fallback_cancels_as_in_a_handler(
+    raised: BaseException, signal_name: str, exit_code: int
+) -> None:
+    """Not FALLBACK_FAILED: the same CANCELLED line a migrated handler raising it gets"""
+
+    def old(cmd: str, payload: Mapping[str, object]) -> object:
+        raise raised
+
+    app = make_app(exec_fallback=old)
+
+    @app.command("interrupted", danger_level="safe", exit_codes=(), description="Interrupt")
+    def interrupted(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        raise raised
+
+    lines = ['{"_cmd": "legacy"}', '{"_cmd": "interrupted"}']
+    _, out, _ = run_exec(app, lines, "--ignore-errors")
+    fallback, handler = out[0], out[1]
+    assert fallback["error"]["code"] == handler["error"]["code"] == "CANCELLED"
+    assert fallback["error"]["context"] == {"signal": signal_name, "command": "legacy"}
+    assert fallback["meta"]["exit_code"] == handler["meta"]["exit_code"] == exit_code
+    assert fallback["meta"]["exec_fallback"] is True
 
 
 @pytest.mark.parametrize("cmd", ["bad.output", "scalar"])

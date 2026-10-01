@@ -159,7 +159,8 @@ Apps built on treaty keep their own, structured schema changelog with
   `--help`, and `--version` do not. `App(exec_fallback=)` passes an `exec` line whose
   `_cmd` is no registered command to the old CLI's dispatcher, as `(cmd, payload)`, and
   wraps what it returns in a success envelope with `meta.exec_fallback`; a `ParseError` it
-  raises is exit 2, any other exception exit 1 `FALLBACK_FAILED`. Its lines are redacted,
+  raises is exit 2, a `KeyboardInterrupt` `CANCELLED` as from a handler, any other
+  exception exit 1 `FALLBACK_FAILED`. Its lines are redacted,
   masked, capped, and audit-logged like a command's, never deduplicated, and refused under
   `exec --dry-run`. The click/typer and argparse chapters' shims use both (#28)
 

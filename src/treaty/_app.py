@@ -440,8 +440,8 @@ class App:
         is no registered command is passed to it as ``exec_fallback(cmd, payload)``,
         ``payload`` being the line's object without ``_cmd``, and what it returns, an
         object, an array, or None, is the line's ``data`` in a success envelope. A
-        ``ParseError`` it raises answers exit 2, any other exception exit 1
-        ``FALLBACK_FAILED``; without it, such a line is ``UNKNOWN_COMMAND``.
+        ``ParseError`` it raises answers exit 2, a ``KeyboardInterrupt`` ``CANCELLED`` as
+        from a handler, any other exception exit 1 ``FALLBACK_FAILED``; without it, such a line is ``UNKNOWN_COMMAND``.
 
         ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
         ``mcp-validate``, ``audit-log``, and ``completion`` are built-ins that yield: an app
@@ -1991,7 +1991,11 @@ class App:
                 return run.emit(mode, run.args_crashed(command, exc))
             except Cancelled as exc:  # while --flag - waited on stdin
                 cancelled = run._cancelled(
-                    command, exc.signal, run.started, _mode_meta(command), handler_started=False
+                    command.path,
+                    exc.signal,
+                    run.started,
+                    _mode_meta(command),
+                    handler_started=False,
                 )
                 return run.emit(mode, cancelled)
             if pinned is not None:
@@ -4227,7 +4231,7 @@ class _Run:
                 )
             except Cancelled as exc:
                 return self._cancelled(
-                    command, exc.signal, started, full_meta, handler_started=False
+                    command.path, exc.signal, started, full_meta, handler_started=False
                 )
             except RecordCorrupt as exc:
                 return self._state_error(
@@ -4493,12 +4497,12 @@ class _Run:
             # A held signal raised before fn() or before the worker started: nothing ran
             ran = not exc.held or bool(running)
             return self._cancelled(
-                command, exc.signal, started, full_meta, handler_started=ran, running=running
+                command.path, exc.signal, started, full_meta, handler_started=ran, running=running
             )
         except KeyboardInterrupt:
             self.abandoned = _still_running(running)
             sig = CancelSignal("SIGINT", 130)
-            return self._cancelled(command, sig, started, full_meta, running=running)
+            return self._cancelled(command.path, sig, started, full_meta, running=running)
         except InputRequired as exc:
             return self._input_required(exc, started, full_meta)
         except StepError as exc:
@@ -4805,13 +4809,13 @@ class _Run:
             ran = events is not None or not exc.held or bool(running)
             meta_now = {**full_meta, "seq": seq}
             cancelled = self._cancelled(
-                command, exc.signal, started, meta_now, handler_started=ran, running=running
+                command.path, exc.signal, started, meta_now, handler_started=ran, running=running
             )
             terminal = _ready(cancelled)
         except KeyboardInterrupt:
             sig = CancelSignal("SIGINT", 130)
             meta_now = {**full_meta, "seq": seq}
-            cancelled = self._cancelled(command, sig, started, meta_now, running=running)
+            cancelled = self._cancelled(command.path, sig, started, meta_now, running=running)
             terminal = _ready(cancelled)
         except InputRequired as exc:
             terminal = functools.partial(self._input_required, exc, started, partial())
@@ -4983,7 +4987,7 @@ class _Run:
 
     def _cancelled(
         self,
-        command: Command,
+        path: CommandPath,
         sig: CancelSignal,
         started: float,
         meta: Mapping[str, object],
@@ -4997,7 +5001,7 @@ class _Run:
         ``running`` holds the handler's worker, which gets the children's grace to finish
         and tear down on its own thread before the teardown runs here, beside it.
         """
-        context: dict[str, object] = {"signal": sig.name, "command": command.path.value}
+        context: dict[str, object] = {"signal": sig.name, "command": path.value}
         # Children first, so the envelope is written after they were signaled (REQ-F-031)
         self._stop_children(sig)
         if handler_started and self.teardown is not None:
@@ -5017,7 +5021,7 @@ class _Run:
             sig.exit_code,
             error=ErrorDetail(
                 code="CANCELLED",
-                message=f"Command {command.path} was cancelled by {sig.name}",
+                message=f"Command {path} was cancelled by {sig.name}",
                 retryable=entry.retryable,
                 context=context,
                 phase="execution",
@@ -5323,14 +5327,32 @@ class _Run:
         payload = types.MappingProxyType(_fallback_payload(request))
         trace("exec fallback", command=cmd)
         try:
-            # The handler boundary: SystemExit too, as from a handler
-            result = user_code(lambda: fallback(cmd, payload), passing=(ParseError,))
+            # The handler boundary, with a handler's passing set: SystemExit is a crash,
+            # a cancellation cancels
+            result = user_code(lambda: fallback(cmd, payload), passing=_HANDLER_SIGNALS)
         except ParseError as exc:
             context = {k: scrub(k, v, redact) for k, v in exc.context.items()}
             refused = ParseError(
                 redact(exc.message), context=context, suggestion=exc.suggestion, code=exc.code
             )
             return self.arg_error(refused, started=started, meta=meta)
+        except Cancelled as exc:
+            return self._cancelled(request.path, exc.signal, started, meta)
+        except KeyboardInterrupt:
+            return self._cancelled(request.path, CancelSignal("SIGINT", 130), started, meta)
+        except InputRequired as exc:
+            context = {k: scrub(k, v, redact) for k, v in exc.context.items()}
+            needed = InputRequired(
+                exc.code,
+                redact(exc.message),
+                suggestion=exc.suggestion,
+                context=context,
+                alternatives=exc.alternatives,
+            )
+            return self._input_required(needed, started, meta)
+        except (CliExit, NotModified, TimeoutExpired, StepError) as exc:
+            # A treaty handler's answers, with no command to answer for: the old CLI broke
+            return self._fallback_failed(cmd, exc, redact, started, meta)
         if isinstance(result, Crashed):
             return self._fallback_failed(cmd, result.exc, redact, started, meta)
         try:
@@ -5950,7 +5972,7 @@ class _Run:
             payload = self._read_input(invocation.input_file, meta=meta)
         except Cancelled as exc:
             return self._cancelled(
-                command, exc.signal, self.started, meta or {}, handler_started=False
+                command.path, exc.signal, self.started, meta or {}, handler_started=False
             )
         if isinstance(payload, Envelope):
             return payload

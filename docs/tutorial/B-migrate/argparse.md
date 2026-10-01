@@ -520,8 +520,8 @@ app = App("bean", version="1.0.0", exec_fallback=old_exec)
   exit 1 `INVALID_OUTPUT`
 - Raise `treaty.ParseError` for a line the old dispatcher does not know or cannot read,
   before it changes anything: exit 2, with `code=` as `error.code` (`UNKNOWN_COMMAND`, say).
-  Any other exception, `SystemExit` included, is exit 1 `FALLBACK_FAILED`, with the
-  traceback on stderr
+  A `KeyboardInterrupt` is `CANCELLED`, as from a handler. Any other exception,
+  `SystemExit` included, is exit 1 `FALLBACK_FAILED`, with the traceback on stderr
 - The result passes through what a migrated command's does: values under credential names
   in the line (`token`, `password`, `api_key`) are redacted from the data, the error, the
   traceback, and the audit log entry; high-entropy values are masked; `--fields`, the token
