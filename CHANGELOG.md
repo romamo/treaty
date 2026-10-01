@@ -10,6 +10,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+- Commands that run children at the same time from several threads no longer crash on
+  Windows with `PermissionError: [WinError 5] Access is denied` rewriting the session's
+  `children.pids`, and no longer lose a child's pid from it on any platform: the
+  rewrites of the file take turns, and a rename another process blocks for a moment is
+  retried (#213)
+
 - `--help` shows a control character, terminal escape, or Unicode bidi override in the
   app's own text (the app, group, command, and flag descriptions, and the examples) as its
   escape, such as `\x1b` or `\u202e`, as plain output does, instead of writing it to the

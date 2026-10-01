@@ -11,7 +11,8 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,8 @@ from treaty._app import _StrayStdout
 from treaty._atomic import retry_sharing_violation
 from treaty._audit import audit
 from treaty._mode import child_ctype, locale_available, normalize_locale
+from treaty._session import PID_FILE, Session, SessionRoot
+from treaty._subprocess import Processes
 
 SESSIONCTL = Path(__file__).resolve().parent / "fixture_session_app.py"
 BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
@@ -1043,3 +1046,116 @@ def test_the_cache_declared_audit_rule_flags_a_hand_written_cache() -> None:
     rule = next(r for r in audit(app, "handctl", limit=5).rules if r.id == "cache-declared")
     [finding] = rule.findings
     assert finding.command == "fetch" and "CachePolicy" in finding.fix
+
+
+# The children's pid file under concurrent ctx.run calls (#213)
+
+
+def test_concurrent_tracks_never_lose_a_pid(tmp_path: Path) -> None:
+    session = Session(SessionRoot(tmp_path / f"pidctl-{os.getpid()}"), "many")
+    started: set[int] = set()
+    guard = threading.Lock()
+    errors: list[BaseException] = []
+    go = threading.Barrier(32)
+
+    def snapshot() -> list[int]:
+        with guard:
+            return list(started)
+
+    def record(pid: int) -> None:
+        go.wait()
+        try:
+            for n in range(40):
+                with guard:
+                    started.add(pid * 100 + n)
+                session.track(snapshot)
+        except BaseException as exc:  # reported to the main thread below
+            errors.append(exc)
+            raise
+
+    threads = [threading.Thread(target=record, args=(i,)) for i in range(32)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    directory = session.directory()
+    written = {int(line) for line in (directory / PID_FILE).read_text().split()}
+    assert written == started and len(written) == 1280
+    assert sorted(p.name for p in directory.iterdir()) == [".live", PID_FILE]
+    session.remove()
+
+
+def test_concurrent_runs_in_one_command_track_their_children(tmp_path: Path) -> None:
+    session = Session(SessionRoot(tmp_path / f"runctl-{os.getpid()}"), "both")
+    procs = Processes(BASE_ENV, deadline=None, headless=True, browser_open=False, session=session)
+    errors: list[BaseException] = []
+
+    def child() -> None:
+        try:
+            procs.run([sys.executable, "-c", "import time; time.sleep(0.2)"])
+        except BaseException as exc:  # reported to the main thread below
+            errors.append(exc)
+            raise
+
+    threads = [threading.Thread(target=child) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == [] and not procs.tracked
+    assert (session.directory() / PID_FILE).read_text() == ""
+    session.remove()
+
+
+def _held(failures: int) -> Callable[[Callable[[], None]], Callable[[], None]]:
+    """Wraps the rename so its first ``failures`` calls fail as a Windows sharing
+    violation does, while another process holds the pid file"""
+
+    def wrap(rename: Callable[[], None]) -> Callable[[], None]:
+        calls = 0
+
+        def attempt() -> None:
+            nonlocal calls
+            calls += 1
+            if calls <= failures:
+                raise PermissionError(13, "sharing violation")
+            rename()
+
+        return attempt
+
+    return wrap
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_a_held_pid_file_is_replaced_once_the_holder_lets_go(tmp_path: Path) -> None:
+    session = Session(SessionRoot(tmp_path / f"heldctl-{os.getpid()}"), "held")
+    clock, held = _Clock(), _held(failures=3)
+    retry = partial(retry_sharing_violation, retry=True, clock=clock, sleep=clock.sleep)
+    session.track(lambda: [42, 7], replace=lambda rename: retry(held(rename)))
+    directory = session.directory()
+    assert (directory / PID_FILE).read_text() == "7\n42\n" and clock.now > 0
+    assert sorted(p.name for p in directory.iterdir()) == [".live", PID_FILE]
+    session.remove()
+
+
+def test_a_pid_file_held_past_the_deadline_fails_and_leaves_no_temp_file(
+    tmp_path: Path,
+) -> None:
+    session = Session(SessionRoot(tmp_path / f"stuckctl-{os.getpid()}"), "stuck")
+    clock, held = _Clock(), _held(failures=10_000)
+    retry = partial(retry_sharing_violation, retry=True, clock=clock, sleep=clock.sleep)
+    with pytest.raises(PermissionError):
+        session.track(lambda: [42], replace=lambda rename: retry(held(rename)))
+    assert [p.name for p in session.directory().iterdir()] == [".live"]
+    session.remove()

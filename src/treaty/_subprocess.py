@@ -468,9 +468,11 @@ class Processes:
     def _track(self) -> None:
         if self.session is None:
             return
+        self.session.track(self._pids)
+
+    def _pids(self) -> list[int]:
         with self._lock:
-            pids = [p.pid for p in self._live]
-        self.session.track(pids)
+            return [p.pid for p in self._live]
 
     def _temp_env(self) -> dict[str, str]:
         return {} if self.session is None else self.session.child_env()
