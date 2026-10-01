@@ -333,9 +333,13 @@ def command_entry(
         out["examples"] = [e.to_json() for e in command.examples]
     if command.has_network_io:
         out["has_network_io"] = True
-    if command.output_file:
-        # REQ-O-001: whether --output gets the --format representation or the raw bytes
-        out["output_file"] = "binary" if command.returns_binary else "formatted"
+    if command.output_file or command.passthrough:
+        # REQ-O-001: on every command treaty registers --output for, whether the file gets
+        # the --format representation or the raw bytes; a passthrough command's gets its
+        # final envelope (#35). An app's own output flag has no key (cli-agent-spec#27)
+        out["output_file"] = (
+            "binary" if command.output_file and command.returns_binary else "formatted"
+        )
     if command.streaming:
         out["streaming_default"] = True
     if command.id_field is not None:

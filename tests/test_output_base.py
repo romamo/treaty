@@ -272,6 +272,15 @@ def test_fs_side_effects_suggests_output_file_for_a_path_flag_write() -> None:
     assert "SideEffect" not in finding.fix
 
 
+def test_an_apps_own_output_flag_has_no_output_file_key() -> None:
+    # A departure from REQ-O-001 until cli-agent-spec#27: treaty cannot tell what the
+    # handler writes there, so only an --output treaty registers is marked
+    manifest = audit_app(export_by_hand).manifest()
+    spec_validator("manifest-response").validate(manifest)
+    entry = manifest["commands"]["x"]
+    assert "output" in entry["flags"] and "output_file" not in entry
+
+
 def test_fs_side_effects_keeps_the_cache_advice_for_an_untraced_write(tmp_path: Path) -> None:
     def cache(args: ExportArgs, ctx: Ctx) -> dict[str, str]:
         (tmp_path / "cache.json").write_text(str(args.output))

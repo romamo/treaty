@@ -53,6 +53,26 @@ Apps built on treaty keep their own, structured schema changelog with
   `key: value` blocks; JSON, `jsonl`, `ndjson`, and `tsv` do not change. Upgrading: rerun
   `treaty agents-md` on each app after upgrading, or `treaty check-docs` exits 81 on the
   Environment Variables section of its AGENTS.md, which now lists `COLUMNS` (#8)
+- A command declared `output_file=True` that returns `treaty.Binary` writes the raw bytes
+  to `--output`, atomically and whatever the `--format`, instead of their base64 wrapper
+  in the `--format` representation; `data` is `{path, bytes, content_type, sha256}`, with
+  `sha256` in lowercase hex and `content_type` only when the command declared one. A
+  failed run still writes no file, the output cap bounds the envelope and never the file,
+  and without `--output` the bytes stay base64 in `data`. A relative `--output` lands in
+  the base `output_file=` declares, as for the `--format` representation, and the
+  `--output` description names both the raw write and that base. `--output -` on such a
+  command exits `2`, as stdout carries only the envelope; other commands still write a
+  file named `-`. The new `binary-output-file` audit rule, an advice, suggests
+  `output_file=True` for a command returning bytes without it (#10)
+- The manifest is ManifestResponse 3.3: the `CommandEntry` of a command declared
+  `output_file=`, with any base, carries `output_file`, `"binary"` when it returns
+  `treaty.Binary` and its `--output` gets the raw bytes, `"formatted"` when the file gets
+  the `--format` representation. A passthrough command's entry carries `"formatted"`, as
+  its `--output` gets the final envelope. An app's own `output` flag has no key, a
+  departure from REQ-O-001 listed in COMPLIANCE.md until cli-agent-spec#27 settles it.
+  `schema_version` is `"3.3"`; the spec's 3.2 adds `ConditionalRule` `any_of` and
+  `one_of`, which treaty's manifest does not emit, as only `--schema` shows a group rule
+  (#10)
 
 ## [1.0.0rc10] - 2026-10-01
 
@@ -234,26 +254,6 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   go to the delegated tool. Exec lines and `App.call` take `"argv": [...]`, MCP lists no
   passthrough command, and completion offers file paths after the path. COMPLIANCE.md lists
   the spec requirements a passthrough command departs from (#35)
-### Added
-
-- A command declared `output_file=True` that returns `treaty.Binary` writes the raw bytes
-  to `--output`, atomically and whatever the `--format`, instead of their base64 wrapper
-  in the `--format` representation; `data` is `{path, bytes, content_type, sha256}`, with
-  `sha256` in lowercase hex and `content_type` only when the command declared one. A
-  failed run still writes no file, the output cap bounds the envelope and never the file,
-  and without `--output` the bytes stay base64 in `data`. A relative `--output` lands in
-  the base `output_file=` declares, as for the `--format` representation, and the
-  `--output` description names both the raw write and that base. `--output -` on such a
-  command exits `2`, as stdout carries only the envelope; other commands still write a
-  file named `-`. The new `binary-output-file` audit rule, an advice, suggests
-  `output_file=True` for a command returning bytes without it (#10)
-- The manifest is ManifestResponse 3.3: the `CommandEntry` of a command declared
-  `output_file=`, with any base, carries `output_file`, `"binary"` when it returns
-  `treaty.Binary` and its `--output` gets the raw bytes, `"formatted"` when the file gets
-  the `--format` representation; any other command, a passthrough one included, has no
-  key. `schema_version` is `"3.3"`; the spec's 3.2 adds `ConditionalRule` `any_of` and
-  `one_of`, which treaty's manifest does not emit, as only `--schema` shows a group
-  rule (#10)
 
 ## [1.0.0rc9] - 2026-10-01
 
