@@ -61,6 +61,7 @@ review), **rename**, **remove**.
 |------|----------|------|
 | `Batch`, `Item`, `ItemError` | keep | Per-item results with exit 3 |
 | `Binary` | keep | Base64 output with `content_type` |
+| `External` | added in 1.0 (#174) | Marks an `error.context` value as content from outside the tool: masked and tagged |
 | `Page`, `PageRequest` | keep | `paginated=True` |
 | `Completed`, `Spawned` | keep | Returned by `ctx.run`, `ctx.pipeline`, `ctx.spawn` |
 | `HttpResponse` | keep | Returned by `ctx.http` |

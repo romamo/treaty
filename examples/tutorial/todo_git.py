@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, Self
 
-from treaty import Affects, App, Arg, Ctx, Exit, Flag, Format, Out, Subprocess
+from treaty import Affects, App, Arg, Ctx, Exit, External, Flag, Format, Out, Subprocess
 
 Priority = Literal["low", "normal", "high"]
 
@@ -240,7 +240,7 @@ def save(args: Save, ctx: Ctx, store: Store) -> Saved:
     if inside.returncode != 0:
         raise Exit.NOT_A_REPOSITORY(
             f"{here} is not in a git repository",
-            context={"directory": str(here), "git": inside.stderr.strip()},
+            context={"directory": str(here), "git": External(inside.stderr.strip())},
             fix_required="--db must name a file inside a git working tree",
         )
     # "--" ends git's options: a file name can never be read as one

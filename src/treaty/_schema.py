@@ -27,7 +27,7 @@ from typing import Any
 
 from ._errors import RegistrationError, SchemaError
 from ._flags import FLAG_META
-from ._out import Binary, out_spec
+from ._out import Binary, External, out_spec
 from ._redact import secret_field
 from ._scalars import DECIMAL_TEXT, ScalarRegistry
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
@@ -310,6 +310,11 @@ def to_jsonable(value: object, scalars: ScalarRegistry, *, base: Path) -> object
                 raise SchemaError(f"dict keys must be str, got {type(k).__name__}")
             out[k] = to_jsonable(v, scalars, base=base)
         return out
+    if isinstance(value, External):
+        raise SchemaError(
+            "treaty.External, which marks a top-level value of error.context only; "
+            "Out(external=True) or external=True marks data"
+        )
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
             f.name: to_jsonable(getattr(value, f.name), scalars, base=base)

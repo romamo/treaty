@@ -103,6 +103,17 @@ class Binary:
             raise TypeError(f"Binary.data is bytes, not {type(self.data).__name__}")
 
 
+@dataclass(frozen=True, slots=True)
+class External:
+    """A value of a failure's ``error.context`` that came from outside the tool, such
+    as a child's output: ``Exit.X(msg, context={"output": External(done.stderr)})``.
+    It is masked as external ``data`` is, and the context gets the trust tags
+    ``_source: external`` and ``_trusted: false`` (REQ-F-035). It marks a top-level
+    context value only; ``Out(external=True)`` and ``external=True`` mark ``data``."""
+
+    value: object
+
+
 def is_binary(value: object) -> bool:
     """A JSON value that is a binary wrapper, which no cut or sort may look inside"""
     return (

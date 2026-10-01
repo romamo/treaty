@@ -43,6 +43,7 @@ from ._scan import (
     ctx_calls,
     direct_subprocess_calls,
     first_party,
+    raw_child_context,
     reached_functions,
     resolve_name,
     source_tree,
@@ -1920,6 +1921,19 @@ def _inner_array(c: Command, where: str, item: type) -> Finding:
 
 def _external_data(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
+        # Whatever the command declares for data: external=True and Out(external=True)
+        # mark data, never error.context
+        for raw in raw_child_context(c.handler):
+            yield Finding(
+                "external-data",
+                Severity.WARNING,
+                c.path.value,
+                f"line {raw.line} of the handler puts a child's output in error.context "
+                f"{raw.key}, which reaches the agent without _trusted: false or masking "
+                "(REQ-F-035)",
+                f'context={{"{raw.key}": treaty.External(...)}} to mark it as content from '
+                "outside the tool",
+            )
         if c.external is not None or any(
             out_spec(f).external for _, f, _ in output_fields(c.output_type)
         ):

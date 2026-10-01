@@ -34,7 +34,7 @@ from ._context import Ctx
 from ._errors import Exit, ParseError, RegistrationError, SchemaError
 from ._flags import Arg, Flag
 from ._mode import Format
-from ._out import Out
+from ._out import External, Out
 from ._profile import (
     SPEC_FALLBACK,
     build_profile,
@@ -944,7 +944,7 @@ def conformance_command(args: ConformanceArgs, ctx: Ctx) -> ConformanceOut:
             context={
                 "kit_exit": kit.exit_code,
                 "kit_error": kit_error,
-                "stderr": kit.stderr[-2000:],
+                "stderr": External(kit.stderr[-2000:]),
             },
             data=result,
         )
