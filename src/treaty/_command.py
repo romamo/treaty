@@ -30,7 +30,7 @@ from ._declare import (
 )
 from ._deprecation import Deprecated
 from ._deps import Version, check_required_tools
-from ._effect import can_carry, with_replay_effect
+from ._effect import can_carry, lists_unrequired, with_replay_effect
 from ._env import SESSION, app_var
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, dry_run_field, inspect_fields
@@ -62,6 +62,7 @@ from ._types import (
 from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope, ToolVersion
 
 if TYPE_CHECKING:
+    from ._adapters import OutputAdapters
     from ._records import RecordSpec  # imports the parser, which imports this module
 
 Handler = Callable[..., Any]
@@ -547,8 +548,8 @@ def build_command(
         )
     if isinstance(default_limit, bool) or not isinstance(default_limit, int) or default_limit < 0:
         raise RegistrationError(f"{path}: default_limit is a whole number of items; 0 is all")
-    _check_gui(path, output_type, gui_operations, headless_behavior)
-    _check_background(path, output_type, background, streaming)
+    _check_gui(path, output_type, gui_operations, headless_behavior, scalars.adapters)
+    _check_background(path, output_type, background, streaming, scalars.adapters)
     if cache is not None and not isinstance(cache, CachePolicy):
         raise RegistrationError(f"{path}: cache takes treaty.CachePolicy(ttl_seconds=...)")
     if cache is not None:
@@ -641,7 +642,7 @@ def build_command(
         f.to_flag_entries()  # a default the manifest cannot list fails now, not on --help
     if danger_level is not DangerLevel.SAFE:
         # A passthrough command's data is treaty's own Delegated, whose replay says noop
-        if not passthrough and not can_carry(output_type, "effect"):
+        if not passthrough and not _carries(path, output_type, "effect", scalars.adapters):
             what = "each Batch item's value" if batch else "an object"
             raise RegistrationError(
                 f"{path}: {danger_level.value} commands must return {what} with an "
@@ -658,7 +659,7 @@ def build_command(
                 f"{path}: destructive commands must declare a boolean 'dry_run' flag, or mark "
                 "their own with Flag(dry_run=True) (REQ-C-004)"
             )
-        if not can_carry(output_type, "would_affect"):
+        if not _carries(path, output_type, "would_affect", scalars.adapters):
             raise RegistrationError(
                 f"{path}: destructive commands must return an object with a 'would_affect' "
                 "field for dry runs, such as would_affect: treaty.Affects | None = None "
@@ -690,7 +691,9 @@ def build_command(
         # An older shape still answers the same contracts, or every pinned call fails
         # after the handler has run
         where = f"{path}: compat[{shim.version.value!r}]"
-        if danger_level is not DangerLevel.SAFE and not can_carry(shim.output_type, "effect"):
+        if danger_level is not DangerLevel.SAFE and not _carries(
+            where, shim.output_type, "effect", scalars.adapters
+        ):
             raise RegistrationError(
                 f"{where} returns no 'effect' field, which {danger_level.value} commands "
                 "answer with (REQ-C-003)"
@@ -1129,11 +1132,23 @@ def _page_output(
     return list[item], True  # type: ignore[valid-type]
 
 
+def _carries(where: object, output_type: object, name: str, adapters: OutputAdapters) -> bool:
+    """``can_carry``, failing on an adapted class whose schema lists ``name`` without
+    requiring it: its ``data`` may lack the key the contract reads"""
+    if lists_unrequired(output_type, name, adapters):
+        raise RegistrationError(
+            f"{where}: the output adapter's schema lists {name!r} but does not require it; "
+            "an x-volatile key is left out of data, so drop x-volatile from it"
+        )
+    return can_carry(output_type, name, adapters)
+
+
 def _check_gui(
     path: CommandPath,
     output_type: object,
     gui_operations: Sequence[str],
     headless_behavior: HeadlessBehavior | None,
+    adapters: OutputAdapters,
 ) -> None:
     unknown = sorted(set(gui_operations) - {BROWSER_OPEN})
     if unknown:
@@ -1153,7 +1168,7 @@ def _check_gui(
             f"gui_operations=[{BROWSER_OPEN!r}] or drop it"
         )
     emits = headless_behavior is HeadlessBehavior.EMIT_IN_OUTPUT
-    if emits and not can_carry(output_type, "open_url"):
+    if emits and not _carries(path, output_type, "open_url", adapters):
         raise RegistrationError(
             f"{path}: a command that opens a browser must return an object with an "
             "'open_url' field, where a headless run puts the URL (REQ-F-057), such as "
@@ -1162,7 +1177,11 @@ def _check_gui(
 
 
 def _check_background(
-    path: CommandPath, output_type: object, background: Background | None, streaming: bool
+    path: CommandPath,
+    output_type: object,
+    background: Background | None,
+    streaming: bool,
+    adapters: OutputAdapters,
 ) -> None:
     if background is None:
         return
@@ -1170,7 +1189,11 @@ def _check_background(
         raise RegistrationError(f"{path}: background takes treaty.Background(...)")
     if streaming:
         raise RegistrationError(f"{path}: a stream cannot start a background process")
-    missing = [f for f in ("background_pid", "cleanup_command") if not can_carry(output_type, f)]
+    missing = [
+        f
+        for f in ("background_pid", "cleanup_command")
+        if not _carries(path, output_type, f, adapters)
+    ]
     if missing:
         raise RegistrationError(
             f"{path}: a command that starts a background process returns an object with "

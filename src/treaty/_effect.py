@@ -13,9 +13,12 @@ import dataclasses
 import re
 import typing
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._types import is_dataclass_type, strip_optional
+
+if TYPE_CHECKING:
+    from ._adapters import OutputAdapters
 
 LIVE_EFFECTS = frozenset({"created", "updated", "deleted", "noop"})
 _PREVIEW_RE = re.compile(r"would_[a-z][a-z_]*")
@@ -32,13 +35,36 @@ class Affects:
     count: int
 
 
-def can_carry(output_type: object, name: str) -> bool:
-    """A dataclass with the field ``name``, or a dict checked at run time"""
+def can_carry(output_type: object, name: str, adapters: OutputAdapters | None = None) -> bool:
+    """A dataclass with the field ``name``, a class an output adapter writes whose schema
+    requires the key ``name``, or a dict checked at run time"""
     base, _ = strip_optional(output_type)
     if is_dataclass_type(base):
         assert isinstance(base, type)
         return any(f.name == name for f in dataclasses.fields(base))
+    node = _adapted_node(base, adapters)
+    if node is not None:
+        return name in node.get("required", ())
     return base is dict or typing.get_origin(base) is dict
+
+
+def lists_unrequired(output_type: object, name: str, adapters: OutputAdapters | None) -> bool:
+    """An adapted class whose schema lists ``name`` but does not require it: an
+    ``x-volatile`` key, which ``--stable-output`` leaves out, so ``data`` may lack it"""
+    node = _adapted_node(strip_optional(output_type)[0], adapters)
+    if node is None:
+        return False
+    properties = node.get("properties")
+    listed = isinstance(properties, dict) and name in properties
+    return listed and name not in node.get("required", ())
+
+
+def _adapted_node(base: object, adapters: OutputAdapters | None) -> dict[str, Any] | None:
+    """The normalized schema of ``base`` when an output adapter writes it"""
+    if adapters is None or adapters.for_type(base) is None:
+        return None
+    assert isinstance(base, type)
+    return adapters.node(base)
 
 
 def with_replay_effect(schema: dict[str, Any]) -> dict[str, Any]:
