@@ -1673,7 +1673,7 @@ class App:
         try:
             code = self.run(sys.argv[1:], env=started_env)
         finally:
-            sys.stdout = stdout
+            _restore_stdout(envelopes, stdout)
             envelopes.flush()
             envelopes.close()
             interceptor.close()
@@ -2434,6 +2434,18 @@ def _settle_streams_locked() -> None:
         if sys.stdout is cast(TextIO, _late_out):
             sys.stdout = _late_out.inner
         _late_out = None
+
+
+def _restore_stdout(envelopes: TextIO, stdout: TextIO) -> None:
+    """``sys.stdout`` back to ``stdout`` after ``App.main``'s run wrote its envelopes. A
+    ``_LateStream`` over the envelopes keeps standing, now over ``stdout``: a handler
+    thread whose run detached may still print, until the process exits (#135)"""
+    with _guard_lock:
+        late = _late_out
+        if late is not None and sys.stdout is cast(TextIO, late) and late.inner is envelopes:
+            late.inner = stdout
+        else:
+            sys.stdout = stdout
 
 
 def _record_level(levelno: int) -> Level:

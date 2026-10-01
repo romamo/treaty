@@ -612,6 +612,59 @@ def test_a_handler_that_prints_after_its_run_returned_leaks_no_secret(
     assert f"other {TOKEN}" in proc.stderr.splitlines(), proc.stderr
 
 
+LATE_MAIN_SCRIPT = """\
+import atexit, sys, threading
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description='API token', secret=True)
+go, written = threading.Event(), threading.Event()
+app = App('libctl', version='1.0.0')
+@app.command('slow', description='Print late', timeout=0.05, danger_level='safe',
+             exit_codes=())
+def slow(args: Login, ctx: Ctx) -> dict[str, bool]:
+    go.wait(timeout=10)  # released only once App.main restored the streams
+    print('out', args.api_token)
+    sys.stderr.write('err ' + args.api_token + '\\n')
+    written.set()
+    return {{'ok': True}}
+def late() -> None:
+    go.set()
+    assert written.wait(timeout=10)
+    print('host')
+atexit.register(late)
+app.main()
+"""
+
+
+def test_a_handler_that_prints_after_app_main_returned_leaks_no_secret() -> None:
+    """A handler abandoned at its timeout that prints after ``App.main`` put its own
+    ``sys.stdout`` back, as at the program's exit: its text is redacted on stderr, never on
+    stdout, which carries the envelope and the host's own write alone (#135)"""
+    env = {
+        "PATH": os.environ["PATH"],
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        "LIBCTL_API_TOKEN": TOKEN,
+        "LIBCTL_AUDIT_LOG": "0",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", LATE_MAIN_SCRIPT.format(), "slow", "--format", "json"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    first, *rest = proc.stdout.splitlines()
+    assert json.loads(first)["error"]["code"] == "TIMEOUT", proc.stdout
+    assert rest == ["host"], proc.stdout
+    assert TOKEN not in proc.stderr, proc.stderr
+    assert ["out [REDACTED]", "err [REDACTED]"] == [
+        line for line in proc.stderr.splitlines() if line.startswith(("out ", "err "))
+    ], proc.stderr
+
+
 @pytest.mark.parametrize("before_first_event", [True, False])
 def test_a_stream_abandoned_at_its_timeout_closes_on_its_worker_and_leaks_no_secret(
     before_first_event: bool,
