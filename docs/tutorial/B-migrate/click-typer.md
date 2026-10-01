@@ -232,6 +232,10 @@ What the module leaves to you:
   the module's docstring repeats them
 - **Types it cannot spell.** An `envvar=`, a `click.File`, a custom `ParamType`, or a
   computed default gets a comment above its field saying what to do
+- **Defaults that may be secrets.** A string default on a hidden option, on a name such as
+  `--token` or `--password`, or equal to an environment variable's value (as
+  `default=os.environ["TOKEN"]` reads at import) is left out of the module, which is meant
+  to be committed; a comment above the field says where to read it from instead
 
 The module passes ruff and `mypy --strict` as written; the scaffold runs it once before
 writing it, so it registers.

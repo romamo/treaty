@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -750,7 +751,8 @@ def scaffold_from_command(args: ScaffoldFromArgs, ctx: Ctx) -> ScaffoldFromOut:
             f"scaffold-from {framework} {args.target}",
         )
     obj = import_target(args.target, ctx.cwd)
-    tree = scaffold(framework, obj, args.target, args.name)
+    # The module read os.environ as it was imported, not the run's env
+    tree = scaffold(framework, obj, args.target, args.name, env=os.environ)
     source = render_module(tree)
     check_module(source, args.target)
     out = None if args.out is None else ctx.cwd / args.out

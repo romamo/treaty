@@ -21,7 +21,7 @@ import re
 import sys
 import types
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -30,6 +30,7 @@ from ._context import Ctx
 from ._errors import Exit, RegistrationError
 from ._framework import RESERVED_GLOBAL, RESERVED_OPT_IN, framework_flags
 from ._parse import SWITCH_GLOBALS, VALUED_GLOBALS
+from ._redact import secret_name
 from ._values import CommandPath, InvalidValue
 
 Kind = Literal["typer", "click", "argparse"]
@@ -97,6 +98,8 @@ class _Walk:
     """What one walk collects besides the tree"""
 
     reserved: frozenset[str]
+    env: Mapping[str, str]
+    """The environment the target was imported under, to spot a default read from it"""
     skipped: list[Skipped] = field(default_factory=list)
     renamed: list[tuple[str, str, str]] = field(default_factory=list)
     """(command, old flag, new flag)"""
@@ -214,7 +217,33 @@ class _Param:
     help: str | None
     switch: bool = False
     counter: bool = False
+    hidden: bool = False
+    """The old CLI hid what was typed for it, as for a password"""
     notes: tuple[str, ...] = ()
+
+
+_MIN_ENV_VALUE = 4
+"""Shorter environment values, such as ``1`` or ``en``, match too many defaults by chance"""
+
+
+def _withheld(param: _Param, walk: _Walk) -> str | None:
+    """Why the default of ``param`` stays out of the module, or None to write it
+
+    The module is meant to be committed, and a default evaluated at import time, such as
+    ``default=os.environ["TOKEN"]``, holds whatever the environment had."""
+    values = param.default if isinstance(param.default, (list, tuple)) else (param.default,)
+    strings = [v for v in values if isinstance(v, str) and v]
+    if not strings:
+        return None
+    if param.hidden or secret_name(param.long or param.name):
+        return "it may be a secret: read it from a treaty secret or App(settings=)"
+    for value in strings:
+        if len(value) < _MIN_ENV_VALUE:
+            continue
+        found = next((k for k, v in walk.env.items() if v == value), None)
+        if found is not None:
+            return f"it was read from ${found} at import: move it to App(settings=)"
+    return None
 
 
 def _field(param: _Param, where: str, walk: _Walk) -> FieldSpec | None:
@@ -244,6 +273,10 @@ def _field(param: _Param, where: str, walk: _Walk) -> FieldSpec | None:
         walk.renamed.append((where, flag_of(name), flag_of(renamed)))
         notes.append(f"--{flag_of(name)} is treaty's; renamed --{flag_of(renamed)}")
         name = renamed
+    withheld = None if param.switch or param.counter else _withheld(param, walk)
+    if withheld is not None:
+        notes.append(f"the default was left out: {withheld}")
+        param = replace(param, default=None, has_default=False)
     base = param.base
     annotation, default = base, None
     if param.counter:
@@ -428,6 +461,7 @@ def _click_param(param: Any) -> _Param | None:
         help=getattr(param, "help", None),
         switch=bool(getattr(param, "is_flag", False) and getattr(param, "is_bool_flag", False)),
         counter=bool(getattr(param, "count", False)),
+        hidden=bool(getattr(param, "hide_input", False)),
         notes=tuple(notes),
     )
 
@@ -679,9 +713,11 @@ def _argparse_origin(parser: argparse.ArgumentParser) -> str | None:
 # Loading
 
 
-def scaffold(kind: Kind, obj: object, target: str, name: str | None) -> Scaffold:
-    """The command tree of ``obj``, the object ``target`` names"""
-    walk = _Walk(reserved=reserved_flags())
+def scaffold(
+    kind: Kind, obj: object, target: str, name: str | None, *, env: Mapping[str, str]
+) -> Scaffold:
+    """The command tree of ``obj``, the object ``target`` names, imported under ``env``"""
+    walk = _Walk(reserved=reserved_flags(), env=env)
     module = target.partition(":")[0].rpartition(".")[2]
     if kind == "argparse":
         parser = _parser(obj, target)

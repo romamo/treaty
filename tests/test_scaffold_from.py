@@ -242,7 +242,7 @@ def test_argparse_internals_missing_is_a_clear_error() -> None:
     from treaty import CliExit
 
     with pytest.raises(CliExit) as caught:
-        scaffold("argparse", _NoActions(), "odd:parser", None)
+        scaffold("argparse", _NoActions(), "odd:parser", None, env={})
     assert caught.value.name.value == "PRECONDITION"
     assert "ArgumentParser._actions" in str(caught.value)
 
@@ -252,8 +252,33 @@ def test_a_module_that_does_not_register_is_refused() -> None:
 
     parser = argparse.ArgumentParser(prog="x")
     parser.add_subparsers().add_parser("run")
-    tree = scaffold("argparse", parser, "x:p", None)
+    tree = scaffold("argparse", parser, "x:p", None, env={})
     source = render_module(tree).replace('"0.1.0"', '""')
     with pytest.raises(CliExit) as caught:
         check_module(source, "x:p")
     assert caught.value.code == "SCAFFOLD_INVALID"
+
+
+def test_a_secret_default_is_not_written_into_the_module() -> None:
+    import click
+
+    token = "sk-live-0123456789"
+
+    @click.group()
+    def cli() -> None:
+        pass
+
+    @cli.command()
+    @click.option("--token", default=token)  # as default=os.environ["DEPLOY_TOKEN"] reads
+    @click.option("--endpoint", default="https://example.test")  # read from $ENDPOINT
+    @click.option("--phrase", default="hunter22", hide_input=True)
+    @click.option("--region", default="eu-west-1")
+    def push(**kwargs: object) -> None:
+        pass
+
+    tree = scaffold("click", cli, "secretcli:cli", None, env={"ENDPOINT": "https://example.test"})
+    source = render_module(tree)
+    assert token not in source and "hunter22" not in source
+    assert "https://example.test" not in source and "$ENDPOINT" in source
+    assert 'default="eu-west-1"' in source
+    check_module(source, "secretcli:cli")

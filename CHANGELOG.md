@@ -150,7 +150,8 @@ Apps built on treaty keep their own, structured schema changelog with
   `data.source`, and `--format plain` prints it alone. It passes ruff and `mypy --strict`,
   and runs once before it is written. The click/typer chapter gains Step 0, separate logic
   from presentation, the agentyper rows that need no open issue, and a before and after
-  run of the conformance kit; the argparse chapter points at the scaffold (#3)
+  run of the conformance kit; the argparse chapter points at the scaffold. A default that may be a secret (a hidden option, a
+  secret-like name, or the value of an environment variable) is left out of the module (#3)
 
 ## [1.0.0rc9] - 2026-10-01
 
