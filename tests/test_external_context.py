@@ -11,9 +11,11 @@ from dataclasses import dataclass
 
 from conftest import spec_validator
 
-from treaty import App, Ctx, Exit, External, Flag, NoArgs
+from treaty import App, Ctx, Exit, External, Flag, NoArgs, ParseError
 from treaty._audit import audit
+from treaty._errors import CliExit
 from treaty._mcp import call_tool, tool_entries
+from treaty._prompt import InputRequired
 
 BLOB = base64.b64encode(random.Random(7).randbytes(192)).decode()
 TAGS = {"_source": "external", "_trusted": False}
@@ -184,3 +186,35 @@ def test_the_audit_flags_child_output_put_in_context_unmarked() -> None:
 
     found = findings(app)
     assert len(found) == 1 and "error.context output" in found[0]
+
+
+@dataclass(frozen=True, slots=True)
+class How:
+    how: str = Flag(default="parse", description="How to fail")
+
+
+def test_external_in_a_parse_error_or_input_required_is_invalid_exit_never_its_repr() -> None:
+    # A handler that re-raises a failed child's context as a ParseError or InputRequired,
+    # or nests External in an ARG_ERROR, printed External(value='...') unmasked, untagged
+    app = App("runner", version="1.0.0")
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=())
+    def go(args: How, ctx: Ctx) -> dict[str, str]:
+        if args.how == "nested":
+            raise Exit.ARG_ERROR("bad", context={"output": [External("child text")]})
+        if args.how == "input":
+            context = {"output": External("child text")}
+            raise InputRequired("NEEDS_ANSWER", "need", suggestion="pass --yes", context=context)
+        try:
+            ctx.run([sys.executable, "-c", "import sys; sys.stderr.write('child text'); exit(3)"])
+        except CliExit as exc:
+            raise ParseError("bad value", context=exc.context) from exc
+        return {}
+
+    for how in ("parse", "nested", "input"):
+        out = io.StringIO()
+        code = app.run(["go", "--how", how], stdout=out, stderr=io.StringIO(), env={})
+        assert "External(" not in out.getvalue() and "child text" not in out.getvalue(), how
+        env = json.loads(out.getvalue())
+        assert code == 1 and env["error"]["code"] == "INVALID_EXIT", how
+        assert "treaty.External" in env["error"]["message"]

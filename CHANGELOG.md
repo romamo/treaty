@@ -116,8 +116,9 @@ Apps built on treaty keep their own, structured schema changelog with
   masked as external `data` is (`HIGH_ENTROPY_MASKED` names `error.context.<key>`), the
   other context values are left alone, and `error.context` gets
   `"_source": "external", "_trusted": false` with an `UNTRUSTED_CONTENT` warning, unless
-  `--no-injection-protection`. `External` nested in a context value or in `data`, or on an
-  `ARG_ERROR`, is `INVALID_EXIT`. The `external-data` audit rule also warns when a
+  `--no-injection-protection`. `External` nested in a context value or in `data`, or in
+  the context of an `ARG_ERROR`, a `ParseError`, or an `InputRequired`, is `INVALID_EXIT`,
+  so its text never reaches the agent unmasked. The `external-data` audit rule also warns when a
   `context=` value is built from a `ctx.run` result's `stdout` or `stderr` without
   `External`, whatever the command declares (#174)
 

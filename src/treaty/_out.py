@@ -114,6 +114,20 @@ class External:
     value: object
 
 
+def holds_external(value: object, depth: int = 0) -> bool:
+    """``value`` is, or holds at any depth a JSON walk reaches, a ``treaty.External``:
+    where nothing masks and tags it, its text would reach the agent as ``External(...)``"""
+    if isinstance(value, External):
+        return True
+    if depth > 64:
+        return False
+    if isinstance(value, Mapping):
+        return any(holds_external(v, depth + 1) for v in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(holds_external(v, depth + 1) for v in value)
+    return False
+
+
 def is_binary(value: object) -> bool:
     """A JSON value that is a binary wrapper, which no cut or sort may look inside"""
     return (

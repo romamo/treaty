@@ -181,7 +181,15 @@ from ._mode import (
     resolve_mode,
     suppress_updates,
 )
-from ._out import NO_ORDER, External, OutSpec, arrange, is_binary, sorted_indices
+from ._out import (
+    NO_ORDER,
+    External,
+    OutSpec,
+    arrange,
+    holds_external,
+    is_binary,
+    sorted_indices,
+)
 from ._output_base import PROJECT_ROOT, OutputBase
 from ._page import (
     CURSOR_FLAG,
@@ -4157,6 +4165,9 @@ class _Run:
         """A ``ParseError`` from a handler or a resource's ``acquire``: user code already
         ran, so exit 2 would promise an agent a side-effect-free failure it cannot have
         (REQ-F-002). Phase 1 checks belong in the args ``__post_init__``."""
+        misplaced = self._misplaced_external("a ParseError", exc.context, kw)
+        if misplaced is not None:
+            return misplaced
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
         return self._envelope(
             entry.code.value,
@@ -4169,6 +4180,31 @@ class _Run:
                 phase="execution",
                 fix_required="correct the arguments; the command author should move this "
                 "check into the args dataclass's __post_init__ so it runs before any side effect",
+            ),
+            **kw,
+        )
+
+    def _misplaced_external(
+        self, raised: str, context: Mapping[str, object], kw: Mapping[str, Any]
+    ) -> Envelope | None:
+        """INVALID_EXIT for ``treaty.External`` in a context nothing masks or tags, such as
+        a failed child's context re-raised as a ``ParseError``: its text would reach the
+        agent as ``External(value=...)``. Only a CliExit's top-level context value is
+        marked (REQ-F-035)"""
+        if not holds_external(context):
+            return None
+        command = self.current
+        where = "" if command is None else f"Command {command.path} "
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="INVALID_EXIT",
+                message=f"{where}raised {raised} with treaty.External in its context, which "
+                "marks a top-level value of a CliExit's error.context only",
+                retryable=False,
+                context={} if command is None else {"command": command.path.value},
+                phase="execution",
             ),
             **kw,
         )
@@ -5375,6 +5411,10 @@ class _Run:
     ) -> Envelope:
         """Exit 4: the run needs an answer only a person at a terminal could give
         (REQ-F-009, REQ-F-047, REQ-F-055); the suggestion names the flag that gives it"""
+        kw = {"started": started, "meta": meta}
+        misplaced = self._misplaced_external("an InputRequired", exc.context, kw)
+        if misplaced is not None:
+            return misplaced
         entry = self.app.exits.framework(FrameworkCode.PRECONDITION)
         return self._envelope(
             entry.code.value,
@@ -5508,7 +5548,7 @@ class _Run:
         message = redact(exc.message) if isinstance(exc.message, str) else exc.message
         if exc.name.value == FrameworkCode.ARG_ERROR.name:
             # Exit 2 promises nothing ran; from a handler, something did (REQ-F-002)
-            if any(isinstance(v, External) for v in exc.context.values()):
+            if holds_external(exc.context):
                 message = (
                     f"Command {command.path} raised ARG_ERROR with treaty.External in its "
                     "context; an argument error is about the arguments, not outside content"
