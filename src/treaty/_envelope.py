@@ -57,8 +57,13 @@ _C1 = re.compile(r"\x9d[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?|\x9b[0-?]*[ -/]*[@-
 # SGR, the one escape that only colors text
 _SGR = re.compile(r"\x1b\[[0-9;:]*m")
 # Controls a terminal still acts on once the escapes are gone: a bell, a backspace that
-# overprints, a carriage return that rewrites the line. Tab and newline are text
-_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# overprints, a carriage return that rewrites the line. Tab and newline are text. The
+# Unicode bidirectional controls too (ALM, LRM, RLM, the embeddings and overrides, the
+# isolates): one in a value reorders how the rest of its line displays (#177)
+_CONTROLS = re.compile(
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f"
+    r"\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+)
 
 
 def strip_escapes(text: str) -> str:
@@ -68,17 +73,21 @@ def strip_escapes(text: str) -> str:
 
 def visible(text: str, keep: str = "", *, rewrite: bool = False) -> str:
     """``text`` with every control character but tab, newline, and those in ``keep``
-    written as its escape (``\\x1b``, ``\\r``), as ``repr`` writes it: a line for a person
-    shows what a value held, and the terminal acts on none of it. A carriage return in
-    ``keep`` stays only as part of a CRLF, since a lone one rewrites the line, unless
-    ``rewrite`` lets it, as a progress line printed to the terminal does"""
+    written as its escape (``\\x1b``, ``\\r``, ``\\u202e`` for a bidirectional control), as
+    ``repr`` writes it: a line for a person shows what a value held, and the terminal acts
+    on none of it. A carriage return in ``keep`` stays only as part of a CRLF, since a
+    lone one rewrites the line, unless ``rewrite`` lets it, as a progress line printed to
+    the terminal does"""
 
     def shown(match: re.Match[str]) -> str:
         char = match[0]
         crlf = rewrite or text.startswith("\n", match.end())
         if char in keep and (char != "\r" or crlf):
             return char
-        return "\\r" if char == "\r" else f"\\x{ord(char):02x}"
+        if char == "\r":
+            return "\\r"
+        code = ord(char)
+        return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}"
 
     return _CONTROLS.sub(shown, text)
 

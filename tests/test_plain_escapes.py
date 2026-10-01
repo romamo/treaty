@@ -345,3 +345,80 @@ def test_a_c1_osc_in_printed_text_is_not_held_past_its_line() -> None:
     err = io.StringIO()
     app.run(["mojibake"], stdout=io.StringIO(), stderr=err, env={}, isatty=True)
     assert err.getvalue().endswith("line 1\nline 2\n"), err.getvalue()
+
+
+# #177: Unicode bidirectional controls reorder how the rest of a line displays
+
+BIDI = "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+BIDI_SHOWN = "\\u061c\\u200e\\u200f\\u202a\\u202b\\u202c\\u202d\\u202e\\u2066\\u2067\\u2068\\u2069"
+
+
+def no_bidi(text: str) -> bool:
+    return not any(c in text for c in BIDI)
+
+
+def test_plain_blocks_show_bidi_controls_in_keys_and_values() -> None:
+    text = render_plain({f"k{BIDI}": "abc\u202edcba\u2066x\u2069"})
+    assert no_bidi(text), repr(text)
+    assert text == f"k{BIDI_SHOWN}: abc\\u202edcba\\u2066x\\u2069\n"
+
+
+def test_a_table_shows_bidi_controls_and_counts_their_escapes_in_the_width() -> None:
+    text = render_plain([{"name": "a\u202eb", "n": 1}, {"name": "xyz", "n": 22}])
+    assert no_bidi(text), repr(text)
+    assert text == "name       n\na\\u202eb   1\nxyz       22\n"
+
+
+def test_tsv_and_csv_cells_show_bidi_controls() -> None:
+    for sep in ("\t", ","):
+        text = table(sep)([{"h\u2067": "a\u202eb"}])
+        assert no_bidi(text) and "h\\u2067" in text and "a\\u202eb" in text, repr(text)
+
+
+def test_a_plain_error_shows_bidi_controls_and_json_keeps_them() -> None:
+    app = App("probe", version="1.0.0")
+
+    @app.command("fail", description="Fail", danger_level="safe", exit_codes=())
+    def fail(args: NoArgs, ctx: Ctx) -> None:
+        raise Exit.PRECONDITION(
+            "No host \u202eexe.txt",
+            context={"host": "web\u2066x\u2069"},
+            suggestion="run probe \u200fhosts",
+        )
+
+    err = io.StringIO()
+    app.run(["fail", "--format", "plain"], stdout=io.StringIO(), stderr=err, env={})
+    assert no_bidi(err.getvalue()), repr(err.getvalue())
+    assert "No host \\u202eexe.txt" in err.getvalue()
+    assert "  host: web\\u2066x\\u2069\n" in err.getvalue()
+    assert "hint: run probe \\u200fhosts\n" in err.getvalue()
+    out = io.StringIO()
+    app.run(["fail", "--format", "json"], stdout=out, stderr=io.StringIO(), env={})
+    error = json.loads(out.getvalue())["error"]
+    assert error["message"] == "No host \u202eexe.txt"
+    assert error["context"]["host"] == "web\u2066x\u2069"
+
+
+def test_json_output_keeps_bidi_controls_as_data() -> None:
+    out, _ = run(["echo", f"a{BIDI}b", "--format", "json"])
+    assert json.loads(out)["data"]["text"] == f"a{BIDI}b"
+    out, _ = run(["echo", f"a{BIDI}b", "--format", "plain"])
+    assert out == f"text: a{BIDI_SHOWN}b\n"
+
+
+def test_printed_text_and_log_lines_show_bidi_controls() -> None:
+    app = App("probe", version="1.0.0")
+
+    @app.command("speak", description="Print and log", danger_level="safe", exit_codes=())
+    def speak(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        print("printed ‮ab")
+        ctx.log("logged ⁦cd⁩")
+        return {}
+
+    for isatty in (True, False):
+        err = io.StringIO()
+        argv = ["speak"] if isatty else ["speak", "--format", "plain", "--verbose"]
+        app.run(argv, stdout=io.StringIO(), stderr=err, env={}, isatty=isatty)
+        assert no_bidi(err.getvalue()), repr(err.getvalue())
+        assert "printed \\u202eab" in err.getvalue()
+        assert "logged \\u2066cd\\u2069" in err.getvalue()

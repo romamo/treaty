@@ -676,7 +676,8 @@ In JSON mode every string value is cleaned before it is written: ANSI escape seq
 are removed, and null bytes and lone surrogates become U+FFFD (REQ-F-007, REQ-F-016).
 Object keys and carriage returns are left as returned. Text formats clean values the same
 way before they are rendered, and show a key's or a value's other controls as escapes
-(`\x1b`, `\x07`, `\r`); a renderer's own text keeps its colors only where the run may
+(`\x1b`, `\x07`, `\r`), the Unicode bidirectional controls among them (`\u202e`), which
+JSON keeps as data; a renderer's own text keeps its colors only where the run may
 color, and a CRLF. Stderr error lines show every control as its escape. `ctx.color` tells a renderer whether it may
 color: never in JSON mode, under `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`,
 `JENKINS_URL`, or `TERM=dumb`, or when stdout is not a terminal (REQ-F-008). `App.main()`

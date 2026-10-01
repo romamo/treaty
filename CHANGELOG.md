@@ -54,6 +54,14 @@ Apps built on treaty keep their own, structured schema changelog with
   loop is advice instead: no `--max-depth` bounds it. `os.walk` is recognized under an alias such as
   `from os import walk as w`, and a module-level `walk` that is not a directory walk, such
   as `ast.walk`, is no longer flagged (#180)
+### Fixed
+
+- Plain output, tables, TSV and CSV cells, stderr error lines, log lines, and printed text
+  show the Unicode bidirectional controls (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066
+  to U+2069) as escapes such as `\u202e`, as they show C0 and C1 controls. Printed raw,
+  one reordered how the rest of its line displays, so a crafted value could make a row
+  read differently from what it holds; a table counted them as no width. JSON keeps them
+  as data (#177)
 
 ## [1.0.0rc11] - 2026-10-01
 
