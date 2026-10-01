@@ -953,6 +953,7 @@
       "filesystem_side_effects",
       "background",
       "preserve_locale",
+      "child_log",
       "cache",
       "recursive_traversal",
       "id_field",

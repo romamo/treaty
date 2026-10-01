@@ -27,9 +27,9 @@ import time
 import webbrowser
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Literal
 
 from ._atomic import exclusive, write_atomic
 from ._errors import CliExit, RegistrationError
@@ -57,6 +57,29 @@ BROWSER_OPEN = "browser_open"
 GUI_SKIPPED = "GUI_SKIPPED"
 
 
+class Stream(Enum):
+    """Where ``ctx.run`` sends a child's lines as they arrive"""
+
+    OFF = "off"
+    """Nowhere: the output is captured whole into ``Completed``"""
+    LOG = "log"
+    """``stream=True``: a ``ctx.log`` line each, shown where ``ctx.log`` is"""
+    ALWAYS = "always"
+    """``stream="always"``: plain text on stderr in any format and verbosity but
+    ``--quiet``; the command declares ``child_log=True`` (#173)"""
+
+    @classmethod
+    def of(cls, value: bool | Literal["always"]) -> Stream:
+        """``ctx.run``'s ``stream=``: False, True, or ``"always"``, nothing else"""
+        if value is True:
+            return cls.LOG
+        if value is False:
+            return cls.OFF
+        if isinstance(value, str) and value == cls.ALWAYS.value:
+            return cls.ALWAYS
+        raise TypeError(f'stream= is False, True, or "always", not {value!r}')
+
+
 class HeadlessBehavior(StrEnum):
     """What a headless ``ctx.open_url`` does instead of opening a window (REQ-C-024)"""
 
@@ -77,10 +100,10 @@ class Completed:
     returncode: int
     """Negative when a signal ended the child, as in ``subprocess``"""
     stdout: str
-    """The last stage's output; with ``stream=True``, its last ``STDERR_TAIL`` characters"""
+    """The last stage's output; streamed, its last ``STDERR_TAIL`` characters"""
     stderr: str
-    """Every stage's stderr, in stage order; with ``stream=True``, its last
-    ``STDERR_TAIL`` characters"""
+    """Every stage's stderr, in stage order; streamed, its last ``STDERR_TAIL``
+    characters"""
     duration_ms: int
     stage: int = 0
 
@@ -171,11 +194,15 @@ class Processes:
         cwd: Path | None = None,
         session: Session | None = None,
         echo: Callable[[str], None] | None = None,
+        child_log: Callable[[str], None] | None = None,
         secrets: Callable[[], Collection[str]] | None = None,
     ) -> None:
         self.env = dict(env)
         self.echo = echo
         """Where a streamed child's lines go, one call each: the run's ``ctx.log``"""
+        self.child_log = child_log
+        """Where ``stream="always"`` sends them: the run's stderr, as plain text; None when
+        the command does not declare ``child_log=True``"""
         self.secrets = secrets
         """The spellings a streamed child's lines are redacted of before ``echo``, read
         when a stream starts; a line the stream splits is redacted across the split"""
@@ -205,10 +232,15 @@ class Processes:
         env: Mapping[str, str] | None = None,
         timeout: Timeout | None = None,
         check: bool = True,
-        stream: bool = False,
+        stream: Stream = Stream.OFF,
     ) -> Completed:
         if isinstance(argv, (str, bytes)):
             raise shell_string_prohibited(argv)
+        if stream is Stream.ALWAYS and self.child_log is None:
+            raise RegistrationError(
+                'ctx.run(stream="always") writes the child\'s lines to stderr, which the '
+                "manifest says of the command: add child_log=True to its @app.command"
+            )
         return self._stages(
             [argv], input=input, cwd=cwd, env=env, timeout=timeout, check=check, stream=stream
         )
@@ -234,7 +266,7 @@ class Processes:
         env: Mapping[str, str] | None,
         timeout: Timeout | None,
         check: bool,
-        stream: bool = False,
+        stream: Stream = Stream.OFF,
     ) -> Completed:
         """``stream`` is ``ctx.run``'s: one stage, its stdout and stderr read line by line"""
         if isinstance(stages, (str, bytes)):
@@ -249,7 +281,8 @@ class Processes:
         procs: list[subprocess.Popen[bytes]] = []
         follow: _Follow | None = None
         with contextlib.ExitStack() as files:
-            errs = [] if stream else [files.enter_context(tempfile.TemporaryFile()) for _ in argvs]
+            follows = stream is not Stream.OFF
+            errs = [] if follows else [files.enter_context(tempfile.TemporaryFile()) for _ in argvs]
             source: IO[bytes] | int = subprocess.DEVNULL
             if input is not None:
                 source = files.enter_context(tempfile.TemporaryFile())
@@ -257,7 +290,7 @@ class Processes:
                 source.seek(0)
             try:
                 for index, argv in enumerate(argvs):
-                    err = subprocess.PIPE if stream else errs[index]
+                    err = subprocess.PIPE if follows else errs[index]
                     proc = self._spawn(argv, index, source, err, cwd, env)
                     procs.append(proc)
                     if index > 0:
@@ -267,10 +300,11 @@ class Processes:
                         previous.close()
                     assert proc.stdout is not None
                     source = proc.stdout
-                if stream:
+                if follows:
                     follow = _Follow(procs[-1])
                     secrets = () if self.secrets is None else self.secrets()
-                    out, tail = follow.wait(end, self.echo, argvs[-1], secrets)
+                    echo = self.child_log if stream is Stream.ALWAYS else self.echo
+                    out, tail = follow.wait(end, echo, argvs[-1], secrets)
                     procs[-1].wait(timeout=_left(end))
                 else:
                     raw, _ = procs[-1].communicate(timeout=_left(end))

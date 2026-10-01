@@ -118,6 +118,20 @@ characters:
 done = ctx.run(["ansible-playbook", "site.yml"], stream=True)
 ```
 
+An agent runs off a terminal without `--verbose`, so it sees none of those lines. When the
+child's log is the progress it waits on, `stream="always"` writes each line to stderr as
+plain text in any format and verbosity (`--quiet` still silences it). The command declares
+`child_log=True`, which its manifest description reports, so an agent expects a busy
+stderr:
+
+```python
+@app.command("deploy", description="Run the site playbook", danger_level="mutating",
+             exit_codes=(), child_log=True)
+def deploy(args: NoArgs, ctx: Ctx) -> dict[str, int]:
+    done = ctx.run(["ansible-playbook", "site.yml"], stream="always")
+    return {"returncode": done.returncode}
+```
+
 ## Step 3: Keep free text out of the arguments
 
 `save` takes one flag of its own, the commit message, and returns the commit it made:

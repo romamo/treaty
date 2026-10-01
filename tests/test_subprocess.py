@@ -20,7 +20,7 @@ from conftest import WINDOWS, needs_posix_signals, spec_validator
 from treaty import App, CliExit, Ctx, Flag, NoArgs, RegistrationError, Timeout
 from treaty._mode import is_headless, quiet_children
 from treaty._signals import Cancelled, CancelSignal
-from treaty._subprocess import LINE_BYTES, Processes
+from treaty._subprocess import LINE_BYTES, Processes, Stream
 from treaty._values import CommandPath
 
 pytestmark = pytest.mark.skipif(WINDOWS, reason="the children are /bin/sh commands")
@@ -685,7 +685,7 @@ def test_a_streamed_child_keeps_only_the_tail_of_a_large_output() -> None:
     lines: list[str] = []
     done = Processes(
         BASE_ENV, deadline=None, headless=True, browser_open=False, echo=lines.append
-    ).run(["sh", "-c", "seq 1 30000; seq 1 20000 >&2"], stream=True)
+    ).run(["sh", "-c", "seq 1 30000; seq 1 20000 >&2"], stream=Stream.LOG)
     # Every line is echoed, the two pipes interleaved
     assert len(lines) == 50000 and {"30000", "20000"} <= set(lines)
     assert len(done.stdout) == 4096 and done.stdout.endswith("\n29999\n30000\n")
@@ -733,7 +733,9 @@ def test_a_streamed_child_that_runs_past_its_timeout_is_stopped() -> None:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         with pytest.raises(CliExit) as stopped:
-            procs.run(["sh", "-c", "echo hi; exec sleep 30"], timeout=Timeout(0.5), stream=True)
+            procs.run(
+                ["sh", "-c", "echo hi; exec sleep 30"], timeout=Timeout(0.5), stream=Stream.LOG
+            )
         gc.collect()
     assert stopped.value.name.value == "TIMEOUT" and time.monotonic() - started < 5
     assert stopped.value.message.startswith("`sh` ran past")
@@ -806,7 +808,7 @@ def test_a_detached_grandchild_is_not_blocked_by_a_timed_out_stream(tmp_path: Pa
         procs.run(
             ["sh", "-c", '"$1" -c "$2" & echo hi; exec sleep 30', "_", sys.executable, grandchild],
             timeout=Timeout(0.5),
-            stream=True,
+            stream=Stream.LOG,
         )
     deadline = time.monotonic() + 15
     while not done.exists() and time.monotonic() < deadline:
