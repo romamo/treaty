@@ -32,7 +32,7 @@ def adapted(name: str = "probe", *, none_as_empty: bool = False) -> App:
     app.output_adapter(
         BaseModel,
         schema=lambda cls: cls.model_json_schema(mode="serialization"),
-        dump=lambda obj: obj.model_dump(mode="json"),
+        dump=lambda obj: obj.model_dump(mode="json", by_alias=True),
         none_as_empty=none_as_empty,
     )
     return app
@@ -443,3 +443,20 @@ def test_a_dump_that_adds_a_key_its_schema_does_not_list_fails_the_run() -> None
     code, env = run(app, ["show", "X1"])
     assert code != 0 and not env["ok"]
     assert "'debug'" in env["error"]["message"]
+
+
+class Person(BaseModel):
+    full_name: str = Field(alias="fullName")
+
+
+def test_the_documented_adapter_writes_an_aliased_field_by_its_schema_name() -> None:
+    # model_json_schema names a field by its alias, so the documented dump must too
+    app = adapted()
+
+    @app.command("who", description="Who", danger_level="safe", exit_codes=())
+    def who(args: NoArgs, ctx: Ctx) -> Person:
+        return Person(fullName="Ann Lee")
+
+    code, env = run(app, ["who"])
+    assert code == 0, env["error"]
+    assert env["data"] == {"fullName": "Ann Lee"}

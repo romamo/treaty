@@ -563,8 +563,9 @@ class App:
         ``schema(cls)`` gives a subclass's JSON Schema and ``dump(obj)`` an instance's JSON
         value; for pydantic, ``app.output_adapter(BaseModel, schema=lambda cls:
         cls.model_json_schema(mode="serialization"), dump=lambda obj:
-        obj.model_dump(mode="json"))``. A model may be returned, held in a list, or nested
-        in a dataclass field. Its properties may declare the ``Out`` options as
+        obj.model_dump(mode="json", by_alias=True))``, as the schema names a field by its
+        alias. A model may be returned, held in a list, or nested in a dataclass field. Its
+        properties may declare the ``Out`` options as
         ``x-sort-key``, ``x-ordered``, ``x-volatile``, ``x-high-entropy``, and
         ``x-external``. An output list or dict is never null; ``none_as_empty=True`` writes
         a null one as ``[]`` or ``{}``, so a ``list[T] | None`` field is allowed.

@@ -1111,11 +1111,12 @@ from pydantic import BaseModel
 app.output_adapter(
     BaseModel,
     schema=lambda cls: cls.model_json_schema(mode="serialization"),
-    dump=lambda obj: obj.model_dump(mode="json"),
+    dump=lambda obj: obj.model_dump(mode="json", by_alias=True),
 )
 ```
 
-`schema(cls)` gives the output schema and `dump(obj)` the value in `data`. treaty inlines
+`schema(cls)` gives the output schema and `dump(obj)` the value in `data`; the dump passes
+`by_alias=True` because `model_json_schema` names a field by its alias. treaty inlines
 the schema's `$defs`, writes a fixed tuple's `prefixItems` as draft-07 `items`, and makes it
 read as a dataclass's does: every key required and no other key allowed. A dump that leaves
 out a key, or writes one a closed schema does not list, fails the run. The stable-output rules are checked on the schema when a command

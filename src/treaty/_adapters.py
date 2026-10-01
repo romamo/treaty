@@ -53,7 +53,7 @@ class OutputAdapter:
     schema: Callable[[type], Mapping[str, Any]]
     """The JSON Schema of a subclass, such as ``cls.model_json_schema(mode="serialization")``"""
     dump: Callable[[Any], object]
-    """An instance as JSON values, such as ``obj.model_dump(mode="json")``"""
+    """An instance as JSON values, such as ``obj.model_dump(mode="json", by_alias=True)``"""
     none_as_empty: bool = False
     """A null list or dict is written as ``[]`` or ``{}``, so ``list[T] | None`` is allowed"""
 
