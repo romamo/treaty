@@ -78,6 +78,9 @@ class Invocation:
     args: object
     timeout: Timeout | None = None
     confirmed: bool = False
+    preview: bool = False
+    """A destructive run without ``--confirm-destructive``: phase 1 turned the dry-run
+    switch on in ``args``, and the run ends ``CONFIRMATION_REQUIRED``"""
     idempotency_key: IdempotencyKey | None = None
     no_stream: bool = False
     """A streaming command asked for one buffered envelope instead of JSONL"""

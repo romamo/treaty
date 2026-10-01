@@ -57,6 +57,14 @@ Apps built on treaty keep their own, structured schema changelog with
   output, stream events, `exec` lines, `App.call` and MCP results, and the envelope
   describing an `--output` write all carry the redacted text. Context keys stay as given
   (#162)
+- A dry run treaty switches on is built in phase 1: the args of a `safe_default` command
+  run without `--live`, or of a destructive command run without `--confirm-destructive`,
+  are rebuilt with the dry-run switch before anything runs, so a `__post_init__` that
+  refuses the combination answers exit 2 `ARG_ERROR` with its message in `error.errors`
+  and a suggestion naming `--live` or `--confirm-destructive`, on the command line, an
+  exec line, `call()`, MCP, and `--validate-only` alike, where it escaped as a traceback.
+  The rebuild that rebases relative paths under `--cwd` reports a refusal the same way,
+  and the args are rebuilt once rather than again when the handler starts (#161)
 
 ## [1.0.0rc9] - 2026-10-01
 
