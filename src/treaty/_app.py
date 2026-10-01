@@ -1673,7 +1673,7 @@ class App:
         try:
             code = self.run(sys.argv[1:], env=started_env)
         finally:
-            sys.stdout = stdout
+            _restore_stdout(envelopes, stdout)
             envelopes.flush()
             envelopes.close()
             interceptor.close()
@@ -2205,14 +2205,23 @@ class _Records(logging.Handler):
     the secrets of every handler thread still alive, whose run may have returned: a
     handler that outlived its timeout still prints and logs. The handler stays on the root
     while such a thread lives, and with no run attached writes a record where
-    ``logging.lastResort`` would, redacted (#118)"""
+    ``logging.lastResort`` would, redacted (#118). On the same lifecycle, while a handler
+    thread whose run detached lives, ``sys.stdout`` and ``sys.stderr`` redact what that
+    thread writes (#135)"""
 
     def __init__(self) -> None:
         super().__init__(logging.NOTSET)
         self._runs: list[tuple[Callable[[logging.LogRecord], None], Callable[[str], str], int]] = []
         """Each run's writer and redactor with the root level it found, innermost last"""
-        self._workers: list[tuple[threading.Thread, Callable[[str], str]]] = []
-        """Each handler thread with its invocation's redactor, until the thread ends"""
+        self._workers: list[
+            tuple[threading.Thread, Callable[[str], str], Callable[[logging.LogRecord], None]]
+        ] = []
+        """Each handler thread with its invocation's redactor and its run's writer, until
+        the thread ends"""
+        self.late: frozenset[threading.Thread] = frozenset()
+        """The live handler threads whose run is no longer attached, rebuilt on a change;
+        read without the guard, by every write to the standard streams while it is not
+        empty"""
         self._redactors: tuple[Callable[[str], str], ...] = ()
         """The attached runs' and live handler threads' redactors, rebuilt on a change"""
         self._guard = threading.Lock()
@@ -2247,22 +2256,30 @@ class _Records(logging.Handler):
             else:
                 root.setLevel(level)
             self._changed()
+        _settle_streams()
 
-    def hold(self, worker: threading.Thread, redact: Callable[[str], str]) -> None:
-        """Redact with ``redact`` until ``worker`` ends, even after its run detached: a
-        handler abandoned at its timeout or on a signal may print or log long after (#104,
-        #118). A thread that never ends keeps its secrets, and this handler on the root
-        logger, for the life of the process."""
+    def hold(
+        self,
+        worker: threading.Thread,
+        redact: Callable[[str], str],
+        owner: Callable[[logging.LogRecord], None],
+    ) -> None:
+        """Redact with ``redact`` until ``worker`` ends, even after its run, the one
+        attached with the writer ``owner``, detached: a handler abandoned at its timeout or
+        on a signal may print or log long after (#104, #118, #135). A thread that never
+        ends keeps its secrets, and this handler on the root logger, for the life of the
+        process."""
         with self._guard:
-            self._workers.append((worker, redact))
+            self._workers.append((worker, redact, owner))
             self._changed()
 
     def forget(self, worker: threading.Thread) -> None:
         """Forget ``worker``, called on it as its handler ends, and leave the root logger
         once no run is attached and no other held thread lives"""
         with self._guard:
-            self._workers = [(w, r) for w, r in self._workers if w is not worker]
+            self._workers = [held for held in self._workers if held[0] is not worker]
             self._changed()
+        _settle_streams()
 
     def emit(self, record: logging.LogRecord) -> None:
         with self._guard:
@@ -2310,13 +2327,22 @@ class _Records(logging.Handler):
         """``text`` with the secrets of every attached run and live handler thread
         replaced"""
         with self._guard:
-            if any(not worker.is_alive() for worker, _ in self._workers):
+            if any(not held[0].is_alive() for held in self._workers):
                 # Not leaving the root here: an emit holds this handler's lock, and
                 # removeHandler takes logging's module lock, the reverse of dictConfig's
                 # order; the next attach, detach, hold, or forget leaves it
                 self._release()
             redactors = self._redactors
         for redact in redactors:
+            text = redact(text)
+        return text
+
+    def redact_late(self, text: str) -> str:
+        """``text`` redacted as ``redact`` has it, without the guard, for a write to a
+        standard stream: it may come under a logging handler's lock, while the guard may be
+        held leaving the root logger, which takes logging's module lock. A thread that
+        ended since the last change keeps its secrets until the next."""
+        for redact in self._redactors:
             text = redact(text)
         return text
 
@@ -2331,11 +2357,95 @@ class _Records(logging.Handler):
     def _release(self) -> None:
         """Release the ended handler threads' secrets and rebuild the redactors; the
         caller holds the guard"""
-        self._workers = [(w, r) for w, r in self._workers if w.is_alive()]
-        self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r in self._workers))
+        self._workers = [held for held in self._workers if held[0].is_alive()]
+        self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r, _ in self._workers))
+        attached = [w for w, _, _ in self._runs]
+        self.late = frozenset(w for w, _, owner in self._workers if owner not in attached)
 
 
 _RECORDS = _Records()
+
+
+class _LateStream:
+    """Stands in for ``sys.stdout`` or ``sys.stderr`` while a handler thread whose run
+    detached still lives, as after a host's ``App.call`` that timed out returned (#135).
+    What that thread writes is redacted of every attached run's and live handler thread's
+    secrets, and its stdout text goes to stderr, so a late write never lands in a host's
+    own output. Every other thread's write reaches the stream it wraps untouched, and so
+    does a write through ``.buffer``, as bytes"""
+
+    def __init__(self, inner: TextIO, *, stdout: bool) -> None:
+        self.inner = inner
+        self._stdout = stdout
+
+    def write(self, text: str, /) -> int:
+        if threading.current_thread() not in _RECORDS.late:
+            return self.inner.write(text)
+        target: TextIO | None = sys.stderr if self._stdout else self.inner
+        if isinstance(target, _LateStream):
+            target = target.inner
+        if target is not None:
+            shown = _RECORDS.redact_late(text)
+            # A secret an escape splits, such as ``hun\x1b[0mter2``, is whole without it
+            bare = terminal_text(text, color=False, keep="\r", rewrite=True)
+            if _RECORDS.redact_late(bare) != bare:
+                shown = _RECORDS.redact_late(bare)
+            target.write(shown)
+        return len(text)
+
+    def writelines(self, lines: Iterable[str], /) -> None:
+        for line in lines:
+            self.write(line)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+
+# The late streams installed now, under _guard_lock
+_late_out: _LateStream | None = None
+_late_err: _LateStream | None = None
+
+
+def _settle_streams() -> None:
+    with _guard_lock:
+        _settle_streams_locked()
+
+
+def _settle_streams_locked() -> None:
+    """Wrap ``sys.stdout`` and ``sys.stderr`` in a ``_LateStream`` while a handler thread
+    whose run detached lives, and unwrap them once none does. ``sys.stdout`` waits while
+    a run's guard holds it, whose stand-in redacts already. A stream the host replaced in
+    between is its own: it is left as it is, and a wrapper the host kept passes every
+    write through. The caller holds ``_guard_lock``."""
+    global _late_out, _late_err
+    if _RECORDS.late:
+        if _late_err is None and sys.stderr is not None:
+            _late_err = _LateStream(sys.stderr, stdout=False)
+            sys.stderr = cast(TextIO, _late_err)
+        if _late_out is None and not _guarded and sys.stdout is not None:
+            _late_out = _LateStream(sys.stdout, stdout=True)
+            sys.stdout = cast(TextIO, _late_out)
+        return
+    if _late_err is not None:
+        if sys.stderr is cast(TextIO, _late_err):
+            sys.stderr = _late_err.inner
+        _late_err = None
+    if _late_out is not None and not _guarded:
+        if sys.stdout is cast(TextIO, _late_out):
+            sys.stdout = _late_out.inner
+        _late_out = None
+
+
+def _restore_stdout(envelopes: TextIO, stdout: TextIO) -> None:
+    """``sys.stdout`` back to ``stdout`` after ``App.main``'s run wrote its envelopes. A
+    ``_LateStream`` over the envelopes keeps standing, now over ``stdout``: a handler
+    thread whose run detached may still print, until the process exits (#135)"""
+    with _guard_lock:
+        late = _late_out
+        if late is not None and sys.stdout is cast(TextIO, late) and late.inner is envelopes:
+            late.inner = stdout
+        else:
+            sys.stdout = stdout
 
 
 def _record_level(levelno: int) -> Level:
@@ -2688,6 +2798,7 @@ class _Run:
                 _guarded -= 1
                 if not _guarded:
                     sys.stdout, sys.stdin = _unguarded
+                    _settle_streams_locked()
                 elif sys.stdout is ours[0]:
                     # A run nested in another's handler: give back what it found. A run
                     # that another swapped over leaves the streams to the last one out.
@@ -3211,15 +3322,15 @@ class _Run:
             cached = self._redaction = (key, self._redactor(current, self.args))
         return cached[1](text)
 
-    @staticmethod
     def _held(
-        redact: Callable[[str], str], keep: Callable[[Pending], None]
+        self, redact: Callable[[str], str], keep: Callable[[Pending], None]
     ) -> Callable[[Pending], None]:
         """``keep``, and the handler's worker redacted with ``redact``, the invocation's
-        secrets, for as long as it runs, even after the run returned (#104)"""
+        secrets, for as long as it runs, even after the run returned (#104, #135)"""
+        owner = self._log_record
 
         def started(pending: Pending) -> None:
-            _RECORDS.hold(pending.worker, redact)
+            _RECORDS.hold(pending.worker, redact, owner)
             keep(pending)
 
         return started

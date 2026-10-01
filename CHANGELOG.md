@@ -18,6 +18,14 @@ Apps built on treaty keep their own, structured schema changelog with
   response cut again after `--warnings-as-errors` or a failed audit log write grew it
   keeps the first cut's `meta.total_bytes`, the full response's size, and reports each
   field in a single `FIELD_TRUNCATED` warning against its original length (#134)
+- Security: a handler abandoned at its timeout or on a signal no longer leaks a secret it
+  prints or writes to `sys.stderr` after its run returned, as after a host's `App.call`.
+  With no run's stand-in left on `sys.stdout`, the text reached the host's streams
+  unredacted. Now, while such a thread lives, `sys.stdout` and `sys.stderr` redact what it
+  writes of every live run's and handler thread's secrets, and send its stdout text to
+  stderr, so it never lands in the host's own output; other threads' writes, and bytes
+  written through `.buffer`, pass through untouched. The streams are restored once the
+  thread ends, unless the host replaced one meanwhile (#135)
 
 ## [1.0.0rc8] - 2026-10-01
 
