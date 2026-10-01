@@ -809,6 +809,7 @@ class App:
         filesystem_side_effects: Sequence[SideEffect] = (),
         background: Background | None = None,
         preserve_locale: bool = False,
+        child_log: bool = False,
         cache: CachePolicy | None = None,
         recursive_traversal: bool = False,
         id_field: str | None = None,
@@ -904,6 +905,10 @@ class App:
         user's other ``LC_*`` removed, so their messages are English, their numbers
         dot-decimal, and their text UTF-8; ``preserve_locale=True`` keeps the
         user's locale for a command whose child output is meant for a person (REQ-F-066).
+        ``child_log=True`` lets ``ctx.run(argv, stream="always")`` write the child's lines
+        to stderr as plain text, redacted, in any ``--format`` and verbosity but
+        ``--quiet``, and says so in the command's manifest description; ``App.call`` and
+        MCP drop the lines.
         ``cache=CachePolicy(ttl_seconds=3600)`` gives ``ctx.cache``, a store of bytes by
         key under ``$XDG_CACHE_HOME/<app>/<command>/``, with ``--no-cache`` and
         ``--cache-ttl``; ``meta.cache_used`` says whether a read hit (REQ-O-018).
@@ -1106,6 +1111,7 @@ class App:
                             filesystem_side_effects=filesystem_side_effects,
                             background=background,
                             preserve_locale=preserve_locale,
+                            child_log=child_log,
                             cache=cache,
                             recursive_traversal=recursive_traversal,
                             id_field=id_field,
@@ -1841,6 +1847,7 @@ class App:
         self._check_fixes()
         # Tracebacks of crashed or late handlers go to the host process's stderr
         run = _Run(self, io.StringIO(), sys.stderr, environ)
+        run.child_lines = False  # the caller reads the envelope, not a child's log
         run.unmask = unmask
         try:
             cap = OutputCap.resolve(None, environ, self.max_output, self.name)
@@ -2525,6 +2532,9 @@ class _Stderr:
     def __init__(self, stream: IO[str], verbosity: Verbosity) -> None:
         self._stream = stream
         self.verbosity = verbosity
+        self._lines = threading.RLock()
+        """Holds a child's line whole against another ``ctx.run``'s on another thread;
+        reentrant, so a signal handler that writes on the same thread cannot deadlock"""
 
     @property
     def stream(self) -> IO[str]:
@@ -2542,6 +2552,21 @@ class _Stderr:
             if not _closed_pipe(exc):
                 raise
             self._closed()
+
+    def child_line(self, line: str) -> None:
+        """One line of a ``stream="always"`` child, written and flushed whole, in any
+        verbosity but ``--quiet`` (#173)"""
+        if self.verbosity is Verbosity.QUIET:
+            return
+        with self._lines:
+            try:
+                self._stream.write(line + "\n")
+            except OSError as exc:
+                if not _closed_pipe(exc):
+                    raise
+                self._closed()
+                return
+            self.flush()
 
     def flush(self) -> None:
         try:
@@ -3170,6 +3195,9 @@ class _Run:
         self.app = app
         self.out = out
         self.err = _Stderr(err, resolve_verbosity(frozenset(), env, tty))
+        self.child_lines = True
+        """Whether ``ctx.run(stream="always")`` writes to ``err``; ``App.call`` and MCP,
+        whose caller reads only the envelope, drop the lines"""
         self.env = env
         self.tty = tty
         """Whether stdout is a terminal"""
@@ -3564,6 +3592,9 @@ class _Run:
             # ctx.run(stream=True); the secrets are read on the handler's thread, when a
             # stream starts, since a secret scalar's serialize= is user code
             echo=lambda line: log(Level.INFO, line, {}),
+            child_log=functools.partial(self._child_line, command, args, mode)
+            if command.child_log
+            else None,
             secrets=functools.partial(self._stream_spellings, command, args),
         )
         if not supports(command.platform, sys.platform):
@@ -3881,6 +3912,15 @@ class _Run:
                 self._log_line(level, message, fields, self._redactor(command, args), mode)
 
         return write
+
+    def _child_line(self, command: Command, args: object, mode: Format, line: str) -> None:
+        """A ``stream="always"`` child's line on stderr: plain text in any format, redacted
+        and escape-cleaned as a plain ``ctx.log`` line is, without its trace (#173)"""
+        if not self.child_lines:
+            return
+        redact = self._redactor(command, args)
+        color = mode not in MACHINE and color_allowed(self.env, self.tty)
+        self.err.child_line(terminal_text(redact(line), color=color))
 
     def _log_line(
         self,

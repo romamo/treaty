@@ -7,7 +7,14 @@ import json
 from collections.abc import Collection, Mapping, Sequence
 from importlib.metadata import version
 
-from ._command import ARGV_KEY, DEFAULT_HEARTBEAT_MS, PASSTHROUGH_NOTE, Command, DangerLevel
+from ._command import (
+    ARGV_KEY,
+    CHILD_LOG_NOTE,
+    DEFAULT_HEARTBEAT_MS,
+    PASSTHROUGH_NOTE,
+    Command,
+    DangerLevel,
+)
 from ._env import CONFIG, CONTEXT, FORMAT, INSTANCE_ID, MAX_OUTPUT_BYTES, NO_UPDATE, app_var
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import (
@@ -308,6 +315,9 @@ def command_entry(
     if command.passthrough:
         # #35: CommandEntry has no key for it; option_placement says strict, this says why
         description = f"{description}. {PASSTHROUGH_NOTE}"
+    if command.child_log:
+        # #173: no CommandEntry key says stderr is busy; an agent reads it here
+        description = f"{description}. {CHILD_LOG_NOTE}"
     out: dict[str, object] = {
         "description": description,
         "danger_level": command.danger_level.value,

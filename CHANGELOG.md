@@ -63,6 +63,17 @@ Apps built on treaty keep their own, structured schema changelog with
   row read differently from what it holds; a table counted them as no width. The LRM, RLM,
   and ALM marks stay text, since right-to-left prose uses them, and JSON keeps all of them
   as data (#177)
+### Added
+
+- `ctx.run(argv, stream="always")` writes a long child's lines to stderr as plain text as
+  they arrive, in any `--format` and verbosity, where `stream=True` makes them `ctx.log`
+  lines that an agent off a terminal never sees, and sees as JSON log records under `-v`.
+  The lines are redacted and escape-cleaned as `ctx.log`'s are, each written whole when two
+  children stream at once; `--quiet` silences them, `App.call` and MCP drop them, and
+  `Completed` keeps its 4096-character tails. The command declares
+  `@app.command(..., child_log=True)`, without which `stream="always"` raises
+  `RegistrationError`, and its manifest description then says stderr carries the child's
+  log, since the spec's CommandEntry has no key for it. `stream=True` is unchanged (#173)
 
 ## [1.0.0rc11] - 2026-10-01
 

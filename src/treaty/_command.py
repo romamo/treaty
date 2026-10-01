@@ -239,6 +239,9 @@ class Command:
     """Starts a process that outlives the run with ``ctx.spawn`` (REQ-C-010)"""
     preserve_locale: bool = False
     """Children keep the user's locale instead of the C locale (REQ-F-066)"""
+    child_log: bool = False
+    """``ctx.run(stream="always")`` writes a child's lines to stderr in any format and
+    verbosity but ``--quiet``; the manifest description says so (#173)"""
     cache: CachePolicy | None = None
     """``ctx.cache`` with ``--no-cache`` and ``--cache-ttl`` (REQ-O-018)"""
     recursive_traversal: bool = False
@@ -364,6 +367,12 @@ PASSTHROUGH_NOTE = (
 )
 """What a passthrough command's manifest description adds: the spec's CommandEntry has
 no key that says so, and ``option_placement: strict`` alone does not (#35)"""
+CHILD_LOG_NOTE = (
+    "While it runs, the log of the program it runs streams to stderr as plain lines in any "
+    "--format, silenced only by --quiet"
+)
+"""What a ``child_log=True`` command's manifest description adds: the spec's CommandEntry
+has no key for a command whose stderr carries a child's log (#173)"""
 ARGV_KEY = "argv"
 """A passthrough command's argv for its tool in an exec line or ``App.call``"""
 HELP_TOKENS = ("--help", "-h")
@@ -441,6 +450,7 @@ def build_command(
     filesystem_side_effects: Sequence[SideEffect] = (),
     background: Background | None = None,
     preserve_locale: bool = False,
+    child_log: bool = False,
     cache: CachePolicy | None = None,
     recursive_traversal: bool = False,
     id_field: str | None = None,
@@ -794,6 +804,7 @@ def build_command(
         filesystem_side_effects=check_side_effects(str(path), filesystem_side_effects),
         background=background,
         preserve_locale=preserve_locale,
+        child_log=child_log,
         cache=cache,
         recursive_traversal=recursive_traversal,
         batch=batch,

@@ -748,6 +748,12 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   and `stderr`, and `SUBPROCESS_FAILED`'s `context.stderr`, keep the last 4096
   characters; the timeout, signals, locale, `input=`, and `children.pids` work as without
   it
+- `ctx.run(argv, stream="always")` is for a child whose log is the progress an agent waits
+  on: each line goes to stderr as plain text, redacted and escape-cleaned the same way, in
+  any `--format` and verbosity; `--quiet` silences it, and `App.call` and MCP drop it. Two
+  children streaming at once interleave whole lines. The command declares
+  `@app.command(..., child_log=True)`, else the call raises `RegistrationError`, and its
+  manifest description says that stderr carries the child's log
 - On Windows only the child itself is stopped, not its grandchildren
 
 `App.main()` writes the same pager and, off a terminal, editor and update-notifier

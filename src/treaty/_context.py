@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from ._cache import Cache
 from ._cap import MARKER, TRUNCATED_CODE
@@ -23,7 +23,15 @@ from ._prompt import Prompter
 from ._retry import Retrier
 from ._session import DEFAULT_KEEP_SECONDS, Session
 from ._steps import StepTracker
-from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Processes, Spawned
+from ._subprocess import (
+    GUI_SKIPPED,
+    Argv,
+    Completed,
+    HeadlessBehavior,
+    Processes,
+    Spawned,
+    Stream,
+)
 from ._timeout import Timeout
 from ._verbosity import Level
 from ._walk import Traversal, Walk
@@ -292,7 +300,7 @@ class Ctx:
         env: Mapping[str, str] | None = None,
         timeout: Timeout | None = None,
         check: bool = True,
-        stream: bool = False,
+        stream: bool | Literal["always"] = False,
     ) -> Completed:
         """Run one program from an argument list, never a shell, and capture its output
 
@@ -309,9 +317,20 @@ class Ctx:
         child's process group, and so outlives a timeout, keeps a reader thread and the
         pipe it inherited open until it closes the pipe or exits; what it writes after
         the run stopped waiting is read and dropped, so it never blocks.
+
+        ``stream="always"`` is for a child whose log is the progress an agent waits on: each
+        line goes to stderr as plain text, redacted, in any ``--format`` and verbosity but
+        ``--quiet``; ``App.call`` and MCP drop it. The command declares ``child_log=True``,
+        which its manifest entry states.
         """
         return self._processes.run(
-            argv, input=input, cwd=cwd, env=env, timeout=timeout, check=check, stream=stream
+            argv,
+            input=input,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            check=check,
+            stream=Stream.of(stream),
         )
 
     def pipeline(
