@@ -74,7 +74,7 @@ the app, as the `entry.py` of `treaty init` does.
 | `ctx.progress(message, done=, total=)` | how far along it is | the same |
 | `ctx.debug(message, **fields)` | detail for whoever is debugging | with `--debug` |
 | `ctx.log_error(message, **fields)` | an error the run survives | always, unless `--quiet` |
-| `ctx.warn(code, message, **context)` | something the caller should know | in the envelope's `warnings`, not on stderr |
+| `ctx.warn(code, message, **context)` | something the caller should know | in the envelope's `warnings`; in a text format, a `warning: CODE: message` line on stderr after the result, unless `--quiet` |
 
 Off a terminal each line is one JSON object with `level`, `message`, and `fields`, so an
 agent that asks for `--verbose` can parse its own stderr too; at a terminal it is

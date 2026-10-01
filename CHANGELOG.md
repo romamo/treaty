@@ -10,6 +10,18 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- A warning reaches stderr in a text format: under `--format plain`, `tsv`, or a format
+  an app registers with `app.format`, the stdout text has no room for the envelope's
+  `warnings`, so a `ctx.warn` call, or a framework warning such as `CWD_CHANGED` or
+  `CLEANUP_FAILED`, was lost. Each is now one `warning: <CODE>: <message>` line on stderr
+  after the result, redacted and cleaned of escapes as a `ctx.log` line is, and kept off
+  by `--quiet`; a stream writes each once, after the event it arrived with. A warning
+  treaty already writes in text mode, such as a deprecated flag's notice, the
+  `--no-injection-protection` notice, or a `--token-limit` cut, is not written twice.
+  stdout and the exit code are unchanged (#152)
+
 ## [1.0.0rc9] - 2026-10-01
 
 The ninth 1.0 release candidate: 2 fixes.

@@ -19,7 +19,18 @@ from typing import Any
 import pytest
 from conftest import needs_posix_permissions, spec_validator
 
-from treaty import App, Arg, AuditLog, Ctx, Exit, Flag, NoArgs, RegistrationError
+from treaty import (
+    App,
+    Arg,
+    AuditLog,
+    Ctx,
+    Deprecated,
+    Exit,
+    Flag,
+    Format,
+    NoArgs,
+    RegistrationError,
+)
 from treaty._app import _RECORDS
 from treaty._atomic import exclusive
 from treaty._audit import audit
@@ -969,6 +980,87 @@ def test_warnings_as_errors_applies_to_a_stream_terminal_and_to_exec_lines() -> 
         False,
         True,
     ]
+
+
+# #152: a text format's stdout has no room for warnings, so they go to stderr
+
+
+def run_merged(app: App, argv: list[str]) -> tuple[int, str]:
+    """stdout and stderr in one buffer, so the order they were written in shows"""
+    both = io.StringIO()
+    code = app.run(argv, stdout=both, stderr=both, env={})
+    return code, both.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("mode", "text"),
+    [("plain", "n: 2\n"), ("tsv", "n\n2\n"), ("csv", "n,2\n"), ("markdown", "**n** 2\n")],
+)
+def test_a_text_format_writes_each_warning_to_stderr_after_the_result(mode: str, text: str) -> None:
+    app = make_app()
+    app.format(Format.CSV, render=lambda data: f"n,{data['n']}\n")
+    app.format(Format.MARKDOWN, render=lambda data: f"**n** {data['n']}\n")
+    code, out, err = run(app, ["warn", "--n", "2", "--format", mode])
+    assert (code, out) == (0, text)
+    assert err == "warning: SOMETHING_ODD: odd 0\nwarning: SOMETHING_ODD: odd 1\n"
+    _, both = run_merged(app, ["warn", "--n", "2", "--format", mode])
+    assert both == text + err
+
+
+def test_a_streams_warning_is_written_once_after_the_event_it_came_with() -> None:
+    code, both = run_merged(make_app(), ["tail", "--n", "1", "--format", "plain"])
+    assert code == 0
+    assert both == "i: 0\n\ni: 1\n\nwarning: SOMETHING_ODD: odd\n"
+
+
+def test_warnings_as_errors_in_text_lists_the_warning_before_the_error() -> None:
+    code, out, err = run(
+        make_app(), ["warn", "--n", "1", "--format", "plain", "--warnings-as-errors"]
+    )
+    assert code == 1 and out == "n: 1\n"
+    first, second = err.splitlines()[:2]
+    assert first == "warning: SOMETHING_ODD: odd 0"
+    assert second.startswith(f"{BASE}: WARNINGS_AS_ERRORS: ")
+
+
+def test_quiet_keeps_text_warnings_off_stderr() -> None:
+    _, out, err = run(make_app(), ["warn", "--n", "1", "--format", "plain", "--quiet"])
+    assert (out, err) == ("n: 1\n", "")
+
+
+def test_a_text_warning_is_redacted_and_loses_its_escapes() -> None:
+    app = App(BASE, version="1.0.0")
+
+    @app.command("sign", description="Sign", danger_level="safe", exit_codes=())
+    def sign(args: Login, ctx: Ctx) -> dict[str, bool]:
+        ctx.warn("ODD_TOKEN", f"\x1b]0;title\x07token {args.api_token} looks \x1b[31mold")
+        return {"ok": True}
+
+    argv = ["sign", "--api-token-from-env", "TOK", "--format", "plain"]
+    _, out, err = run(app, argv, {"TOK": "s3cr3t-value"})
+    assert out == "ok: true\n"
+    assert err == "warning: ODD_TOKEN: token [REDACTED] looks old\n"
+
+
+def test_a_deprecated_flag_warns_once_in_text() -> None:
+    app = App(BASE, version="1.1.0")
+
+    @dataclass(frozen=True, slots=True)
+    class Named:
+        name: str = Flag(default="x", description="Name")
+        label: str | None = Flag(
+            default=None,
+            description="Old spelling of --name",
+            deprecated=Deprecated("1.1.0", replacement="name"),
+        )
+
+    @app.command("greet", description="Greet", danger_level="safe", exit_codes=())
+    def greet(args: Named, ctx: Ctx) -> dict[str, str]:
+        return {"name": args.label or args.name}
+
+    code, out, err = run(app, ["greet", "--label", "y", "--format", "plain"])
+    assert (code, out) == (0, "name: y\n")
+    assert [json.loads(line)["code"] for line in err.splitlines()] == ["DEPRECATED_FLAG"]
 
 
 # REQ-O-030: the audit log is off until the app or the operator turns it on
