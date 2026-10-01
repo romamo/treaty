@@ -71,6 +71,8 @@ from ._cap import (
     Rerun,
     StdinCap,
     cap_envelope,
+    cut_envelope,
+    recap,
 )
 from ._changelog import load_changelog
 from ._command import (
@@ -2731,10 +2733,12 @@ class _Run:
         if self.budget is not None:
             envelope = self._budgeted(self.budget, envelope)
         rerun = Rerun(self.argv, self.app.name, self.page)
-        envelope = cap_envelope(envelope, self.cap, rerun)
+        cut, total = cut_envelope(envelope, self.cap, rerun)
         if settle:
-            # After the budget and the cap: their truncation warnings count (REQ-O-025)
-            envelope = cap_envelope(self.settle(envelope), self.cap, rerun)
+            # After the budget and the cap: their truncation warnings count (REQ-O-025);
+            # what settling adds may need a second cut, which keeps the first one's report
+            cut = recap(envelope, cut, total, self.settle(cut), self.cap, rerun)
+        envelope = cut
         write_envelope(envelope, self.out)
         self.delivered = True
         return envelope.exit_code

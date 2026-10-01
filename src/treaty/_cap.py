@@ -10,8 +10,10 @@ Each cut is reported as a ``FIELD_TRUNCATED`` warning, and ``meta.truncation_hin
 is the command that gets the rest: the next page of a list command, else the same
 command with a larger ``--max-output``. The cap governs ``data`` only: when error or meta alone
 exceed it, ``data`` still gets the cap as its own budget, so the envelope is at most
-that oversized base plus the cap. Sizes are of the line as written, its newline
-included, so ``meta.total_bytes`` and the cap count the same bytes.
+that oversized base plus the cap. When the cut's own report (the truncation meta and its
+warning) leaves no room for any ``data``, ``data`` is dropped and the line passes the cap
+by that report alone, with the hint in its shortest form. Sizes are of the line as
+written, its newline included, so ``meta.total_bytes`` and the cap count the same bytes.
 """
 
 from __future__ import annotations
@@ -169,15 +171,24 @@ class Cut:
 def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
     """``envelope`` within ``cap``, with the command that gets the rest in its ``meta``;
     ``data`` is cleaned of terminal escapes first, as every envelope written is"""
+    return cut_envelope(envelope, cap, rerun)[0]
+
+
+def cut_envelope(
+    envelope: Envelope, cap: OutputCap, rerun: Rerun, *, total: int | None = None
+) -> tuple[Envelope, int | None]:
+    """``cap_envelope``, with the full response's size when it was cut, None when it fit;
+    ``total`` is that size when ``envelope`` is not the whole response, as on a re-cut"""
     envelope = envelope.cleaned()
-    total = written_size(envelope)
-    if total <= cap.bytes or envelope.data is None:
-        return envelope
+    size = written_size(envelope)
+    if size <= cap.bytes or envelope.data is None:
+        return envelope, None
+    total = size if total is None else total
     base = written_size(dataclasses.replace(envelope, data=None))
     if base > cap.bytes:
         # Error or meta alone exceed the cap, which cutting data cannot fix; data still
         # gets the cap as its own budget, so the envelope stays bounded
-        return cap_envelope(envelope, OutputCap(base + cap.bytes), rerun)
+        return cut_envelope(envelope, OutputCap(base + cap.bytes), rerun, total=total)
 
     def fits(candidate: object, pending: list[Cut]) -> bool:
         trial = _truncated(envelope, candidate, pending, total, rerun)
@@ -185,9 +196,43 @@ def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
         return written_size(trial) <= cap.bytes
 
     shrunk = shrink(envelope.data, fits)
-    if shrunk is None:
-        return _truncated(envelope, None, [Cut((), total, 0)], total, rerun)
-    return _truncated(envelope, *shrunk, total, rerun)
+    if shrunk is not None:
+        return _truncated(envelope, *shrunk, total, rerun), total
+    dropped = [Cut((), total, 0)]
+    fallback = _truncated(envelope, None, dropped, total, rerun)
+    if written_size(fallback) <= cap.bytes:
+        return fallback, total
+    # Even without data the report passes the cap (#134): it cannot be left out, so it
+    # takes the fewest bytes the hint can say it in
+    return _truncated(envelope, None, dropped, total, rerun, brief=True), total
+
+
+def recap(
+    full: Envelope,
+    cut: Envelope,
+    total: int | None,
+    settled: Envelope,
+    cap: OutputCap,
+    rerun: Rerun,
+) -> Envelope:
+    """``settled`` within ``cap``: ``cut`` (``full`` as ``cut_envelope`` left it, ``total``
+    its result) with what settling added, a warning or an error. A first cut is redone on
+    ``full``'s data, so each field is reported once against its own size and
+    ``meta.total_bytes`` stays the full response's size (#134)"""
+    if total is None:
+        return cap_envelope(settled, cap, rerun)
+    if written_size(settled) <= cap.bytes:
+        return settled
+    kept = len(cut.warnings)
+    if tuple(settled.warnings[:kept]) != tuple(cut.warnings):
+        raise AssertionError("settling must only append warnings to the cut envelope")
+    whole = dataclasses.replace(
+        settled,
+        data=full.data,
+        warnings=(*full.warnings, *settled.warnings[kept:]),
+        extra_meta=full.extra_meta,
+    )
+    return cut_envelope(whole, cap, rerun, total=total)[0]
 
 
 def shrink(
@@ -220,7 +265,13 @@ def shrink(
 
 
 def _truncated(
-    envelope: Envelope, data: object, cuts: list[Cut], total: int, rerun: Rerun
+    envelope: Envelope,
+    data: object,
+    cuts: list[Cut],
+    total: int,
+    rerun: Rerun,
+    *,
+    brief: bool = False,
 ) -> Envelope:
     meta: dict[str, object] = {**envelope.extra_meta, "truncated": True, "total_bytes": total}
     root = next((c for c in cuts if c.path == ()), None)
@@ -251,6 +302,10 @@ def _truncated(
         # A rerun's meta differs by a few bytes (duration_ms), so the hint leaves slack
         room = str(total + SLACK)
         meta["truncation_hint"] = shlex.join(with_flags(rerun.argv, {MAX_OUTPUT_FLAG: room}))
+    elif brief:
+        meta["truncation_hint"] = (
+            f"the full response is {total} bytes, over {env_var(rerun.app_name)}"
+        )
     else:
         # An exec line or an MCP call has no argv of its own to repeat
         meta["truncation_hint"] = (
