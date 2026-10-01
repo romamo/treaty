@@ -65,6 +65,16 @@ The thirteenth 1.0 release candidate: 2 additions and 3 fixes.
   rewrites of the file take turns, and a rename another process blocks for a moment is
   retried (#213)
 
+- A command's `renderers=` can name a format the app does not register, such as
+  `renderers={"html": render_page}`: that command alone offers it. Its manifest entry
+  lists it in `output_formats`, its `--help` and completion offer it, and the root
+  `--format` values, root `--help`, and other commands leave it out. `--format html` on
+  another command exits `2` listing that command's formats; `<APP>_FORMAT=html` is passed
+  over there, which answers in its default instead of failing. `treaty.FormatRenderer(render,
+  media_type="text/html")` states what a command's renderer writes, in its manifest
+  description, as the output_formats list has no room for it. A command's renderer still
+  wins over the app's for a name both declare (#209)
+
 - `--help` shows a control character, terminal escape, or Unicode bidi override in the
   app's own text (the app, group, command, and flag descriptions, and the examples) as its
   escape, such as `\x1b` or `\u202e`, as plain output does, instead of writing it to the

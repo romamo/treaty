@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import re
 import sys
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Collection, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -113,11 +113,19 @@ def resolve_mode(
     stdout_isatty: bool,
     offered: Sequence[FormatName],
     app_name: str,
+    *,
+    command: str | None = None,
+    elsewhere: Collection[FormatName] = (),
 ) -> FormatName:
     """``--format``, else ``<APP>_FORMAT``, else JSON off a terminal or under CI and plain
-    on one; a value the app does not offer exits 2 listing those it does"""
+    on one; a value the app does not offer exits 2 listing those it does.
+
+    With ``command`` given, ``offered`` is that command's formats and ``elsewhere`` the
+    names only other commands offer (#209): ``--format`` naming one exits 2 listing the
+    command's, while ``<APP>_FORMAT`` naming one, a default set for the whole session,
+    is passed over for the terminal default, so it never fails an unrelated command"""
     if explicit is not None:
-        context = {
+        context: dict[str, object] = {
             "flag": "format",
             "value": explicit,
             "allowed": [m.value for m in offered],
@@ -128,6 +136,11 @@ def resolve_mode(
             raise ParseError(f"unknown --format {explicit!r}", context=context) from None
         if name in offered:
             return name
+        if command is not None and name in elsewhere:
+            context["command"] = command
+            raise ParseError(
+                f"--format {explicit!r} is not offered by {app_name} {command}", context=context
+            )
         if name.builtin is not None:
             # A real format with no renderer registered, not a typo
             raise ParseError(f"--format {explicit!r} is not offered by {app_name}", context=context)
@@ -135,7 +148,13 @@ def resolve_mode(
     # REQ-O-042: the tool's own variable, failing as the same --format value would
     var = app_var(app_name, FORMAT.key)
     forced = env.get(var)
-    if forced:
+    # Another command's own format: this one answers in its default (#209)
+    passed_over = (
+        command is not None
+        and any(n.value == forced for n in elsewhere)
+        and not any(n.value == forced for n in offered)
+    )
+    if forced and not passed_over:
         try:
             return resolve_mode(forced, {}, stdout_isatty, offered, app_name)
         except ParseError as exc:
