@@ -139,10 +139,10 @@ def test_call_runs_a_command_from_json_values_with_secret_from_env(tmp_path: Pat
 
 
 def test_call_refuses_direct_secret_values() -> None:
-    envelope = adapter_app().call("push", {"image": "app:1", "token": "abcd"})
+    envelope = adapter_app().call("push", {"image": "app:1", "token": "s3cret-token-value"})
     assert envelope.exit_code == 2
     assert envelope.error is not None
-    assert "abcd" not in json.dumps(envelope.to_json())
+    assert "s3cret-token-value" not in json.dumps(envelope.to_json())
 
 
 def test_call_reports_validation_errors_and_unknown_commands() -> None:
