@@ -14,7 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, NoReturn
 
-from ._command import Command, OptionPlacement
+from ._command import ARGV_KEY, Command, OptionPlacement
 from ._declare import shell_safe
 from ._dispatch import invalid_json
 from ._errors import ArgsCrashed, ArgsRefused, ParseError
@@ -148,6 +148,9 @@ class Invocation:
     """``fields`` of an exec line or MCP call: the ``--fields`` global (REQ-O-002)"""
     given: frozenset[str] = frozenset()
     """The fields the caller supplied, as opposed to defaulted"""
+    argv_rest: tuple[str, ...] = ()
+    """A passthrough command's argv for its tool: every token after the command path, or
+    the ``argv`` of an exec line or ``App.call``"""
 
     def __post_init__(self) -> None:
         if self.proxy is not None and self.no_proxy:
@@ -462,6 +465,68 @@ def strict_argv(argv: list[str], known: Mapping[CommandPath, Command]) -> list[s
             return [*argv[:i], "--", *argv[i:]]
         i += 2 if _takes_value(command, tok) else 1
     return argv
+
+
+@dataclass(frozen=True, slots=True)
+class Delegation:
+    """The argv of a passthrough command, split where its path ends (#35)"""
+
+    argv: list[str]
+    """Treaty's part: the global options, the command path, then the command's own
+    framework flags, which go before the path"""
+    rest: tuple[str, ...]
+    """The delegated tool's part: every token after the path, verbatim"""
+
+
+def delegated_argv(argv: list[str], known: Mapping[CommandPath, Command]) -> Delegation | None:
+    """``argv`` split for the passthrough command it names; None when it names none. Before
+    the path treaty reads its global options and the command's framework flags; after the
+    path it reads nothing, so ``--help``, ``--``, and a global's name reach the tool too"""
+    for command in known.values():
+        if command.passthrough and (found := _delegation(argv, command)) is not None:
+            return found
+    return None
+
+
+def _delegation(argv: list[str], command: Command) -> Delegation | None:
+    words = command.path.parts
+    options: list[str] = []
+    flags: list[str] = []
+    matched = 0
+    i = 0
+    while matched < len(words):
+        if i >= len(argv) or argv[i] == "--":
+            return None
+        tok = argv[i]
+        if not tok.startswith("-") or tok == "-":
+            if tok != words[matched]:
+                return None
+            matched += 1
+            i += 1
+            continue
+        name, eq, _ = tok[2:].partition("=") if tok.startswith("--") else ("", "", "")
+        spec = flag_named(command, name) if name else None
+        if _global(tok):
+            taken, valued = options, not eq and name in VALUED_GLOBALS
+        elif spec is not None:
+            taken, valued = flags, not eq and not spec.switch
+        else:
+            return None  # not treaty's: the misplaced-flag error names it
+        width = 2 if valued else 1
+        taken.extend(argv[i : i + width])
+        i += width
+    return Delegation([*options, *words, *flags], tuple(argv[i:]))
+
+
+def argv_value(value: object) -> tuple[str, ...]:
+    """The ``argv`` of a JSON payload: an array of strings, passed on verbatim"""
+    if not isinstance(value, list) or not all(isinstance(token, str) for token in value):
+        raise ParseError(
+            "'argv' is an array of strings: the delegated tool's arguments, verbatim",
+            context={"field": ARGV_KEY},
+            suggestion='pass "argv": ["extract", "statement.csv"], or [] for none',
+        )
+    return tuple(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -844,7 +909,8 @@ def known_flags(command: Command, *, argv: bool = True) -> list[str]:
     if argv:
         return flags
     lines = [INPUT_LINES_FLAG] if command.stdin_input is StdinInput.LINES else []
-    return [*flags, STABLE_OUTPUT_FLAG, FIELDS_FLAG, *lines]
+    rest = [ARGV_KEY] if command.passthrough else []
+    return [*flags, STABLE_OUTPUT_FLAG, FIELDS_FLAG, *lines, *rest]
 
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
@@ -960,6 +1026,9 @@ def build_from_mapping(
                 continue
             if key == INPUT_LINES_KEY and command.stdin_input is StdinInput.LINES:
                 framework["input_lines"] = input_lines(value)
+                continue
+            if key == ARGV_KEY and command.passthrough:
+                framework["argv_rest"] = argv_value(value)
                 continue
             flag = key.replace("_", "-")
             spec = flag_named(command, flag, json=True)

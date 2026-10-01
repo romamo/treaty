@@ -189,6 +189,17 @@ def render_block(app: App, target: str, invocation: str) -> str:
             f"- The input is read from stdin, or from `--{INPUT_FILE_FLAG}` (`-` is stdin), "
             f"on {_spans(invocation, stdin)}"
         )
+    delegating = [p for p, c in commands if c.passthrough]
+    if delegating:
+        # #35: the one grammar where treaty's flags precede the path
+        one = len(delegating) == 1
+        inputs.append(
+            f"- {_spans(invocation, delegating)} {'hands' if one else 'hand'} every token "
+            f"after the command path to the tool {'it delegates' if one else 'they delegate'} "
+            f"to, verbatim; {'its' if one else 'their'} own flags, such as `--output`, go "
+            "before the path, the tool's output is on stdout, and the envelope is the last "
+            'line on stderr. Exec lines pass the tokens as `"argv": [...]`'
+        )
     inputs.append(
         f"- `{invocation} exec` reads JSONL DispatchRequest lines from stdin, one command "
         "each, and answers one envelope line per request"

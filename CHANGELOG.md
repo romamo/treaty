@@ -171,6 +171,21 @@ Apps built on treaty keep their own, structured schema changelog with
   and the manifest names the base. The `fs-side-effects` audit rule now suggests
   `output_file=True` for a safe command that writes to a path from one of its `Path` flags,
   instead of a cache side effect (#68)
+### Added
+
+- Passthrough commands: `@app.command(..., passthrough=True)` wraps another tool's own
+  argument parser. The args type is `NoArgs`, `ctx.argv_rest` holds every token after the
+  command path verbatim (`--help` and `--` included), and the handler returns the tool's
+  exit code or lets its parser's `SystemExit` through; that code is the process exit code,
+  with `DELEGATED_EXIT` when it is not 0. The tool owns stdout, descriptor 1 included, so
+  the final envelope is the last line on stderr, and goes to `--output PATH` too.
+  Treaty's flags go before the path; the timeout, signals, session deduplication by argv,
+  and the audit log (with `argv` `[OMITTED]`) apply. `help_command=` is the argv the tool
+  gets for a lone `--help`. The manifest stays within the spec's schema: the entry has
+  `option_placement: "strict"` and a description ending in a sentence saying the arguments
+  go to the delegated tool. Exec lines and `App.call` take `"argv": [...]`, MCP lists no
+  passthrough command, and completion offers file paths after the path. COMPLIANCE.md lists
+  the spec requirements a passthrough command departs from (#35)
 
 ## [1.0.0rc9] - 2026-10-01
 

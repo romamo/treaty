@@ -110,6 +110,10 @@ def _node(
     assert isinstance(flags, dict)
     positionals = entry.get("positionals", [])
     assert isinstance(positionals, list)
+    if entry.get("option_placement") == "strict" and not positionals:
+        # #35: strict without the variadic positional it needs is a passthrough command;
+        # every word after the path is the delegated tool's, offered as a file path
+        return Node(words, children, (), (Takes((), True),), True, True)
     slots = tuple(_takes({**flags.get(p["name"], {}), **p}) for p in positionals)
     variadic = bool(positionals) and bool(positionals[-1].get("variadic"))
     strict = entry.get("option_placement") == "strict"

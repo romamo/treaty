@@ -374,7 +374,8 @@ def _exit_codes(app: App) -> Iterator[Finding]:
     # Each finding suggests its own free code, so applying every fix as written registers
     free = app.exits.unused()
     for c in user_commands(app):
-        if c.danger_level is DangerLevel.SAFE or c.exit_codes:
+        # A passthrough command exits with its tool's codes, which treaty cannot name (#35)
+        if c.danger_level is DangerLevel.SAFE or c.exit_codes or c.passthrough:
             continue
         name = c.path.parts[-1].upper().replace("-", "_") + "_FAILED"
         code = next(free, None)
@@ -2109,6 +2110,8 @@ def prints(fn: Callable[..., object]) -> str | None:
 
 def _log_not_print(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
+        if c.passthrough:
+            continue  # its tool owns stdout, and prints its output there on purpose (#35)
         found = _first(reached_functions(c.handler), prints)
         if found is not None:
             unit, name = found

@@ -445,9 +445,14 @@ FLAGS: tuple[FrameworkFlag, ...] = (
     FrameworkFlag(
         OUTPUT_FLAG,
         "output",
-        lambda c: c.output_file,
+        lambda c: c.output_file or c.passthrough,
         "string",
-        _output_description,
+        lambda c: (
+            "Also write the final envelope to this file; it goes before the command path, "
+            "as stdout and every token after the path belong to the delegated tool"
+            if c.passthrough
+            else _output_description(c)
+        ),
         parse=lambda v, c: output_path(str(v)),
         metavar="PATH",
         entry=lambda c: {"pattern_type": "filepath"},

@@ -45,6 +45,20 @@ Level 2 (every P0) is the level the spec calls agent-reliable. All 51 Level 2
 requirements are done, so treaty meets Level 2 (51 of 51) as well as Level 1; none are
 open.
 
+## Passthrough commands
+
+A command registered with `passthrough=True` (#35) hands its argv and stdout to another
+tool's parser, so for that command alone treaty departs from these requirements by design.
+Every other command is unaffected, and the scores above count them as done.
+
+| ID | Departure | Spec issue |
+|----|-----------|------------|
+| REQ-F-004, REQ-F-006 | The envelope is the last line on stderr (and `--output PATH`), not on stdout, which carries the delegated tool's output | [cli-agent-spec#25](https://github.com/cli-agent-spec/cli-agent-spec/issues/25) |
+| REQ-F-001, REQ-F-002 | The exit code is the delegated tool's own (`DELEGATED_EXIT` when not 0), outside the table's meanings: its `2` promises no absence of side effects | [cli-agent-spec#25](https://github.com/cli-agent-spec/cli-agent-spec/issues/25) |
+| REQ-C-003 | A mutating passthrough command's `data` is `{"exit_code": n}` with no `effect`; only a replay adds `effect: noop` | [cli-agent-spec#25](https://github.com/cli-agent-spec/cli-agent-spec/issues/25) |
+| REQ-C-015 | No input schema describes the tool's arguments; `--schema` lists only treaty's flags, which go before the path | [cli-agent-spec#25](https://github.com/cli-agent-spec/cli-agent-spec/issues/25) |
+| Manifest `CommandEntry` | No key marks a passthrough command, so the manifest uses `option_placement: "strict"` and a sentence in `description`; `help_command` is not listed | [cli-agent-spec#24](https://github.com/cli-agent-spec/cli-agent-spec/issues/24) |
+
 ## Framework-automatic
 
 | ID | Title | Priority | Level | Status | Notes |

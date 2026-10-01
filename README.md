@@ -332,6 +332,31 @@ to the script, and `tool run ./script --format plain` forwards `--format plain` 
 parsing it. Every manifest entry carries `option_placement` (`any` by default), and the
 `option-placement` audit rule flags a variadic positional passed to `ctx.run` under `any`.
 
+A command that wraps another tool's own argument parser declares `passthrough=True`. Its
+args type is `NoArgs`, `ctx.argv_rest` holds every token after the command path verbatim
+(`--help`, `--`, and a global's name included), and the handler returns the tool's exit
+code, or lets the parser's `SystemExit` through, which becomes the process exit code:
+
+```python
+@app.command("ingest", description="Import statements", danger_level="mutating",
+             exit_codes=(), passthrough=True)
+def ingest(args: NoArgs, ctx: Ctx) -> int:
+    return beangulp_main(list(ctx.argv_rest))
+```
+
+The tool owns stdout, so treaty writes the final envelope (exit code, duration, any
+exception) as the last line on stderr, whatever `--format` says, and to `--output PATH` as
+well. Treaty's own flags go before the path: `tool --output env.json --timeout 600 ingest
+extract statement.csv`. The timeout, signals, session deduplication, and the audit log
+apply as to any other command; the log records `argv` as `[OMITTED]`, since treaty cannot
+tell a secret in it. `help_command=("help",)` hands the tool that argv in place of a lone
+`--help` or `-h` after the path. The manifest entry stays within the spec's schema: it
+has `option_placement: "strict"`, and its description ends with "Arguments after the
+command path go to the delegated tool unparsed; the envelope is the last stderr line".
+Exec lines and `App.call` pass the tool's tokens as `"argv": [...]`, and `treaty-mcp`
+lists no passthrough command. A passthrough command cannot be destructive, and departs
+from a few spec requirements by design; COMPLIANCE.md lists them.
+
 A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
 words resolve to in `context.command`, and puts the corrected order in `suggestion`. Plain
 mode prints every error's suggestion as a final `hint:` line on stderr.

@@ -69,6 +69,10 @@ class Ctx:
     idempotency_key: str | None = None
     stdin_text: str | None = None
     """The payload of a ``stdin_input=True`` command: stdin, capped, or ``--input-file``"""
+    argv_rest: tuple[str, ...] = ()
+    """A ``passthrough=True`` command's arguments for the tool it delegates to: every token
+    after the command path, unparsed, or the ``argv`` of an exec line or ``App.call``;
+    empty for any other command"""
     page: PageRequest | None = None
     """The page a list command is asked for (``paginated=True``), else None; a handler
     that loads its whole list can ignore it and return the list"""

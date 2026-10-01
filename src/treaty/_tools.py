@@ -114,11 +114,14 @@ def output_schema(command: Command) -> JsonSchema:
 
 
 def tool_entries(app: App) -> list[ToolEntry]:
-    """Every command except ``exec`` and the ``completion`` built-in, a script for a shell
-    rather than a tool, in path order"""
+    """Every command except ``exec``, the ``completion`` built-in, a script for a shell
+    rather than a tool, and passthrough commands, whose arguments and stdout belong to
+    another tool that no input or output schema describes (#35), in path order"""
     entries: list[ToolEntry] = []
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         if path == EXEC_PATH or (path == COMPLETION_PATH and path in app.builtins):
+            continue
+        if command.passthrough:
             continue
         entries.append(
             ToolEntry(
