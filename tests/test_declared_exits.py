@@ -81,6 +81,12 @@ def make_app() -> App:
     return app
 
 
+POST_INIT_FIX = (
+    "raise treaty.ParseError there instead of Exit.UNSAFE_TARGET, which exits 2 before "
+    "anything runs"
+)
+
+
 def findings(app: App) -> list[Finding]:
     rule = next(r for r in audit(app, "x:app", limit=3).rules if r.id == "declared-exits")
     return list(rule.findings)
@@ -89,12 +95,13 @@ def findings(app: App) -> list[Finding]:
 def test_each_undeclared_code_is_found_with_its_line() -> None:
     found = findings(make_app())
     assert [(f.command, f.fix) for f in found] == [
+        ("render", POST_INIT_FIX),
         ("render", 'add "NOT_FOUND" to exit_codes='),
         ("render", 'add "PERMISSION_DENIED" to exit_codes='),
         ("render", 'add "STORE_DOWN" to exit_codes='),
-        ("render", 'add "UNSAFE_TARGET" to exit_codes='),
     ]
-    messages = {f.message.split()[1]: f.message for f in found}
+    messages = {f.message.split()[1]: f.message for f in found[1:]}
+    messages["UNSAFE_TARGET"] = found[0].message
     assert f"({HERE}:{line_of('# framework')})" in messages["NOT_FOUND"]
     helper = messages["PERMISSION_DENIED"]
     assert f"({HERE}:{line_of('# helper')})" in helper
@@ -144,7 +151,48 @@ def test_declaring_every_code_clears_the_rule() -> None:
         write_report(args.out)
         return {"effect": "created"}
 
-    # Target's __post_init__ still raises UNSAFE_TARGET, which this app never registered
+    # Target's __post_init__ still raises UNSAFE_TARGET, which no declaration clears
     [left] = findings(app)
-    assert left.fix.startswith('app.exit_code("UNSAFE_TARGET", <79-125>, description=')
-    assert left.fix.endswith('then add "UNSAFE_TARGET" to exit_codes=')
+    assert left.fix == POST_INIT_FIX
+
+
+def test_an_exit_from_the_args_post_init_crashes_declared_or_not(tmp_path) -> None:
+    """Only a ParseError refuses the arguments there: declaring the code does not stop the
+    run reporting HANDLER_CRASHED, so the rule says so instead of asking to declare it"""
+    app = App("renderctl", version="1.0.0")
+    app.exit_code("UNSAFE_TARGET", 80, description="u", retryable=False, side_effects="none")
+
+    @app.command(
+        "render", description="Render", danger_level="mutating", exit_codes=["UNSAFE_TARGET"]
+    )
+    def render(args: Target, ctx: Ctx) -> dict[str, str]:
+        return {"effect": "created"}
+
+    out = io.StringIO()
+    code = app.run(
+        ["render", "--format", "json", "--out", str(tmp_path / "r.exe")],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+    )
+    assert code == 1
+    assert json.loads(out.getvalue().splitlines()[0])["error"]["code"] == "HANDLER_CRASHED"
+    [found] = findings(app)
+    assert found.fix == POST_INIT_FIX
+    assert f"({HERE}:{line_of('# post-init')})" in found.message
+    assert "HANDLER_CRASHED instead, declared or not" in found.message
+
+
+def test_an_unregistered_code_is_registered_then_declared() -> None:
+    app = App("renderctl", version="1.0.0")
+
+    @app.command("render", description="Render", danger_level="safe", exit_codes=())
+    def render(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        raise Exit.STALE("the input is stale")
+
+    [found] = findings(app)
+    assert found.fix == (
+        'app.exit_code("STALE", <79-125>, description="<what failed>", retryable=False, '
+        'side_effects="none"), then add "STALE" to exit_codes='
+    )

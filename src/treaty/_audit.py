@@ -413,10 +413,26 @@ def _declared_exits(app: App) -> Iterator[Finding]:
         post_init = getattr(
             c.args_model.model if c.args_model else c.args_type, "__post_init__", None
         )
+        if inspect.isfunction(post_init):
+            # Only a ParseError or InvalidValue there refuses the arguments: any exit,
+            # declared or not, is ArgsCrashed, so declaring it would not help
+            crashes: dict[str, tuple[ExitRaise, Reached]] = {}
+            for unit in reached_functions(post_init):
+                for raised in exit_raises(unit.fn):
+                    crashes.setdefault(raised.name.value, (raised, unit))
+            for name, (raised, unit) in sorted(crashes.items()):
+                yield Finding(
+                    "declared-exits",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"its args __post_init__ raises {name} ({raised.where}); the run exits 1 "
+                    f"with HANDLER_CRASHED instead, declared or not{unit.where}",
+                    f"raise treaty.ParseError there instead of Exit.{name}, which exits 2 "
+                    "before anything runs",
+                )
         code: list[Callable[..., object]] = [
             c.handler,
             *(spec.acquire for spec in c.resource_graph.values()),
-            *([post_init] if inspect.isfunction(post_init) else []),
         ]
         first: dict[str, tuple[ExitRaise, Reached]] = {}
         for fn in code:

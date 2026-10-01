@@ -12,6 +12,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Added
 
+- The `declared-exits` audit rule warns for each exit code a command's handler raises
+  without declaring it, which passed `treaty audit --strict` and failed only at run time
+  as `UNDECLARED_EXIT_CODE`. It reads `Exit.NAME` and `CliExit(ExitCodeName("NAME"))` in
+  the handler, the first-party functions it calls, and its resources' `acquire`, names the
+  file and line, and skips the codes a command gets without declaring them; a declared
+  code never raised stays silent. An exit in the args class's `__post_init__` is reported
+  declared or not, as the run reports it as `HANDLER_CRASHED`; the fix is a `ParseError`
+  (#211)
+
+### Added
+
 - `@app.command(..., idempotent=True)` declares that a repeat of a mutating command with
   the same arguments leaves the same state: the `retryable` audit rule passes its
   retryable codes, and its manifest description says so, as the spec's CommandEntry has
@@ -68,15 +79,6 @@ The thirteenth 1.0 release candidate: 2 additions and 3 fixes.
   `_source` on a command that is not external still prints. A boolean in the stderr error
   block reads `true` or `false`, as in the rest of plain output, not Python's `True` or
   `False` (#198)
-
-### Added
-
-- The `declared-exits` audit rule warns for each exit code a command's handler raises
-  without declaring it, which passed `treaty audit --strict` and failed only at run time
-  as `UNDECLARED_EXIT_CODE`. It reads `Exit.NAME` and `CliExit(ExitCodeName("NAME"))` in
-  the handler, the first-party functions it calls, its resources' `acquire`, and its args
-  class's `__post_init__`, names the file and line, and skips the codes a command gets
-  without declaring them; a declared code never raised stays silent (#211)
 
 ## [1.0.0rc12] - 2026-10-01
 
