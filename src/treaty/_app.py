@@ -205,6 +205,7 @@ from ._protect import (
     protect_batch,
     tagged,
 )
+from ._records import Records, RecordSpec
 from ._redact import NAME_CONTEXT, OMITTED, REDACTED, line_fragments, redacted, scrub
 from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
@@ -684,6 +685,7 @@ class App:
         cursor_check: Callable[[str], None] | None = None,
         heartbeat: bool = False,
         stdin_input: bool | Literal["lines"] = False,
+        stdin_records: type | None = None,
         output_file: bool = False,
         requires_auth: bool = False,
         auth: str | None = None,
@@ -732,8 +734,12 @@ class App:
         size from ``--input-file``. ``stdin_input="lines"`` reads nothing up front:
         ``ctx.stdin_lines`` yields stdin's lines as the handler iterates, with no total cap
         and each line within ``App(max_line_bytes=)``; with ``streaming=True`` the command is
-        a filter, writing each event as it goes. ``output_file=True`` adds ``--output PATH``, which
-        writes ``data`` there in the ``--format`` representation and the envelope to stdout.
+        a filter, writing each event as it goes. ``stdin_records=Sec``, a frozen dataclass,
+        reads each line as a ``Sec`` through ``ctx.stdin_records``: a bare JSON object, or
+        the ``data`` of another treaty command's envelope, whose failure ends this run with
+        ``UPSTREAM_FAILED``; it implies ``stdin_input="lines"``. ``output_file=True`` adds
+        ``--output PATH``, which writes ``data`` there in the ``--format`` representation
+        and the envelope to stdout.
         ``requires_auth=True`` checks the app's ``credentials`` for ``required_scopes``
         before the handler runs. ``auth="browser"`` or ``"device"`` marks a login command:
         it gets ``--headless`` and ``--token-env-var``, and ``ctx.token`` from
@@ -849,6 +855,15 @@ class App:
             stdin_mode = stdin_input_of(stdin_input)
         except InvalidValue as exc:
             raise RegistrationError(f"{cmd_path}: {exc}") from None
+        records: RecordSpec | None = None
+        if stdin_records is not None:
+            if stdin_mode is StdinInput.TEXT:
+                raise RegistrationError(
+                    f"{cmd_path}: stdin_records reads stdin line by line; drop "
+                    'stdin_input=True, or write stdin_input="lines"'
+                )
+            records = RecordSpec.inspect(stdin_records, self.scalars, str(cmd_path))
+            stdin_mode = StdinInput.LINES
         if auth is not None and auth not in AuthKind:
             kinds = ", ".join(k.value for k in AuthKind)
             raise RegistrationError(f"{cmd_path}: auth={auth!r} is not one of {kinds}")
@@ -945,6 +960,7 @@ class App:
                         cursor_check=cursor_check,
                         heartbeat=heartbeat,
                         stdin_input=stdin_mode,
+                        stdin_records=records,
                         output_file=output_file,
                         requires_auth=requires_auth,
                         auth=None if auth is None else AuthKind(auth),
@@ -3150,7 +3166,10 @@ class _Run:
             _warn_sink=self._warn,
             idempotency_key=idempotency_key,
             stdin_text=invocation.stdin_text,
-            _stdin_lines=invocation.lines,
+            _stdin_lines=invocation.lines if command.stdin_records is None else None,
+            _stdin_records=None
+            if command.stdin_records is None or invocation.lines is None
+            else Records(invocation.lines, command.stdin_records, self._warn),
             page=page,
             token=invocation.token,
             _config_file=self.config_file if command.config_write_scope is not None else None,

@@ -10,7 +10,7 @@ import typing
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._auth import AuthKind, check_declaration
 from ._batch import ITEM_KEYS, batch_item, batch_schema
@@ -56,6 +56,9 @@ from ._types import (
     type_hints,
 )
 from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope, ToolVersion
+
+if TYPE_CHECKING:
+    from ._records import RecordSpec  # imports the parser, which imports this module
 
 Handler = Callable[..., Any]
 """``(args, ctx, *resources)``: extra parameters are annotated with resource classes"""
@@ -164,6 +167,8 @@ class Command:
     stdin_input: StdinInput | None = None
     """The handler reads stdin or ``--input-file``: the payload in ``ctx.stdin_text``, or
     its lines through ``ctx.stdin_lines``"""
+    stdin_records: RecordSpec | None = None
+    """``stdin_records=``: each input line a record of this type, ``ctx.stdin_records``"""
     output_file: bool = False
     """``--output PATH`` writes the rendered ``data`` to a file (REQ-O-001)"""
     requires_auth: bool = False
@@ -357,6 +362,7 @@ def build_command(
     cursor_check: Callable[[str], None] | None = None,
     heartbeat: bool = False,
     stdin_input: StdinInput | None = None,
+    stdin_records: RecordSpec | None = None,
     output_file: bool = False,
     requires_auth: bool = False,
     auth: AuthKind | None = None,
@@ -647,6 +653,7 @@ def build_command(
         cursor_check=cursor_check,
         heartbeat=heartbeat,
         stdin_input=stdin_input,
+        stdin_records=stdin_records,
         output_file=output_file,
         requires_auth=requires_auth,
         auth=auth,

@@ -92,6 +92,14 @@ Apps built on treaty keep their own, structured schema changelog with
   on stdin exits 2 with `STDIN_IS_TTY`, and in `exec`, `App.call`, and MCP the request
   gives them as `input_lines`, an array of strings. `--schema` adds `"stdin_mode":
   "lines"` (#33)
+- `stdin_records=Sec`, a frozen dataclass, reads another command's output as typed records:
+  `ctx.stdin_records` yields one `Sec` per bare JSON line or per item of an envelope's
+  `data`, and a stream's terminal envelope ends the input. An upstream `ok: false` exits 1
+  with `UPSTREAM_FAILED` and the upstream error, redacted, in `context.upstream`; envelopes
+  that stop before their terminal one exit 1 with `UPSTREAM_INCOMPLETE`; a record that
+  fails its fields exits 1 with `RECORD_INVALID`, `context.line`, and `context.field`. A
+  paged or cut upstream response adds an `UPSTREAM_TRUNCATED` warning. `--schema` gives
+  the record type as `stdin_records_schema` (#32)
 
 ### Fixed
 
