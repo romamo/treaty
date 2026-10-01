@@ -83,8 +83,8 @@ from ._changelog import load_changelog
 from ._command import (
     ARGV_KEY,
     DEFAULT_HEARTBEAT_MS,
-    OUTPUT_FLAG,
     HELP_TOKENS,
+    OUTPUT_FLAG,
     Cleanup,
     Command,
     DangerLevel,
