@@ -21,6 +21,16 @@ Apps built on treaty keep their own, structured schema changelog with
   keeps the array order its schema declares with `x-ordered`, nested arrays included, as it
   does when returned; before, every array in it was re-sorted. A dataclass keeps its
   `Out(ordered=True)` order as before, and a plain dict is still sorted (#181)
+### Fixed
+
+- A `mutating` or `destructive` command may return a class an `app.output_adapter` writes,
+  when the adapter's schema lists `effect` (and `would_affect` for a destructive command):
+  registration failed with "must return an object with an 'effect' field" whatever the
+  schema said. Each run checks the dumped object's `effect` and `would_affect` as it checks a
+  dataclass's, so `would_*` dry runs, `meta.dry_run`, the destructive preview, and the
+  idempotent `noop` replay hold. An adapter schema that lists the key as `x-volatile`, which
+  `--stable-output` leaves out, is a `RegistrationError` saying so; the same holds for
+  `open_url`, `background_pid`, and `cleanup_command` (#183)
 
 ## [1.0.0rc11] - 2026-10-01
 

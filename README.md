@@ -1302,7 +1302,9 @@ schema. A property declares the `Out` options as schema keys, for pydantic throu
 optional: an undeclared array is sorted by its items' JSON text and `treaty audit` advises
 declaring its order, and a credential-named or `format: password` string is masked unless
 `--unmask`. A field type with its own JSON schema, such as a constrained `str`, needs no
-`app.scalar`. Register the adapter before the commands returning the class; two adapters
+`app.scalar`. A mutating or destructive command may return an adapted class whose schema
+lists `effect` (and `would_affect`), checked on each run as a dataclass's are; the key may
+not be `x-volatile`. Register the adapter before the commands returning the class; two adapters
 whose bases overlap, or an adapted class registered as a scalar, are registration errors.
 
 ## Args models
