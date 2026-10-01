@@ -88,6 +88,12 @@ Apps built on treaty keep their own, structured schema changelog with
   rule now advises on a network command whose handler reaches none of `ctx.http`,
   `ctx.network`, and `ctx.run`, since `--proxy` would not reach a client of its own (#171)
 
+### Fixed
+
+- A malformed proxy setting no longer shows its password in the `PROXY_INVALID` or
+  `--proxy` error: one written without a scheme (`user:pass@host:port`), or whose password
+  holds a `/`, `?`, or `#`, now loses everything up to its last `@`
+
 ## [1.0.0rc11] - 2026-10-01
 
 The eleventh 1.0 release candidate: 4 additions and 1 change.

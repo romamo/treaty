@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import IO
 from urllib.parse import SplitResult, unquote, urlsplit
 
-from ._envelope import NetworkContext, without_userinfo
+from ._envelope import NetworkContext, proxy_without_userinfo, without_userinfo
 from ._errors import CliExit, ParseError
 from ._retry import Retrier, retry_after
 from ._values import ExitCodeName
@@ -78,8 +78,8 @@ def parse_proxy(raw: object) -> str:
     problem = _proxy_problem(raw)
     if problem is not None:
         raise ParseError(
-            f"--proxy {without_userinfo(raw)!r} {problem}",
-            context={"flag": PROXY_FLAG, "value": without_userinfo(raw)},
+            f"--proxy {proxy_without_userinfo(raw)!r} {problem}",
+            context={"flag": PROXY_FLAG, "value": proxy_without_userinfo(raw)},
             suggestion="pass --proxy http://host:port",
         )
     return raw
@@ -159,9 +159,9 @@ class ProxyConfig:
         if problem is not None:
             raise CliExit(
                 ExitCodeName("PRECONDITION"),
-                f"{name} {without_userinfo(raw)!r} {problem}",
+                f"{name} {proxy_without_userinfo(raw)!r} {problem}",
                 code="PROXY_INVALID",
-                context={"variable": name, "value": without_userinfo(raw)},
+                context={"variable": name, "value": proxy_without_userinfo(raw)},
                 fix_required=f"set {name} to http://host:port, or unset it",
             )
         return Route(proxy, name)
@@ -232,7 +232,7 @@ class NetworkSettings:
 
     def __repr__(self) -> str:
         try:
-            shown = repr({k: without_userinfo(v) for k, v in self.proxies.items()})
+            shown = repr({k: proxy_without_userinfo(v) for k, v in self.proxies.items()})
         except CliExit as exc:  # a repr names the problem rather than raising it
             shown = f"<{exc.code}>"
         return f"NetworkSettings(proxies={shown}, ca_bundle={self.ca_bundle!r})"
@@ -566,7 +566,7 @@ class Http:
         route = self.proxies.route(url)
         curl = ["curl", "-v"]
         if route.proxy is not None:
-            curl += ["--proxy", without_userinfo(route.proxy)]
+            curl += ["--proxy", proxy_without_userinfo(route.proxy)]
         elif self.proxies.no_proxy_flag:
             curl += ["--noproxy", "*"]
         curl.append(without_userinfo(url))

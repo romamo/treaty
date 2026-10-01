@@ -690,6 +690,28 @@ def test_ctx_network_refuses_a_proxy_variable_that_is_no_http_url() -> None:
     assert repr(settings) == "NetworkSettings(proxies=<PROXY_INVALID>, ca_bundle=None)"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "alice:s3cret@proxy.internal:99999",  # no scheme: urlsplit sees no userinfo
+        "http://alice:pa/s3cret@proxy.internal:8080",  # a / ends the authority early
+        "http://alice:pa#s3cret@proxy.internal:8080",  # as a # does
+        "http://alice:pa?s3cret@proxy.internal:8080",  # and a ?
+    ],
+)
+def test_an_invalid_proxy_never_shows_its_password(value: str) -> None:
+    code, envelope = run(
+        own_client_app(), ["settings", "--url", "https://example.com/"], {"HTTPS_PROXY": value}
+    )
+    assert (code, error_of(envelope)["code"]) == (4, "PROXY_INVALID")
+    assert "s3cret" not in json.dumps(envelope)
+    assert "proxy.internal" in error_of(envelope)["message"]  # type: ignore[operator]
+    if "://" in value:
+        code, envelope = run(net_app(), ["get", "--url", "https://example.com/", "--proxy", value])
+        assert code == 2, envelope
+        assert "s3cret" not in json.dumps(envelope)
+
+
 def test_ctx_network_needs_has_network_io() -> None:
     app = App("t", version="1.0.0")
     with pytest.raises(RegistrationError, match=r"ctx\.network .*has_network_io"):
