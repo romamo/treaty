@@ -1,26 +1,30 @@
 """Network and filesystem utilities (workstream 10): REQ-F-036, F-037, F-061, F-063 (the
 HTTP half), O-019, O-040. Every HTTP test talks to a real server on a local port."""
 
+import ast
 import base64
 import contextlib
 import io
 import json
 import os
 import shlex
+import shutil
 import socket
 import ssl
 import sys
 import threading
 import time
-from collections.abc import Iterator
+import types
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from os import walk as os_walk
 from pathlib import Path
 
 import pytest
 
 from treaty import App, Ctx, Exit, Flag, HttpResponse, NoArgs, RegistrationError, Retry
-from treaty._audit import Finding, audit
+from treaty._audit import Finding, Severity, audit, os_walks
 from treaty._http import Http, NetworkFailure, ProxyConfig
 from treaty._profile import probes_for
 from treaty._retry import Retrier
@@ -785,10 +789,134 @@ def test_audit_flags_a_hand_rolled_walk_and_a_direct_http_call() -> None:
     assert found["recursive-traversal", "scan"].fix == (
         "recursive_traversal=True, then for entry in ctx.walk(root): ..."
     )
-    assert ("recursive-traversal", "tidy") in found
+    assert found["recursive-traversal", "tidy"].severity is Severity.ADVICE
     assert found["http-client", "pull"].fix == "response = ctx.http.get(url)"
     rules = {f.rule for f in (*findings(fs_app()), *findings(net_app()))}
     assert not rules & {"recursive-traversal", "http-client"}
+
+
+def traversal_app() -> App:
+    """One command per walk shape, with ``os.walk`` reached through the module and an
+    alias, and a follow flag passed as a keyword, a positional, a name, and ``**``"""
+    app = App("t", version="1.0.0")
+    follow = True
+    extra = {"recurse_symlinks": True}
+
+    def command(name: str) -> Callable[[Callable[[Target, Ctx], object]], object]:
+        return app.command(name, description=name, danger_level="safe", exit_codes=())
+
+    @command("rglob")
+    def rglob(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(sorted(args.path.rglob("*.json")))}
+
+    @command("rglob-off")
+    def rglob_off(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(list(args.path.rglob("*", recurse_symlinks=False)))}
+
+    @command("rglob-on")
+    def rglob_on(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(list(args.path.rglob("*", recurse_symlinks=True)))}
+
+    @command("rglob-kwargs")
+    def rglob_kwargs(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": len(list(args.path.rglob("*", **extra)))}
+
+    @command("path-walk")
+    def path_walk(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in args.path.walk())}
+
+    @command("path-walk-on")
+    def path_walk_on(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in args.path.walk(follow_symlinks=follow))}
+
+    @command("path-walk-positional")
+    def path_walk_positional(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in args.path.walk(True, None, True))}
+
+    @command("os-walk")
+    def walk(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in os.walk(args.path, onerror=None))}
+
+    @command("os-walk-on")
+    def walk_on(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in os.walk(args.path, followlinks=True))}
+
+    @command("os-walk-alias")
+    def walk_alias(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in os_walk(args.path, True, None, True))}
+
+    @command("os-walk-alias-off")
+    def walk_alias_off(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in os_walk(args.path, True, None))}
+
+    @command("glob")
+    def glob(args: Target, ctx: Ctx) -> dict[str, int]:
+        import glob as g
+
+        return {"n": len(g.glob("**", root_dir=args.path, recursive=True))}
+
+    @command("rmtree")
+    def rmtree(args: Target, ctx: Ctx) -> None:
+        shutil.rmtree(args.path)
+
+    @command("copytree")
+    def copytree(args: Target, ctx: Ctx) -> None:
+        shutil.copytree(args.path, args.path.with_suffix(".bak"))
+
+    @command("ast-walk")
+    def ast_walk(args: Target, ctx: Ctx) -> dict[str, int]:
+        return {"n": sum(1 for _ in ast.walk(ast.parse(str(args.path))))}
+
+    return app
+
+
+def test_a_walk_that_cannot_follow_a_symlink_is_advice_not_a_loop_warning() -> None:
+    severity = {
+        f.command: f.severity for f in findings(traversal_app()) if f.rule == "recursive-traversal"
+    }
+    advice, warning = Severity.ADVICE, Severity.WARNING
+    assert severity == {
+        "rglob": advice,
+        "rglob-off": advice,
+        "rglob-on": warning,
+        "rglob-kwargs": warning,
+        "path-walk": advice,
+        "path-walk-on": warning,
+        "path-walk-positional": warning,
+        "os-walk": advice,
+        "os-walk-on": warning,
+        "os-walk-alias": warning,
+        "os-walk-alias-off": advice,
+        "glob": warning,
+        "rmtree": advice,
+        "copytree": warning,
+    }
+    by_command = {f.command: f.message for f in findings(traversal_app())}
+    assert "no --max-depth bounds this walk" in by_command["rglob"]
+    assert "circular symlink can loop" not in by_command["rglob"]
+    assert "circular symlink can loop" in by_command["rglob-on"]
+
+
+def test_the_walk_table_leaves_out_a_walk_the_platform_lacks() -> None:
+    # Windows has no os.fwalk: reading it at import broke ``import treaty`` there
+    def fwalk() -> None: ...
+
+    windows_os = types.ModuleType("os")
+    windows_os.walk = os.walk  # type: ignore[attr-defined]
+    assert os_walks(windows_os) == {os.walk: 3}
+    posix_os = types.ModuleType("os")
+    posix_os.walk, posix_os.fwalk = os.walk, fwalk  # type: ignore[attr-defined]
+    assert os_walks(posix_os) == {os.walk: 3, fwalk: None}
+
+
+def test_a_bare_rglob_cannot_loop_on_a_circular_symlink(tree: Path) -> None:
+    """The premise of the advice: without a follow flag a link back up is not entered"""
+    (tree / "a").mkdir()
+    (tree / "a" / "x.json").write_text("{}")
+    (tree / "a" / "loop").symlink_to(tree, target_is_directory=True)
+    assert [p.name for p in tree.rglob("*.json")] == ["x.json"]
+    assert [d.name for d, _, _ in tree.walk()] == [tree.name, "a"]
+    assert [os.path.basename(d) for d, _, _ in os.walk(tree)] == [tree.name, "a"]
 
 
 def test_conformance_probes_refuse_a_socks_proxy_and_a_zero_depth() -> None:

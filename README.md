@@ -833,8 +833,10 @@ plus `--no-follow-symlinks` and `--max-depth N` (default 50):
   and `symlinks_skipped` are there for the result (REQ-O-040)
 
 The `http-client` audit rule flags `urlopen`, `requests`, and `httpx` in a network command,
-and `recursive-traversal` flags `os.walk`, `rglob`, `shutil.rmtree`, `shutil.copytree`, and
-recursive `glob`.
+and `recursive-traversal` warns on a walk a circular symlink can loop: `shutil.copytree`,
+recursive `glob`, and `os.walk`, `Path.walk`, or `rglob` told to follow symlinks. Without
+that they cannot loop, nor can `shutil.rmtree`, and the rule only advises that no
+`--max-depth` bounds them.
 
 ## Declarations
 
