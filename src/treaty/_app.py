@@ -6009,12 +6009,10 @@ class _Run:
             return self._file_error(
                 envelope, "OUTPUT_UNWRITABLE", f"cannot write --output: {exc.strerror}", path
             )
-        written = {
-            "path": str(path),
-            "bytes": len(raw),
-            "content_type": wrapper.get("content_type"),
-            "sha256": hashlib.sha256(raw).hexdigest(),
-        }
+        written: dict[str, object] = {"path": str(path), "bytes": len(raw)}
+        if "content_type" in wrapper:  # only when the command declared one, as in the wrapper
+            written["content_type"] = wrapper["content_type"]
+        written["sha256"] = hashlib.sha256(raw).hexdigest()  # lowercase hex
         return dataclasses.replace(envelope, data=written)
 
     def _file_error(self, envelope: Envelope, code: str, message: str, path: Path) -> Envelope:

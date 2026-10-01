@@ -124,7 +124,7 @@ def test_schema_entry_keeps_full_exit_table(app: App) -> None:
 def test_builtins_are_marked_and_app_commands_are_not(app: App) -> None:
     manifest = app.manifest()
     spec_validator("manifest-response").validate(manifest)
-    assert manifest["schema_version"] == "3.1"
+    assert manifest["schema_version"] == "3.2"
     marked = {path for path, entry in manifest["commands"].items() if entry.get("builtin")}
     assert marked == {p.value for p in app.builtins}
     assert "manifest" in marked and "audit-log" in marked
@@ -169,7 +169,7 @@ def test_schema_of_one_command_carries_the_marker(app: App) -> None:
     assert run_json(app, ["doctor", "--schema"])[1]["data"]["builtin"] is True
     assert "builtin" not in run_json(app, ["deploy", "rollback", "--schema"])[1]["data"]
     subtree = run_json(app, ["deploy", "--schema"])[1]["data"]
-    assert subtree["schema_version"] == "3.1"
+    assert subtree["schema_version"] == "3.2"
     assert not any("builtin" in entry for entry in subtree["commands"].values())
 
 

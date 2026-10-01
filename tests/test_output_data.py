@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -219,8 +220,10 @@ def test_10_the_cap_bounds_the_envelope_never_the_file(tmp_path: Path) -> None:
     code, env = run(download_app(), ["blob", "--output", str(target)])
     blob = bytes(range(256)) * 256
     assert code == 0 and target.read_bytes() == blob and "truncated" not in env["meta"]
-    assert env["data"]["content_type"] is None and env["data"]["bytes"] == len(blob)
+    # No content_type declared: the key is left out, as in the base64 wrapper
+    assert set(env["data"]) == {"path", "bytes", "sha256"} and env["data"]["bytes"] == len(blob)
     assert env["data"]["sha256"] == hashlib.sha256(blob).hexdigest()
+    assert re.fullmatch(r"[0-9a-f]{64}", env["data"]["sha256"])
 
 
 def test_10_an_existing_file_is_replaced_atomically(tmp_path: Path) -> None:
@@ -264,8 +267,13 @@ def test_10_the_manifest_describes_the_raw_write_and_stays_valid() -> None:
     manifest = download_app().manifest()
     spec_validator("manifest-response").validate(manifest)
     commands = manifest["commands"]
+    assert manifest["schema_version"] == "3.2"
     assert "sha256" in commands["png"]["flags"]["output"]["description"]
     assert "--format" in commands["rows"]["flags"]["output"]["description"]
+    # REQ-O-001: output_file on exactly the commands that take --output
+    marked = {p: c["output_file"] for p, c in commands.items() if "output_file" in c}
+    assert marked == {"png": "binary", "blob": "binary", "rows": "formatted"}
+    assert {p for p, c in commands.items() if "output" in c["flags"]} == set(marked)
 
 
 def test_binary_output_file_rule_suggests_output_file_for_bytes() -> None:

@@ -473,7 +473,9 @@ and the manifest names where a relative path lands. A failed run still writes no
 a path with `..` exits `2` whatever the base.
 A command returning `treaty.Binary` writes the raw bytes instead, whatever the `--format`,
 and `data` is `{"path": ..., "bytes": N, "content_type": ..., "sha256": ...}`, with
-`content_type` null when the command gave none. Without `--output` the bytes stay base64
+`sha256` in lowercase hex and `content_type` only when the command declared one. The
+manifest says which a command does: `"output_file": "binary"` here, `"formatted"` on the
+other commands that take `--output` (ManifestResponse 3.2). Without `--output` the bytes stay base64
 in `data`, and the `binary-output-file` audit rule suggests `output_file=True`.
 `--output -` exits `2` there, as stdout carries only the envelope.
 
