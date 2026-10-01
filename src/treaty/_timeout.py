@@ -158,8 +158,9 @@ def call_with_timeout[T](
 
     worker = threading.Thread(target=target, name="treaty-handler", daemon=True)
     pending = Pending(worker, slot)
-    worker.start()
     try:
+        # Inside the try: an interrupt landing as start() returns still releases the worker
+        worker.start()
         if running is not None:
             running(pending)
     finally:

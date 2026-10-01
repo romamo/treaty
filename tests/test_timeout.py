@@ -242,6 +242,36 @@ def test_the_handler_runs_only_once_its_worker_is_registered() -> None:
     assert order == ["running", "fn", "ended"]
 
 
+def test_a_caller_interrupted_as_the_worker_starts_never_leaves_it_waiting() -> None:
+    """A ``KeyboardInterrupt`` on the calling thread the moment ``worker.start()``
+    returns, before the worker is registered: the worker must still be released to run
+    and end, not wait for its registration for the life of the process (#128). A trace
+    function raises it at the first line the caller runs after the start"""
+    started: list[threading.Thread] = []
+
+    def trace(frame, event, arg):  # type: ignore[no-untyped-def]
+        if frame.f_code is not call_with_timeout.__code__:
+            return None
+
+        def line(frame, event, arg):  # type: ignore[no-untyped-def]
+            worker = frame.f_locals.get("worker")
+            if event == "line" and not started and worker is not None and worker.ident:
+                started.append(worker)
+                raise KeyboardInterrupt
+            return line
+
+        return line
+
+    sys.settrace(trace)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            call_with_timeout(lambda: None, Timeout(5))
+    finally:
+        sys.settrace(None)
+    started[0].join(timeout=5)
+    assert not started[0].is_alive()
+
+
 def test_a_late_wake_skips_the_missed_heartbeats_rather_than_bursting() -> None:
     # Issue #56: a wait that wakes several intervals late ticked once per missed
     # interval in the same instant; the clock jumps 5.5 intervals to stall the wait
