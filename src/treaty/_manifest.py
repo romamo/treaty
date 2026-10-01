@@ -23,8 +23,9 @@ from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "3.2"  # 3.1: CommandEntry.builtin (REQ-O-041)
-# 3.2: CommandEntry.output_file (REQ-O-001)
+SCHEMA_VERSION = "3.3"  # 3.1: CommandEntry.builtin (REQ-O-041)
+# 3.2: ConditionalRule any_of and one_of, which the manifest does not emit (--schema does)
+# 3.3: CommandEntry.output_file (REQ-O-001)
 # TIMEOUT is shared: every handler runs under a deadline unless it is set to 0.
 # PRECONDITION too: a stray input() no one can answer exits 4 on any command (REQ-F-047)
 _ALWAYS = (

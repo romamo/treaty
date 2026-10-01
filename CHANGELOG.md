@@ -247,11 +247,13 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   command exits `2`, as stdout carries only the envelope; other commands still write a
   file named `-`. The new `binary-output-file` audit rule, an advice, suggests
   `output_file=True` for a command returning bytes without it (#10)
-- The manifest is ManifestResponse 3.2: the `CommandEntry` of a command declared
+- The manifest is ManifestResponse 3.3: the `CommandEntry` of a command declared
   `output_file=`, with any base, carries `output_file`, `"binary"` when it returns
   `treaty.Binary` and its `--output` gets the raw bytes, `"formatted"` when the file gets
   the `--format` representation; any other command, a passthrough one included, has no
-  key. `schema_version` is `"3.2"` (#10)
+  key. `schema_version` is `"3.3"`; the spec's 3.2 adds `ConditionalRule` `any_of` and
+  `one_of`, which treaty's manifest does not emit, as only `--schema` shows a group
+  rule (#10)
 
 ## [1.0.0rc9] - 2026-10-01
 
