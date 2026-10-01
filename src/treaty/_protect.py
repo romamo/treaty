@@ -26,7 +26,9 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
+from ._adapters import OutputAdapters, branch
 from ._errors import RegistrationError
 from ._out import data_path, is_binary, out_spec
 from ._redact import public_key_name, secret_field
@@ -87,19 +89,21 @@ class Protected:
     """A field declared ``Out(external=True)`` carried a value"""
 
 
-def protect(data: object, tp: object, *, unmask: bool) -> Protected:
+def protect(data: object, tp: object, *, unmask: bool, adapters: OutputAdapters) -> Protected:
     """``data``, the JSON form of an instance of ``tp``, with its high-entropy values
     masked unless ``unmask``; the walk also finds declared external content"""
-    walk = _Walk(unmask)
+    walk = _Walk(unmask, adapters)
     out = walk.value(data, tp, (), None)
     return Protected(out, tuple(walk.masked), walk.external)
 
 
-def protect_batch(data: Mapping[str, object], item: object, *, unmask: bool) -> Protected:
+def protect_batch(
+    data: Mapping[str, object], item: object, *, unmask: bool, adapters: OutputAdapters
+) -> Protected:
     """A ``Batch``'s ``data``: each successful result against the item type, so its
     ``Out(external=...)`` and ``Out(high_entropy=...)`` apply, and the summary and the
     failed items by name, as any undeclared object"""
-    walk = _Walk(unmask)
+    walk = _Walk(unmask, adapters)
     out: dict[str, object] = {}
     for key, value in data.items():
         if key == "results" and isinstance(value, list):
@@ -127,8 +131,9 @@ def tagged(data: object) -> object:
 
 
 class _Walk:
-    def __init__(self, unmask: bool) -> None:
+    def __init__(self, unmask: bool, adapters: OutputAdapters) -> None:
         self.unmask = unmask
+        self.adapters = adapters
         self.masked: list[str] = []
         self.external = False
 
@@ -137,6 +142,9 @@ class _Walk:
     ) -> object:
         """``secret``: True masks every string below, False none, None by shape and name"""
         base, _ = strip_optional(resolve_alias(tp))
+        if self.adapters.for_type(base) is not None:
+            assert isinstance(base, type)
+            return self.node(value, self.adapters.node(base), path, secret)
         if isinstance(value, str):
             return self.string(value, path, secret)
         if isinstance(value, list):
@@ -173,6 +181,53 @@ class _Walk:
         return {
             k: self.value(v, item, (*path, k), _by_name(k, v, secret)) for k, v in value.items()
         }
+
+    def node(
+        self,
+        value: object,
+        schema: Mapping[str, Any],
+        path: tuple[str | int, ...],
+        secret: bool | None,
+    ) -> object:
+        """``value`` by the JSON Schema an output adapter gave: a property's
+        ``x-high-entropy`` masks or exempts it, and ``x-external`` marks its content"""
+        node = branch(dict(schema), value)
+        if isinstance(value, str):
+            return self.string(value, path, secret)
+        if isinstance(value, list):
+            items = node.get("items")
+            extra = node.get("additionalItems")
+            rest = extra if isinstance(extra, dict) else {}
+            return [
+                self.node(
+                    v,
+                    (items[i] if i < len(items) else rest)
+                    if isinstance(items, list)
+                    else (items if isinstance(items, dict) else {}),
+                    (*path, i),
+                    secret,
+                )
+                for i, v in enumerate(value)
+            ]
+        if not isinstance(value, dict) or is_binary(value):
+            return value
+        properties = node.get("properties")
+        props = properties if isinstance(properties, dict) else {}
+        extra = node.get("additionalProperties")
+        rest = extra if isinstance(extra, dict) else {}
+        out: dict[str, object] = {}
+        for key, v in value.items():
+            prop = props.get(key)
+            if prop is None:
+                out[key] = self.node(v, rest, (*path, key), _by_name(key, v, secret))
+                continue
+            if prop.get("x-external") is True and v is not None:
+                self.external = True
+            declared = secret if secret is not None else prop.get("x-high-entropy")
+            if declared is None:
+                declared = _by_name(key, v, None)
+            out[key] = self.node(v, prop, (*path, key), declared)
+        return out
 
     def string(self, value: str, path: tuple[str | int, ...], secret: bool | None) -> str:
         if self.unmask or secret is False:
@@ -359,28 +414,53 @@ def _item_type(tp: object) -> object:
     return base
 
 
-def declares_external(tp: object, seen: frozenset[type] = frozenset()) -> bool:
-    """Some dataclass in the output type has an ``Out(external=True)`` field, so ``data``
-    may carry the trust tags and its schema must list them"""
+def declares_external(
+    tp: object, adapters: OutputAdapters, seen: frozenset[type] = frozenset()
+) -> bool:
+    """Some dataclass in the output type has an ``Out(external=True)`` field, or an adapted
+    class an ``x-external`` property, so ``data`` may carry the trust tags and its schema
+    must list them"""
     base, _ = strip_optional(resolve_alias(tp))
-    if any(declares_external(arg, seen) for arg in typing.get_args(base) if arg is not Ellipsis):
+    if any(
+        declares_external(arg, adapters, seen)
+        for arg in typing.get_args(base)
+        if arg is not Ellipsis
+    ):
         return True
+    if adapters.for_type(base) is not None:
+        assert isinstance(base, type)
+        return _external_node(adapters.node(base))
     if not is_dataclass_type(base) or base in seen:
         return False
     assert isinstance(base, type)
     hints = type_hints(base)
     return any(
-        out_spec(f).external or declares_external(hints[f.name], seen | {base})
+        out_spec(f).external or declares_external(hints[f.name], adapters, seen | {base})
         for f in dataclasses.fields(base)
     )
 
 
-def check_trust(tp: object, where: str, *, external: bool) -> None:
+def _external_node(node: object) -> bool:
+    if isinstance(node, list):
+        return any(_external_node(n) for n in node)
+    if not isinstance(node, dict):
+        return False
+    return node.get("x-external") is True or any(_external_node(v) for v in node.values())
+
+
+def check_trust(tp: object, where: str, *, external: bool, adapters: OutputAdapters) -> None:
     """Trust tags need an object to go on, and a name no output field takes"""
     item = _item_type(tp)
+    names: set[str] = set()
     if is_dataclass_type(item):
         assert isinstance(item, type)
-        taken = {f.name for f in dataclasses.fields(item)} & {SOURCE_KEY, TRUSTED_KEY}
+        names = {f.name for f in dataclasses.fields(item)}
+    elif adapters.for_type(item) is not None:
+        assert isinstance(item, type)
+        properties = adapters.node(item).get("properties")
+        names = set(properties) if isinstance(properties, dict) else set()
+    if names:
+        taken = names & {SOURCE_KEY, TRUSTED_KEY}
         if taken:
             raise RegistrationError(
                 f"{where}: output field {sorted(taken)[0]} is a trust tag treaty writes "

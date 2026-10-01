@@ -2,6 +2,7 @@
 
 from importlib.metadata import version
 
+from ._adapters import OutputAdapter
 from ._app import App, Group, NoArgs
 from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
@@ -86,6 +87,7 @@ __all__ = [
     "NetworkContext",
     "NoArgs",
     "Out",
+    "OutputAdapter",
     "Format",
     "Page",
     "PageRequest",

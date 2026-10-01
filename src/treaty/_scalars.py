@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from ._adapters import OutputAdapter, OutputAdapters
 from ._errors import RegistrationError
 
 # REQ-C-020 presets a scalar may claim instead of a pattern; filepath belongs to Path fields
@@ -153,14 +154,32 @@ def default_serializer(cls: type, base: type) -> Callable[[Any], object]:
 
 
 class ScalarRegistry:
+    """The app's own value types: registered scalars, and the output adapters that
+    describe and write whole class families (``app.output_adapter``)"""
+
     def __init__(self) -> None:
         self._specs: dict[type, ScalarSpec] = {}
+        self.adapters = OutputAdapters()
 
     def register(self, spec: ScalarSpec) -> ScalarSpec:
         if spec.cls in self._specs:
             raise RegistrationError(f"{spec.cls.__qualname__} is already a registered scalar")
+        if (adapter := self.adapters.for_type(spec.cls)) is not None:
+            raise RegistrationError(
+                f"{spec.cls.__qualname__} is written by the output adapter for "
+                f"{adapter.base.__qualname__}; a class is a scalar or adapted, not both"
+            )
         self._specs[spec.cls] = spec
         return spec
+
+    def register_adapter(self, adapter: OutputAdapter) -> OutputAdapter:
+        taken = sorted(c.__qualname__ for c in self._specs if issubclass(c, adapter.base))
+        if taken:
+            raise RegistrationError(
+                f"output_adapter: {adapter.base.__qualname__} covers {taken[0]}, a registered "
+                "scalar; a class is a scalar or adapted, not both"
+            )
+        return self.adapters.register(adapter)
 
     def get(self, cls: object) -> ScalarSpec | None:
         return self._specs.get(cls) if isinstance(cls, type) else None

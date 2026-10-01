@@ -117,6 +117,9 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
         if (spec := scalars.get(base)) is not None:
             # Before the built-ins it may replace, such as Decimal, as serialization is
             return spec.json_schema()
+        if output and scalars.adapters.for_type(base) is not None:
+            # An output adapter writes a class; reading one in is another registration
+            return scalars.adapters.schema(base)
         if base is Decimal:
             schema: JsonSchema = {"type": "string", "pattern": DECIMAL_PATTERN}
             # An argument says format: decimal; output keeps the schema locks recorded
@@ -125,7 +128,10 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
             return _enum_schema(base)
         if dataclasses.is_dataclass(base):
             return _dataclass_schema(base, scalars, output)
-    raise SchemaError(f"unsupported annotation {base!r}; register a class with app.scalar(...)")
+    raise SchemaError(
+        f"unsupported annotation {base!r}; register a class with app.scalar(...), or a "
+        "model family with app.output_adapter(...)"
+    )
 
 
 # REQ-F-005: dates and times travel as ISO 8601 text, keyed by exact class
@@ -242,11 +248,13 @@ def _masked(name: str, declared: bool | None, prop: JsonSchema) -> bool:
     return secret_field(name) and _textual(prop)
 
 
-def is_payload_type(tp: object) -> bool:
+def is_payload_type(tp: object, scalars: ScalarRegistry) -> bool:
     """True when values of this type serialize to a JSON object, array, or null"""
     base, _ = strip_optional(tp)
     if base is types.NoneType:
         return True
+    if scalars.adapters.for_type(base) is not None:
+        return True  # its schema is checked to be an object or array when it is built
     origin = typing.get_origin(base)
     return origin in (list, tuple, dict) or is_dataclass_type(base)
 
@@ -270,6 +278,8 @@ def to_jsonable(value: object, scalars: ScalarRegistry, *, base: Path) -> object
     # A registered scalar first: a str or int subclass has its own serialize=
     if (spec := scalars.for_value(value)) is not None:
         return to_jsonable(spec.serialize(value), scalars, base=base)
+    if (adapter := scalars.adapters.for_value(value)) is not None:
+        return to_jsonable(scalars.adapters.dump(value, adapter), scalars, base=base)
     if isinstance(value, float) and not math.isfinite(value):
         raise SchemaError(f"{value!r} is not a finite number, and JSON has no NaN or Infinity")
     if isinstance(value, Enum):
@@ -306,5 +316,6 @@ def to_jsonable(value: object, scalars: ScalarRegistry, *, base: Path) -> object
             for f in dataclasses.fields(value)
         }
     raise SchemaError(
-        f"cannot serialize {type(value).__name__} to JSON; register it with app.scalar(...)"
+        f"cannot serialize {type(value).__name__} to JSON; register it with app.scalar(...), "
+        "or its model family with app.output_adapter(...)"
     )

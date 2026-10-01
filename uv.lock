@@ -1021,6 +1021,7 @@ dev = [
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "mypy" },
+    { name = "pydantic" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -1037,6 +1038,7 @@ dev = [
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "mcp", specifier = ">=2,<3" },
     { name = "mypy", specifier = ">=1.14" },
+    { name = "pydantic", specifier = ">=2.11" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.9" },
 ]

@@ -37,6 +37,19 @@ Apps built on treaty keep their own, structured schema changelog with
   `postings[].token`, so it becomes a top-level flag read from `--x-from-env` or
   `--x-from-file`. An object flag cannot be positional, a secret, a setting, or a
   `Subprocess(user_controlled_args=)` field (#6)
+### Added
+
+- `app.output_adapter(base, schema=..., dump=...)` lets a handler return a class treaty
+  does not know, such as a pydantic `BaseModel`, with no dataclass mirror: one
+  registration covers every subclass, returned at the top, in a `list` or `tuple`, as
+  `Model | None`, or in a dataclass field. treaty imports no pydantic. The output schema
+  comes from `schema(cls)` with its `$defs` inlined and every key required, and `data`
+  from `dump(obj)`. The stable-output rules are checked on that schema at registration:
+  a null list or dict is refused unless `none_as_empty=True` writes it as `[]` or `{}`,
+  and a property declares the `Out` options as `x-sort-key`, `x-ordered`, `x-volatile`,
+  `x-high-entropy`, and `x-external` (pydantic's `Field(json_schema_extra=...)`), each
+  optional. `treaty audit` advises declaring the order of an adapted array of objects
+  and notes an untyped `dict[str, Any]` value. `OutputAdapter` is exported (#2)
 
 ## [1.0.0rc9] - 2026-10-01
 
