@@ -2762,6 +2762,9 @@ class _Run:
         """Whether the root logger routes records to this run (``attach_logging``)"""
         self._redaction: tuple[tuple[object, ...], Callable[[str], str]] | None = None
         """``_redact_now``'s redactor, with the invocation state it was built from"""
+        self._shown: tuple[tuple[object, ...], list[WarningDetail]] | None = None
+        """``warnings`` as envelopes carry them, redacted, with the invocation state they
+        were redacted for: a stream's every event carries them, each redacted once"""
         self.current: Command | None = None
         """The command being answered, for ``meta.command`` and ``meta.schema_version``"""
         self.pinned: SchemaVersion | None = None
@@ -3439,9 +3442,27 @@ class _Run:
                 project_root=None if root is None else str(root),
                 retries=0 if self.retrier is None or self.stable else self.retrier.count,
             ),
-            warnings=tuple(self.warnings),
+            warnings=self._shown_warnings(),
             extra_meta={**extra, **(meta or {})},
         )
+
+    def _shown_warnings(self) -> tuple[WarningDetail, ...]:
+        """``warnings`` as every envelope carries them: each ``message`` and context
+        string redacted of the secret values of every attached run and live handler
+        thread, as ``error.message`` is (#162). Keys stay: stdout is not redacted by
+        field name (REQ-F-034)"""
+        source = self.warnings
+        key = (source, self.current, self.args, self.token, self.settings)
+        cached = self._shown
+        if cached is None or any(a is not b for a, b in zip(cached[0], key, strict=True)):
+            cached = self._shown = (key, [])
+        shown = cached[1]
+        redact = self._redact_everywhere
+        for warning in source[len(shown) :]:
+            context = redacted(dict(warning.context), redact)
+            assert isinstance(context, dict)
+            shown.append(WarningDetail(warning.code, redact(warning.message), context=context))
+        return tuple(shown)
 
     def arg_error(self, exc: ParseError, *, code: str | None = None, **kw: Any) -> Envelope:
         rebase_suggestions(exc, self.cwd)

@@ -50,6 +50,13 @@ Apps built on treaty keep their own, structured schema changelog with
   `x-high-entropy`, and `x-external` (pydantic's `Field(json_schema_extra=...)`), each
   optional. `treaty audit` advises declaring the order of an adapted array of objects
   and notes an untyped `dict[str, Any]` value. `OutputAdapter` is exported (#2)
+- Security: a declared secret a handler passes to `ctx.warn`, in the message or as a
+  context value, no longer reaches the response's `warnings` unredacted. Each warning's
+  `message` and context strings are redacted of every live run's and handler thread's
+  secret values where the envelope is built, as `error.message` is, so JSON and JSONL
+  output, stream events, `exec` lines, `App.call` and MCP results, and the envelope
+  describing an `--output` write all carry the redacted text. Context keys stay as given
+  (#162)
 
 ## [1.0.0rc9] - 2026-10-01
 
