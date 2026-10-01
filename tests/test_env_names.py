@@ -189,6 +189,31 @@ def test_a_bad_declared_name_is_refused_at_registration(
         App("bean", version="1.0.0", settings=_settings(**fields))
 
 
+@dataclass(frozen=True, slots=True)
+class Signed:
+    token: str = Flag(default="", description="Token", secret=True)
+
+
+@pytest.mark.parametrize(("secret", "refused"), [(None, True), (False, True), (True, False)])
+def test_a_plain_setting_cannot_read_a_variable_a_command_reads_as_a_secret(
+    secret: bool | None, refused: bool
+) -> None:
+    """--show-config prints a plain setting, so it would leak the command's credential"""
+    label = Flag(default="", description="Label", secret=secret, env=("BEAN_TOKEN",))
+    app = App("bean", version="1.0.0", settings=_settings(label=label))
+
+    def register() -> None:
+        @app.command("sign", description="Sign", danger_level="safe", exit_codes=())
+        def sign(args: Signed, ctx: Ctx) -> NoArgs:
+            return NoArgs()
+
+    if refused:
+        with pytest.raises(RegistrationError, match="plain setting 'label'"):
+            register()
+    else:
+        register()
+
+
 def test_env_takes_a_tuple_of_names_or_env_names() -> None:
     with pytest.raises(RegistrationError, match="tuple of variable names"):
         Flag(description="F", env="BEANCOUNT_FILE")  # type: ignore[arg-type]

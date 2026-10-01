@@ -250,7 +250,7 @@ from ._select import (
 )
 from ._session import Session, SessionRoot, prune
 from ._settings import EMPTY as EMPTY_SETTINGS
-from ._settings import ConfigOptions, Resolved, SettingsSpec
+from ._settings import ConfigOptions, Resolved, SettingsSpec, plain_settings_env
 from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
@@ -1163,6 +1163,7 @@ class App:
                 "framework for this command, or "
                 f"reserved for it (REQ-F-079), and would never reach the handler; {advice}"
             )
+        self._check_secret_env(command)
         if path in self._commands:
             raise RegistrationError(f"{path} is already registered")
         if path in self._groups:
@@ -1317,6 +1318,17 @@ class App:
             if command.is_ancestor_of(path) or path.is_ancestor_of(command):
                 raise RegistrationError(
                     f"{path} and {command} overlap: a command cannot also be a group"
+                )
+
+    def _check_secret_env(self, command: Command) -> None:
+        """A variable a command reads as a secret or token is no plain setting's
+        ``Flag(env=)`` name: ``--show-config`` would print the credential"""
+        plain = plain_settings_env(self._settings_cls)
+        for var in (*command.secret_env_vars.values(), *command.token_env_vars):
+            if var in plain:
+                raise RegistrationError(
+                    f"{command.path.value}: reads {var} as a secret, which {plain[var]} also "
+                    "reads; a variable read as a secret cannot be read as a plain value"
                 )
 
     def _register_builtins(self, enable_exec: bool) -> None:

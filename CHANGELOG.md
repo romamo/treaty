@@ -21,7 +21,8 @@ Apps built on treaty keep their own, structured schema changelog with
   old name with a `DEPRECATED_ENV_VAR` warning naming the variable to use instead; a name is
   not deprecated unless declared so. A name that is not a variable name, repeats, is the
   field's own `<APP>_<FIELD>`, or is read for another field or a framework option is a
-  `RegistrationError` (#7)
+  `RegistrationError`, as is a plain setting naming a variable a command reads as a secret
+  or token, which `--show-config` would print (#7)
 
 ## [1.0.0rc10] - 2026-10-01
 

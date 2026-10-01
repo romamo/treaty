@@ -178,6 +178,23 @@ def settings_env_names(settings: type | None) -> frozenset[str]:
     )
 
 
+def plain_settings_env(settings: type | None) -> dict[str, str]:
+    """The names plain settings declare with ``Flag(env=)``, with the field each sets:
+    ``--show-config`` prints their values. A setting is secret when declared so or, left
+    undeclared, when its name says so; read without inspecting the field types"""
+    if settings is None:
+        return {}
+    plain: dict[str, str] = {}
+    for f in dataclasses.fields(settings):
+        declared = f.metadata.get(FLAG_META)
+        if declared is None or not declared.env:
+            continue
+        secret = secret_name(f.name) if declared.secret is None else declared.secret
+        if not secret:
+            plain |= dict.fromkeys((n.name for n in declared.env), f"plain setting {f.name!r}")
+    return plain
+
+
 @dataclass(frozen=True, slots=True)
 class ConfigOptions:
     """Where this run reads config: the global flags, else their environment variables"""
