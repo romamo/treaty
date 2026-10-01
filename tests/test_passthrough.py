@@ -205,6 +205,15 @@ def test_the_audit_log_records_the_run_without_its_raw_argv(tmp_path: Path) -> N
     assert "secret-token" not in line
 
 
+def test_the_unprotected_record_on_stderr_omits_the_tools_argv() -> None:
+    ran = run(["--no-injection-protection", "ingest", "extract", "secret-token"])
+    assert ran.code == 0 and ran.stdout == "entries of secret-token\n"
+    record = json.loads(ran.stderr.splitlines()[0])
+    assert record["code"] == "INJECTION_PROTECTION_DISABLED"
+    assert record["argv"] == ["ledger", "--no-injection-protection", "ingest", "[OMITTED]"]
+    assert "secret-token" not in ran.stderr
+
+
 def test_descriptor_1_is_the_tools_under_main() -> None:
     proc = subprocess.run(
         [sys.executable, str(LEDGER), "ingest", "native"],

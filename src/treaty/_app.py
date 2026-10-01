@@ -1926,6 +1926,10 @@ class App:
         delegation = delegated_argv(argv, self._commands)
         if delegation is not None:
             argv = delegation.argv
+            if delegation.rest and run.argv is not None:
+                # The tool's tokens may hold its secrets, which treaty cannot tell
+                kept = run.argv[: len(run.argv) - len(delegation.rest)]
+                run.argv = (*kept, OMITTED)
         try:
             bound = bind_values(strict_argv(argv, self._commands), self._commands)
             globals_, rest = split_globals(bound, short_verbose=not self._claims_v(bound))
