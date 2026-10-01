@@ -120,7 +120,7 @@ from ._envelope import (
     visible,
     write_envelope,
 )
-from ._envnames import DEPRECATED_ENV_VAR, declared_text, deprecated_name
+from ._envnames import DEPRECATED_ENV_VAR, check_env_names, declared_text, deprecated_name
 from ._envnames import replacement as env_replacement
 from ._errors import (
     ArgsCrashed,
@@ -135,7 +135,7 @@ from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy
 from ._fix import command_problem, fix_problem
 from ._flags import Arg, Flag
 from ._framework import framework_collisions
-from ._help import global_rows, render_command, render_root
+from ._help import declared_env_rows, global_rows, render_command, render_root
 from ._http import Http, NetworkFailure, ProxyConfig
 from ._idempotency import (
     KeyBusy,
@@ -250,7 +250,13 @@ from ._select import (
 )
 from ._session import Session, SessionRoot, prune
 from ._settings import EMPTY as EMPTY_SETTINGS
-from ._settings import ConfigOptions, Resolved, SettingsSpec, plain_settings_env
+from ._settings import (
+    ConfigOptions,
+    Resolved,
+    SettingsSpec,
+    plain_settings_env,
+    settings_env_taken,
+)
 from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
@@ -268,6 +274,7 @@ from ._suggest import closest, hint
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
 from ._tools import EXEC_PATH
+from ._types import FlagType
 from ._update import UpdateCheck, available, check_allowed
 from ._values import (
     CommandPath,
@@ -1164,6 +1171,7 @@ class App:
                 f"reserved for it (REQ-F-079), and would never reach the handler; {advice}"
             )
         self._check_secret_env(command)
+        self._check_flag_env(command)
         if path in self._commands:
             raise RegistrationError(f"{path} is already registered")
         if path in self._groups:
@@ -1320,14 +1328,68 @@ class App:
                     f"{path} and {command} overlap: a command cannot also be a group"
                 )
 
+    def _check_flag_env(self, command: Command) -> None:
+        """``Flag(env=)`` names read one value each: no framework variable, no setting's
+        variable or declared name, no other flag's variable in the same command, and not
+        the flag's own ``<APP>_<NAME>``. Flags of different commands may share a name,
+        unless one reads it as a secret and the other as a plain value, which would echo it"""
+        if not any(f.spec.env for f in command.fields):
+            return
+        taken = {app_var(self.name, v.key): f"the framework's {v.key}" for v in KNOWN}
+        taken |= settings_env_taken(self._settings_cls, self.name)
+        where = command.path.value
+        taken |= {
+            v: f"--{k.replace('_', '-')} of {where}" for k, v in command.secret_env_vars.items()
+        }
+        taken |= {v: f"the token of {where}" for v in command.token_env_vars}
+        for f in command.fields:
+            if f.spec.env and f.flag_type is FlagType.ARRAY and f.object_type is not None:
+                raise RegistrationError(
+                    f"{where}: --{f.flag} takes a list of JSON objects, which a variable "
+                    "cannot carry as comma-separated text; drop env= or take one object"
+                )
+            own = command.secret_env_vars.get(f.name)
+            others = {k: v for k, v in taken.items() if k != own}
+            check_env_names(
+                f"{where}: --{f.flag}", own, f.spec.env, others, default=own or f"--{f.flag}"
+            )
+            taken |= {n.name: f"--{f.flag} of {where}" for n in f.spec.env}
+
     def _check_secret_env(self, command: Command) -> None:
-        """A variable a command reads as a secret or token is no plain setting's
-        ``Flag(env=)`` name: ``--show-config`` would print the credential"""
+        """A variable a secret or token reads in one command is no plain setting's or
+        plain flag's ``Flag(env=)`` name, and the reverse: ``--show-config``, the envelope,
+        and the audit log would carry the credential unredacted"""
+        secret: dict[str, str] = {}
         plain = plain_settings_env(self._settings_cls)
-        for var in (*command.secret_env_vars.values(), *command.token_env_vars):
+        for c in (*self._commands.values(), command):
+            where = c.path.value
+            secret |= {v: f"the token of {where}" for v in c.token_env_vars}
+            for f in c.fields:
+                names = [n.name for n in f.spec.env]
+                if f.secret:
+                    own = c.secret_env_vars[f.name]
+                    secret |= dict.fromkeys([own, *names], f"secret --{f.flag} of {where}")
+                elif c is command:
+                    continue
+                else:
+                    plain |= dict.fromkeys(names, f"plain --{f.flag} of {where}")
+        for var in command.token_env_vars:
             if var in plain:
                 raise RegistrationError(
-                    f"{command.path.value}: reads {var} as a secret, which {plain[var]} also "
+                    f"{command.path.value}: reads {var} as a token, which {plain[var]} also "
+                    "reads; a variable read as a secret cannot be read as a plain value"
+                )
+        for f in command.fields:
+            if f.secret:
+                names = [command.secret_env_vars[f.name], *(n.name for n in f.spec.env)]
+                clash = next((n for n in names if n in plain), None)
+                read_as = None if clash is None else plain[clash]
+            else:
+                clash = next((n.name for n in f.spec.env if n.name in secret), None)
+                read_as = None if clash is None else secret[clash]
+            if clash is not None:
+                raise RegistrationError(
+                    f"{command.path.value}: --{f.flag} reads {clash}, which {read_as} also "
                     "reads; a variable read as a secret cannot be read as a plain value"
                 )
 
@@ -1733,12 +1795,16 @@ class App:
             for f in self.settings.fields:
                 own = app_var(self.name, f.name)
                 rows.append((own, f"Setting {f.name}, over the config files"))
-                rows += [(n.name, declared_text(n, f"Setting {f.name}", own)) for n in f.env]
+                rows += [(n.name, declared_text(n, f"Setting {f.name}", own, own)) for n in f.env]
+        commands = sorted(self._commands.items(), key=lambda kv: kv[0].value)
         secrets = {
             var: f"Default of --{field.replace('_', '-')} of {path}"
-            for path, c in sorted(self._commands.items(), key=lambda kv: kv[0].value)
+            for path, c in commands
             for field, var in c.secret_env_vars.items()
         }
+        for path, c in commands:
+            for var, _, text in declared_env_rows(path, c):
+                secrets.setdefault(var, text)  # flags of several commands may share one
         return rows + sorted(secrets.items())
 
     def _effective_timeout(self, command: Command, override: Timeout | None) -> Timeout:
@@ -4276,7 +4342,7 @@ class _Run:
 
     def _deprecations(self, command: Command, invocation: Invocation) -> None:
         """REQ-F-075: a deprecated command, a deprecated flag the caller passed, or a
-        deprecated variable a setting was read from still runs; stderr gets one
+        deprecated variable a setting or flag was read from still runs; stderr gets one
         structured line and ``warnings`` an entry, each naming the replacement"""
         found: list[tuple[str, str, Deprecated, str | None]] = []
         if (old := command.deprecated) is not None:
@@ -4289,6 +4355,12 @@ class _Run:
             if (old := f.spec.deprecated) is not None and f.name in invocation.given:
                 instead = old.replacement and f"--{old.replacement}"
                 found.append(("DEPRECATED_FLAG", f"--{f.flag}", old, instead))
+        for f in command.fields:
+            var = invocation.env_sources.get(f.name, "")
+            name = deprecated_name(f.spec.env, var)
+            if name is not None and name.deprecated is not None:
+                instead = env_replacement(name, command.secret_env_vars.get(f.name, f"--{f.flag}"))
+                found.append((DEPRECATED_ENV_VAR, var, name.deprecated, instead))
         spec = self.app.settings
         for s in () if spec is None else spec.fields:
             var = self.settings.sources.get(s.name, "").removeprefix("env:")

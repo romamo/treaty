@@ -247,16 +247,3 @@ def test_a_deprecated_name_may_point_at_another_declared_name() -> None:
     assert envelope.data == {"file": "x"}
     [warning] = envelope.warnings
     assert warning.context["replacement"] == "NEW_FILE"
-
-
-def test_env_on_a_command_flag_is_refused_until_flags_read_variables() -> None:
-    @dataclass(frozen=True)
-    class Args:
-        file: str = Flag(default="", description="F", env=("BEANCOUNT_FILE",))
-
-    app = App("bean", version="1.0.0")
-    with pytest.raises(RegistrationError, match="env= is for settings fields"):
-
-        @app.command("show", description="Show", danger_level="safe", exit_codes=())
-        def show(args: Args, ctx: Ctx) -> Args:
-            return args
