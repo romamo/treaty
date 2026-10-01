@@ -225,6 +225,8 @@ class Leaf:
     text: str
 
     def __post_init__(self) -> None:
+        if self.text.startswith("crash-"):
+            raise ValueError(f"cannot read {self.text.removeprefix('crash-')}")
         if self.text.startswith("Zq7"):
             raise ParseError(f"note {self.text} looks like a credential")
 
@@ -314,3 +316,23 @@ def test_a_nested_object_post_init_quoting_a_secret_is_redacted() -> None:
         "note", {"password_from_env": "PW", "note": {"leaf": {"text": SECRET}}}, env=ENV
     )
     assert envelope.exit_code == 2 and SECRET not in json.dumps(envelope.to_json())
+
+
+def test_a_nested_object_crash_quoting_a_secret_is_redacted() -> None:
+    """An object's __post_init__ bug is reported once the secrets are read, whichever
+    order the flags came in, so the crash report is redacted of them"""
+    note = json.dumps({"leaf": {"text": f"crash-{SECRET}"}})
+    for argv in (
+        ["note", "--password-from-env", "PW", "--note", note],
+        ["note", "--note", note, "--password-from-env", "PW"],
+    ):
+        code, out, err = run([*argv, "--format", "json"], app=rebuild_app())
+        assert code == 1 and SECRET not in out + err
+        error = json.loads(out)["error"]
+        assert error["code"] == "HANDLER_CRASHED" and "[REDACTED]" in error["message"]
+    arguments = {"password_from_env": "PW", "note": {"leaf": {"text": f"crash-{SECRET}"}}}
+    envelope = rebuild_app().call("note", arguments, env=ENV)
+    assert envelope.exit_code == 1 and SECRET not in json.dumps(envelope.to_json())
+    line = json.dumps({"_cmd": "note", **arguments})
+    code, out, err = run(["exec"], app=rebuild_app(), stdin=line + "\n")
+    assert code != 0 and SECRET not in out + err and "HANDLER_CRASHED" in out

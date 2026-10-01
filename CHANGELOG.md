@@ -111,8 +111,10 @@ Apps built on treaty keep their own, structured schema changelog with
   values reached the envelope as written. They are now redacted of the run's secret
   values, as a handler's error is, on every path that answers with that envelope: JSON,
   the plain rendering on stderr, `exec` lines, `--raw-payload`, `--validate-only`,
-  `App.call`, and MCP tool calls. treaty's own phase 1 errors, which never echo a secret,
-  read as before (#165)
+  `App.call`, and MCP tool calls. That holds at parse time, for the rebuild of a forced
+  dry run or under `--cwd`, and for an object flag's own `__post_init__`, whose crash
+  report is now redacted of the run's secrets too. treaty's own phase 1 errors, which
+  never echo a secret, read as before (#165)
 
 ## [1.0.0rc9] - 2026-10-01
 

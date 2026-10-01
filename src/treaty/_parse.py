@@ -488,10 +488,17 @@ class _Collector:
 
     def __init__(self) -> None:
         self.errors: list[ParseError] = []
+        self.crashed: ArgsCrashed | None = None
+        """An object's ``__post_init__`` bug, raised once every value, the secrets
+        included, has been read, so its report can be redacted of them (#165)"""
 
     def add(self, exc: ParseError) -> None:
         """One error, or each of several an object's checks collected"""
         self.errors.extend(exc.errors or (exc,))
+
+    def crash(self, exc: ArgsCrashed) -> None:
+        if self.crashed is None:
+            self.crashed = exc
 
     def fail(self) -> NoReturn:
         raise ParseError.combine(self.errors)
@@ -710,6 +717,9 @@ def parse_command_args(
         except ParseError as exc:
             errors.add(exc)
             i += 1
+        except ArgsCrashed as exc:  # an object's __post_init__, before secrets are read
+            errors.crash(exc)
+            i += 1
 
     for name, items in arrays.items():
         values[name] = tuple(items)
@@ -815,6 +825,9 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
     """The args dataclass built, or every phase 1 error with the values read, so the
     envelope can redact the secrets among them from what user code wrote, such as a
     nested object's ``__post_init__`` collected beside the args' own (#165)"""
+    if errors.crashed is not None:
+        # The object's own fields hold no secret; the run's are in values by now
+        raise ArgsCrashed(errors.crashed.cause, values) from errors.crashed.cause
     try:
         return _construct(command, values, errors)
     except ArgsRefused:
@@ -955,6 +968,8 @@ def build_from_mapping(
             values[found.name] = _check_json_value(found, value)
         except ParseError as exc:
             errors.add(exc)
+        except ArgsCrashed as exc:  # an object's __post_init__, before secrets are read
+            errors.crash(exc)
     _apply_secrets(command, values, secrets, env, errors)
     given = frozenset(values)
     return Invocation(args=_finish(command, values, errors), given=given, **framework)
