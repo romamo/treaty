@@ -455,6 +455,7 @@ def build_command(
                 "gui_operations=": bool(gui_operations),
                 "heartbeat=True": heartbeat,
                 "stdin_input=": stdin_input is not None,
+                "stdin_records=": stdin_records is not None,
                 "supports_raw_payload=True": supports_raw_payload,
                 "auth=": auth is not None,
                 "async_job=True": async_job,

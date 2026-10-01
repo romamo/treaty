@@ -80,6 +80,8 @@ def test_a_passthrough_command_takes_no_args_and_returns_an_exit_code() -> None:
     for stdin_input in (True, "lines"):
         with pytest.raises(RegistrationError, match="stdin_input="):
             app.command("c2", passthrough=True, stdin_input=stdin_input, **meta)(handler)
+    with pytest.raises(RegistrationError, match="stdin_records="):
+        app.command("c3", passthrough=True, stdin_records=Some, **meta)(handler)
     with pytest.raises(RegistrationError, match="passthrough=True"):
         app.command("d", help_command=("--help",), **meta)(handler)
     with pytest.raises(RegistrationError, match="non-empty argv tokens"):
