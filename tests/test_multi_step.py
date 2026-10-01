@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import pytest
-from conftest import needs_posix_signals, spec_validator
+from conftest import CountedLines, needs_posix_signals, spec_validator
 from jsonschema import Draft7Validator
 
 from treaty import (
@@ -176,10 +176,10 @@ def test_heartbeat_lines_name_the_step_in_progress() -> None:
     )
     def go(args: NoArgs, ctx: Ctx) -> dict[str, int]:
         ctx.step("wait")
-        time.sleep(0.3)
+        out.wait_for(1)  # a beat that names the step, however late it comes (#168)
         return {}
 
-    out = io.StringIO()
+    out = CountedLines(lambda line: '"step"' in line)
     assert app.run(["go", "--heartbeat-ms", "50"], stdout=out, stderr=io.StringIO(), env={}) == 0
     *beats, _ = [json.loads(line) for line in out.getvalue().splitlines()]
     # A beat may land before the handler reaches ctx.step on a slow runner, and has no step

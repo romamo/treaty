@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from conftest import spec_validator
+from conftest import CountedLines, spec_validator
 
 from treaty import App, Arg, Ctx, Exit, Flag, NoArgs, RegistrationError
 from treaty._audit import audit
@@ -433,17 +433,36 @@ def test_audit_suggests_id_field_for_an_output_with_one_id_like_field() -> None:
 HEARTBEAT = re.compile(r"\[(\d+)s\] (.+)")
 
 
+def migrating(argv: list[str], beats: int) -> tuple[int, str, str]:
+    """Run a migrate command that, after each of its two progress statuses, waits until
+    stderr has had ``beats`` more heartbeat lines: a fixed sleep is outlasted by a loaded
+    runner's timer slack, which delays every beat (#168)"""
+    out, err = io.StringIO(), CountedLines(lambda line: HEARTBEAT.fullmatch(line) is not None)
+    app = App("beatctl", version="1.0.0")
+
+    @app.command("migrate", description="Work a while", danger_level="safe",
+                 exit_codes=(), heartbeat=True, timeout=30)  # fmt: skip
+    def migrate(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        for status in ("Connecting to database...", "Running migration batch 1/2..."):
+            ctx.progress(status)
+            err.wait_for(err.seen + beats)
+        return {"done": True}
+
+    code = app.run(argv, stdin=io.StringIO(), stdout=out, stderr=err, env={}, isatty=False)
+    return code, out.getvalue(), err.getvalue()
+
+
 def test_heartbeat_interval_causes_a_progress_message_to_stderr_every_interval() -> None:
     started = time.monotonic()
-    code, _, err = run(["migrate", "--seconds", "0.6", "--heartbeat-interval", "0.1"])
+    code, _, err = migrating(["migrate", "--heartbeat-interval", "0.1"], beats=2)
     elapsed = time.monotonic() - started
     beats = [line for line in err.splitlines() if HEARTBEAT.fullmatch(line)]
     # A slow runner stretches the run, so the ceiling is one beat per interval it really took
-    assert code == 0 and 3 <= len(beats) <= elapsed / 0.1 + 1
+    assert code == 0 and 4 <= len(beats) <= elapsed / 0.1 + 1
 
 
 def test_the_heartbeat_message_includes_elapsed_time_and_the_most_recent_progress_status() -> None:
-    _, _, err = run(["migrate", "--seconds", "0.6", "--heartbeat-interval", "0.1"])
+    _, _, err = migrating(["migrate", "--heartbeat-interval", "0.1"], beats=1)
     statuses = [HEARTBEAT.fullmatch(line) for line in err.splitlines()]
     assert all(m is not None and m.group(1) == "0" for m in statuses)
     said = [m.group(2) for m in statuses if m is not None]
@@ -452,8 +471,9 @@ def test_the_heartbeat_message_includes_elapsed_time_and_the_most_recent_progres
 
 
 def test_heartbeat_messages_are_plain_text_never_json() -> None:
-    code, out, err = run(["migrate", "--seconds", "0.3", "--heartbeat-interval", "0.1"])
-    assert err and all(not line.startswith("{") for line in err.splitlines())
+    code, out, err = migrating(["migrate", "--heartbeat-interval", "0.1"], beats=1)
+    # Exit 0: the handler saw its beats; a crash's traceback is plain text too
+    assert code == 0 and err and all(not line.startswith("{") for line in err.splitlines())
     assert [line for line in out.splitlines() if "heartbeat" in line] == []
 
 
