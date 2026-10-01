@@ -487,3 +487,30 @@ def test_settings_and_subprocess_refuse_object_fields() -> None:
         )
         def run_it(args: RunArgs, ctx: Ctx) -> None:
             return None
+
+
+def test_post_init_error_on_a_field_named_like_the_flag_is_located() -> None:
+    """``window_start`` begins with ``window`` but is not under it, so it is prefixed"""
+    from treaty import ParseError
+
+    @dataclass(frozen=True, slots=True)
+    class Window:
+        window_start: int
+        window_end: int
+
+        def __post_init__(self) -> None:
+            if self.window_start > self.window_end:
+                raise ParseError("start is after end", context={"field": "window_start"})
+
+    @dataclass(frozen=True, slots=True)
+    class Args:
+        window: Window = Flag(description="The window")
+
+    app = App("w", version="1.0.0")
+
+    @app.command("check", description="Check", danger_level="safe", exit_codes=())
+    def check(args: Args, ctx: Ctx) -> dict[str, int]:
+        return {"start": args.window.window_start}
+
+    code, env = run(["check", "--window", '{"window_start": 3, "window_end": 2}'], app=app)
+    assert code == 2 and env["error"]["context"]["field"] == "window.window_start"

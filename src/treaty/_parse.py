@@ -1003,7 +1003,7 @@ def _located(exc: ParseError, where: str) -> ParseError:
     """An object's own ``__post_init__`` error, at the object unless it names a field"""
     if exc.field is None:
         exc.context["field"] = where
-    elif not exc.field.startswith(where):
+    elif exc.field != where and not exc.field.startswith((f"{where}.", f"{where}[")):
         exc.context["field"] = f"{where}.{exc.field}"
     return exc
 
