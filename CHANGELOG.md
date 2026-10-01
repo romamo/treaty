@@ -10,6 +10,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc12] - 2026-10-01
+
+The twelfth 1.0 release candidate: 1 change, 7 fixes, 5 additions, and 3 breaking changes.
+Not additive over rc11: see Breaking.
+
 ### Changed
 
 - The README says a passthrough command's delegated parser follows its own colour rules:
@@ -1320,7 +1325,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc11...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc12...HEAD
+[1.0.0rc12]: https://github.com/romamo/treaty/compare/v1.0.0rc11...v1.0.0rc12
 [1.0.0rc11]: https://github.com/romamo/treaty/compare/v1.0.0rc10...v1.0.0rc11
 [1.0.0rc10]: https://github.com/romamo/treaty/compare/v1.0.0rc9...v1.0.0rc10
 [1.0.0rc9]: https://github.com/romamo/treaty/compare/v1.0.0rc8...v1.0.0rc9
