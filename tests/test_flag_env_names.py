@@ -234,6 +234,43 @@ def test_flags_of_different_commands_may_share_a_name() -> None:
 
 
 @dataclass(frozen=True)
+class Labelled:
+    label: str = Flag(default="", description="Label", env=("SHARED_TOKEN",))
+
+
+@dataclass(frozen=True)
+class Signed:
+    token: str = Flag(default="", description="Token", secret=True, env=("SHARED_TOKEN",))
+
+
+@dataclass(frozen=True)
+class ReadsOwnSecret:
+    label: str = Flag(default="", description="Label", env=("PY_IBKR_TOKEN",))
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [(Signed, Labelled), (Labelled, Signed), (Download, ReadsOwnSecret)],
+)
+def test_a_plain_flag_cannot_read_a_variable_another_command_reads_as_a_secret(
+    first: type, second: type
+) -> None:
+    """A plain flag echoes its value in the envelope and the audit log, so a variable one
+    command reads as a secret would leak through another command's plain flag"""
+    app = App("py-ibkr", version="1.0.0")
+
+    @app.command("one", description="One", danger_level="safe", exit_codes=())
+    def one(args: first, ctx: Ctx) -> NoArgs:  # type: ignore[valid-type]
+        return NoArgs()
+
+    with pytest.raises(RegistrationError, match="secret"):
+
+        @app.command("two", description="Two", danger_level="safe", exit_codes=())
+        def two(args: second, ctx: Ctx) -> NoArgs:  # type: ignore[valid-type]
+            return NoArgs()
+
+
+@dataclass(frozen=True)
 class Settings:
     region: str = Flag(default="eu", description="Region", env=("AWS_REGION",))
 

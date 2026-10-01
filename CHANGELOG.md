@@ -27,7 +27,8 @@ Apps built on treaty keep their own, structured schema changelog with
   already uses, such as `IBKR_FLEX_TOKEN`, when it is not passed, on every input path:
   argv, `--raw-payload`, `exec` lines, and `App.call` and MCP. A secret reads its own
   `<APP>_<NAME>` first, and its declared names join `secret_env_vars` in the manifest; its
-  value stays redacted everywhere. A plain flag reads only its declared names, which its
+  value stays redacted everywhere, and no plain flag of another command may read a variable
+  a secret or token reads. A plain flag reads only its declared names, which its
   manifest description lists; a required one shows `required: false` in the manifest and the
   `--raw-payload` schema, since a variable may supply it. A value read from a variable is
   validated as strictly as a passed one, and its error names the variable in

@@ -1328,21 +1328,11 @@ class App:
                     f"{path} and {command} overlap: a command cannot also be a group"
                 )
 
-    def _check_secret_env(self, command: Command) -> None:
-        """A variable a command reads as a secret or token is no plain setting's
-        ``Flag(env=)`` name: ``--show-config`` would print the credential"""
-        plain = plain_settings_env(self._settings_cls)
-        for var in (*command.secret_env_vars.values(), *command.token_env_vars):
-            if var in plain:
-                raise RegistrationError(
-                    f"{command.path.value}: reads {var} as a secret, which {plain[var]} also "
-                    "reads; a variable read as a secret cannot be read as a plain value"
-                )
-
     def _check_flag_env(self, command: Command) -> None:
         """``Flag(env=)`` names read one value each: no framework variable, no setting's
         variable or declared name, no other flag's variable in the same command, and not
-        the flag's own ``<APP>_<NAME>``. Flags of different commands may share a name"""
+        the flag's own ``<APP>_<NAME>``. Flags of different commands may share a name,
+        unless one reads it as a secret and the other as a plain value, which would echo it"""
         if not any(f.spec.env for f in command.fields):
             return
         taken = {app_var(self.name, v.key): f"the framework's {v.key}" for v in KNOWN}
@@ -1364,6 +1354,44 @@ class App:
                 f"{where}: --{f.flag}", own, f.spec.env, others, default=own or f"--{f.flag}"
             )
             taken |= {n.name: f"--{f.flag} of {where}" for n in f.spec.env}
+
+    def _check_secret_env(self, command: Command) -> None:
+        """A variable a secret or token reads in one command is no plain setting's or
+        plain flag's ``Flag(env=)`` name, and the reverse: ``--show-config``, the envelope,
+        and the audit log would carry the credential unredacted"""
+        secret: dict[str, str] = {}
+        plain = plain_settings_env(self._settings_cls)
+        for c in (*self._commands.values(), command):
+            where = c.path.value
+            secret |= {v: f"the token of {where}" for v in c.token_env_vars}
+            for f in c.fields:
+                names = [n.name for n in f.spec.env]
+                if f.secret:
+                    own = c.secret_env_vars[f.name]
+                    secret |= dict.fromkeys([own, *names], f"secret --{f.flag} of {where}")
+                elif c is command:
+                    continue
+                else:
+                    plain |= dict.fromkeys(names, f"plain --{f.flag} of {where}")
+        for var in command.token_env_vars:
+            if var in plain:
+                raise RegistrationError(
+                    f"{command.path.value}: reads {var} as a token, which {plain[var]} also "
+                    "reads; a variable read as a secret cannot be read as a plain value"
+                )
+        for f in command.fields:
+            if f.secret:
+                names = [command.secret_env_vars[f.name], *(n.name for n in f.spec.env)]
+                clash = next((n for n in names if n in plain), None)
+                read_as = None if clash is None else plain[clash]
+            else:
+                clash = next((n.name for n in f.spec.env if n.name in secret), None)
+                read_as = None if clash is None else secret[clash]
+            if clash is not None:
+                raise RegistrationError(
+                    f"{command.path.value}: --{f.flag} reads {clash}, which {read_as} also "
+                    "reads; a variable read as a secret cannot be read as a plain value"
+                )
 
     def _register_builtins(self, enable_exec: bool) -> None:
         @self.command(

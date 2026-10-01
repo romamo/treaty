@@ -998,8 +998,9 @@ variable in `context.source`, and a secret's stays redacted everywhere. A secret
 join `secret_env_vars` in the manifest; a plain flag's are named in its description, and a
 required one is listed `required: false`, as a variable may supply it. `--help`, AGENTS.md,
 and the `env-prefix` audit rule know them all, and `EnvName(..., deprecated=Deprecated(...))`
-works as on a setting. Flags of different commands may share a name; two flags of one
-command, a flag and a setting, or a name treaty reads itself may not.
+works as on a setting. Flags of different commands may share a name, unless one reads it
+as a secret or token and the other as a plain value; two flags of one command, a flag and
+a setting, or a name treaty reads itself may not.
 
 ## Credentials
 
