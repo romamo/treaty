@@ -4,7 +4,7 @@ A variable treaty reads for an app is ``<APP>_<KEY>``: the app name uppercased, 
 run of other characters an underscore, so ``my-tool`` reads ``MY_TOOL_FORMAT``. Nothing
 unprefixed is read except the names a settings field or flag declares with ``Flag(env=)``,
 the conventions every tool shares (``CI``, ``NO_COLOR``,
-``TERM``, ``HOME``, ``XDG_*``, proxies) and ``TOOL_TRACE_ID``, which crosses tools.
+``TERM``, ``COLUMNS``, ``HOME``, ``XDG_*``, proxies) and ``TOOL_TRACE_ID``, which crosses tools.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ UNPREFIXED = frozenset(
         "PATH",
         "SHELL",
         "TERM",
+        "COLUMNS",
         "PWD",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",

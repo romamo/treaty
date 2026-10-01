@@ -473,9 +473,24 @@ and the manifest names where a relative path lands. A failed run still writes no
 a path with `..` exits `2` whatever the base.
 
 Without a renderer, `plain` prints flat lines, one item each: `key: value`, with dotted
-paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. An
-array prints each element as its own block, the way a stream prints its events.
-`app.format(Format.PLAIN, render=...)` replaces those lines for the whole app.
+paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. A
+list of objects whose values are all scalars, such as a `list[Item]` result, prints as an
+aligned table instead: a header of the field names in the dataclass's field order, one row
+per object, numbers (and `Decimal` fields) right-aligned, `null` as an empty cell, and
+`(no rows)` for an empty `list[Item]`:
+
+```text
+id  name  size_bytes
+ 1  api         2048
+```
+
+When `COLUMNS` is a positive integer, a wider table cuts its widest text column, one cell
+at a time down to four, ending a cut value in `…`; numbers are never cut, and a file
+written with `--output` is never cut. Wide East Asian characters count as two cells.
+`Out(table=False)` leaves a field out of the table, and a field holding an object or a
+list, unless left out that way, keeps the whole list in `key: value` blocks, the way a
+stream prints its events. JSON, `jsonl`, `ndjson`, and `tsv` do not change.
+`app.format(Format.PLAIN, render=...)` replaces the table and the lines for the whole app.
 `manifest` and `--schema` stay JSON in every text format, since they are read by programs
 (one line in `ndjson`).
 
@@ -1133,8 +1148,8 @@ Every variable treaty reads carries the app's prefix (`DEPLOYCTL_FORMAT`,
 `DEPLOYCTL_MAX_OUTPUT_BYTES`, `DEPLOYCTL_STATE_DIR`, ...), and `--help` lists them under
 Environment; in the manifest, each global flag's description names its variable (the spec's
 manifest has no `environment` key yet). Unprefixed, treaty reads only shared conventions:
-`CI`, `NO_COLOR`, `TERM`, `HOME`, `XDG_*`, `GITHUB_ACTIONS`, `JENKINS_URL`, the proxy and
-CA bundle variables, and `TOOL_TRACE_ID`. The `env-prefix` audit rule flags handlers that read an unprefixed
+`CI`, `NO_COLOR`, `TERM`, `COLUMNS`, `HOME`, `XDG_*`, `GITHUB_ACTIONS`, `JENKINS_URL`, the
+proxy and CA bundle variables, and `TOOL_TRACE_ID`. The `env-prefix` audit rule flags handlers that read an unprefixed
 variable such as `DEBUG`.
 
 ## Validation errors

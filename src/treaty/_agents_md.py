@@ -57,7 +57,10 @@ SHARED: tuple[tuple[tuple[str, ...], str], ...] = (
         ("CI", "GITHUB_ACTIONS", "JENKINS_URL"),
         "CI detection: JSON output, no prompts, and no update check",
     ),
-    (("NO_COLOR", "TERM"), "Color and terminal capabilities of plain output"),
+    (
+        ("NO_COLOR", "TERM", "COLUMNS"),
+        "Color, terminal capabilities, and table width of plain output",
+    ),
     (("TOOL_TRACE_ID",), "Trace id of the run, inherited by child processes"),
     (
         ("HOME", "USER", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"),

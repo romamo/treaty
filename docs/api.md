@@ -122,7 +122,8 @@ same keywords.
 `Flag`: `description`, `default`, `short`, `pattern`, `secret`, `multiline`, `max_bytes`,
 `pattern_type`, `from_stdin`, `deprecated`, `audit`, `dry_run`, `env`. `Arg`: `description`,
 `default`, `pattern`, `secret`, `pattern_type`, `from_stdin`, `multiline`, `audit`. `Out`:
-`default`, `default_factory`, `sort_key`, `ordered`, `volatile`, `high_entropy`, `external`. All keep.
+`default`, `default_factory`, `sort_key`, `ordered`, `volatile`, `high_entropy`, `external`,
+`table`. All keep.
 
 ## `Ctx`
 
@@ -180,8 +181,8 @@ Prefixed (`<APP>_<KEY>`): `FORMAT`, `MAX_OUTPUT_BYTES`, `MAX_STDIN_BYTES`, `STAT
 `CONFIG`, `CONTEXT`, `INSTANCE_ID`, `SESSION`, `NO_UPDATE`, `AUDIT_LOG`, plus one per
 `App(settings=)` field and secret flag.
 
-Unprefixed conventions: `CI`, `NO_COLOR`, `TERM`, `HOME`, `USER`, `PATH`, `SHELL`, `PWD`,
-`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, the proxy
+Unprefixed conventions: `CI`, `NO_COLOR`, `TERM`, `COLUMNS`, `HOME`, `USER`, `PATH`, `SHELL`,
+`PWD`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, the proxy
 variables in both cases, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `GITHUB_ACTIONS`,
 `JENKINS_URL`, and `TOOL_TRACE_ID`. The `treaty` CLI itself also reads `TREATY_SPEC_DIR`.
 

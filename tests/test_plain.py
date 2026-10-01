@@ -46,9 +46,14 @@ def test_top_level_array_of_scalars_prints_one_per_line() -> None:
     assert render_plain(["a", 2, True]) == "a\n2\ntrue\n"
 
 
-def test_top_level_array_of_objects_prints_blocks_like_a_stream() -> None:
+def test_top_level_array_of_flat_objects_prints_a_table() -> None:
     data = [{"n": 1, "text": "a"}, {"n": 2, "text": "b"}]
-    assert render_plain(data) == "n: 1\ntext: a\n\nn: 2\ntext: b\n\n"
+    assert render_plain(data) == "n  text\n1  a\n2  b\n"
+
+
+def test_top_level_array_of_nested_objects_prints_blocks_like_a_stream() -> None:
+    data = [{"n": 1, "tags": ["a"]}, {"n": 2, "tags": []}]
+    assert render_plain(data) == "n: 1\ntags.0: a\n\nn: 2\ntags: []\n\n"
     assert render_plain(data) == "".join(render_event(e) for e in data)
 
 

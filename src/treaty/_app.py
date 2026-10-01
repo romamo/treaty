@@ -210,7 +210,7 @@ from ._parse import (
     without_value,
 )
 from ._paths import rebase_suggestions
-from ._plain import render_event, render_plain
+from ._plain import NO_LAYOUT, Layout, layout_of, render_event, render_plain, table_width
 from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._protect import (
     MASKED_CODE,
@@ -2180,12 +2180,14 @@ class App:
                 # REQ-O-001: the file gets the representation; stdout gets the envelope
                 target = run.output_target(command, invocation.output)
                 written = (
-                    run.to_file(target, requested, envelope, render)
+                    run.to_file(
+                        target, requested, envelope, render, layout_of(command.output_type)
+                    )
                     if target is not None
                     else run.output_unresolved(command, invocation.output, envelope)
                 )
                 return run.emit(Format.JSON, written)
-            return run.emit(mode, envelope, render=render)
+            return run.emit(mode, envelope, render=render, layout=layout_of(command.output_type))
 
 
 # Runs that swapped sys.stdout and sys.stdin now, and the streams from before the first:
@@ -5900,15 +5902,18 @@ class _Run:
         *,
         render: Renderer | None = None,
         settle: bool = True,
+        layout: Layout = NO_LAYOUT,
     ) -> int:
-        """Write the answer; ``settle=False`` for help and schemas, which run no command"""
+        """Write the answer; ``settle=False`` for help and schemas, which run no command.
+        ``layout`` is the plain table the command's output type declares"""
         if self.delegating:
             return self._write_delegated(envelope, settle=settle)
         if mode is Format.JSON:
             return self._write(envelope, settle=settle)
         if mode is Format.NDJSON and render is None:
             render = ndjson_records
-        return self._emit_text(mode, envelope, render, settle=settle)
+        plain = functools.partial(render_plain, layout=layout, width=table_width(self.env))
+        return self._emit_text(mode, envelope, render, fallback=plain, settle=settle)
 
     def output_closed(self) -> int:
         """The reader went away: nothing more can be written, and nothing goes to stderr.
@@ -5927,10 +5932,16 @@ class _Run:
         return 0 if self.delivered else 141
 
     def to_file(
-        self, path: Path, mode: Format, envelope: Envelope, render: Renderer | None
+        self,
+        path: Path,
+        mode: Format,
+        envelope: Envelope,
+        render: Renderer | None,
+        layout: Layout = NO_LAYOUT,
     ) -> Envelope:
         """Write a successful result's ``data`` to ``path``; the envelope then describes
-        the write. A failed run writes no file."""
+        the write. A failed run writes no file. A plain table in a file is never cut to
+        ``COLUMNS``: a file is not a terminal."""
         if not envelope.ok or envelope.data is None:
             return envelope
         data = envelope.data
@@ -5941,7 +5952,7 @@ class _Run:
         else:
             data = clean(data)  # values as the JSON envelope has them (REQ-F-007)
             try:
-                text = _rendered(render, data) if render is not None else render_plain(data)
+                text = _rendered(render, data) if render is not None else render_plain(data, layout)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
                 self.err.write(self._redact_now(_traceback(exc)))
                 return self._file_error(
