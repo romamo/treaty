@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc8] - 2026-10-01
+
+The eighth 1.0 release candidate: 1 change and 2 fixes.
+
 ### Changed
 
 - The package metadata names the author, links the documentation and the changelog, and
@@ -896,7 +900,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc7...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc8...HEAD
+[1.0.0rc8]: https://github.com/romamo/treaty/compare/v1.0.0rc7...v1.0.0rc8
 [1.0.0rc7]: https://github.com/romamo/treaty/compare/v1.0.0rc6...v1.0.0rc7
 [1.0.0rc6]: https://github.com/romamo/treaty/compare/v1.0.0rc5...v1.0.0rc6
 [1.0.0rc5]: https://github.com/romamo/treaty/compare/v1.0.0rc4...v1.0.0rc5
