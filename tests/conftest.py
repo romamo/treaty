@@ -1,6 +1,9 @@
+import io
 import json
 import os
 import sys
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -17,6 +20,40 @@ SPEC_DIR = Path(
 SCHEMAS = SPEC_DIR / "schemas"
 
 WINDOWS = sys.platform == "win32"
+
+
+class CountedLines(io.StringIO):
+    """A stream that counts the lines it is written that ``match``, for a handler to wait
+    on the heartbeats it expects: a fixed sleep is outlasted by a loaded runner's timer
+    slack, which delays every beat (#168)"""
+
+    def __init__(self, match: Callable[[str], bool]) -> None:
+        super().__init__()
+        self._match = match
+        self._seen = 0
+        self._changed = threading.Condition()
+
+    @property
+    def seen(self) -> int:
+        with self._changed:
+            return self._seen
+
+    def write(self, s: str) -> int:
+        written = super().write(s)
+        hits = sum(1 for line in s.splitlines() if self._match(line))
+        if hits:
+            with self._changed:
+                self._seen += hits
+                self._changed.notify_all()
+        return written
+
+    def wait_for(self, count: int, timeout: float = 10.0) -> None:
+        """Block until ``count`` matching lines were written; fail after ``timeout`` s"""
+        with self._changed:
+            if not self._changed.wait_for(lambda: self._seen >= count, timeout):
+                raise AssertionError(f"{self._seen} of {count} lines in {timeout} s")
+
+
 needs_posix_signals = pytest.mark.skipif(
     WINDOWS, reason="Windows cannot deliver SIGINT or SIGTERM to a running process"
 )

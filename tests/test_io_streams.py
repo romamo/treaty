@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import needs_posix_signals, spec_validator
+from conftest import CountedLines, needs_posix_signals, spec_validator
 
 from treaty import App, Ctx, Format, NoArgs, table
 
@@ -167,8 +167,21 @@ def test_f053_each_event_reaches_the_reader_before_the_process_ends(tmp_path: Pa
 
 
 def test_f053_heartbeats_precede_the_envelope() -> None:
-    code, out, _ = run(["slow", "--heartbeat-ms", "100"])
-    *beats, envelope = lines(out)
+    # The handler returns once it has seen two beats, not after a fixed sleep (#168)
+    out = CountedLines(lambda line: '"heartbeat"' in line)
+    app = App("beatctl", version="1.0.0")
+
+    @app.command("slow", description="Waits for two beats", danger_level="safe",
+                 exit_codes=(), heartbeat=True, timeout=30)  # fmt: skip
+    def slow(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+        out.wait_for(2)
+        return {"done": True}
+
+    argv = ["slow", "--heartbeat-ms", "100"]
+    code = app.run(
+        argv, stdin=io.StringIO(), stdout=out, stderr=io.StringIO(), env={}, isatty=False
+    )
+    *beats, envelope = lines(out.getvalue())
     assert code == 0 and len(beats) >= 2
     for beat in beats:
         assert set(beat) == {"status", "heartbeat", "elapsed_ms"}
