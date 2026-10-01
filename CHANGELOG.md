@@ -152,6 +152,16 @@ Apps built on treaty keep their own, structured schema changelog with
   from presentation, the agentyper rows that need no open issue, and a before and after
   run of the conformance kit; the argparse chapter points at the scaffold. A default that may be a secret (a hidden option, a
   secret-like name, or the value of an environment variable) is left out of the module (#3)
+- `app.resolves(argv)`, for a shim that routes a CLI moving to treaty a command at a time:
+  true when argv names a registered command, by the longest path, so a half-migrated group
+  splits (`transaction list` on treaty, `transaction add` on the old CLI). Global options
+  before the path are skipped; built-ins and redirected paths resolve; groups, root
+  `--help`, and `--version` do not. `App(exec_fallback=)` passes an `exec` line whose
+  `_cmd` is no registered command to the old CLI's dispatcher, as `(cmd, payload)`, and
+  wraps what it returns in a success envelope with `meta.exec_fallback`; a `ParseError` it
+  raises is exit 2, any other exception exit 1 `FALLBACK_FAILED`. Its lines are redacted,
+  masked, capped, and audit-logged like a command's, never deduplicated, and refused under
+  `exec --dry-run`. The click/typer and argparse chapters' shims use both (#28)
 
 ## [1.0.0rc9] - 2026-10-01
 

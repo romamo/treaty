@@ -194,6 +194,7 @@ from ._parse import (
     format_hint,
     misplaced_flag_target,
     parse_command_args,
+    path_words,
     resolve_path,
     split_globals,
     strict_argv,
@@ -212,7 +213,15 @@ from ._protect import (
     tagged,
 )
 from ._records import Records, RecordSpec
-from ._redact import NAME_CONTEXT, OMITTED, REDACTED, line_fragments, redacted, scrub
+from ._redact import (
+    NAME_CONTEXT,
+    OMITTED,
+    REDACTED,
+    line_fragments,
+    redacted,
+    scrub,
+    secret_name,
+)
 from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen, RequiresAny, RequiresOne
@@ -270,6 +279,10 @@ from ._verbosity import (
     trace,
 )
 from ._walk import DEFAULT_MAX_DEPTH, Traversal, TraversalStopped
+
+type ExecFallback = Callable[[str, Mapping[str, object]], object]
+"""``App(exec_fallback=)``: the old CLI's dispatcher, called with an exec line's ``_cmd``
+and the rest of the line"""
 
 CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
 MANIFEST_PATH = CommandPath("manifest")
@@ -392,6 +405,7 @@ class App:
         update_check: UpdateCheck | None = None,
         audit_log: AuditLog | None = None,
         schema_changelog: str | Path | None = None,
+        exec_fallback: ExecFallback | None = None,
     ) -> None:
         """``version`` is semver, or a PEP 440 release such as ``importlib.metadata.version``
         returns, ``a``, ``b``, ``rc``, ``.post``, and ``.dev`` parts included; ``--version``
@@ -421,7 +435,13 @@ class App:
         changelog-add`` writes, shipped with the package; it adds the ``changelog``
         built-in (REQ-O-029). ``max_stdin_bytes`` caps the payload a ``stdin_input=True``
         command or ``exec`` reads from stdin; ``max_line_bytes`` caps each line of a
-        ``stdin_input="lines"`` command's input, which has no total cap.
+        ``stdin_input="lines"`` command's input, which has no total cap. ``exec_fallback``
+        is for a CLI moving to treaty a command at a time: an ``exec`` line whose ``_cmd``
+        is no registered command is passed to it as ``exec_fallback(cmd, payload)``,
+        ``payload`` being the line's object without ``_cmd``, and what it returns, an
+        object, an array, or None, is the line's ``data`` in a success envelope. A
+        ``ParseError`` it raises answers exit 2, any other exception exit 1
+        ``FALLBACK_FAILED``; without it, such a line is ``UNKNOWN_COMMAND``.
 
         ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
         ``mcp-validate``, ``audit-log``, and ``completion`` are built-ins that yield: an app
@@ -483,6 +503,15 @@ class App:
             raise RegistrationError(f"App {name}: audit_log is a treaty.AuditLog, or None")
         self.audit_log = audit_log
         self.schema_changelog = None if schema_changelog is None else Path(schema_changelog)
+        if exec_fallback is not None and not callable(exec_fallback):
+            raise RegistrationError(
+                f"App {name}: exec_fallback is a callable taking (cmd, payload), or None"
+            )
+        if exec_fallback is not None and not enable_exec:
+            raise RegistrationError(
+                f"App {name}: exec_fallback needs the exec built-in; drop enable_exec=False"
+            )
+        self.exec_fallback = exec_fallback
         self.changelog = (
             () if self.schema_changelog is None else load_changelog(self.schema_changelog, name)
         )
@@ -1577,6 +1606,24 @@ class App:
             suggestion=f"flags go after the command: {command} [arguments] {flag}",
         )
 
+    def resolves(self, argv: Sequence[str]) -> bool:
+        """Whether ``argv``, a command line without the program name, names a command this
+        app registered, so ``app.run(argv)`` runs it rather than answering with help or an
+        unknown-command error. For a routing shim during a migration: the longest
+        registered path wins, so ``transaction list`` can be on treaty while ``transaction
+        add`` is not. Global options before or between the path's words, such as
+        ``--format json`` or ``--help``, are skipped; a retired path ``App.redirect``
+        answers counts. The built-ins count too (``manifest``, ``version``, ``exec``, and
+        the others the root ``--help`` lists); a group, an empty argv, root ``--help``,
+        and ``--version`` do not."""
+        if isinstance(argv, str) or not all(isinstance(word, str) for word in argv):
+            raise TypeError("argv is a sequence of words, such as sys.argv[1:]")
+        words = path_words(list(argv))
+        paths = {path.parts for path in self._commands}
+        if any(tuple(words[:n]) in paths for n in range(len(words), 0, -1)):
+            return True
+        return self._moved(words) is not None
+
     @property
     def builtins(self) -> frozenset[CommandPath]:
         """The commands treaty registered itself, such as ``manifest`` and ``init``"""
@@ -2569,6 +2616,44 @@ def _lowest_shown(verbosity: Verbosity) -> int | None:
     return min(shown, default=None)
 
 
+def _masked_warning(masked: Sequence[str]) -> WarningDetail:
+    return WarningDetail(
+        MASKED_CODE,
+        "High-entropy values were masked; rerun with --unmask for the raw values",
+        context={"paths": list(masked[:MASKED_PATHS_SHOWN]), "count": len(masked)},
+    )
+
+
+def _fallback_payload(request: DispatchRequest) -> dict[str, object]:
+    """An exec line as ``App(exec_fallback=)`` gets it: the object without ``_cmd``"""
+    payload = dict(request.payload)
+    if request.opts:
+        payload["_opts"] = dict(request.opts)
+    return payload
+
+
+def _named_secrets(value: object, name: str = "") -> list[object]:
+    """The scalar values under a credential name, at any depth"""
+    if isinstance(value, Mapping):
+        return [s for k, v in value.items() for s in _named_secrets(v, str(k))]
+    if isinstance(value, list):
+        return [s for v in value for s in _named_secrets(v, name)]
+    if name and secret_name(name) and value is not None and not isinstance(value, bool):
+        return [value]
+    return []
+
+
+def _redact_strings(value: object, redact: Callable[[str], str]) -> object:
+    """A JSON value with ``redact`` applied to every string in it"""
+    if isinstance(value, dict):
+        return {k: _redact_strings(v, redact) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_strings(v, redact) for v in value]
+    if isinstance(value, str):
+        return redact(value)
+    return value
+
+
 def _warned(envelope: Envelope, code: str, message: str, command: Command) -> Envelope:
     warning = WarningDetail(code, message, context={"command": command.path.value})
     return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
@@ -2940,6 +3025,8 @@ class _Run:
         """``--cwd`` set ``cwd``: relative paths and children are under it (REQ-O-017)"""
         self.update_available: str | None = None
         """A newer release from the app's cached update check (REQ-F-029)"""
+        self.fallback: DispatchRequest | None = None
+        """The exec line ``App(exec_fallback=)`` is answering"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -3088,7 +3175,9 @@ class _Run:
         command, other than the built-ins that do no work (REQ-O-030)"""
         command = self.current
         if command is None:
-            return False  # its arguments cannot be redacted without a schema
+            # An exec_fallback line's arguments are redacted by name; any other's cannot
+            # be without a schema
+            return self.fallback is not None
         return not (command.path in UNLOGGED and command.path in self.app.builtins)
 
     def _audit_entry(self, envelope: Envelope) -> dict[str, object]:
@@ -3107,6 +3196,12 @@ class _Run:
                     continue
                 value = to_jsonable(getattr(args, f.name), self.app.scalars, base=self.cwd)
                 parameters[f.name] = scrub(f.name, value, redact)
+        if command is None and self.fallback is not None:
+            redact = self._fallback_redactor(self.fallback)
+            parameters = {
+                key: scrub(key, value, redact)
+                for key, value in _fallback_payload(self.fallback).items()
+            }
         invocation = self.invocation
         if invocation is not None and invocation.validate_only:
             parameters["validate_only"] = True
@@ -3565,6 +3660,8 @@ class _Run:
         command = self.current
         if command is None:
             name, version, root = self.app.name, ENVELOPE_SCHEMA_VERSION, None
+            if self.fallback is not None:
+                name = self.fallback.path.value
         else:
             name = command.path.value
             version = (self.pinned or command.schema_version).value
@@ -3763,16 +3860,7 @@ class _Run:
                 )
             data = protected.data
             if protected.masked:
-                warnings.append(
-                    WarningDetail(
-                        MASKED_CODE,
-                        "High-entropy values were masked; rerun with --unmask for the raw values",
-                        context={
-                            "paths": list(protected.masked[:MASKED_PATHS_SHOWN]),
-                            "count": len(protected.masked),
-                        },
-                    )
-                )
+                warnings.append(_masked_warning(protected.masked))
             external = (envelope.ok or batch) and (command.external or protected.external)
             if external and not self.unprotected and data not in ([], {}):
                 data = tagged(data)
@@ -5121,10 +5209,15 @@ class _Run:
         """Every spelling of the run's secret values, the secret arguments' and
         settings': the value, its serialized form for a registered scalar, and the
         escaped form ``repr`` puts in messages"""
+        secrets = [(getattr(args, f.name, None), f.default) for f in command.fields if f.secret]
+        return self._spellings(secrets)
+
+    def _spellings(self, secrets: list[tuple[object, object]]) -> set[str]:
+        """Every spelling of ``secrets``, (value, default) pairs, of the login token, and of
+        the secret settings"""
         spellings: set[str] = set()
         if self.token is not None and len(self.token) >= MIN_REDACTED:
             spellings.update({self.token, repr(self.token)[1:-1]})
-        secrets = [(getattr(args, f.name, None), f.default) for f in command.fields if f.secret]
         spec, settings = self.app.settings, self.settings.value
         if spec is not None and settings is not None:
             for setting in spec.fields:
@@ -5144,6 +5237,124 @@ class _Run:
                 if isinstance(form, str) and len(form) >= MIN_REDACTED:
                     spellings.update({form, repr(form)[1:-1]})
         return spellings
+
+    def _fallback_redactor(self, request: DispatchRequest) -> Callable[[str], str]:
+        """Replace every spelling of an exec_fallback line's secret values: those under a
+        credential name such as ``token`` or ``password``, at any depth, and the secret
+        settings'"""
+        secrets: list[tuple[object, object]] = [
+            (value, None) for value in _named_secrets(_fallback_payload(request))
+        ]
+        ordered = sorted(self._spellings(secrets), key=len, reverse=True)
+
+        def redact(text: str) -> str:
+            for spelling in ordered:
+                text = text.replace(spelling, REDACTED)
+            return text
+
+        return redact
+
+    def _fallback(
+        self,
+        fallback: ExecFallback,
+        request: DispatchRequest,
+        dry_run: bool,
+        started: float,
+        meta: Mapping[str, object],
+    ) -> Envelope:
+        """An exec line no registered command answers, run by ``App(exec_fallback=)``.
+        Its envelope passes through what an app command's does on its way out: secret
+        values redacted, high-entropy values masked, ``--fields``, then, as it is written,
+        the token budget, the byte cap, and the audit log. The line is not deduplicated:
+        treaty knows nothing of what it changes, so idempotency stays the old CLI's."""
+        self.fallback = request
+        cmd = request.path.value
+        meta = {**meta, "exec_fallback": True}
+        line = meta["_line"]
+        if dry_run:
+            return self.arg_error(
+                ParseError(
+                    f"line {line}: {cmd} runs through exec_fallback, which cannot honor --dry-run",
+                    context={"line": line, "_cmd": cmd},
+                    suggestion="run the plan without --dry-run, or migrate the command first",
+                ),
+                started=started,
+                meta=meta,
+            )
+        redact = self._fallback_redactor(request)
+        payload = types.MappingProxyType(_fallback_payload(request))
+        trace("exec fallback", command=cmd)
+        try:
+            result = fallback(cmd, payload)
+        except ParseError as exc:
+            context = {k: scrub(k, v, redact) for k, v in exc.context.items()}
+            refused = ParseError(
+                redact(exc.message), context=context, suggestion=exc.suggestion, code=exc.code
+            )
+            return self.arg_error(refused, started=started, meta=meta)
+        except BaseException as exc:  # noqa: BLE001 - the fallback is the old CLI's handler
+            # SystemExit too: the old CLI's dispatcher may exit where it means to fail
+            return self._fallback_failed(cmd, exc, redact, started, meta)
+        try:
+            data = self._payload(result)
+        except SchemaError as exc:
+            entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+            return self._envelope(
+                entry.code.value,
+                error=ErrorDetail(
+                    code="INVALID_OUTPUT",
+                    message=redact(f"exec_fallback for {cmd} returned {exc}"),
+                    retryable=False,
+                    context={"command": cmd},
+                    phase="execution",
+                    fix_required="return an object, an array, or None from exec_fallback",
+                ),
+                started=started,
+                meta=meta,
+            )
+        except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
+            return self._fallback_failed(cmd, exc, redact, started, meta)
+        data = _redact_strings(data, redact)
+        envelope = self._envelope(0, data=data, started=started, meta=meta)
+        warnings = list(envelope.warnings)
+        if data is not None:
+            protected = protect(data, object, unmask=self.unmask)
+            data = protected.data
+            if protected.masked:
+                warnings.append(_masked_warning(protected.masked))
+        if self.fields is not None and data is not None:
+            data = project(data, self.fields)
+            meta = {**envelope.extra_meta, "fields": list(self.fields)}
+        else:
+            meta = dict(envelope.extra_meta)
+        return dataclasses.replace(envelope, data=data, warnings=tuple(warnings), extra_meta=meta)
+
+    def _fallback_failed(
+        self,
+        cmd: str,
+        exc: BaseException,
+        redact: Callable[[str], str],
+        started: float,
+        meta: Mapping[str, object],
+    ) -> Envelope:
+        """Exit 1 ``FALLBACK_FAILED``: the old dispatcher raised; its traceback goes to
+        stderr, redacted"""
+        self.err.write(redact(_traceback(exc)))
+        entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        name = type(exc).__name__
+        return self._envelope(
+            entry.code.value,
+            error=ErrorDetail(
+                code="FALLBACK_FAILED",
+                message=redact(f"exec_fallback for {cmd} raised {name}: {_text(exc)}"),
+                retryable=False,
+                context={"command": cmd, "exception": type(exc).__qualname__},
+                phase="execution",
+                fix_required="see the exception; stderr has the traceback",
+            ),
+            started=started,
+            meta=meta,
+        )
 
     def _output(self, command: Command) -> tuple[object, OutSpec]:
         """The type the handler's result has in the answered schema, and its order"""
@@ -5645,7 +5856,7 @@ class _Run:
                         break
         # What follows answers the plan, not its last line
         self.current, self.pinned, self.retrier, self.warnings = plan_command, None, None, []
-        self.args, self.invocation = None, None
+        self.args, self.invocation, self.fallback = None, None, None
         self.stable = self.stable_all
         if (received := self.cancellation.received) is not None:
             # A signal ends the plan whatever --ignore-errors says (REQ-F-069). One held
@@ -5892,7 +6103,7 @@ class _Run:
             # One command per line
             self.warnings, self.token, self.config_file = [], None, None
             self.current, self.pinned, self.retrier, self.args = None, None, None, None
-            self.invocation = None
+            self.invocation, self.fallback = None, None
             self.session, self.processes, self.cache = None, None, None
             self.stable = self.stable_all
             started = time.perf_counter()
@@ -5913,6 +6124,10 @@ class _Run:
                 source, moved, _ = found
                 # A plan line names the command by its path, so that is what it resends
                 yield line_no, self.redirected(source, moved, moved.to.value, meta=meta)
+                continue
+            fallback = self.app.exec_fallback
+            if command is None and fallback is not None:
+                yield line_no, self._fallback(fallback, request, args.dry_run, started, meta)
                 continue
             if command is None or request.path == EXEC_PATH:
                 yield (

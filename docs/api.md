@@ -91,12 +91,12 @@ Keywords: `name`, `version` (semver, or a PEP 440 release with optional `a`, `b`
 `1.0.0.post1` is `1.0.0+post.1`; epochs and local versions are refused), `description`, `state`, `default_timeout`,
 `max_output_bytes`, `max_stdin_bytes`, `max_line_bytes`, `state_dir`, `enable_exec`, `credentials`, `jobs`,
 `settings`, `init`, `companions`, `dependencies`, `checks`, `update_check`, `audit_log`,
-`schema_changelog`. All keep.
+`schema_changelog`, `exec_fallback`. All keep.
 
 Public methods (keep): `command`, `group`, `redirect`, `exit_code`, `scalar`,
 `output_adapter`, `args_adapter`, `format`,
 `tokenizer`, `suppress_update_notifier`, `run`, `main`, `call`, `manifest`,
-`environment`, and the read-only properties `commands`, `builtins`, `formats`,
+`environment`, `resolves`, and the read-only properties `commands`, `builtins`, `formats`,
 `redirected_paths`, `settings`, `shadowed_builtins`. The `Command` objects `commands` maps to are opaque: their
 attributes are not covered.
 
