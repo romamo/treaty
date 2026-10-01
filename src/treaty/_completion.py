@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ._envelope import visible
 from ._values import CommandPath
 
 COMPLETION_PATH = CommandPath("completion")
@@ -137,8 +138,9 @@ def _takes(entry: Mapping[str, object]) -> Takes:
 
 
 def _short(description: str) -> str:
-    """The first clause on one line, cut at a word to fit a completion menu"""
-    text = " ".join(re.split(r"; |\. ", description, maxsplit=1)[0].split())
+    """The first clause on one line, cut at a word to fit a completion menu; a control
+    character or bidi override shows as its escape, as in --help (#203)"""
+    text = visible(" ".join(re.split(r"; |\. ", description, maxsplit=1)[0].split()))
     if len(text) <= _DESCRIPTION_CHARS:
         return text
     return text[: _DESCRIPTION_CHARS - 3].rsplit(" ", 1)[0] + "..."

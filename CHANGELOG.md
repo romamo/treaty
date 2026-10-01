@@ -10,6 +10,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+- `--help` shows a control character, terminal escape, or Unicode bidi override in the
+  app's own text (the app, group, command, and flag descriptions, and the examples) as its
+  escape, such as `\x1b` or `\u202e`, as plain output does, instead of writing it to the
+  terminal; newlines and tabs keep their layout. The zsh completion menu's descriptions
+  are escaped the same way (#203)
+
 - Plain output no longer prints the trust tags of external content as data: the data
   block of an `external=True` command, and the stderr error block of a context with
   `treaty.External`, show one `(external content, untrusted)` line instead of

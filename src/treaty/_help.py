@@ -6,6 +6,7 @@ import shlex
 from collections.abc import Mapping, Sequence
 
 from ._command import Command
+from ._envelope import visible
 from ._envnames import declared_text
 from ._flags import FieldInfo, object_shape
 from ._framework import framework_flags
@@ -30,8 +31,10 @@ def global_rows(entries: Mapping[str, object]) -> list[Row]:
 def _section(title: str, rows: Sequence[Row]) -> list[str]:
     if not rows:
         return []
-    width = max(len(label) for label, _ in rows)
-    return [title, *(f"  {label:<{width}}  {text}" for label, text in rows), ""]
+    # Aligned on the labels as shown: an enum value's control takes its escape's width
+    shown = [(visible(label), text) for label, text in rows]
+    width = max(len(label) for label, _ in shown)
+    return [title, *(f"  {label:<{width}}  {text}" for label, text in shown), ""]
 
 
 def render_root(
@@ -91,7 +94,14 @@ def render_root(
     lines += _section("Global flags", rows)
     # REQ-F-073, REQ-O-042: every variable read, by its exact prefixed name
     lines += _section("Environment", environment)
-    return "\n".join(lines).rstrip("\n") + "\n"
+    return _shown("\n".join(lines).rstrip("\n") + "\n")
+
+
+def _shown(text: str) -> str:
+    """Help as a terminal gets it: the app's text (descriptions, examples, enum values)
+    shows each control character and bidi override as its escape, as plain output does,
+    and keeps its newlines and tabs (#203)"""
+    return visible(text)
 
 
 def _under(commands: Mapping[CommandPath, Command], parts: tuple[str, ...]) -> list[CommandPath]:
@@ -193,4 +203,4 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
         for e in command.examples:
             lines.append(f"  # {e.description}")
             lines.append(f"  {e.command}")
-    return "\n".join(lines) + "\n"
+    return _shown("\n".join(lines) + "\n")
