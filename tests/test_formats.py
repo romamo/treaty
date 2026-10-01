@@ -347,12 +347,23 @@ def test_a_handler_tells_a_custom_name_from_plain() -> None:
     run(app, ["peek", "--format", "html"])
     run(app, ["peek", "--format", "plain"])
     run(app, ["peek", "--format", "csv"])
+    # jsonl runs as json, but the handler still sees what the caller asked for
     run(app, ["peek", "--format", "jsonl"])
+    # An exec line and App.call run and answer in JSON, whatever --format the run had
+    app.run(
+        ["--format", "html", "exec"],
+        stdin=io.StringIO('{"_cmd": "peek"}\n'),
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
     app.call("peek", {})
     assert seen == [
         (Format.PLAIN, FormatName("html")),
         (Format.PLAIN, FormatName("plain")),
         (Format.CSV, FormatName("csv")),
+        (Format.JSON, FormatName("jsonl")),
         (Format.JSON, FormatName("json")),
         (Format.JSON, FormatName("json")),
     ]

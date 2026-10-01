@@ -58,8 +58,9 @@ class Ctx:
     version: str
     mode: Format
     format_name: FormatName
-    """The ``--format`` value the caller asked for: ``mode``'s member, or a name the app
-    registered, such as ``html``, for which ``mode`` is ``Format.PLAIN``"""
+    """The ``--format`` value the CLI caller asked for, such as ``html``, for which
+    ``mode`` is ``Format.PLAIN``, or ``jsonl``, for which it is ``Format.JSON``; ``json``
+    for an ``exec`` line and ``App.call``, which run and answer in JSON"""
     request_id: str
     env: Mapping[str, str]
     state: Mapping[str, object]

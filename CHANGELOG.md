@@ -153,10 +153,12 @@ Apps built on treaty keep their own, structured schema changelog with
   key for it. A string naming a `Format` member is that member, and `json`, `jsonl`,
   `ndjson`, and `id` still take no renderer. The new `treaty.FormatName` is one `--format`
   value: `App.formats` holds them, and a member's equals and hashes like the member, so
-  `Format.CSV in app.formats` still holds. The new `ctx.format_name` is the value asked
-  for, so a handler tells `html` from `plain`, whose `ctx.mode` is `Format.PLAIN` for both.
-  `--output` is argv only (an `exec` line and `App.call` refuse an `output` key), so the
-  refusal of `--output html` covers every path that writes a file (#179)
+  `Format.CSV in app.formats` still holds. The new `ctx.format_name` is the value the CLI
+  caller asked for (`jsonl` too, which runs as `json`; `json` for an `exec` line or
+  `App.call`), so a handler tells `html` from `plain`, whose `ctx.mode` is
+  `Format.PLAIN` for both. `--output` is argv only (an `exec` line and `App.call`
+  refuse an `output` key), so the refusal of `--output html` covers every path that
+  writes a file (#179)
 
 ## [1.0.0rc11] - 2026-10-01
 

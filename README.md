@@ -457,8 +457,9 @@ An app can offer a format treaty does not list, such as a page for a person:
 letters and digits, words joined by `-` or `_`) joins `--format`'s values, `<APP>_FORMAT`,
 the manifest, `--help`, and completion, and a command's `renderers={"html": ...}` overrides
 it. It runs as `plain` does: errors go to stderr as prose, `--output` writes the rendered
-text, and `ctx.mode` is `Format.PLAIN`; `ctx.format_name` is the name asked for
-(`FormatName("html")`), so a handler can tell it from `plain`. `media_type` is stated in the `--format` flag's
+text, and `ctx.mode` is `Format.PLAIN`; `ctx.format_name` is the name the caller asked for
+(`FormatName("html")`), so a handler can tell it from `plain`; an `exec` line and
+`App.call` report `json`, as they run in JSON. `media_type` is stated in the `--format` flag's
 description, since the manifest has no key for it. A string naming a `Format` member is
 that member, and `json`, `jsonl`, `ndjson`, and `id`, which treaty writes itself, take no
 renderer.

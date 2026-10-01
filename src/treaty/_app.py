@@ -2119,7 +2119,7 @@ class App:
             run.budget = self._budget(globals_)
         except ParseError as exc:
             return run.emit(Format.JSON, run.arg_error(exc))
-        run.mode, run.format_name = mode, selected
+        run.mode, run.format_name = mode, requested
         run.attach_logging()
         trace(
             "run",
@@ -3357,8 +3357,8 @@ class _Run:
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
         self.format_name = FormatName.of(Format.JSON)
-        """The ``--format`` value asked for, which ``ctx.format_name`` reports: a custom
-        name, whose mode is plain, or ``mode``'s member"""
+        """The ``--format`` value the caller asked for, which ``ctx.format_name``
+        reports: ``jsonl`` or a custom name though ``mode`` is json or plain"""
         self.ndjson_shown: collections.Counter[str] = collections.Counter()
         """How often ``ndjson`` wrote each warning to stderr so far, by its JSON: a stream's
         envelopes repeat the run's warnings, and add their own (masking) that later ones
@@ -3730,8 +3730,8 @@ class _Run:
             app_name=self.app.name,
             version=self.app.version,
             mode=mode,
-            # An exec line or App.call runs in JSON whatever the run's --format said
-            format_name=self.format_name if self.format_name.mode is mode else FormatName.of(mode),
+            # What the CLI caller asked for; json for an exec line and App.call
+            format_name=self.format_name,
             request_id=self.request_id,
             env=self.env,
             state=self.app._state,
@@ -6554,6 +6554,7 @@ class _Run:
         plan_command = self.current
         text = self._read_plan(args)
         self.payload_stdin = None  # the plan is stdin; a line's payload needs input_file
+        self.format_name = FormatName.of(Format.JSON)  # every line runs and answers in JSON
         if isinstance(text, Envelope):
             return self.emit(Format.JSON, text)
         # Only \n ends a JSONL line: splitlines() would also break on U+2028, U+2029,
