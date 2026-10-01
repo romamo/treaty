@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Changed
+
+- The package metadata names the author, links the documentation and the changelog, and
+  adds the `Environment :: Console`, `Operating System :: OS Independent`,
+  `Programming Language :: Python :: 3 :: Only`, and `Typing :: Typed` classifiers. The
+  README's links are absolute, so they resolve on pypi.org, and a test fails on a relative
+  one (#122)
+
 ## [1.0.0rc7] - 2026-09-30
 
 The seventh 1.0 release candidate: 2 fixes.
