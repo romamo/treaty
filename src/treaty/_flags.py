@@ -59,6 +59,8 @@ class FlagSpec:
     """False writes the value as ``[OMITTED]`` in the audit log; it is still a plain value"""
     dry_run: bool = False
     """The command's dry-run switch under its own name, such as a wrapped tool's ``--check``"""
+    confirm: bool = False
+    """The inverse switch: the command previews, as a dry run, unless this flag is set"""
     env: tuple[EnvName, ...] = ()
     """Variables read after ``<APP>_<NAME>``, in order, such as ``BEANCOUNT_FILE``"""
 
@@ -69,6 +71,12 @@ class FlagSpec:
             raise RegistrationError(f"audit is True or False, not {self.audit!r}")
         if not isinstance(self.dry_run, bool):
             raise RegistrationError(f"dry_run is True or False, not {self.dry_run!r}")
+        if not isinstance(self.confirm, bool):
+            raise RegistrationError(f"confirm is True or False, not {self.confirm!r}")
+        if self.confirm and self.dry_run:
+            raise RegistrationError(
+                "confirm=True and dry_run=True are opposite switches; a flag is one of them"
+            )
         if self.pattern_type is not None and self.pattern_type not in PATTERN_TYPES:
             raise RegistrationError(
                 f"pattern_type={self.pattern_type!r} is not one of "
@@ -113,6 +121,7 @@ def Flag(
     deprecated: Deprecated | None = None,
     audit: bool = True,
     dry_run: bool = False,
+    confirm: bool = False,
     env: Sequence[str | EnvName] = (),
 ) -> Any:
     """Declare a named ``--flag`` on an arguments dataclass
@@ -131,6 +140,9 @@ def Flag(
     body too private to keep; unlike ``secret``, argv and error messages still carry it.
     ``dry_run=True`` on a boolean makes it the command's dry run in place of a field
     named ``dry_run``, so a wrapper keeps the tool's own ``--check`` or ``--noop``.
+    ``confirm=True`` on a boolean, such as ``yes: bool = Flag(confirm=True, ...)``, is the
+    inverse: a mutating command previews unless it is passed, with ``meta.dry_run`` true
+    and a ``would_*`` effect as under ``--dry-run``; its default is False.
     ``env=("IBKR_FLEX_TOKEN",)`` reads those variables, in order, when the flag is not
     passed, after ``<APP>_<NAME>``, which a flag or setting that declares ``env`` reads
     first (REQ-F-073). ``EnvName("OLD", deprecated=Deprecated("1.4.0"))`` still reads one, with a
@@ -148,8 +160,16 @@ def Flag(
         deprecated=deprecated,
         audit=audit,
         dry_run=dry_run,
+        confirm=confirm,
         env=env_names(env),
     )
+    if confirm and default is MISSING:
+        default = False  # unconfirmed is the preview
+    if confirm and default is not False:
+        raise RegistrationError(
+            f"confirm=True makes the command preview unless the flag is passed, so its "
+            f"default is False, not {default!r}"
+        )
     return _field(spec, default)
 
 
@@ -351,6 +371,13 @@ class FieldInfo:
             description = f"{description} (- reads it from stdin)"
         if not self.spec.audit:
             description = f"{description} ({UNAUDITED})"
+        if self.spec.confirm:
+            # FlagEntry allows no extra keys and CommandEntry has none for it, so the
+            # preview is stated here (#197)
+            description = (
+                f"{description} (without it the command previews: meta.dry_run is true and "
+                "effect a would_* value)"
+            )
         if (old := self.spec.deprecated) is not None:
             instead = "" if old.replacement is None else f"; use --{old.replacement}"
             description = f"{description} (deprecated since {old.since}{instead})"
@@ -707,8 +734,26 @@ def dry_run_field(fields: Sequence[FieldInfo]) -> FieldInfo | None:
     )
 
 
+def confirm_field(fields: Sequence[FieldInfo]) -> FieldInfo | None:
+    """The command's confirmation switch: the field marked ``Flag(confirm=True)``"""
+    return next((f for f in fields if f.spec.confirm), None)
+
+
 def _check_dry_run(cls: type, infos: Sequence[FieldInfo]) -> None:
-    """One dry-run switch per command: one marked field, and no ``dry_run`` field beside it"""
+    """One dry-run switch per command: one marked field, and no ``dry_run`` field beside it;
+    a confirmation switch is one too, so it stands alone"""
+    confirming = [i.name for i in infos if i.spec.confirm]
+    if len(confirming) > 1:
+        raise RegistrationError(
+            f"{cls.__qualname__}: confirm=True on {confirming}; a command has one "
+            "confirmation switch"
+        )
+    switch = dry_run_field(infos)
+    if confirming and switch is not None:
+        raise RegistrationError(
+            f"{cls.__qualname__}: {confirming[0]} is marked confirm=True, so the command "
+            f"previews without it; {switch.name} is a second dry-run switch, drop one"
+        )
     marked = [i.name for i in infos if i.spec.dry_run]
     if len(marked) > 1:
         raise RegistrationError(
@@ -866,6 +911,12 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             )
         classified = classify(hints[f.name], scalars, _objects(scalars))
         item = classified.item
+        if spec.confirm and classified.flag_type is not FlagType.BOOLEAN:
+            # Before the default check, whose False would not match another type
+            raise RegistrationError(
+                f"{cls.__qualname__}.{f.name}: confirm=True marks a boolean flag as the "
+                f"confirmation; this field is a {classified.flag_type.value}"
+            )
         if spec.positional and (
             classified.flag_type is FlagType.OBJECT
             or (item is not None and item.flag_type is FlagType.OBJECT)

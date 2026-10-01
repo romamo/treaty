@@ -30,6 +30,17 @@ Apps built on treaty keep their own, structured schema changelog with
   `_source` on a command that is not external still prints. A boolean in the stderr error
   block reads `true` or `false`, as in the rest of plain output, not Python's `True` or
   `False` (#198)
+### Added
+
+- A mutating command can preview unless its own confirmation flag is passed:
+  `yes: bool = Flag(confirm=True, description=...)`. Without `--yes` the run is a dry run
+  under the `--dry-run` contract: a `would_*` effect, `meta.dry_run: true`, and nothing
+  stored under an idempotency key; with it the command runs, and the flag keeps its name.
+  A missing value is a preview on argv, `--raw-payload`, `exec`, and `App.call` and MCP,
+  and `exec --dry-run` previews even a line that passes it. The flag's manifest
+  description says the command previews without it, and generated skills say so too. A
+  confirmation on a safe or destructive command, on a non-boolean field, with a default
+  other than `False`, or beside a `dry_run` switch is a `RegistrationError` (#197)
 
 ## [1.0.0rc12] - 2026-10-01
 

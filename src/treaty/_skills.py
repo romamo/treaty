@@ -84,6 +84,11 @@ def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) ->
             "with --confirm-destructive, which nothing else implies"
         )
     elif command.danger_level is DangerLevel.MUTATING:
+        if (confirming := command.confirm_field) is not None:
+            rails.append(
+                f"Previews unless --{confirming.flag}: read the would_* effect first, then "
+                f"apply with --{confirming.flag}"
+            )
         rails.append("Mutating: pass --idempotency-key so a retry cannot apply it twice")
     if command.required_scopes:
         scopes = ", ".join(str(s) for s in command.required_scopes)
