@@ -13,13 +13,20 @@ import pytest
 from conftest import spec_validator
 
 from treaty import App, Ctx, Flag, RegistrationError
+from treaty._app import _Stderr
 from treaty._command import CHILD_LOG_NOTE
 from treaty._subprocess import Processes, Stream
+from treaty._verbosity import Verbosity
 
 # Each child is a tiny Python script, so these run on every platform
 PRINT = "import sys\nfor line in sys.argv[1:]:\n    print(line, flush=True)\n"
 BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
 BOTH = "import sys\nprint('out', flush=True)\nprint('err', file=sys.stderr, flush=True)\n"
+MANY = (
+    "import sys\n"
+    "for i in range(500):\n"
+    "    print(f'{sys.argv[1]}{i:04d}-' + 'x' * 200, flush=True)\n"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +47,8 @@ def make_app() -> App:
 
     @app.command("follow", description="Follow", danger_level="safe", exit_codes=())
     def follow(args: Child, ctx: Ctx) -> dict[str, object]:
-        done = ctx.run([sys.executable, "-c", args.code, *args.lines], stream=True)
+        extra = [] if args.token is None else [args.token]
+        done = ctx.run([sys.executable, "-c", args.code, *args.lines, *extra], stream=True)
         return {"stdout": done.stdout, "stderr": done.stderr}
 
     @app.command("undeclared", description="Undeclared", danger_level="safe", exit_codes=())
@@ -52,16 +60,23 @@ def make_app() -> App:
         "both", description="Two children", danger_level="safe", exit_codes=(), child_log=True
     )
     def both(args: Child, ctx: Ctx) -> dict[str, object]:
-        # Two children at once, on two threads of the handler
+        # Two children at once, on two threads of the handler. Each child makes its own
+        # lines: 500 of them as arguments would pass Windows' 32767-character command line
+        errors: list[BaseException] = []
+
         def one(tag: str) -> None:
-            lines = [f"{tag}{i:04d}-" + "x" * 200 for i in range(500)]
-            ctx.run([sys.executable, "-c", PRINT, *lines], stream="always")
+            try:
+                ctx.run([sys.executable, "-c", MANY, tag], stream="always")
+            except BaseException as exc:  # noqa: BLE001 - re-raised on the handler's thread
+                errors.append(exc)
 
         threads = [threading.Thread(target=one, args=(tag,)) for tag in "ab"]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
+        if errors:
+            raise errors[0]
         return {}
 
     return app
@@ -139,6 +154,20 @@ def test_a_secret_in_a_line_is_redacted() -> None:
     assert "hunter2-secret" not in err and err.splitlines() == ["[REDACTED]"]
 
 
+def test_a_secret_flag_value_is_redacted_as_stream_true_redacts_it() -> None:
+    secret = "hunter2-secret"
+    said = ["before", f"x{secret}y", f"{secret}:{secret}"]
+    flags = [*lines_of(*said), "--token-from-env", "CHILDLOG_TOKEN", "--format", "json"]
+    code, envelope, always = run("deploy", PRINT, *flags, CHILDLOG_TOKEN=secret)
+    assert code == 0 and envelope is not None, always
+    code, _, logged = run("follow", PRINT, *flags, "--verbose", CHILDLOG_TOKEN=secret)
+    assert code == 0, logged
+    messages = [json.loads(line)["message"] for line in logged.splitlines()]
+    assert secret not in always and secret not in logged
+    expected = ["before", "x[REDACTED]y", "[REDACTED]:[REDACTED]", "[REDACTED]"]
+    assert always.splitlines() == expected and messages == expected
+
+
 def test_escapes_and_carriage_returns_are_cleaned() -> None:
     script = (
         "import sys\n"
@@ -157,11 +186,12 @@ def test_a_terminal_keeps_colors_unless_no_color() -> None:
 
 
 def test_concurrent_children_interleave_whole_lines() -> None:
-    code, _, err = run("both", PRINT, "--format", "json")
-    assert code == 0
+    code, envelope, err = run("both", PRINT, "--format", "json")
+    assert code == 0, f"exit {code}: {envelope}\nstderr: {err[:2000]!r}"
     lines = err.splitlines()
-    assert len(lines) == 1000
-    assert all(re.fullmatch(r"[ab]\d{4}-x{200}", line) for line in lines)
+    assert len(lines) == 1000, f"{len(lines)} lines: {envelope}\nstderr: {err[:2000]!r}"
+    torn = [line for line in lines if not re.fullmatch(r"[ab]\d{4}-x{200}", line)]
+    assert not torn, f"{len(torn)} torn lines, first: {torn[:3]!r}"
     assert sorted(lines) == sorted(f"{t}{i:04d}-" + "x" * 200 for t in "ab" for i in range(500))
 
 
@@ -198,3 +228,40 @@ def test_the_manifest_description_says_stderr_carries_the_child_log() -> None:
     commands = manifest["commands"]
     assert commands["deploy"]["description"] == f"Deploy. {CHILD_LOG_NOTE}"
     assert commands["follow"]["description"] == "Follow"
+
+
+def test_a_large_output_on_both_pipes_drains_without_blocking() -> None:
+    script = (
+        "import sys\n"
+        "for i in range(20000):\n"
+        "    print(f'o{i}')\n"
+        "    print(f'e{i}', file=sys.stderr)\n"
+    )
+    code, envelope, err = run("deploy", script, "--format", "json")
+    assert code == 0 and envelope is not None, err[-2000:]
+    lines = err.splitlines()
+    assert len(lines) == 40000 and {"o19999", "e19999"} <= set(lines), lines[-3:]
+
+
+class _Failing(io.StringIO):
+    def write(self, text: str) -> int:
+        raise ValueError("stderr broke")
+
+
+def test_a_write_that_raises_releases_the_lock() -> None:
+    err = _Stderr(_Failing(), Verbosity.NORMAL)
+    with pytest.raises(ValueError, match="stderr broke"):
+        err.child_line("first")
+    raised: list[ValueError] = []
+
+    def other() -> None:
+        try:
+            err.child_line("second")
+        except ValueError as exc:
+            raised.append(exc)
+
+    # Another thread would block forever on a lock the raise left held
+    thread = threading.Thread(target=other, daemon=True)
+    thread.start()
+    thread.join(timeout=5)
+    assert not thread.is_alive() and len(raised) == 1
