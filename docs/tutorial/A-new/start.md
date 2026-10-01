@@ -279,9 +279,9 @@ def list_items(args: ListArgs, ctx: Ctx, store: Store) -> list[Item]:
 ```
 
 treaty sorts every array in `data`, so two identical calls return identical bytes;
-`sort_key` says which field orders an array of objects. `renderers=` replaces the default
-`key: value` lines at a terminal with the format a person expects, one line per item. The
-renderer gets `data` as JSON values and returns text; the JSON an agent reads does not
+`sort_key` says which field orders an array of objects. At a terminal, a list of flat
+objects prints as an aligned table by default; `renderers=` replaces it with the format a
+person expects, one line per item. The renderer gets `data` as JSON values and returns text; the JSON an agent reads does not
 change.
 
 `done` fails when the item does not exist. The failure is a named exit code, not a print

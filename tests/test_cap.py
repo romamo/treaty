@@ -229,7 +229,8 @@ def test_exec_caps_each_line() -> None:
 def test_plain_mode_is_not_capped() -> None:
     out = io.StringIO()
     big_app().run(["items"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
-    assert out.getvalue().count("name: item-") == 1000
+    # Plain renders the 1,000 flat items as a table: a header and one line per item
+    assert out.getvalue().count(" item-") == 1000
 
 
 def test_command_flag_named_like_a_global_is_rejected() -> None:

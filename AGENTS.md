@@ -75,7 +75,7 @@ which serves any treaty app's commands as MCP tools over stdio.
 Shared conventions, read without the prefix:
 
 - `CI`, `GITHUB_ACTIONS`, `JENKINS_URL` (string, optional): CI detection: JSON output, no prompts, and no update check
-- `NO_COLOR`, `TERM` (string, optional): Color and terminal capabilities of plain output
+- `NO_COLOR`, `TERM`, `COLUMNS` (string, optional): Color, terminal capabilities, and table width of plain output
 - `TOOL_TRACE_ID` (string, optional): Trace id of the run, inherited by child processes
 - `HOME`, `USER`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` (string, optional): Where the user config file, state, and caches live
 - `PATH`, `SHELL`, `PWD` (string, optional): Passed to child processes; PATH finds required tools

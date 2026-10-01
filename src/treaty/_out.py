@@ -37,6 +37,8 @@ class OutSpec:
     """Masked unless ``--unmask``: True always, False never, None by the name (REQ-F-058)"""
     external: bool = False
     """Holds content from outside the tool; ``data`` gets trust tags (REQ-F-035)"""
+    table: bool = True
+    """A column of the plain table a list of these objects renders as; output only"""
 
 
 NO_ORDER = OutSpec()
@@ -51,6 +53,7 @@ def Out(
     volatile: bool = False,
     high_entropy: bool | None = None,
     external: bool = False,
+    table: bool = True,
 ) -> Any:
     """Declare how a field of an output dataclass is written, the output ``Flag``
 
@@ -61,7 +64,8 @@ def Out(
     ``high_entropy=True`` masks the value unless ``--unmask``, ``False`` exempts it (a
     content hash to compare), and the default masks it when the name says credential.
     ``external=True`` marks content from outside the tool: when it has a value, ``data``
-    is tagged ``_trusted: false``.
+    is tagged ``_trusted: false``. ``table=False`` leaves the field out of the aligned
+    table ``--format plain`` prints for a list of these objects; JSON keeps it.
     """
     if sort_key is not None and ordered:
         raise RegistrationError("Out: sort_key orders the array, ordered=True keeps it; pick one")
@@ -69,7 +73,9 @@ def Out(
         raise RegistrationError("Out: high_entropy is True, False, or None (by the name)")
     if not isinstance(external, bool):
         raise RegistrationError("Out: external is True or False")
-    spec = OutSpec(sort_key, ordered, volatile, high_entropy, external)
+    if not isinstance(table, bool):
+        raise RegistrationError("Out: table is True or False")
+    spec = OutSpec(sort_key, ordered, volatile, high_entropy, external, table)
     if default is not MISSING and default_factory is not MISSING:
         raise RegistrationError("Out: pass default or default_factory, not both")
     if default_factory is not MISSING:

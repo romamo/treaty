@@ -602,7 +602,8 @@ todo list -a --db tmp/tutorial/todo.json | jq -e '[.data[].id] == [2]'
             click.echo(f"[{mark}] #{item['id']} {item['text']} ({item['priority']})")
 ```
 
-Piped output is JSON. At a terminal, treaty prints `plain`: one `key: value` line per field.
+Piped output is JSON. At a terminal, treaty prints `plain`: a list of flat objects as an
+aligned table, anything else as one `key: value` line per field.
 When the old output was worth keeping, move the formatting into a renderer for the command.
 It receives `data` as JSON values and returns text:
 
