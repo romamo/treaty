@@ -277,10 +277,12 @@ def test_output_refuses_the_format_name() -> None:
     assert not Path("ndjson").exists()
 
 
-# --max-output: whole records up to the cap, counted across a stream (REQ-F-052, REQ-F-064)
+# --max-output (REQ-F-052, REQ-F-064): a buffered answer keeps whole records up to the
+# cap; a stream caps each record, as jsonl caps each envelope, and goes on
 
 PADDED = [{"n": i, "pad": "x" * 1000} for i in range(10)]
 """Each line is 1017 bytes, so four fit the smallest cap, 4096"""
+HUGE = {"pad": "x" * 5000}
 
 
 def capped_app() -> App:
@@ -296,9 +298,17 @@ def capped_app() -> App:
     def flow(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, object]]:
         yield from PADDED
 
+    @app.command(
+        "spiky", description="A huge event", streaming=True, danger_level="safe", exit_codes=()
+    )
+    def spiky(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, object]]:
+        yield {"n": 1}
+        yield HUGE
+        yield {"n": 3}
+
     @app.command("huge", description="One big row", danger_level="safe", exit_codes=())
     def huge(args: NoArgs, ctx: Ctx) -> dict[str, object]:
-        return {"pad": "x" * 5000}
+        return HUGE
 
     return app
 
@@ -315,11 +325,12 @@ def run_capped(argv: list[str]) -> tuple[int, str, list[dict[str, object]]]:
     return code, out.getvalue(), [json.loads(line) for line in err.getvalue().splitlines()]
 
 
-@pytest.mark.parametrize("command", ["padded", "flow"])
-def test_max_output_writes_whole_records_up_to_the_cap(command: str) -> None:
-    code, out, err = run_capped([command])
+@pytest.mark.parametrize("argv", [["padded"], ["flow", "--no-stream"]])
+def test_a_buffered_answer_keeps_whole_records_up_to_the_cap(argv: list[str]) -> None:
+    code, out, err = run_capped(argv)
     assert code == 0 and lines(out) == PADDED[:4] and len(out.encode()) <= 4096
     [truncation, warning] = err
+    hint = f"probe {' '.join(argv)} --format ndjson --max-output 11194"
     assert truncation["truncation"] == {
         "truncated": True,
         "total_bytes": 10170,
@@ -328,12 +339,39 @@ def test_max_output_writes_whole_records_up_to_the_cap(command: str) -> None:
         "returned_count": 4,
         "omitted_count": 6,
         "max_output_bytes": 4096,
-        "truncation_hint": f"probe {command} --format ndjson --max-output 11194",
+        "truncation_hint": hint,
     }
     assert warning == {
         "code": "FIELD_TRUNCATED",
         "message": "data cut from 10 to 4",
         "context": {"field": "data", "original_length": 10, "truncated_length": 4},
+    }
+
+
+def test_a_stream_caps_each_record_so_it_never_goes_silent() -> None:
+    code, out, err = run_capped(["flow"])
+    assert code == 0 and lines(out) == PADDED and err == []
+
+
+def test_a_stream_record_over_the_cap_is_left_out_and_the_stream_goes_on() -> None:
+    code, out, err = run_capped(["spiky"])
+    assert code == 0 and lines(out) == [{"n": 1}, {"n": 3}]
+    [truncation, warning] = err
+    assert truncation["truncation"] == {
+        "truncated": True,
+        "seq": 2,
+        "total_bytes": 5011,
+        "returned_bytes": 0,
+        "total_count": 1,
+        "returned_count": 0,
+        "omitted_count": 1,
+        "max_output_bytes": 4096,
+        "truncation_hint": "probe spiky --format ndjson --max-output 6035",
+    }
+    assert warning == {
+        "code": "FIELD_TRUNCATED",
+        "message": "event 2 left out: 5011 bytes, over the 4096-byte cap",
+        "context": {"field": "data", "seq": 2, "original_length": 5011, "truncated_length": 0},
     }
 
 
@@ -346,9 +384,10 @@ def test_a_record_larger_than_the_cap_writes_nothing() -> None:
     assert [e.get("code") for e in err[1:]] == ["FIELD_TRUNCATED"]
 
 
-def test_a_cut_fails_the_run_under_warnings_as_errors() -> None:
-    code, out, err = run_capped(["padded", "--warnings-as-errors"])
-    assert code == 1 and len(lines(out)) == 4
+@pytest.mark.parametrize(("command", "written"), [("padded", 4), ("spiky", 2)])
+def test_a_cut_fails_the_run_under_warnings_as_errors(command: str, written: int) -> None:
+    code, out, err = run_capped([command, "--warnings-as-errors"])
+    assert code == 1 and len(lines(out)) == written
     error = err[-1]["error"]
     assert isinstance(error, dict) and error["code"] == "WARNINGS_AS_ERRORS"
 

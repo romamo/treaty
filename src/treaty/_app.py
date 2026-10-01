@@ -76,6 +76,7 @@ from ._cap import (
     cut_envelope,
     recap,
     record_cut,
+    record_dropped,
 )
 from ._changelog import load_changelog
 from ._command import (
@@ -2891,12 +2892,8 @@ class _Run:
         """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
-        self.warnings_written = 0
-        """The warnings of the answer that ``ndjson`` wrote to stderr so far"""
-        self.records_sent = (0, 0)
-        """``ndjson`` records written to stdout, and their bytes, across a stream's events"""
-        self.records_omitted = (0, 0)
-        """``ndjson`` records ``--max-output`` held back, and their bytes"""
+        self.ndjson_shown: list[WarningDetail] = []
+        """The warnings ``ndjson`` wrote to stderr so far: a stream's envelopes repeat them"""
         self._logging = False
         """Whether the root logger routes records to this run (``attach_logging``)"""
         self._redaction: tuple[tuple[object, ...], Callable[[str], str]] | None = None
@@ -5338,7 +5335,7 @@ class _Run:
                 continue
             fallback = ndjson_line if mode is Format.NDJSON else render_event
             code = self._emit_text(
-                mode, envelope, render, fallback=fallback, settle=_terminal(envelope)
+                mode, envelope, render, fallback=fallback, settle=_terminal(envelope), event=True
             )
             if code != envelope.exit_code:
                 # One traceback is enough: later events use the plain fallback
@@ -5355,9 +5352,10 @@ class _Run:
         *,
         fallback: Renderer = render_plain,
         settle: bool = True,
+        event: bool = False,
     ) -> int:
         """Data through the renderer on stdout, errors as prose on stderr, or as one JSON
-        line there in ``ndjson``"""
+        line there in ``ndjson``; ``event`` for each envelope of a stream"""
         if self.budget is not None:
             before = len(envelope.warnings)
             envelope = self._budgeted(self.budget, envelope)
@@ -5370,19 +5368,23 @@ class _Run:
                 self.warnings_shown += envelope.warnings[before:]
         records = ""
         if mode is Format.NDJSON:
-            records, envelope = self._capped_records(envelope, render or fallback)
+            records, envelope = self._capped_records(envelope, render or fallback, event)
         # A program reading ndjson gets every warning once, as a stream's events add them;
         # a person, those settling added
-        before = self.warnings_written if mode is Format.NDJSON else len(envelope.warnings)
+        before = len(envelope.warnings)
         if settle:
             envelope = self.settle(envelope)
-        if settle or mode is Format.NDJSON:
-            self.warnings_written = len(envelope.warnings)
-            for warning in envelope.warnings[before:]:
-                # No envelope carries it here: one WarningDetail line on stderr (REQ-O-030)
-                line = json.dumps(warning.to_json(), separators=(",", ":"))
-                self.err.write(line + "\n", Level.WARN)
-                self.warnings_shown.append(warning)
+        if mode is Format.NDJSON:
+            fresh = [w for w in envelope.warnings if w not in self.ndjson_shown]
+            self.ndjson_shown.extend(fresh)
+        else:
+            fresh = list(envelope.warnings[before:]) if settle else []
+            # That line says it: the warning lines after the result skip it (#152)
+            self.warnings_shown += fresh
+        for warning in fresh:
+            # No envelope carries it here: one WarningDetail line on stderr (REQ-O-030)
+            line = json.dumps(warning.to_json(), separators=(",", ":"))
+            self.err.write(line + "\n", Level.WARN)
         code = envelope.exit_code
         pagination = envelope.extra_meta.get("pagination")
         if isinstance(pagination, dict) and pagination.get("has_more"):
@@ -5479,27 +5481,42 @@ class _Run:
             line = f"warning: {warning.code}: {self._redact_everywhere(warning.message)}"
             self.err.write(terminal_text(line, color=color) + "\n", Level.WARN)
 
-    def _capped_records(self, envelope: Envelope, render: Renderer) -> tuple[str, Envelope]:
-        """The ``ndjson`` lines of ``envelope`` that fit ``--max-output``, counted across a
-        stream's events: whole records only, none after the first that would pass the cap
-        (REQ-F-052). The answer's last envelope gets the ``FIELD_TRUNCATED`` warning, and
-        stderr one ``{"truncation": ...}`` line (REQ-F-064)."""
+    def _capped_records(
+        self, envelope: Envelope, render: Renderer, event: bool
+    ) -> tuple[str, Envelope]:
+        """The ``ndjson`` lines of ``envelope`` within ``--max-output`` (REQ-F-052), each
+        cut reported as a ``FIELD_TRUNCATED`` warning and one ``{"truncation": ...}`` line
+        on stderr (REQ-F-064). A stream's ``event`` is capped record by record, as
+        ``jsonl`` caps each envelope, so a record over the cap is left out and the stream
+        goes on; a buffered answer keeps whole records up to the cap, and none after."""
         data = clean(envelope.data)
+        lines = [] if data is None else _rendered(render, data).splitlines(keepends=True)
+        sizes = [len(line.encode("utf-8")) for line in lines]
+        rerun = Rerun(self.argv, self.app.name, self.page)
         kept: list[str] = []
-        if data is not None:
-            for line in _rendered(render, data).splitlines(keepends=True):
-                size = len(line.encode("utf-8"))
-                (count, sent), (dropped, held) = self.records_sent, self.records_omitted
-                if dropped or sent + size > self.cap.bytes:
-                    self.records_omitted = (dropped + 1, held + size)
-                else:
+        cut: list[tuple[WarningDetail, dict[str, object]]] = []
+        if event:
+            for line, size in zip(lines, sizes, strict=True):
+                if size <= self.cap.bytes:
                     kept.append(line)
-                    self.records_sent = (count + 1, sent + size)
-        if _terminal(envelope) and self.records_omitted[0]:
-            rerun = Rerun(self.argv, self.app.name, self.page)
-            warning, report = record_cut(self.cap, rerun, self.records_sent, self.records_omitted)
+                    continue
+                seq = envelope.extra_meta.get("seq")
+                cut.append(record_dropped(self.cap, rerun, size, seq))
+        else:
+            sent = 0
+            for line, size in zip(lines, sizes, strict=True):
+                if sent + size > self.cap.bytes:
+                    break
+                kept.append(line)
+                sent += size
+            if len(kept) < len(lines):
+                omitted = (len(lines) - len(kept), sum(sizes) - sent)
+                cut.append(record_cut(self.cap, rerun, (len(kept), sent), omitted))
+        for warning, report in cut:
             line = json.dumps({"truncation": report}, separators=(",", ":"), sort_keys=True)
             self.err.write(line + "\n", Level.WARN)
+            # The stream's later envelopes, and its terminal one, carry it too
+            self.warnings.append(warning)
             envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
         return "".join(kept), envelope
 

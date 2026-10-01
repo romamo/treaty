@@ -373,7 +373,10 @@ or `CI` is set, and `plain` otherwise.
 `json` writes the full response envelope, one compact line per envelope; it is the contract
 agents read and takes no renderer. `jsonl` is the same output under the name line-oriented
 readers ask for. Every other format writes the result data as text and errors as prose on
-stderr.
+stderr. `tsv` is built in: a header row, then one row per item (nested values as compact
+JSON, `null` as an empty field, and a backslash, tab, or line break in a value escaped as
+`\\`, `\t`, `\n`, `\r`, never quoted); `treaty.table(",")` is the same renderer for CSV
+with the `csv` module's quoting, `app.format(Format.CSV, render=table(","))`.
 
 `ndjson` writes `data` alone for `jq -c`, `duckdb read_json`, `mlr`, or the next command in a
 pipe: one compact JSON line per item of a list result or per event of a stream (a stream
@@ -382,18 +385,17 @@ data. Keys are sorted and values masked and redacted as in the envelope, and `--
 applies. The status goes elsewhere: the exit code, and on stderr one JSON line each for
 the error (`{"error": {...}}`, credential-named context `[REDACTED]`), every warning
 (a `WarningDetail` object), a cut page (`{"pagination": {...}}`), and `ctx.log` lines.
-`--max-output` caps the records written, counted across a stream's events: whole
-records only, stopping before the first that would pass the cap. A cut writes one
-`{"truncation": {...}}` line to stderr (`truncated`, `total_bytes`, `returned_bytes`,
-`total_count`, `returned_count`, `omitted_count`, `max_output_bytes`, and a
-`truncation_hint` rerun with a larger `--max-output`) and a `FIELD_TRUNCATED` warning on
-`data`. The exit code is unchanged, as it is for a cut envelope, unless
-`--warnings-as-errors` is set. A first record larger than the cap leaves stdout empty.
-A cut stream still runs to its end, writing nothing more, so its exit code is the real one. `ndjson` takes no renderer, and `exec`, `App.call`, and the MCP adapter
-answer with envelopes whatever `--format` says. `tsv` is built in: a header row, then one row per item (nested values as compact
-JSON, `null` as an empty field, and a backslash, tab, or line break in a value escaped as
-`\\`, `\t`, `\n`, `\r`, never quoted); `treaty.table(",")` is the same renderer for CSV
-with the `csv` module's quoting, `app.format(Format.CSV, render=table(","))`.
+`--max-output` caps what a buffered answer writes: whole records only, stopping before
+the first that would pass the cap, so a first record larger than the cap leaves stdout
+empty. A stream is capped record by record, as `jsonl` caps each envelope: a record over
+the cap is left out and the stream goes on, so a pipeline is never silenced. Each cut
+writes one `{"truncation": {...}}` line to stderr (`truncated`, `total_bytes`,
+`returned_bytes`, `total_count`, `returned_count`, `omitted_count`, `max_output_bytes`,
+`seq` for a stream's record, and a `truncation_hint` rerun with a larger `--max-output`)
+and a `FIELD_TRUNCATED` warning on `data`. The exit code is unchanged, as it is for a cut
+envelope, unless `--warnings-as-errors` is set. `ndjson` takes no renderer, and `exec`,
+`App.call`, and the MCP adapter answer with envelopes whatever `--format` says.
+
 A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
 returns the text. Formats are `Format` members, never strings:
 

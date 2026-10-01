@@ -131,9 +131,10 @@ Apps built on treaty keep their own, structured schema changelog with
   values masked as in the envelope, and `--fields` applied. The exit code carries the
   status, and stderr gets one JSON line each for the error (`{"error": {...}}`), every
   warning, a cut page (`{"pagination": {...}}`), and `ctx.log` lines. `--max-output`
-  caps its stdout bytes, counted across a stream: whole records up to the cap, then one
-  `{"truncation": {...}}` line and a `FIELD_TRUNCATED` warning on stderr, the exit code
-  unchanged (REQ-F-052); the flag's description now says so. Every app offers it,
+  caps it (REQ-F-052): a buffered answer writes whole records up to the cap, and a stream
+  leaves out each record over the cap and goes on, as `jsonl` caps each envelope; each
+  cut is one `{"truncation": {...}}` line and a `FIELD_TRUNCATED` warning on stderr, the
+  exit code unchanged. The flag's description now says so. Every app offers it,
   so the manifest's `--format` enum and `--help` list it; it takes no renderer, and
   `--output ndjson` is refused as a format name. `jsonl` stays the envelope stream (#34)
 
