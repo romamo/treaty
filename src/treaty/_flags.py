@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ._deprecation import Deprecated
-from ._errors import ParseError, RegistrationError
+from ._errors import ParseError, RegistrationError, SchemaError
 from ._paths import PATTERN_TYPE, check_path
 from ._redact import REDACTED, secret_name
 from ._scalars import (
@@ -28,7 +28,7 @@ from ._scalars import (
     matches_preset,
 )
 from ._secrets import source_flags
-from ._types import Classified, FlagType, classify, type_hints
+from ._types import Classified, FlagType, ObjectHook, classify, type_hints
 
 _META = "treaty"
 FLAG_META = _META
@@ -212,11 +212,16 @@ class FieldInfo:
         if self.spec.secret is not None:
             return self.spec.secret
         item = self.classified.item
-        if self.flag_type in (FlagType.BOOLEAN, FlagType.ENUM) or (
-            item is not None and item.flag_type is FlagType.ENUM
-        ):
-            return False
+        public = (FlagType.BOOLEAN, FlagType.ENUM, FlagType.OBJECT)
+        if self.flag_type in public or (item is not None and item.flag_type in public):
+            return False  # an object's own fields say which of them hold a secret
         return secret_name(self.name)
+
+    @property
+    def object_type(self) -> Classified | None:
+        """The object type of an object field, or of an array field's items"""
+        target = self.classified.item if self.flag_type is FlagType.ARRAY else self.classified
+        return target if target is not None and target.flag_type is FlagType.OBJECT else None
 
     @property
     def env_flag(self) -> str:
@@ -339,13 +344,19 @@ class FieldInfo:
         if (old := self.spec.deprecated) is not None:
             instead = "" if old.replacement is None else f"; use --{old.replacement}"
             description = f"{description} (deprecated since {old.since}{instead})"
+        kind = self.flag_type
+        if (shape := self.object_type) is not None:
+            # FlagEntry has no object type: argv takes the object as JSON text
+            each = "each value" if kind is FlagType.ARRAY else "the value"
+            description = f"{description} ({each} a JSON object {object_shape(shape)})"
+            kind = FlagType.ARRAY if kind is FlagType.ARRAY else FlagType.STRING
         entry: dict[str, object] = {
-            "type": self.flag_type.value,
+            "type": kind.value,
             "required": self.required,
             "description": description,
         }
         if self.default is not MISSING and self.default is not None:
-            entry["default"] = jsonable_default(self.default, self.scalar)
+            entry["default"] = jsonable_value(self.default, self.classified)
         if self.flag_type is FlagType.ENUM:
             entry["enum_values"] = list(self.classified.enum_values)
         if self.spec.short is not None:
@@ -390,6 +401,65 @@ _PRESET_HINTS = {
     "semver": "pass a version such as 1.2.3",
     "url": "pass an http or https URL with a host",
 }
+
+
+def object_shape(target: Classified) -> str:
+    """An object's keys and their types for help and the manifest, as in
+    ``{account: string, number: decimal, memo?: string}``; ``?`` marks an optional key"""
+    if target.flag_type is FlagType.OBJECT:
+        keys = (
+            f"{m.name}{'' if m.required else '?'}: {object_shape(m.classified)}"
+            for m in target.members
+        )
+        return "{" + ", ".join(keys) + "}"
+    if target.flag_type is FlagType.ARRAY:
+        assert target.item is not None, "array fields always carry an item type"
+        return f"[{object_shape(target.item)}]"
+    if target.flag_type is FlagType.ENUM:
+        return "|".join(target.enum_values)
+    if target.scalar is DECIMAL:
+        return "decimal"
+    return "path" if target.path else target.flag_type.value
+
+
+def jsonable_value(value: object, target: Classified) -> object:
+    """A default as JSON, each field of an object by its own type"""
+    if value is None:
+        return None
+    if target.flag_type is FlagType.ARRAY and target.item is not None:
+        assert isinstance(value, tuple)
+        return [jsonable_value(v, target.item) for v in value]
+    if target.flag_type is FlagType.OBJECT:
+        return {
+            m.name: jsonable_value(getattr(value, m.name), m.classified) for m in target.members
+        }
+    return jsonable_default(value, target.scalar)
+
+
+def object_secrets(value: object, target: Classified) -> list[object]:
+    """The values of an object's secret fields at any depth, for the run's redaction"""
+    if value is None:
+        return []
+    if target.flag_type is FlagType.ARRAY and target.item is not None:
+        assert isinstance(value, tuple)
+        return [s for v in value for s in object_secrets(v, target.item)]
+    if target.flag_type is not FlagType.OBJECT:
+        return []
+    found: list[object] = []
+    for m in target.members:
+        nested = getattr(value, m.name)
+        if m.secret and nested is not None:
+            found.extend(nested if isinstance(nested, tuple) else (nested,))
+        else:
+            found.extend(object_secrets(nested, m.classified))
+    return found
+
+
+def has_secrets(target: Classified) -> bool:
+    """Whether an object holds a secret field at any depth, so its text is never echoed"""
+    if target.item is not None:
+        return has_secrets(target.item)
+    return any(m.secret or has_secrets(m.classified) for m in target.members)
 
 
 def jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
@@ -507,6 +577,8 @@ def _coerce_base(target: Classified, raw: str, flag: str) -> object:
             )
         case FlagType.ARRAY:
             raise RegistrationError("nested arrays are not supported")
+        case FlagType.OBJECT:
+            raise ParseError(f"{flag!r} expects a JSON object", context={"flag": flag})
 
 
 def _check_secret_field(cls: type, info: FieldInfo) -> None:
@@ -519,7 +591,7 @@ def _check_secret_field(cls: type, info: FieldInfo) -> None:
             f"Flag(...) to get --{info.env_flag} and --{info.file_flag}, or pass "
             "secret=False when it holds no secret (REQ-C-016)"
         )
-    if info.flag_type in (FlagType.BOOLEAN, FlagType.ARRAY):
+    if info.flag_type in (FlagType.BOOLEAN, FlagType.ARRAY, FlagType.OBJECT):
         raise RegistrationError(
             f"{where}: {how}, but a {info.flag_type.value} cannot hold a secret; pass secret=False"
         )
@@ -547,6 +619,12 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
             return target.scalar.parse(text)  # what a parsed argument would be: -0 is 0
         return default
     match target.flag_type:
+        case FlagType.OBJECT:
+            if not isinstance(default, target.object_cls):
+                raise RegistrationError(
+                    f"{where}: default {default!r} is not a {target.object_cls.__qualname__}"
+                )
+            return default
         case FlagType.ARRAY:
             assert target.item is not None
             if not isinstance(default, tuple):
@@ -660,6 +738,120 @@ def flag_name(field_name: str) -> str:
     return field_name.replace("_", "-")
 
 
+MAX_OBJECT_DEPTH = 8
+"""How deep objects may nest in an argument: postings[0].amount.currency is depth 3"""
+_MEMBER_OPTIONS = (
+    "positional",
+    "short",
+    "from_stdin",
+    "deprecated",
+    "dry_run",
+)
+
+
+def _objects(scalars: ScalarRegistry, outer: tuple[type, ...] = ()) -> ObjectHook:
+    """Reads a frozen dataclass inside an argument as an object, ``outer`` holding the
+    dataclasses it sits in"""
+
+    def hook(cls: type) -> Classified:
+        return _inspect_object(cls, scalars, outer)
+
+    return hook
+
+
+def _inspect_object(cls: type, scalars: ScalarRegistry, outer: tuple[type, ...]) -> Classified:
+    """An object argument's fields, each checked as a flag's value would be. A field may be
+    a plain dataclass field or carry ``Flag(...)`` for its description, ``secret``,
+    ``pattern``, ``pattern_type``, ``multiline``, or ``max_bytes``"""
+    where = cls.__qualname__
+    if cls in outer:
+        chain = " -> ".join(c.__qualname__ for c in (*outer, cls))
+        raise RegistrationError(f"{where} contains itself ({chain}); an object has a finite shape")
+    if len(outer) >= MAX_OBJECT_DEPTH:
+        raise RegistrationError(
+            f"{where}: objects nest at most {MAX_OBJECT_DEPTH} deep in an argument"
+        )
+    params = getattr(cls, "__dataclass_params__", None)
+    if params is None or not params.frozen:
+        raise RegistrationError(
+            f"{where}: an object argument is a frozen dataclass; declare it @dataclass(frozen=True)"
+        )
+    hints = type_hints(cls)
+    members: list[FieldInfo] = []
+    for f in dataclasses.fields(cls):
+        at = f"{where}.{f.name}"
+        if not f.init:
+            raise RegistrationError(f"{at}: field(init=False) cannot be given as a JSON key")
+        spec = f.metadata.get(_META)
+        if spec is None:
+            spec = FlagSpec(f.name.replace("_", " "))
+        elif not isinstance(spec, FlagSpec):
+            raise RegistrationError(f"{at}: declare it with Flag(...) or as a plain field")
+        given = [o for o in _MEMBER_OPTIONS if getattr(spec, o) not in (None, False)]
+        if not spec.audit:
+            given.append("audit")
+        if given:
+            raise RegistrationError(
+                f"{at}: a field of an object takes description, secret, pattern, "
+                f"pattern_type, multiline, and max_bytes from Flag(...), not {', '.join(given)}"
+            )
+        try:
+            classified = classify(hints[f.name], scalars, _objects(scalars, (*outer, cls)))
+        except SchemaError as exc:
+            raise RegistrationError(f"{at}: {exc}") from None
+        default: object = f.default
+        if default is not MISSING:
+            default = _checked_default(classified, default, at)
+        elif f.default_factory is MISSING and classified.optional:
+            default = None  # X | None without a default: an absent key is null
+        info = FieldInfo(
+            name=f.name,
+            flag=f.name,
+            classified=classified,
+            required=default is MISSING and f.default_factory is MISSING,
+            default=default,
+            spec=spec,
+        )
+        if info.secret and info.flag_type in (FlagType.BOOLEAN, FlagType.OBJECT):
+            raise RegistrationError(f"{at}: a {info.flag_type.value} cannot hold a secret")
+        _check_value_spec(at, spec, classified, secret=info.secret)
+        _check_default_constraints(info, at)
+        members.append(info)
+    return Classified(FlagType.OBJECT, False, cls, members=tuple(members))
+
+
+def _check_value_spec(where: str, spec: FlagSpec, classified: Classified, *, secret: bool) -> None:
+    """The value options an object's field allows by its type, as an argument's do"""
+    item = classified.item
+    if spec.pattern is not None and (classified.path or (item is not None and item.path)):
+        raise RegistrationError(
+            f"{where}: Path fields get the filepath preset; pattern= is not allowed on them "
+            "(REQ-C-020)"
+        )
+    scalar = classified.scalar if item is None else item.scalar
+    text_type = item if item is not None else classified
+    if spec.pattern_type is not None and (
+        text_type.flag_type is not FlagType.STRING or text_type.path or scalar is not None
+    ):
+        raise RegistrationError(
+            f"{where}: pattern_type is for str fields; a Path gets filepath on its own, and a "
+            "scalar declares it in app.scalar(...) (REQ-C-020)"
+        )
+    if spec.pattern is not None and scalar is not None:
+        raise RegistrationError(
+            f"{where}: {scalar.cls.__qualname__} declares its own constraints in "
+            "app.scalar(...); pattern= is not allowed on it"
+        )
+    if spec.multiline and text_type.flag_type is not FlagType.STRING:
+        raise RegistrationError(f"{where}: multiline=True is for str fields only")
+    if spec.max_bytes is not None and (
+        text_type.flag_type is not FlagType.STRING or text_type.path or secret
+    ):
+        raise RegistrationError(
+            f"{where}: max_bytes is for str fields that are not secrets or paths"
+        )
+
+
 def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
     """Read an arguments dataclass into ordered ``FieldInfo`` records"""
     if not dataclasses.is_dataclass(cls):
@@ -673,8 +865,18 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: declare fields with Flag(...) or Arg(...)"
             )
-        classified = classify(hints[f.name], scalars)
+        classified = classify(hints[f.name], scalars, _objects(scalars))
         item = classified.item
+        if spec.positional and (
+            classified.flag_type is FlagType.OBJECT
+            or (item is not None and item.flag_type is FlagType.OBJECT)
+        ):
+            # A SchemaError, so registration names the command as for any unsupported type
+            raise SchemaError(
+                f"{cls.__qualname__}.{f.name}: a dataclass positional; declare it with "
+                "Flag(...) to take a JSON object per value, or register a class with "
+                "app.scalar(...) to take it from one text value"
+            )
         if spec.pattern is not None and (classified.path or (item is not None and item.path)):
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: Path fields get the filepath preset; "

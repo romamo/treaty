@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ._errors import RegistrationError, SchemaError
+from ._flags import FLAG_META
 from ._out import Binary, out_spec
 from ._redact import secret_field
 from ._scalars import DECIMAL_TEXT, ScalarRegistry
@@ -196,9 +197,18 @@ def _dataclass_fields_schema(cls: type, scalars: ScalarRegistry, output: bool) -
             prop = {**prop, "x-volatile": True}
         if output and _masked(f.name, spec.high_entropy, prop):
             prop = {**prop, "x-high-entropy": True}  # REQ-F-058: a summary unless --unmask
+        declared = f.metadata.get(FLAG_META)
+        if not output and declared is not None:
+            prop = {**prop, "description": declared.description}
+            if declared.max_bytes is not None and "items" in prop:
+                prop["items"] = {**prop["items"], "x-max-bytes": declared.max_bytes}
+            elif declared.max_bytes is not None:
+                prop["x-max-bytes"] = declared.max_bytes
         properties[f.name] = prop
         if output and not spec.volatile:
             required.append(f.name)
+        elif not output and optional:
+            continue  # an input's X | None may be left out, as the parser allows
         elif f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING:
             required.append(f.name)
     schema: JsonSchema = {

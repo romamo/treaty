@@ -1061,6 +1061,41 @@ base). `pattern=` on a field of a registered type is a registration error, as is
 an unregistered class. `pattern_type` takes the REQ-C-020 presets `alphanumeric_id`,
 `uuid`, `semver`, and `url`; `filepath` stays with `pathlib.Path`.
 
+## Object arguments
+
+A flag can take a structured record: annotate it with a frozen dataclass, `X | None`, or
+`tuple[X, ...]` for a list of them. The dataclass's own fields are plain fields, or carry
+`Flag(...)` for a description, `secret`, `pattern`, `pattern_type`, `multiline`, or
+`max_bytes`; they may be any argument type, other objects and lists of objects among them,
+up to 8 deep:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Posting:
+    account: str
+    number: Decimal
+    memo: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AddArgs:
+    postings: tuple[Posting, ...] = Flag(default=(), description="Postings")
+```
+
+`exec` lines, `--raw-payload`, `app.call(...)`, and MCP carry the value as a JSON object
+(`{"postings": [{"account": "cash", "number": "12.30"}]}`); on argv each `--postings` takes
+one JSON object, repeated for a list, and `from_stdin=True` reads one object per line. Each
+field is checked as a flag's value is (the `Decimal`, `Path`, enum, `Literal`, and
+`app.scalar` rules included), an unknown or missing key is refused, and every error is one
+entry in `error.errors` at its location, such as `postings[1].number`, exit `2`. The
+dataclass's `__post_init__` runs in phase 1 too. `--schema` and the MCP `inputSchema`
+carry the object's schema; the manifest lists the flag as a `string` (an `array` for a list)
+whose description shows its shape, as `--help` does, and completion offers no values for
+it. A field under a secret's name, or declared `secret=True`, is never echoed in an error
+and is redacted from logs and the audit log. An object flag cannot be positional, a secret,
+or a setting, and a value class meant to travel as one string, such as an id, still needs
+`app.scalar(...)`: an unregistered frozen dataclass on a flag is an object.
+
 ## Resources
 
 A handler can take more parameters after `ctx`. Each one is annotated with a class that has

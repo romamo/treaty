@@ -241,6 +241,8 @@ def _typed(field: FieldInfo, value: object, where: str) -> tuple[object, object]
     """``value`` as the field would parse it from argv, and its JSON form"""
     if field.flag_type is FlagType.ARRAY:
         raise RegistrationError(f"{where}: requires cannot compare the array --{field.flag}")
+    if field.flag_type is FlagType.OBJECT:
+        raise RegistrationError(f"{where}: requires cannot compare the object --{field.flag}")
     raw = value.value if isinstance(value, Enum) else value
     if isinstance(raw, bool):
         raw = "true" if raw else "false"
