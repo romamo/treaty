@@ -132,6 +132,8 @@ Apps built on treaty keep their own, structured schema changelog with
   a framework option, or another command's secret or token reads it too is a
   `RegistrationError`, as is naming it in `env=`; a deprecated name's warning names it as
   the replacement instead of the flag (#178)
+- `App.formats` holds `treaty.FormatName` values, not `Format` members, so it can list the
+  names an app registers: compare `n.value`, or `FormatName.of(Format.CSV)` (#179)
 
 ### Added
 
@@ -144,6 +146,15 @@ Apps built on treaty keep their own, structured schema changelog with
   `<APP>_SESSION`, `<APP>_AUDIT_LOG`, and each plain setting's `<APP>_<NAME>` and declared
   names. A secret setting is left out, since root `env_vars` holds no secret. `--help` and
   AGENTS.md list a plain flag's `<APP>_<NAME>` (#178)
+- `app.format("html", render=..., media_type="text/html")` offers a format `Format` does not
+  list. The name, lowercase letters and digits with words joined by `-` or `_`, joins
+  `--format`'s values, `<APP>_FORMAT`, the manifest's enum, `--help`, and completion, and a
+  command's `renderers={"html": ...}` overrides it. It runs as `plain` does: errors go to
+  stderr as prose, `--output` writes the rendered text, and `--output html` is refused as a
+  format name. `media_type` is stated in the `--format` description, as `FlagEntry` has no
+  key for it. A string naming a `Format` member is that member, and `json`, `jsonl`,
+  `ndjson`, and `id` still take no renderer. The new `treaty.FormatName` is one `--format`
+  value (#179)
 
 ## [1.0.0rc11] - 2026-10-01
 

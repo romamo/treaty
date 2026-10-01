@@ -25,6 +25,7 @@ review), **rename**, **remove**.
 | `Out` | output field marker | keep | Settles 07-D4 and X1: one marker, `Out`, not `Field`, so it cannot be confused with `dataclasses.field` |
 | `NoArgs` | class | keep | Arguments type of a command with none |
 | `Format` | enum | keep | `PLAIN`, `JSON`, `JSONL`, `CSV`, `TSV`, `YAML`, `MARKDOWN`, `ID` |
+| `FormatName` | value object | keep | One `--format` value: a `Format` member's or an app's own (`app.format("html", ...)`); `App.formats` lists them |
 | `DangerLevel` | enum | keep | `SAFE`, `MUTATING`, `DESTRUCTIVE` |
 | `Example` | class | keep | Also accepted as `(description, command)` tuples |
 | `Renderer` | type alias | keep | `Callable[[Any], str]` |

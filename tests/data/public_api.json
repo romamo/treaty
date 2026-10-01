@@ -499,6 +499,16 @@
         "ID"
       ]
     },
+    "FormatName": {
+      "fields": [
+        "value"
+      ],
+      "kind": "class",
+      "methods": [
+        "builtin",
+        "mode"
+      ]
+    },
     "FrameworkCode": {
       "kind": "enum",
       "members": [

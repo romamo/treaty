@@ -4,8 +4,9 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from conftest import spec_validator
 
-from treaty import App, Ctx, Exit, Format, NoArgs, RegistrationError, Renderer
+from treaty import App, Ctx, Exit, Format, FormatName, NoArgs, RegistrationError, Renderer
 
 
 def csv_rows(data: Any) -> str:
@@ -131,13 +132,9 @@ def test_a_value_outside_format_is_unknown() -> None:
 
 def test_manifest_and_help_list_the_offered_formats() -> None:
     app = formats_app()
-    assert app.formats == (
-        Format.PLAIN,
-        Format.JSON,
-        Format.JSONL,
-        Format.NDJSON,
-        Format.CSV,
-        Format.TSV,
+    assert app.formats == tuple(
+        FormatName.of(m)
+        for m in (Format.PLAIN, Format.JSON, Format.JSONL, Format.NDJSON, Format.CSV, Format.TSV)
     )
     offered = app.manifest()["flags"]["format"]["enum_values"]  # type: ignore[index]
     assert offered == ["plain", "json", "jsonl", "ndjson", "csv", "tsv"]
@@ -148,21 +145,25 @@ def test_manifest_and_help_list_the_offered_formats() -> None:
 # Registration
 
 
-def test_a_string_is_not_a_format() -> None:
-    with pytest.raises(RegistrationError, match="not a Format member"):
-        App("t", version="1.0.0").format("csv", render=csv_rows)  # type: ignore[arg-type]
+def test_a_members_name_is_that_member() -> None:
+    """``app.format("csv", ...)`` is ``app.format(Format.CSV, ...)``, not a second csv"""
+    app = App("t", version="1.0.0")
+    app.format("csv", render=csv_rows)
+    with pytest.raises(RegistrationError, match="already has a renderer"):
+        app.format(Format.CSV, render=csv_rows)
+    assert [n.value for n in app.formats].count("csv") == 1
 
 
 def test_a_command_renderer_key_must_be_a_format() -> None:
     app = App("t", version="1.0.0")
-    with pytest.raises(RegistrationError, match="not a Format member"):
+    with pytest.raises(RegistrationError, match="not a Format member or a format name"):
         app.command(
             "show",
             description="Show",
-            renderers={"plain": csv_rows},
+            renderers={3: csv_rows},  # type: ignore[dict-item]
             danger_level="safe",
             exit_codes=(),
-        )  # type: ignore[dict-item]
+        )
 
 
 def test_json_takes_no_renderer() -> None:
@@ -201,3 +202,125 @@ def test_a_format_is_registered_once() -> None:
 def test_a_renderer_must_be_callable() -> None:
     with pytest.raises(RegistrationError, match="not callable"):
         App("t", version="1.0.0").format(Format.CSV, render="csv")  # type: ignore[arg-type]
+
+
+# Custom format names (#179)
+
+
+def html_page(data: Any) -> str:
+    return (
+        "<html><body>" + "".join(f"<p>{k}: {v}</p>" for k, v in data.items()) + "</body></html>\n"
+    )
+
+
+def html_app() -> App:
+    app = formats_app()
+    app.format("html", render=html_page, media_type="text/html")
+    app.format("rst", render=lambda d: f"{d}\n")
+
+    @app.command(
+        "why",
+        description="Why it happened",
+        renderers={"html": lambda d: f"<h1>{d['tag']}</h1>\n"},
+        output_file=True,
+        danger_level="safe",
+        exit_codes=(),
+    )
+    def why(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"service": "api", "tag": "1.3.9"}
+
+    return app
+
+
+SHOW_HTML = "<html><body><p>service: api</p><p>tag: 1.3.9</p></body></html>\n"
+
+
+def test_a_custom_name_renders_every_command_and_a_command_may_override_it() -> None:
+    app = html_app()
+    assert run(app, ["show", "--format", "html"]) == (0, SHOW_HTML, "")
+    assert run(app, ["why", "--format", "html"]) == (0, "<h1>1.3.9</h1>\n", "")
+    assert run(app, ["tick", "--format", "rst"]) == (0, "{'n': 1}\n{'n': 2}\n", "")
+
+
+def test_the_format_variable_selects_a_custom_name() -> None:
+    code, out, _ = run(html_app(), ["show"], env={"SHOWCTL_FORMAT": "html"})
+    assert code == 0 and out == SHOW_HTML
+
+
+def test_an_error_under_a_custom_name_is_prose_on_stderr() -> None:
+    code, out, err = run(html_app(), ["fail", "--format", "html"])
+    assert code == 5 and out == ""
+    assert err.startswith("showctl: NOT_FOUND: No such release.\n")
+
+
+def test_manifest_help_and_completion_list_a_custom_name() -> None:
+    app = html_app()
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    entry = manifest["flags"]["format"]  # type: ignore[index]
+    assert entry["enum_values"] == ["plain", "json", "jsonl", "ndjson", "csv", "tsv", "html", "rst"]
+    # FlagEntry has no media type key, so the description states it
+    assert entry["description"].endswith("; html writes text/html")
+    _, out, _ = run(app, ["--help"])
+    assert "--format plain|json|jsonl|ndjson|csv|tsv|html|rst" in out
+    assert "html writes text/html" in out
+    code, script, _ = run(app, ["completion", "bash", "--format", "plain"])
+    assert code == 0 and "html" in script and "rst" in script
+
+
+def test_output_writes_a_custom_format_and_refuses_its_name_as_a_path(tmp_path: Any) -> None:
+    target = tmp_path / "why.html"
+    code, out, _ = run(html_app(), ["why", "--format", "html", "--output", str(target)])
+    assert code == 0 and target.read_text() == "<h1>1.3.9</h1>\n"
+    assert json.loads(out)["data"]["path"] == str(target)
+    out_io = io.StringIO()
+    code = html_app().run(
+        ["--cwd", str(tmp_path), "why", "--output", "html"],
+        stdout=out_io,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    error = json.loads(out_io.getvalue())["error"]
+    assert code == 2 and error["suggestion"] == "use --format html to choose the representation"
+    assert not (tmp_path / "html").exists()
+
+
+def test_an_unregistered_name_is_unknown_listing_the_custom_ones() -> None:
+    out = io.StringIO()
+    code = html_app().run(
+        ["show", "--format", "xml"], stdout=out, stderr=io.StringIO(), env={}, isatty=False
+    )
+    error = json.loads(out.getvalue())["error"]
+    assert code == 2 and error["message"] == "Unknown --format 'xml'"
+    assert error["context"]["allowed"][-2:] == ["html", "rst"]
+
+
+@pytest.mark.parametrize("name", ["json", "jsonl", "ndjson", "id"])
+def test_treatys_own_formats_stay_reserved(name: str) -> None:
+    with pytest.raises(RegistrationError, match="takes no renderer"):
+        App("t", version="1.0.0").format(name, render=csv_rows)
+
+
+@pytest.mark.parametrize("name", ["HTML", "html page", "1html", "-html", "html-", "", "x" * 33])
+def test_a_custom_name_is_validated(name: str) -> None:
+    with pytest.raises(RegistrationError, match="format name"):
+        App("t", version="1.0.0").format(name, render=csv_rows)
+
+
+@pytest.mark.parametrize("media_type", ["html", "text/HTML", "text/html; charset=utf-8", ""])
+def test_a_media_type_is_validated(media_type: str) -> None:
+    with pytest.raises(RegistrationError, match="media type"):
+        App("t", version="1.0.0").format("html", render=csv_rows, media_type=media_type)
+
+
+def test_a_command_renderer_for_a_custom_name_needs_it_registered_first() -> None:
+    app = App("t", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"app\.format\('html'"):
+        app.command(
+            "show",
+            description="Show",
+            renderers={"html": csv_rows},
+            danger_level="safe",
+            exit_codes=(),
+        )

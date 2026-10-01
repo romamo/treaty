@@ -31,7 +31,7 @@ from ._http import HttpResponse, NetworkSettings
 from ._init import Init
 from ._jobs import Job, JobStore
 from ._journal import AuditLog
-from ._mode import Format
+from ._mode import Format, FormatName
 from ._out import Binary, External, Out
 from ._output_base import OutputBase
 from ._page import Page, PageRequest
@@ -97,6 +97,7 @@ __all__ = [
     "OutputAdapter",
     "OutputBase",
     "Format",
+    "FormatName",
     "Page",
     "PageRequest",
     "Redirect",

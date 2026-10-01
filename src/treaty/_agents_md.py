@@ -124,7 +124,7 @@ def env_vars(app: App) -> tuple[EnvVarDoc, ...]:
 
 def help_texts(app: App) -> dict[tuple[str, ...], str]:
     """The plain ``--help`` of the root and of every command, keyed by command words"""
-    rows = global_rows(global_flag_entries(app.formats, app.name))
+    rows = global_rows(global_flag_entries(app.formats, app.name, app._media_types))
     texts: dict[tuple[str, ...], str] = {
         (): render_root(
             app.name, app.description, app.commands, app._groups, rows, app.environment()
