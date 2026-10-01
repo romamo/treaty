@@ -275,3 +275,87 @@ def test_output_refuses_the_format_name() -> None:
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and "--format ndjson" in error["errors"][0]["suggestion"]
     assert not Path("ndjson").exists()
+
+
+# --max-output: whole records up to the cap, counted across a stream (REQ-F-052, REQ-F-064)
+
+PADDED = [{"n": i, "pad": "x" * 1000} for i in range(10)]
+"""Each line is 1017 bytes, so four fit the smallest cap, 4096"""
+
+
+def capped_app() -> App:
+    app = App("probe", version="1.0.0")
+
+    @app.command("padded", description="Big rows", danger_level="safe", exit_codes=())
+    def padded(args: NoArgs, ctx: Ctx) -> list[dict[str, object]]:
+        return PADDED
+
+    @app.command(
+        "flow", description="Big events", streaming=True, danger_level="safe", exit_codes=()
+    )
+    def flow(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, object]]:
+        yield from PADDED
+
+    @app.command("huge", description="One big row", danger_level="safe", exit_codes=())
+    def huge(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"pad": "x" * 5000}
+
+    return app
+
+
+def run_capped(argv: list[str]) -> tuple[int, str, list[dict[str, object]]]:
+    out, err = io.StringIO(), io.StringIO()
+    code = capped_app().run(
+        [*argv, "--format", "ndjson", "--max-output", "4096"],
+        stdout=out,
+        stderr=err,
+        env={},
+        isatty=False,
+    )
+    return code, out.getvalue(), [json.loads(line) for line in err.getvalue().splitlines()]
+
+
+@pytest.mark.parametrize("command", ["padded", "flow"])
+def test_max_output_writes_whole_records_up_to_the_cap(command: str) -> None:
+    code, out, err = run_capped([command])
+    assert code == 0 and lines(out) == PADDED[:4] and len(out.encode()) <= 4096
+    [truncation, warning] = err
+    assert truncation["truncation"] == {
+        "truncated": True,
+        "total_bytes": 10170,
+        "returned_bytes": 4068,
+        "total_count": 10,
+        "returned_count": 4,
+        "omitted_count": 6,
+        "max_output_bytes": 4096,
+        "truncation_hint": f"probe {command} --format ndjson --max-output 11194",
+    }
+    assert warning == {
+        "code": "FIELD_TRUNCATED",
+        "message": "data cut from 10 to 4",
+        "context": {"field": "data", "original_length": 10, "truncated_length": 4},
+    }
+
+
+def test_a_record_larger_than_the_cap_writes_nothing() -> None:
+    code, out, err = run_capped(["huge"])
+    assert code == 0 and out == ""
+    truncation = err[0]["truncation"]
+    assert isinstance(truncation, dict)
+    assert truncation["returned_count"] == 0 and truncation["omitted_count"] == 1
+    assert [e.get("code") for e in err[1:]] == ["FIELD_TRUNCATED"]
+
+
+def test_a_cut_fails_the_run_under_warnings_as_errors() -> None:
+    code, out, err = run_capped(["padded", "--warnings-as-errors"])
+    assert code == 1 and len(lines(out)) == 4
+    error = err[-1]["error"]
+    assert isinstance(error, dict) and error["code"] == "WARNINGS_AS_ERRORS"
+
+
+def test_records_under_the_cap_are_not_reported() -> None:
+    out, err = io.StringIO(), io.StringIO()
+    code = capped_app().run(
+        ["padded", "--format", "ndjson"], stdout=out, stderr=err, env={}, isatty=False
+    )
+    assert code == 0 and lines(out.getvalue()) == PADDED and err.getvalue() == ""

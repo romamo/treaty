@@ -168,6 +168,32 @@ class Cut:
         )
 
 
+def record_cut(
+    cap: OutputCap, rerun: Rerun, sent: tuple[int, int], omitted: tuple[int, int]
+) -> tuple[WarningDetail, dict[str, object]]:
+    """``--format ndjson`` past ``cap``: whole records were written until the next would
+    pass it (REQ-F-052). ``sent`` and ``omitted`` are (records, bytes). Returns the
+    ``FIELD_TRUNCATED`` warning on ``data`` (REQ-F-064) and the stderr report, its keys
+    named as the envelope's truncation meta is"""
+    total_bytes = sent[1] + omitted[1]
+    if rerun.argv is not None:
+        room = str(total_bytes + SLACK)
+        hint = shlex.join(with_flags(rerun.argv, {MAX_OUTPUT_FLAG: room}))
+    else:
+        hint = f"the full output is {total_bytes} bytes, over {env_var(rerun.app_name)}"
+    report: dict[str, object] = {
+        "truncated": True,
+        "total_bytes": total_bytes,
+        "returned_bytes": sent[1],
+        "total_count": sent[0] + omitted[0],
+        "returned_count": sent[0],
+        "omitted_count": omitted[0],
+        "max_output_bytes": cap.bytes,
+        "truncation_hint": hint,
+    }
+    return Cut((), sent[0] + omitted[0], sent[0]).warning(), report
+
+
 def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
     """``envelope`` within ``cap``, with the command that gets the rest in its ``meta``;
     ``data`` is cleaned of terminal escapes first, as every envelope written is"""

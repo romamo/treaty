@@ -382,8 +382,14 @@ data. Keys are sorted and values masked and redacted as in the envelope, and `--
 applies. The status goes elsewhere: the exit code, and on stderr one JSON line each for
 the error (`{"error": {...}}`, credential-named context `[REDACTED]`), every warning
 (a `WarningDetail` object), a cut page (`{"pagination": {...}}`), and `ctx.log` lines.
-`--max-output` caps an envelope, so it leaves `ndjson` records whole, as it does every
-other text format. `ndjson` takes no renderer, and `exec`, `App.call`, and the MCP adapter
+`--max-output` caps the records written, counted across a stream's events: whole
+records only, stopping before the first that would pass the cap. A cut writes one
+`{"truncation": {...}}` line to stderr (`truncated`, `total_bytes`, `returned_bytes`,
+`total_count`, `returned_count`, `omitted_count`, `max_output_bytes`, and a
+`truncation_hint` rerun with a larger `--max-output`) and a `FIELD_TRUNCATED` warning on
+`data`. The exit code is unchanged, as it is for a cut envelope, unless
+`--warnings-as-errors` is set. A first record larger than the cap leaves stdout empty.
+A cut stream still runs to its end, writing nothing more, so its exit code is the real one. `ndjson` takes no renderer, and `exec`, `App.call`, and the MCP adapter
 answer with envelopes whatever `--format` says. `tsv` is built in: a header row, then one row per item (nested values as compact
 JSON, `null` as an empty field, and a backslash, tab, or line break in a value escaped as
 `\\`, `\t`, `\n`, `\r`, never quoted); `treaty.table(",")` is the same renderer for CSV

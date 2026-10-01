@@ -75,6 +75,7 @@ from ._cap import (
     cap_envelope,
     cut_envelope,
     recap,
+    record_cut,
 )
 from ._changelog import load_changelog
 from ._command import (
@@ -2892,6 +2893,10 @@ class _Run:
         """How the run answers, for the lines ``--debug`` writes"""
         self.warnings_written = 0
         """The warnings of the answer that ``ndjson`` wrote to stderr so far"""
+        self.records_sent = (0, 0)
+        """``ndjson`` records written to stdout, and their bytes, across a stream's events"""
+        self.records_omitted = (0, 0)
+        """``ndjson`` records ``--max-output`` held back, and their bytes"""
         self._logging = False
         """Whether the root logger routes records to this run (``attach_logging``)"""
         self._redaction: tuple[tuple[object, ...], Callable[[str], str]] | None = None
@@ -5363,6 +5368,9 @@ class _Run:
                 self.err.write(f"cut to --token-limit {self.budget.limit}{rest}\n", Level.WARN)
                 # That line reports the budget's cuts: their warnings are not written again
                 self.warnings_shown += envelope.warnings[before:]
+        records = ""
+        if mode is Format.NDJSON:
+            records, envelope = self._capped_records(envelope, render or fallback)
         # A program reading ndjson gets every warning once, as a stream's events add them;
         # a person, those settling added
         before = self.warnings_written if mode is Format.NDJSON else len(envelope.warnings)
@@ -5399,7 +5407,9 @@ class _Run:
         # REQ-F-007: data values lose their escapes, as in the JSON envelope; a renderer's
         # own text keeps only its colors, and those only where the run may color
         data = clean(envelope.data)
-        if data is not None and render is not None:
+        if mode is Format.NDJSON:
+            self.out.write(records)
+        elif data is not None and render is not None:
             try:
                 text = _rendered(render, data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
@@ -5468,6 +5478,30 @@ class _Run:
                 continue  # unprotected_record wrote it before the command ran
             line = f"warning: {warning.code}: {self._redact_everywhere(warning.message)}"
             self.err.write(terminal_text(line, color=color) + "\n", Level.WARN)
+
+    def _capped_records(self, envelope: Envelope, render: Renderer) -> tuple[str, Envelope]:
+        """The ``ndjson`` lines of ``envelope`` that fit ``--max-output``, counted across a
+        stream's events: whole records only, none after the first that would pass the cap
+        (REQ-F-052). The answer's last envelope gets the ``FIELD_TRUNCATED`` warning, and
+        stderr one ``{"truncation": ...}`` line (REQ-F-064)."""
+        data = clean(envelope.data)
+        kept: list[str] = []
+        if data is not None:
+            for line in _rendered(render, data).splitlines(keepends=True):
+                size = len(line.encode("utf-8"))
+                (count, sent), (dropped, held) = self.records_sent, self.records_omitted
+                if dropped or sent + size > self.cap.bytes:
+                    self.records_omitted = (dropped + 1, held + size)
+                else:
+                    kept.append(line)
+                    self.records_sent = (count + 1, sent + size)
+        if _terminal(envelope) and self.records_omitted[0]:
+            rerun = Rerun(self.argv, self.app.name, self.page)
+            warning, report = record_cut(self.cap, rerun, self.records_sent, self.records_omitted)
+            line = json.dumps({"truncation": report}, separators=(",", ":"), sort_keys=True)
+            self.err.write(line + "\n", Level.WARN)
+            envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        return "".join(kept), envelope
 
     def schema(self, mode: Format, path: CommandPath | None, prefix: tuple[str, ...]) -> int:
         """``--schema`` is machine output in every mode; the envelope carries it as data"""
