@@ -459,8 +459,8 @@ A command returning `treaty.Binary` writes the raw bytes instead, whatever the `
 and `data` is `{"path": ..., "bytes": N, "content_type": ..., "sha256": ...}`, with
 `sha256` in lowercase hex and `content_type` only when the command declared one. The
 manifest says which a command does: `"output_file": "binary"` here, `"formatted"` on the
-other commands treaty gives `--output`, passthrough ones included (ManifestResponse 3.3);
-an app's own `output` flag has none (see COMPLIANCE.md). Without `--output` the bytes stay
+other `output_file=` commands (ManifestResponse 3.3); a passthrough command and an app's
+own `output` flag have none (see COMPLIANCE.md). Without `--output` the bytes stay
 base64 in `data`, and the `binary-output-file` audit rule suggests `output_file=True`.
 `--output -` exits `2` there, as stdout carries only the envelope.
 

@@ -156,8 +156,8 @@ above). `Ctx.config` was already private (`_config_file`, workstream 02).
 - Manifest root: `schema_version` (`"3.3"`, the spec's `ManifestResponse`),
   `framework_version`, `etag`, `flags`, `exit_codes`, `commands`, and `dependencies` when
   declared; a built-in's `CommandEntry` carries `builtin: true`, an app command omits it;
-  an `output_file=` or passthrough command's carries `output_file`, `"binary"` or
-  `"formatted"`
+  an `output_file=` command's carries `output_file`, `"binary"` or `"formatted"`; a
+  passthrough command's omits it
 - `framework_version` is treaty's version; the app's version is `meta.tool_version`. Before
   the review it carried the app's version
 
