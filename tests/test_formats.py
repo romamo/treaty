@@ -118,7 +118,7 @@ def test_a_known_format_without_a_renderer_is_not_offered(
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and error["code"] == "ARG_ERROR"
     assert error["message"] == "--format 'yaml' is not offered by showctl."
-    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "csv", "tsv"]
+    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "ndjson", "csv", "tsv"]
 
 
 def test_a_value_outside_format_is_unknown() -> None:
@@ -126,16 +126,23 @@ def test_a_value_outside_format_is_unknown() -> None:
     code = formats_app().run(["show", "--format", "xml"], stdout=out, stderr=io.StringIO(), env={})
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and error["message"] == "Unknown --format 'xml'"
-    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "csv", "tsv"]
+    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "ndjson", "csv", "tsv"]
 
 
 def test_manifest_and_help_list_the_offered_formats() -> None:
     app = formats_app()
-    assert app.formats == (Format.PLAIN, Format.JSON, Format.JSONL, Format.CSV, Format.TSV)
+    assert app.formats == (
+        Format.PLAIN,
+        Format.JSON,
+        Format.JSONL,
+        Format.NDJSON,
+        Format.CSV,
+        Format.TSV,
+    )
     offered = app.manifest()["flags"]["format"]["enum_values"]  # type: ignore[index]
-    assert offered == ["plain", "json", "jsonl", "csv", "tsv"]
+    assert offered == ["plain", "json", "jsonl", "ndjson", "csv", "tsv"]
     _, out, _ = run(app, ["--help"])
-    assert "--format plain|json|jsonl|csv|tsv" in out and "$SHOWCTL_FORMAT" in out
+    assert "--format plain|json|jsonl|ndjson|csv|tsv" in out and "$SHOWCTL_FORMAT" in out
 
 
 # Registration

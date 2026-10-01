@@ -106,7 +106,7 @@ def test_human_is_an_unknown_format(argv: list[str], env: dict[str, str]) -> Non
     code = plain_app().run(argv, stdout=out, stderr=io.StringIO(), env=env, isatty=False)
     error = json.loads(out.getvalue())["error"]
     assert code == 2 and error["code"] == "ARG_ERROR"
-    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "tsv"]
+    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "ndjson", "tsv"]
 
 
 def test_manifest_stays_json_in_plain_mode() -> None:

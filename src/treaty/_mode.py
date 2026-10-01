@@ -19,12 +19,19 @@ class Format(StrEnum):
     JSON = "json"
     JSONL = "jsonl"
     """One compact envelope per line: what ``json`` writes, named for readers that ask"""
+    NDJSON = "ndjson"
+    """``data`` alone, one compact JSON line per item of a list or event of a stream;
+    errors and warnings go to stderr as JSON lines, and the exit code carries the status"""
     CSV = "csv"
     TSV = "tsv"
     YAML = "yaml"
     MARKDOWN = "markdown"
     ID = "id"
     """The bare primary identifier per line, for piping (REQ-O-005)"""
+
+
+MACHINE: frozenset[Format] = frozenset({Format.JSON, Format.NDJSON})
+"""Formats a program reads: no color, and JSON lines for the logs on stderr"""
 
 
 def resolve_mode(

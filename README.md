@@ -365,7 +365,7 @@ unless the major version went up.
 
 ## Output formats
 
-`--format` takes `json`, `jsonl`, `plain`, `tsv`, and any format the app registers. With no flag,
+`--format` takes `json`, `jsonl`, `ndjson`, `plain`, `tsv`, and any format the app registers. With no flag,
 `<APP>_FORMAT` decides (`DEPLOYCTL_FORMAT` for `deployctl`, failing as the same `--format`
 value would); without that, the format is `json` when stdout is not a terminal
 or `CI` is set, and `plain` otherwise.
@@ -373,7 +373,18 @@ or `CI` is set, and `plain` otherwise.
 `json` writes the full response envelope, one compact line per envelope; it is the contract
 agents read and takes no renderer. `jsonl` is the same output under the name line-oriented
 readers ask for. Every other format writes the result data as text and errors as prose on
-stderr. `tsv` is built in: a header row, then one row per item (nested values as compact
+stderr.
+
+`ndjson` writes `data` alone for `jq -c`, `duckdb read_json`, `mlr`, or the next command in a
+pipe: one compact JSON line per item of a list result or per event of a stream (a stream
+event that is a list stays one line), a single result as one line, and nothing for `null`
+data. Keys are sorted and values masked and redacted as in the envelope, and `--fields`
+applies. The status goes elsewhere: the exit code, and on stderr one JSON line each for
+the error (`{"error": {...}}`, credential-named context `[REDACTED]`), every warning
+(a `WarningDetail` object), a cut page (`{"pagination": {...}}`), and `ctx.log` lines.
+`--max-output` caps an envelope, so it leaves `ndjson` records whole, as it does every
+other text format. `ndjson` takes no renderer, and `exec`, `App.call`, and the MCP adapter
+answer with envelopes whatever `--format` says. `tsv` is built in: a header row, then one row per item (nested values as compact
 JSON, `null` as an empty field, and a backslash, tab, or line break in a value escaped as
 `\\`, `\t`, `\n`, `\r`, never quoted); `treaty.table(",")` is the same renderer for CSV
 with the `csv` module's quoting, `app.format(Format.CSV, render=table(","))`.
@@ -398,10 +409,10 @@ app.format(Format.CSV, render=render_csv)  # offers --format csv to every comman
 
 A command's `renderers=` overrides the app's renderer for that format. `app.format()` must
 come before the commands that override it, and a command can only override a format the
-app offers. `Format` lists every format treaty knows (`plain`, `json`, `jsonl`, `csv`,
-`tsv`, `yaml`, `markdown`); an app offers `plain`, `json`, `jsonl`, `tsv`, and the ones it
-registers, and the manifest and `--help` list exactly those. Any other value exits `2`
-listing them, before anything runs or any file is written.
+app offers. `Format` lists every format treaty knows (`plain`, `json`, `jsonl`, `ndjson`,
+`csv`, `tsv`, `yaml`, `markdown`); an app offers `plain`, `json`, `jsonl`, `ndjson`, `tsv`,
+and the ones it registers, and the manifest and `--help` list exactly those. Any other
+value exits `2` listing them, before anything runs or any file is written.
 
 A command declared `output_file=True` takes `--output PATH`: the result goes to the file in
 the `--format` representation, and stdout gets the JSON envelope with `data: {"path": ...,
@@ -412,7 +423,8 @@ Without a renderer, `plain` prints flat lines, one item each: `key: value`, with
 paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. An
 array prints each element as its own block, the way a stream prints its events.
 `app.format(Format.PLAIN, render=...)` replaces those lines for the whole app.
-`manifest` and `--schema` stay JSON in every text format, since they are read by programs.
+`manifest` and `--schema` stay JSON in every text format, since they are read by programs
+(one line in `ndjson`).
 
 Breaking after 0.0.4: `renderers={Format.PLAIN: ...}` replaces `plain=`, which is no
 longer accepted, and `Format` replaces `OutputMode`.

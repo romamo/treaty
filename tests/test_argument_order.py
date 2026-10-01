@@ -92,7 +92,7 @@ def test_manifest_lists_global_options_at_the_root(app: App) -> None:
         "token-count",
         "tokenizer",
     }
-    assert manifest["flags"]["format"]["enum_values"] == ["plain", "json", "jsonl", "tsv"]
+    assert manifest["flags"]["format"]["enum_values"] == ["plain", "json", "jsonl", "ndjson", "tsv"]
     for entry in manifest["commands"].values():
         assert not set(entry["flags"]) & set(manifest["flags"])
 

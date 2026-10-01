@@ -125,6 +125,14 @@ Apps built on treaty keep their own, structured schema changelog with
   and each entry of a `ValueError`'s `errors()`, such as a pydantic `ValidationError`'s,
   is one `error.errors` item, exit 2; a password-format field is a treaty secret. treaty
   imports no pydantic (#102)
+- `--format ndjson` (`Format.NDJSON`) writes `data` alone for `jq -c`, `duckdb`, `mlr`, or
+  the next command in a pipe: one compact JSON line per item of a list result or event of a
+  stream, a single result as one line, and nothing for `null` data, with keys sorted and
+  values masked as in the envelope, and `--fields` applied. The exit code carries the
+  status, and stderr gets one JSON line each for the error (`{"error": {...}}`), every
+  warning, a cut page (`{"pagination": {...}}`), and `ctx.log` lines. Every app offers it,
+  so the manifest's `--format` enum and `--help` list it; it takes no renderer, and
+  `--output ndjson` is refused as a format name. `jsonl` stays the envelope stream (#34)
 
 ## [1.0.0rc9] - 2026-10-01
 
