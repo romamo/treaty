@@ -267,6 +267,35 @@ def resolve(args: NoArgs, ctx: Ctx) -> Iterator[Resolved]:
         yield lookup(json.loads(line))
 ```
 
+When the input is another command's output, `stdin_records=Sec` (a frozen dataclass) does
+the unwrapping: `ctx.stdin_records` yields one `Sec` per record. A line may be a bare JSON
+object, as `--format ndjson` writes, or a treaty envelope, as `json` and `jsonl` write: an
+envelope gives its `data` (each item of an array), and a stream's terminal envelope, or a
+whole response, ends the input. An upstream `ok: false` ends the run with exit `1` and
+`UPSTREAM_FAILED`, the upstream error in `error.context.upstream` with secret-named keys
+redacted and tokens masked; a stream that stops before its terminal envelope (the producer
+was killed) with `UPSTREAM_INCOMPLETE`, so a failed upstream never reads as a short input.
+Each record is checked field by field, as an argument payload is, and built, so its
+`__post_init__` runs; a line that fails exits `1` with `RECORD_INVALID` and
+`error.context.line` and `error.context.field`. Keys a record has no field for are refused:
+`--fields` on the producer keeps only the ones it needs. An upstream response that was one
+page of more, or had fields cut to fit its output cap, adds an `UPSTREAM_TRUNCATED` warning.
+`--schema` gives the record type as `stdin_records_schema`, to match against a producer's
+`output_schema`. Bare lines carry no status, so with `ndjson` a failed producer shows only in
+its own exit code: run the pipeline with `set -o pipefail`.
+
+```python
+@app.command("resolve", description="Resolve each security", danger_level="safe",
+             exit_codes=(), streaming=True, stdin_records=Sec)
+def resolve(args: NoArgs, ctx: Ctx) -> Iterator[Resolved]:
+    for sec in ctx.stdin_records:
+        yield lookup(sec.isin)
+```
+
+```bash
+probe securities --format json | probe resolve --format json
+```
+
 ## Flag order
 
 `--format`, `--help`, `--schema` (alias `--print-schema`), `--output-schema`,

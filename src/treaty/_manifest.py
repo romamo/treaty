@@ -413,6 +413,9 @@ def command_schema(
         entry["stdin_input"] = True  # REQ-F-054; not a ManifestResponse key
     if command.stdin_input is StdinInput.LINES:
         entry["stdin_mode"] = StdinInput.LINES.value  # #33: read lazily, a cap per line
+    if command.stdin_records is not None:
+        # #32: what each input line holds, to match a producer's output_schema
+        entry["stdin_records_schema"] = command.stdin_records.schema
     if command.heartbeat:
         # REQ-F-053: lines an agent skips before the envelope; not a ManifestResponse key
         entry["heartbeat_ms"] = DEFAULT_HEARTBEAT_MS

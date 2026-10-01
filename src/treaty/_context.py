@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ._cache import Cache
 from ._cap import MARKER, TRUNCATED_CODE
@@ -27,6 +27,9 @@ from ._subprocess import GUI_SKIPPED, Argv, Completed, HeadlessBehavior, Process
 from ._timeout import Timeout
 from ._verbosity import Level
 from ._walk import Traversal, Walk
+
+if TYPE_CHECKING:
+    from ._records import Records  # imports the parser, which imports this module
 
 LogSink = Callable[[Level, str, Mapping[str, object]], None]
 WarnSink = Callable[[str, str, Mapping[str, object]], None]
@@ -83,6 +86,7 @@ class Ctx:
     _deadline: float | None = field(default=None, repr=False, compare=False)
     """``time.monotonic()`` when the command times out, else None"""
     _stdin_lines: Lines | None = field(default=None, repr=False, compare=False)
+    _stdin_records: Records | None = field(default=None, repr=False, compare=False)
 
     @property
     def stdin_lines(self) -> Iterator[str]:
@@ -92,9 +96,28 @@ class Ctx:
         ``App(max_line_bytes=)`` ends the run with exit 1 ``LINE_TOO_LARGE``, and one that is
         not UTF-8 with ``LINE_NOT_UTF8``, each with the line number in ``context.line``. In a
         stream, the wait for each line restarts the idle timeout, as each event does"""
+        if self._stdin_records is not None:
+            raise RegistrationError(
+                "ctx.stdin_lines: a stdin_records= command reads its input "
+                "through ctx.stdin_records"
+            )
         if self._stdin_lines is None:
             raise RegistrationError('ctx.stdin_lines needs stdin_input="lines" on the command')
         return self._stdin_lines
+
+    @property
+    def stdin_records(self) -> Iterator[Any]:
+        """The input of a ``stdin_records=T`` command, one ``T`` per record as it arrives,
+        read as ``ctx.stdin_lines`` reads lines. A line is a bare JSON object or another
+        treaty command's envelope: an envelope gives its ``data`` (an array, each item),
+        and its stream's terminal envelope ends the input. An upstream ``ok: false`` ends
+        the run with exit 1 ``UPSTREAM_FAILED``, the upstream error in
+        ``context.upstream``; envelopes that stop before their terminal one with
+        ``UPSTREAM_INCOMPLETE``; a record that fails ``T``'s fields with
+        ``RECORD_INVALID``, ``context.line`` and ``context.field`` naming it"""
+        if self._stdin_records is None:
+            raise RegistrationError("ctx.stdin_records needs stdin_records= on the command")
+        return self._stdin_records
 
     @property
     def remaining(self) -> float | None:

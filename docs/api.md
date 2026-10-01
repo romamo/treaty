@@ -107,7 +107,7 @@ that no app or example called.
 `exit_codes`, `examples`, `has_network_io`, `timeout`, `supports_raw_payload`, `cleanup`,
 `renderers`, `streaming`, `safe_default`, `gui_operations`, `headless_behavior`,
 `interactive`, `editor_alternatives`, `paginated`, `default_limit`, `cursor_check`,
-`heartbeat`, `stdin_input`, `output_file`, `requires_auth`, `auth`, `token_env_vars`,
+`heartbeat`, `stdin_input`, `stdin_records`, `output_file`, `requires_auth`, `auth`, `token_env_vars`,
 `async_job`, `config_write_scope`, `schema_version`, `compat`, `project_root`, `retry`,
 `sort_key`, `ordered`, `fix_commands`, `refreshes_auth`, `requires`, `option_placement`,
 `introduced_in`, `deprecated`, `steps`, `resumable`, `rollback`, `external`,
@@ -129,7 +129,7 @@ Fields (keep): `app_name`, `version`, `mode`, `request_id`, `env`, `state`, `tim
 Methods and properties (keep): `log`, `warn`, `debug`, `progress`, `log_error`, `run`,
 `pipeline`, `spawn`, `open_url`, `prompt`, `confirm`, `edit`, `retry`, `lock`, `step`,
 `http`, `walk`, `cache`, `tmp_dir`, `temp_file`, `output_file`, `truncated`,
-`config_path`, `write_config`, `stdin_lines`.
+`config_path`, `write_config`, `stdin_lines`, `stdin_records`.
 
 Made private in the review: `log_sink`, `warn_sink`, `processes`, `prompter`, `retrier`,
 `locks`, `teardown`, `steps`, `session` (the run's plumbing, reached through the methods
