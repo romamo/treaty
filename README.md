@@ -1300,11 +1300,14 @@ schema. A property declares the `Out` options as schema keys, for pydantic throu
 `Field(json_schema_extra={...})`: `x-sort-key` (the item field an array is sorted by),
 `x-ordered`, `x-volatile`, `x-high-entropy` (`True` or `False`), and `x-external`. Each is
 optional: an undeclared array is sorted by its items' JSON text and `treaty audit` advises
-declaring its order, and a credential-named or `format: password` string is masked unless
-`--unmask`. A field type with its own JSON schema, such as a constrained `str`, needs no
-`app.scalar`. A mutating or destructive command may return an adapted class whose schema
-lists `effect` (and `would_affect`), checked on each run as a dataclass's are; the key may
-not be `x-volatile`. Register the adapter before the commands returning the class; two adapters
+declaring its order. A `list[Model]` or `tuple[Model, ...]` a command returns or a dataclass
+field holds is ordered as a list of dataclasses is, by `sort_key=` or `ordered=True` (or
+`Out(...)` on the field), and `stable-order` warns when it declares neither. A
+credential-named or `format: password` string is masked unless `--unmask`. A field type
+with its own JSON schema, such as a constrained `str`, needs no `app.scalar`. A mutating or
+destructive command may return an adapted class whose schema lists `effect` (and
+`would_affect`), checked on each run as a dataclass's are; the key may not be
+`x-volatile`. Register the adapter before the commands returning the class; two adapters
 whose bases overlap, or an adapted class registered as a scalar, are registration errors.
 
 ## Args models

@@ -31,6 +31,18 @@ Apps built on treaty keep their own, structured schema changelog with
   idempotent `noop` replay hold. An adapter schema that lists the key as `x-volatile`, which
   `--stable-output` leaves out, is a `RegistrationError` saying so; the same holds for
   `open_url`, `background_pid`, and `cleanup_command` (#183)
+### Fixed
+
+- The `stable-order` audit rule warns about a `list[X]` or `tuple[X, ...]` of a class an
+  `app.output_adapter` writes, returned by a command with neither `sort_key=` nor
+  `ordered=True` or held in a dataclass field with no `Out(sort_key=...)` or
+  `Out(ordered=True)`, as it does for dataclasses: treaty re-sorts such an array by its
+  items' JSON text, so a ranking such as search results lost its order with a clean audit.
+  The fix names `sort_key=` for a stable listing and `ordered=True` for a ranking; a
+  dataclass array's fix now says the same. `treaty audit --strict` may now flag an adapted
+  list whose order is not declared, including one nested in a dataclass field or a dict;
+  `ordered=True` or `sort_key=` on the command (or `treaty.Out(...)` on the field) clears
+  it (#182)
 
 ## [1.0.0rc11] - 2026-10-01
 
