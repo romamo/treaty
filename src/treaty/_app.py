@@ -5530,8 +5530,12 @@ class _Run:
             )
             return self._broken(command, "INVALID_EXIT", message, started, meta)
         try:
-            # A dataclass carries its own field order, such as Out(ordered=True)
-            shape = type(exc.data) if dataclasses.is_dataclass(exc.data) else object
+            # A dataclass carries its own field order, such as Out(ordered=True), and an
+            # output adapter's type its schema's x-ordered arrays
+            kind = type(exc.data)
+            adapted = self.app.scalars.adapters.for_type(kind) is not None
+            known = dataclasses.is_dataclass(kind) or adapted
+            shape = kind if known else object
             data = self._payload(exc.data, shape)
             context = redacted(to_jsonable(exc.context, self.app.scalars, base=self.cwd), redact)
         except SchemaError as err:

@@ -10,7 +10,7 @@ import pytest
 from jsonschema import Draft7Validator
 from pydantic import BaseModel, Field, SecretStr, StringConstraints
 
-from treaty import App, Arg, Ctx, NoArgs, RegistrationError
+from treaty import App, Arg, Ctx, Exit, Flag, NoArgs, Out, RegistrationError
 from treaty._audit import Severity, audit, schema_lock
 from treaty._mcp import call_tool, tool_entries
 
@@ -460,3 +460,90 @@ def test_the_documented_adapter_writes_an_aliased_field_by_its_schema_name() -> 
     code, env = run(app, ["who"])
     assert code == 0, env["error"]
     assert env["data"] == {"fullName": "Ann Lee"}
+
+
+class Document:
+    """A report that is not a dataclass, written through its own output adapter"""
+
+    def __init__(self, body: dict[str, Any]) -> None:
+        self.body = body
+
+
+@dataclass(frozen=True, slots=True)
+class Fleet:
+    servers: list[str] = Out(ordered=True)
+
+
+@dataclass(frozen=True, slots=True)
+class FailArgs:
+    fail: bool = Flag(default=False, description="Raise DRIFT with the data")
+
+
+DOCUMENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "servers": {
+            "type": "array",
+            "x-ordered": True,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "checks": {"type": "array", "x-ordered": True},
+                },
+            },
+        }
+    },
+}
+
+
+def drift_app() -> App:
+    app = App("fleet", version="0.1.0")
+    app.output_adapter(Document, schema=lambda cls: DOCUMENT_SCHEMA, dump=lambda o: o.body)
+    app.exit_code("DRIFT", 83, description="Drift", retryable=False, side_effects="none")
+
+    def document() -> Document:
+        checks = [{"c": "z"}, {"c": "a"}]
+        ids = ["h1", "v6", "a0"]
+        return Document(
+            {"servers": [{"id": i, "checks": checks if i == "h1" else []} for i in ids]}
+        )
+
+    @app.command("doc", description="Doc", danger_level="safe", exit_codes=["DRIFT"])
+    def doc(args: FailArgs, ctx: Ctx) -> Document:
+        if args.fail:
+            raise Exit.DRIFT("drift", data=document())
+        return document()
+
+    @app.command("fleet", description="Fleet", danger_level="safe", exit_codes=["DRIFT"])
+    def fleet(args: FailArgs, ctx: Ctx) -> Fleet:
+        servers = Fleet(servers=["h1", "v6", "a0"])
+        if args.fail:
+            raise Exit.DRIFT("drift", data=servers)
+        return servers
+
+    @app.command("plain", description="Plain", danger_level="safe", exit_codes=["DRIFT"])
+    def plain_dict(args: NoArgs, ctx: Ctx) -> dict[str, list[str]]:
+        raise Exit.DRIFT("drift", data={"servers": ["h1", "v6", "a0"]})
+
+    return app
+
+
+def test_an_adapter_type_raised_as_exit_data_keeps_its_declared_order() -> None:
+    # #181: a failure's data went through the ordering of object, so every array sorted
+    app = drift_app()
+    returned = run(app, ["doc"])
+    raised = run(app, ["doc", "--fail"])
+    assert returned[0] == 0 and raised[0] == 83
+    assert raised[1]["data"] == returned[1]["data"]
+    servers = raised[1]["data"]["servers"]
+    assert [s["id"] for s in servers] == ["h1", "v6", "a0"]
+    assert servers[0]["checks"] == [{"c": "z"}, {"c": "a"}]
+
+
+def test_a_dataclass_exit_data_keeps_order_and_a_plain_dict_is_still_sorted() -> None:
+    app = drift_app()
+    assert run(app, ["fleet", "--fail"])[1]["data"] == {"servers": ["h1", "v6", "a0"]}
+    assert run(app, ["fleet"])[1]["data"] == {"servers": ["h1", "v6", "a0"]}
+    code, env = run(app, ["plain"])
+    assert code == 83 and env["data"] == {"servers": ["a0", "h1", "v6"]}

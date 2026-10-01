@@ -15,6 +15,12 @@ Apps built on treaty keep their own, structured schema changelog with
 - The README says a passthrough command's delegated parser follows its own colour rules:
   Python 3.14's argparse colours its help when `FORCE_COLOR` is set, even off a terminal,
   and `NO_COLOR` turns that off (#170)
+### Fixed
+
+- An `app.output_adapter` type raised as a failure's data, `raise Exit.X(..., data=obj)`,
+  keeps the array order its schema declares with `x-ordered`, nested arrays included, as it
+  does when returned; before, every array in it was re-sorted. A dataclass keeps its
+  `Out(ordered=True)` order as before, and a plain dict is still sorted (#181)
 
 ## [1.0.0rc11] - 2026-10-01
 
