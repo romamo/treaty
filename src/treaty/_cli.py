@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import stat
 import subprocess
@@ -11,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from . import __version__
 from ._agents_md import AGENTS_FILE, Mismatch, check, check_tools, render_file
@@ -45,6 +46,7 @@ from ._profile import (
     write_profile,
 )
 from ._scaffold import ProjectName, render
+from ._scaffold_from import check_module, render_module, scaffold
 
 # `treaty audit` is the linter; `treaty audit-log` queries the opt-in audit log, which
 # TREATY_AUDIT_LOG=1 turns on, as on every app (REQ-O-030)
@@ -147,6 +149,33 @@ class AuditOut:
 def load_app(target: str, cwd: Path) -> App:
     """The App at ``target``, importable from ``cwd``, the run's ``--cwd``; the commands
     check its shape in phase 1, ``treaty-mcp`` here"""
+    obj = import_target(target, cwd)
+    module_name = target.partition(":")[0]
+    if not isinstance(obj, App):
+        raise Exit.PRECONDITION(
+            f"Target {target} is {type(obj).__name__}, not a treaty App", context={"target": target}
+        )
+    try:
+        # What the app checks once in use, such as its settings' field types
+        obj._check_fixes()
+    except RegistrationError as exc:
+        raise Exit.PRECONDITION(
+            f"App {target} failed its registration checks: {type(exc).__name__}: {exc}",
+            code="APP_IMPORT_FAILED",
+            context={
+                "module": module_name,
+                "target": target,
+                "exception": type(exc).__qualname__,
+                "message": str(exc),
+            },
+            fix_required="fix the error in the app's module; the message names it",
+        ) from None
+    return obj
+
+
+def import_target(target: str, cwd: Path) -> object:
+    """The object at ``target``, importable from ``cwd``: importing runs the module's
+    top-level code"""
     module_name, sep, attr = target.partition(":")
     if not sep or not module_name or not attr:
         raise Exit.ARG_ERROR("target must be module:attribute", context={"target": target})
@@ -179,25 +208,6 @@ def load_app(target: str, cwd: Path) -> App:
         raise Exit.NOT_FOUND(
             f"Module {module_name} has no attribute {attr}", context={"target": target}
         )
-    if not isinstance(obj, App):
-        raise Exit.PRECONDITION(
-            f"Target {target} is {type(obj).__name__}, not a treaty App", context={"target": target}
-        )
-    try:
-        # What the app checks once in use, such as its settings' field types
-        obj._check_fixes()
-    except RegistrationError as exc:
-        raise Exit.PRECONDITION(
-            f"App {target} failed its registration checks: {type(exc).__name__}: {exc}",
-            code="APP_IMPORT_FAILED",
-            context={
-                "module": module_name,
-                "target": target,
-                "exception": type(exc).__qualname__,
-                "message": str(exc),
-            },
-            fix_required="fix the error in the app's module; the message names it",
-        ) from None
     return obj
 
 
@@ -634,6 +644,148 @@ def init_command(args: InitArgs, ctx: Ctx) -> InitOut:
             f"uv run treaty audit {name.package}.cli:app",
             f"uv run treaty conformance {name.package}.cli:app --run",
         ),
+    )
+
+
+# scaffold-from
+
+
+@dataclass(frozen=True, slots=True)
+class ScaffoldFromArgs:
+    kind: Literal["typer", "click", "argparse"] = Arg(
+        description="The framework the CLI is written in"
+    )
+    target: str = Arg(
+        description="Import path of the typer.Typer, click group, or argparse parser (or a "
+        "function that only builds and returns the parser), as module:attribute; importing "
+        "runs the module's top-level code"
+    )
+    out: Path | None = Flag(
+        default=None,
+        description="File to write the module to; without it the module is in data.source, "
+        "and --format plain prints it alone",
+    )
+    name: str | None = Flag(default=None, description="The App name, default the CLI's own name")
+    force: bool = Flag(
+        default=False,
+        description="Replace an existing --out file; without it the command exits 6 and "
+        "leaves the file alone",
+    )
+    dry_run: bool = Flag(default=False, description="Report what --out would get, writing nothing")
+
+    def __post_init__(self) -> None:
+        check_target(self.target)
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedOut:
+    item: str
+    """A command, or a command and one of its options"""
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class RenamedOut:
+    command: str
+    old: str
+    new: str
+
+
+@dataclass(frozen=True, slots=True)
+class ScaffoldFromOut:
+    effect: str
+    """``noop`` when the module only goes to stdout, or --out already holds it"""
+    kind: str
+    target: str
+    name: str
+    out: Path | None
+    source: str
+    commands: tuple[str, ...] = Out(ordered=True)
+    """The dotted path of each scaffolded command"""
+    skipped: tuple[SkippedOut, ...] = Out(ordered=True)
+    """Commands and options left out, as treaty provides them"""
+    renamed: tuple[RenamedOut, ...] = Out(ordered=True)
+    """Options renamed off a flag treaty keeps"""
+
+
+def render_scaffold_from(data: Any) -> str:
+    if data["out"] is None:
+        return str(data["source"])
+    verb = "Would write" if data["effect"].startswith("would_") else "Wrote"
+    lines = [f"{verb} {data['out']}: {len(data['commands'])} commands from {data['target']}"]
+    lines.extend(f"  left out {s['item']}: {s['reason']}" for s in data["skipped"])
+    lines.extend(f"  {r['command']}: --{r['old']} is now --{r['new']}" for r in data["renamed"])
+    lines.append("")
+    lines.append("Next: declare each command's danger_level and exit_codes, then run")
+    lines.append("  treaty audit <module>:app")
+    return "\n".join(lines) + "\n"
+
+
+@cli.command(
+    "scaffold-from",
+    description="Write a treaty module from a typer, click, or argparse CLI: an args "
+    "dataclass and a handler stub per command, with danger_level and exit_codes left for "
+    "the author",
+    danger_level="mutating",
+    exit_codes=["NOT_FOUND", "PRECONDITION", "CONFLICT"],
+    supports_raw_payload=True,
+    examples=[
+        ("Print the module for a typer app", "treaty scaffold-from typer mycli.main:app"),
+        (
+            "Write it for an argparse CLI",
+            "treaty scaffold-from argparse mycli.main:build_parser --out mycli/cli_treaty.py",
+        ),
+    ],
+    timeout=60,
+    renderers={Format.PLAIN: render_scaffold_from},
+)
+def scaffold_from_command(args: ScaffoldFromArgs, ctx: Ctx) -> ScaffoldFromOut:
+    """The tree is read from the live objects, so the target module is imported"""
+    framework = args.kind
+    if framework != "argparse" and importlib.util.find_spec(framework) is None:
+        raise Exit.PRECONDITION(
+            f"{framework} is not installed in this environment",
+            context={"kind": framework},
+            fix_required="run treaty from the CLI's own environment: uv run treaty "
+            f"scaffold-from {framework} {args.target}",
+        )
+    obj = import_target(args.target, ctx.cwd)
+    tree = scaffold(framework, obj, args.target, args.name)
+    source = render_module(tree)
+    check_module(source, args.target)
+    out = None if args.out is None else ctx.cwd / args.out
+    effect = "noop"
+    if out is not None:
+        current = out.read_text(encoding="utf-8") if out.is_file() else None
+        if out.exists() and current is None:
+            raise Exit.CONFLICT(
+                f"{out} exists and is not a file",
+                context={"out": str(out)},
+                fix_required="pass --out with a file path",
+            )
+        if current is not None and current != source and not args.force:
+            raise Exit.CONFLICT(
+                f"File {out} exists",
+                context={"out": str(out)},
+                fix_required="pass --force to replace it, or --out to write elsewhere",
+            )
+        if current != source:
+            effect = "created" if current is None else "updated"
+        if not args.dry_run and effect != "noop":
+            out.parent.mkdir(parents=True, exist_ok=True)
+            write_atomic(out, source, new_mode=0o644)
+    if args.dry_run and effect != "noop":
+        effect = {"created": "would_create", "updated": "would_update"}[effect]
+    return ScaffoldFromOut(
+        effect=effect,
+        kind=framework,
+        target=args.target,
+        name=tree.name,
+        out=out,
+        source=source,
+        commands=tuple(".".join(c.path) for c in tree.commands()),
+        skipped=tuple(SkippedOut(s.path, s.reason) for s in tree.skipped),
+        renamed=tuple(RenamedOut(*r) for r in tree.renamed),
     )
 
 

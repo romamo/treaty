@@ -48,6 +48,7 @@ which serves any treaty app's commands as MCP tools over stdio.
 - `treaty manifest`: Print the command manifest for agents
 - `treaty mcp-validate`: Compare a saved MCP tool list with the current command schemas; drift exits 1 with SCHEMA_DRIFT_DETECTED and the diff in data
 - `treaty rules`: List the audit rules in the order they are checked
+- `treaty scaffold-from`: Write a treaty module from a typer, click, or argparse CLI: an args dataclass and a handler stub per command, with danger_level and exit_codes left for the author
 - `treaty schema-lock`: Record each command's schema version and output schema for the audit to diff
 - `treaty status`: Show the tool's local state: side-effect paths with sizes, state files, and whether a credential is active; --show-config shows the settings
 - `treaty version`: Print the tool name and version
@@ -83,7 +84,7 @@ Shared conventions, read without the prefix:
 ## Input Conventions
 
 - Arguments are positionals and `--flag value` pairs; `treaty <command> --schema` prints a command's input and output schema, and `--validate-only` checks the arguments without running anything
-- `--raw-payload` takes every field as one JSON object on `treaty conformance`
+- `--raw-payload` takes every field as one JSON object on `treaty conformance`, `treaty scaffold-from`
 - `treaty exec` reads JSONL DispatchRequest lines from stdin, one command each, and answers one envelope line per request
 
 ## CI Validation

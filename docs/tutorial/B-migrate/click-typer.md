@@ -78,6 +78,78 @@ Error: Invalid value for '--priority': 'urgent' is not one of 'low', 'normal', '
 
 treaty fixes the first three by construction and the fourth with `manifest`.
 
+## Step 0: Separate logic from presentation
+
+Skip this step if your commands already return data. A click or typer command usually does
+three things in one body: the work, the printing (`click.echo`, a rich `Table`), and the
+exit (`ClickException`, `raise typer.Exit(1)`), often in shared helpers as well. Porting such
+a command means untangling it and changing frameworks in one change, and when a test fails
+nothing says which of the two broke it. Untangle it first, inside the old CLI:
+
+- Move each command body into a function that takes plain values, returns a domain object,
+  and raises a domain exception. It prints nothing and never raises `typer.Exit`
+- Keep the click or typer command as a thin shell: call the function, render what it
+  returns, and turn each exception into the exit the command had
+
+`done` mixes all three:
+
+<!-- file: examples/tutorial/todo_click.py -->
+```python
+def done(db: Path, id: int) -> None:
+    items = load(db)
+    for item in items:
+        if item["id"] == id:
+            item["done"] = True
+            save(db, items)
+            click.echo(f"Completed #{id}")
+            return
+    raise click.ClickException(f"no item #{id}")
+```
+
+Split, the work is a function any caller can use, and the command only presents it:
+
+```python
+class NoSuchItem(Exception):
+    pass
+
+
+def complete(db: Path, id: int) -> Item:
+    items = load(db)
+    for item in items:
+        if item["id"] == id:
+            item["done"] = True
+            save(db, items)
+            return item
+    raise NoSuchItem(id)
+
+
+@cli.command(help="Mark an item completed")
+@click.argument("id", type=int)
+@click.pass_obj
+def done(db: Path, id: int) -> None:
+    try:
+        complete(db, id)
+    except NoSuchItem:
+        raise click.ClickException(f"no item #{id}") from None
+    click.echo(f"Completed #{id}")
+```
+
+Why a step of its own:
+
+- **The old tests still judge it.** The output does not change, so the existing tests pass
+  unchanged; the framework change later changes the output, and with it the tests. Doing
+  both at once leaves nothing to compare against
+- **It pays off even if the migration stops here.** The functions serve a library API, an
+  MCP server, and tests without a CLI around them
+- **It makes the later steps mechanical.** Each part maps to one treaty construct: the
+  function becomes the handler body, the rendering a renderer
+  ([Step 7](#step-7-keep-the-output-people-are-used-to)), and each exception a declared exit
+  code ([Step 5](#step-5-replace-clickexception-and-typerexit-with-a-named-exit-code)).
+  `treaty scaffold-from` writes handlers that only need that function to call
+  ([Scaffold the commands](#scaffold-the-commands-of-a-large-cli))
+
+**Check:** the CLI's existing tests pass unchanged
+
 ## Step 1: Take inventory
 
 click's decorators already list the arguments. What they do not say is what each command
@@ -122,6 +194,47 @@ now; the audit never sees an app that does not build:
 **Check:** every command has a row, and every `ClickException`, `typer.Exit`, `ctx.exit`,
 `click.confirm`, and `click.prompt` in the old code shows up in the "Fails when" or "Writes?"
 column
+
+### Scaffold the commands of a large CLI
+
+For a CLI with dozens of commands, `treaty scaffold-from` writes the first draft of Steps 2
+to 4: it imports the CLI, walks its command tree, and writes a treaty module with an
+`App`, a group per click group or typer sub-app, an args dataclass per command (the group
+options on base classes, as [Step 3](#step-3-move-group-options-onto-a-base-class) does by
+hand), and a handler per command:
+
+```bash
+uv run treaty scaffold-from typer todo.cli:app --out todo/cli_treaty.py
+uv run treaty scaffold-from click todo.cli:cli --out todo/cli_treaty.py
+```
+
+Run it inside the CLI's own environment, since it imports the module and so runs its
+top-level code; a module that does work on import does that work again. Without `--out` the
+module is in `data.source`, and `--format plain` prints it alone. An existing `--out` file is
+left alone with exit 6 (`CONFLICT`) unless `--force` is given, and `--dry-run` reports what
+it would write.
+
+What the module leaves to you:
+
+- **Danger levels and exit codes.** Every command starts as `danger_level="mutating"` with
+  `exit_codes=()`. `treaty audit` reports the `exit-codes` rule on each one until you
+  declare them, and the inventory table above has the values
+- **The handler bodies.** A handler returns its arguments with `effect: "noop"`, so every
+  command already parses and answers, and nothing runs twice by accident. Its docstring
+  names the click or typer function it replaces: call the function Step 0 split out of it.
+  The scaffold does not call the old command itself, since that one prints, exits, and
+  reads click's context
+- **What treaty does instead.** A command named `manifest`, `version`, or `exec`, an option
+  treaty provides (`--verbose`, `--quiet`, `--debug`), and a `--yes` switch (the
+  confirmation [Step 6](#step-6-replace-the-confirmation-with-a-danger-level) replaces) are
+  left out; an option on a name treaty keeps, such as `--format` or `--config`, is renamed
+  (`--output-format`, `--config-file`). `data.skipped` and `data.renamed` list each one, and
+  the module's docstring repeats them
+- **Types it cannot spell.** An `envvar=`, a `click.File`, a custom `ParamType`, or a
+  computed default gets a comment above its field saying what to do
+
+The module passes ruff and `mypy --strict` as written; the scaffold runs it once before
+writing it, so it registers.
 
 ## Step 2: Create the app
 
@@ -663,6 +776,19 @@ command.
 | shell completion | `--install-completion` | `todo completion bash` |
 | `CliRunner().invoke(...)` | `typer.testing.CliRunner` | `app.call(...)`, or `app.run(argv, ...)` |
 
+### agentyper to treaty
+
+agentyper is a typer-compatible layer over argparse, pydantic, and rich, built for agents.
+It keeps typer's signatures, so the table above applies; these rows cover what it adds:
+
+| agentyper | treaty | Note |
+| --- | --- | --- |
+| `--fields` implemented by the app | built in (`--fields` is reserved) | delete the app's code; the output matches |
+| `exec` with `_cmd` and `_opts` | the built-in `exec` | the same line shape, so existing JSONL plans keep working; `App(exec_fallback=)` runs the lines of commands not yet migrated |
+| `@app.command(mutating=True)` | `danger_level="mutating"`, and an `effect` in the output | |
+| `typer.exit_error(msg)` | `app.exit_code(...)`, then `raise Exit.NAME(msg, ...)` | |
+| `version=` read from package metadata (`0.3.0.dev0`) | `App(version=importlib.metadata.version(...))` | PEP 440 versions are accepted and reported in their semver spelling |
+
 ## What changes for the people using your CLI
 
 Migration is a breaking change for callers. Put this list in your release notes:
@@ -688,6 +814,80 @@ Migration is a breaking change for callers. Put this list in your release notes:
 - A verbosity count stops at two: `-v` is `--verbose`, and `-vv`, `-vvv`, or more is `--debug`
 - `--config` and `--format` are now treaty's; the CLI's own options of those names are renamed (list the new names)
 - Completion scripts have to be generated again with `todo completion`
+
+## Before and after: the conformance kit
+
+The audit reads declarations; the [conformance kit](../ship/conformance.md) runs the
+executable the way an agent does. Run with one profile against both versions, it shows what
+the migration bought. The click version, through a launcher with the same sandbox:
+
+```bash
+$ uv run treaty conformance examples.tutorial.todo_exit_codes:app --out tmp/click/todo.json \
+    --command examples/tutorial/conformance/todo-click --run --format plain
+Profile: tmp/click/todo.json (6 probes)
+Levels: level_1 fail, level_2 fail, level_3 fail
+
+  fail  L3 argument_order
+        argument_order --format json before the command path: --format json before the command path exited 2, expected 0
+  fail  L2 destructive_refuses_unconfirmed
+        purge: expected exit 2 (refused before side effects) without confirmation, got 1
+  fail  L1 dry_run_preview
+        purge --dry-run: dry-run exited 2, expected 0
+  pass  L1 exit_code_contract
+  fail  L1 help_off_stdout
+        --help: --help wrote prose to stdout in a non-TTY; route it to stderr
+  pass  L1 invalid_input_exit_2
+  fail  L1 json_envelope
+        list: stdout is empty
+        manifest malformed etag: stdout is empty
+        purge --dry-run: stdout is empty
+        purge: stdout is not a single JSON document (Expecting value at char 0)
+        status built-in: stdout is empty
+        unknown flag: stdout is empty
+        version: stdout is empty
+  fail  L3 manifest_valid
+        manifest: stdout is empty
+  pass  L1 no_color_honored
+  pass  L1 no_hang_stdin_closed
+  fail  L1 no_hang_stdin_open
+        purge: no exit within 10s; killed
+  pass  L1 stdout_no_ansi
+treaty: CONFORMANCE_FAILED: 7 conformance checks failed.
+  summary: {'passed': 5, 'failed': 7, 'skipped': 0}
+```
+
+The migrated app, once [Declare exit codes](../core/exit-codes.md) has named its failures:
+
+```bash
+$ uv run treaty conformance examples.tutorial.todo_exit_codes:app \
+    --out examples/tutorial/conformance/todo.json --run --format plain
+Profile: examples/tutorial/conformance/todo.json (6 probes)
+Levels: level_1 pass, level_2 pass, level_3 pass
+
+  pass  L3 argument_order
+  pass  L2 destructive_refuses_unconfirmed
+  pass  L1 dry_run_preview
+  pass  L1 exit_code_contract
+  pass  L1 help_off_stdout
+  pass  L1 invalid_input_exit_2
+  pass  L1 json_envelope
+  pass  L3 manifest_valid
+  pass  L1 no_color_honored
+  pass  L1 no_hang_stdin_closed
+  pass  L1 no_hang_stdin_open
+  pass  L1 stdout_no_ansi
+```
+
+Five checks passed before: click already exits 2 on a bad value and writes no colour to a
+pipe. The seven that failed map to the steps that fixed them:
+
+| Failed check | Cause in the click version | Fixed in |
+| --- | --- | --- |
+| `json_envelope` | output is prose, and `manifest`, `version`, and `status` do not exist | [Step 4](#step-4-migrate-one-command-end-to-end), [Step 8](#step-8-swap-the-entry-point) |
+| `no_hang_stdin_open`, `destructive_refuses_unconfirmed`, `dry_run_preview` | `purge` asks with `click.confirm`, aborts with exit 1, and has no `--dry-run` | [Step 6](#step-6-replace-the-confirmation-with-a-danger-level) |
+| `manifest_valid` | no `manifest` command | [Step 2](#step-2-create-the-app) |
+| `argument_order` | `--format` is unknown to click | the migration as a whole |
+| `help_off_stdout` | click prints `--help` on stdout | the migration as a whole |
 
 ## Next
 

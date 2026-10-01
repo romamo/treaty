@@ -137,6 +137,20 @@ Apps built on treaty keep their own, structured schema changelog with
   exit code unchanged. The flag's description now says so. Every app offers it,
   so the manifest's `--format` enum and `--help` list it; it takes no renderer, and
   `--output ndjson` is refused as a format name. `jsonl` stays the envelope stream (#34)
+### Added
+
+- `treaty scaffold-from typer|click|argparse module:obj` writes a treaty module from an
+  existing CLI: it imports the target, walks the click or typer command tree (typer's own
+  copy of click included) or the argparse subparsers, and writes an args dataclass per
+  command, group options on base classes, and a handler that returns its arguments with
+  effect `noop`. Every command starts as `danger_level="mutating"` with `exit_codes=()`,
+  which `treaty audit` reports until the author declares them; commands and options treaty
+  provides are left out and options on reserved names renamed, both listed in `data`. The
+  module goes to `--out` (exit 6 `CONFLICT` over an existing file without `--force`) or to
+  `data.source`, and `--format plain` prints it alone. It passes ruff and `mypy --strict`,
+  and runs once before it is written. The click/typer chapter gains Step 0, separate logic
+  from presentation, the agentyper rows that need no open issue, and a before and after
+  run of the conformance kit; the argparse chapter points at the scaffold (#3)
 
 ## [1.0.0rc9] - 2026-10-01
 
