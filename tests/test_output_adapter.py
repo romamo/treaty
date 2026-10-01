@@ -526,6 +526,8 @@ def drift_app() -> App:
     def plain_dict(args: NoArgs, ctx: Ctx) -> dict[str, list[str]]:
         raise Exit.DRIFT("drift", data={"servers": ["h1", "v6", "a0"]})
 
+    return app
+
 
 class Security(BaseModel):
     """py-ftmarkets' lookup result: the handler's order is FT's ranking (#182)"""
