@@ -25,12 +25,12 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
-from ._atomic import try_lock
+from ._atomic import retry_sharing_violation, try_lock
 from ._errors import CliExit
 from ._values import ExitCodeName, InstanceId
 
@@ -197,6 +197,8 @@ class Session:
         self._out_id = uuid.uuid4().hex[:8]
         """Tells apart the output files of ``exec`` lines, which share a request id"""
         self._lock = threading.Lock()
+        self._pids_lock = threading.Lock()
+        """Serialises the rewrites of the pid file: snapshot, write, rename"""
         self._live: IO[str] | None = None
 
     @property
@@ -250,16 +252,31 @@ class Session:
         where = str(self.directory())
         return {"TMPDIR": where, "TEMP": where, "TMP": where}
 
-    def track(self, pids: Collection[int]) -> None:
+    def track(
+        self,
+        pids: Callable[[], Collection[int]],
+        *,
+        replace: Callable[[Callable[[], None]], None] = retry_sharing_violation,
+    ) -> None:
         """Rewrite the pid file of the children running now (REQ-F-030); once the run
-        ended, a late child of an abandoned handler is not written anywhere"""
+        ended, a late child of an abandoned handler is not written anywhere.
+
+        ``pids()`` is read under the pid file's lock, so of two threads tracking at
+        once the later write holds the later set, and their renames onto the one file
+        never overlap: on Windows the second fails while the first is in flight. A
+        reader of the file, another process's, still blocks the rename there for a
+        moment, so ``replace`` retries it (``retry_sharing_violation``)."""
         if self._removed:
             return
         path = self.directory() / PID_FILE
-        text = "".join(f"{pid}\n" for pid in sorted(pids))
-        partial = path.with_name(f".{PID_FILE}.{uuid.uuid4().hex}")
-        private_file(partial).write_text(text, encoding="ascii")
-        os.replace(partial, path)
+        with self._pids_lock:
+            text = "".join(f"{pid}\n" for pid in sorted(pids()))
+            partial = path.with_name(f".{PID_FILE}.{uuid.uuid4().hex}")
+            private_file(partial).write_text(text, encoding="ascii")
+            try:
+                replace(lambda: os.replace(partial, path))
+            finally:
+                partial.unlink(missing_ok=True)
 
     @property
     def pid_file(self) -> Path | None:
