@@ -1688,6 +1688,9 @@ class App:
         # goes to a copy of the original; the next envelope warns with what it caught
         stdout.flush()
         interceptor = intercept_stdout()
+        # Colored as the run colors, from the environment as it was started: the CI=1 set
+        # above for children would otherwise strip the colors a print() keeps (#117)
+        interceptor.color = color_allowed(started_env, stdout_tty)
         # REQ-F-072: LF on every platform; Windows text mode would write CRLF
         envelopes = open(  # noqa: SIM115 - closed below, before descriptor 1 is restored
             os.dup(interceptor.saved),

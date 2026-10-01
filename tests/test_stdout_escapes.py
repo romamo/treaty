@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from treaty import App, Ctx, NoArgs
 
 OSC52 = "\x1b]52;c;aGVsbG8=\x07"
@@ -144,3 +146,44 @@ def test_a_failed_childs_stderr_in_the_error_carries_no_escape() -> None:
     err = plain(child_app(), "fail")
     assert "SUBPROCESS_FAILED" in err or "exited with 3" in err, err
     assert "\x1b]" not in err and "\x07" not in err
+
+
+COLORING_APP = """
+import os
+from treaty import App, Ctx, NoArgs
+
+app = App("colors", version="1.0.0")
+
+
+@app.command("go", description="Write colors", danger_level="safe", exit_codes=())
+def go(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+    os.write(1, b"\\x1b[31mred\\x1b[0m\\n")
+    return {}
+
+
+app.main()
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="pseudo-terminals are POSIX")
+def test_main_on_a_terminal_with_piped_stdin_keeps_the_colors_a_print_keeps() -> None:
+    # main() sets CI=1 for children off an interactive session; the run still colors
+    import pty
+
+    master, slave = pty.openpty()
+    off = {"CI", "NO_COLOR", "GITHUB_ACTIONS", "JENKINS_URL"}
+    env = {k: v for k, v in os.environ.items() if k not in off}
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", COLORING_APP, "go", "--format", "plain"],
+            stdin=subprocess.PIPE,
+            stdout=slave,
+            stderr=subprocess.PIPE,
+            env={**env, "TERM": "xterm"},
+            timeout=30,
+            check=True,
+        )
+    finally:
+        os.close(slave)
+        os.close(master)
+    assert proc.stderr == b"\x1b[31mred\x1b[0m\n"
