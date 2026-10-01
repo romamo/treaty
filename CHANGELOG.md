@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- The output cap measures the envelope it falls back to when no cut of `data` fits: when
+  the truncation meta and warning would pass the cap, an exec line or `call()` hint takes
+  its short form, and a line that still passes the cap does so by that report alone. A
+  response cut again after `--warnings-as-errors` or a failed audit log write grew it
+  keeps the first cut's `meta.total_bytes`, the full response's size, and reports each
+  field in a single `FIELD_TRUNCATED` warning against its original length (#134)
+
 ## [1.0.0rc8] - 2026-10-01
 
 The eighth 1.0 release candidate: 1 change and 2 fixes.

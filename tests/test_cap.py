@@ -256,3 +256,73 @@ def test_a_call_without_argv_names_the_apps_own_cap_variable() -> None:
     _, out = run(big_app(), ["exec"], stdin='{"_cmd": "items"}\n')
     hint = json.loads(out.splitlines()[0])["meta"]["truncation_hint"]
     assert "BIGCTL_MAX_OUTPUT_BYTES" in hint and "<APP>" not in hint
+
+
+@pytest.mark.parametrize(
+    ("argv", "stdin"),
+    [(["ls"], ""), (["exec"], '{"_cmd": "ls"}\n')],
+)
+def test_a_second_cut_after_settling_keeps_the_first_cuts_report(
+    argv: list[str], stdin: str
+) -> None:
+    """#134: the error --warnings-as-errors adds to a cut envelope makes it cut again; the
+    second cut reported the first cut's size as ``total_bytes`` and the field twice"""
+    flags = [*argv, "--stable-output", "--warnings-as-errors"]
+    capped = {"SIZECTL_MAX_OUTPUT_BYTES": str(CAP)}
+    code, out = run(sized_app(10), flags, env=capped, stdin=stdin)
+    line = out.splitlines(keepends=True)[0]
+    env = envelope(line)
+    assert code != 0 and env["error"]["code"] == "WARNINGS_AS_ERRORS"
+    assert env["error"]["context"]["count"] == 1 and len(line.encode()) <= CAP
+    (warning,) = env["warnings"]
+    assert warning["code"] == "FIELD_TRUNCATED" and warning["context"]["original_length"] == 2000
+    meta = env["meta"]
+    assert meta["total_count"] == 2000 and meta["returned_count"] == len(env["data"])
+    # Uncut, nothing warns, so nothing is an error: the full response is the plain line
+    raised = {"SIZECTL_MAX_OUTPUT_BYTES": "1000000"}
+    _, full = run(sized_app(10), flags, env=raised, stdin=stdin)
+    assert meta["total_bytes"] == len(full.splitlines(keepends=True)[0].encode())
+
+
+def blob_app() -> App:
+    app = App("blobctl", version="1.0.0")
+
+    @dataclass(frozen=True, slots=True)
+    class Args:
+        pad: int = Flag(default=0, description="Length of the warning's message")
+
+    @app.command("blob", description="A blob no cut enters", danger_level="safe", exit_codes=())
+    def blob(args: Args, ctx: Ctx) -> dict[str, object]:
+        ctx.warn("PADDING", "p" * args.pad)
+        return {"blob": {"type": "binary", "encoding": "base64", "value": "A" * 2000}}
+
+    return app
+
+
+def test_data_dropped_whole_is_measured_with_its_report() -> None:
+    """#134: when no cut of data fits, data is dropped, and that envelope was never
+    measured: its truncation meta and warning passed the cap over a base just under it.
+    Where the report fits in its short form, the line is within the cap; where nothing
+    can make it fit, the line passes the cap by that short report alone"""
+
+    def line(pad: int, cap: int) -> str:
+        stdin = json.dumps({"_cmd": "blob", "pad": pad}) + "\n"
+        env = {"BLOBCTL_MAX_OUTPUT_BYTES": str(cap)}
+        _, out = run(blob_app(), ["exec", "--stable-output"], env=env, stdin=stdin)
+        return out.splitlines(keepends=True)[0]
+
+    whole = line(0, 1_000_000)
+    data = len(json.dumps(json.loads(whole)["data"], separators=(",", ":"))) - len("null")
+    base = len(whole.encode()) - data  # the line with no data, at pad 0
+    within = 0
+    for pad in range(CAP - base - 400, CAP - base + 1, 5):
+        cut = line(pad, CAP)
+        env = envelope(cut)
+        assert env["data"] is None, pad
+        assert [w["code"] for w in env["warnings"]] == ["PADDING", "FIELD_TRUNCATED"], pad
+        total = env["meta"]["total_bytes"]
+        brief = f"the full response is {total} bytes, over BLOBCTL_MAX_OUTPUT_BYTES"
+        size = len(cut.encode())
+        assert size <= CAP or env["meta"]["truncation_hint"] == brief, (pad, size)
+        within += size <= CAP and env["meta"]["truncation_hint"] == brief
+    assert within  # a window the long hint overran is now within the cap
