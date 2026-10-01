@@ -106,11 +106,13 @@ def test_a_field_that_failed_is_not_also_reported_missing() -> None:
 
 
 def test_secret_errors_are_collected_with_the_rest() -> None:
-    code, env, _ = run(["deploy", "api", "--token", "abc", "--token-from-env", "NOPE", "--env=x"])
+    code, env, _ = run(
+        ["deploy", "api", "--token", "s3cret-token-value", "--token-from-env", "NOPE", "--env=x"]
+    )
     errors = error_of(env)["errors"]
     assert isinstance(errors, list)
     assert [e["field"] for e in errors] == ["token", "env", "token-from-env"]
-    assert "abc" not in json.dumps(env)
+    assert "s3cret-token-value" not in json.dumps(env)
 
 
 def test_a_flag_without_a_value_at_the_end_is_collected_with_the_rest() -> None:
