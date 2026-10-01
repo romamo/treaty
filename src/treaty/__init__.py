@@ -27,7 +27,7 @@ from ._errors import (
 )
 from ._exit import ExitCodeEntry, FrameworkCode, RetryStrategy, SideEffects
 from ._flags import Arg, Flag
-from ._http import HttpResponse
+from ._http import HttpResponse, NetworkSettings
 from ._init import Init
 from ._jobs import Job, JobStore
 from ._journal import AuditLog
@@ -90,6 +90,7 @@ __all__ = [
     "JobStore",
     "Meta",
     "NetworkContext",
+    "NetworkSettings",
     "NoArgs",
     "Out",
     "OutputAdapter",

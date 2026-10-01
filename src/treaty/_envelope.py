@@ -177,6 +177,16 @@ def without_userinfo(url: str) -> str:
     return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2]))
 
 
+def proxy_without_userinfo(proxy: str) -> str:
+    """A proxy setting with everything up to its last ``@`` removed. A proxy has no path,
+    so any ``@`` ends a ``user:password``, even one holding the ``/``, ``?``, or ``#``
+    that would end an ordinary URL's authority, or one written with no scheme"""
+    scheme, sep, rest = proxy.partition("://")
+    if not sep:
+        scheme, rest = "", proxy
+    return f"{scheme}{sep}{rest.rpartition('@')[2]}"
+
+
 @dataclass(frozen=True, slots=True)
 class NetworkContext:
     """How a failed network call went out (REQ-F-037): only the framework's own client
@@ -195,7 +205,7 @@ class NetworkContext:
 
     def __post_init__(self) -> None:
         if self.proxy_used is not None:
-            object.__setattr__(self, "proxy_used", without_userinfo(self.proxy_used))
+            object.__setattr__(self, "proxy_used", proxy_without_userinfo(self.proxy_used))
         if not self.suggestion:
             raise RegistrationError("NetworkContext needs a diagnostic command in suggestion")
 

@@ -1,5 +1,6 @@
 """Deliberately imperfect app for audit tests."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from treaty import App, Arg, Ctx, Flag
@@ -46,4 +47,9 @@ def create_item(args: Wide, ctx: Ctx) -> dict[str, object]:
     exit_codes=(),
 )
 def good(args: Name, ctx: Ctx) -> Name:
-    return args
+    return lookup(args, proxies=ctx.network.proxies)
+
+
+def lookup(name: Name, *, proxies: Mapping[str, str]) -> Name:
+    """Stands in for a library's own client, which takes the run's proxies"""
+    return name

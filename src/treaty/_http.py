@@ -37,10 +37,11 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import IO
 from urllib.parse import SplitResult, unquote, urlsplit
 
-from ._envelope import NetworkContext, without_userinfo
+from ._envelope import NetworkContext, proxy_without_userinfo, without_userinfo
 from ._errors import CliExit, ParseError
 from ._retry import Retrier, retry_after
 from ._values import ExitCodeName
@@ -77,8 +78,8 @@ def parse_proxy(raw: object) -> str:
     problem = _proxy_problem(raw)
     if problem is not None:
         raise ParseError(
-            f"--proxy {without_userinfo(raw)!r} {problem}",
-            context={"flag": PROXY_FLAG, "value": without_userinfo(raw)},
+            f"--proxy {proxy_without_userinfo(raw)!r} {problem}",
+            context={"flag": PROXY_FLAG, "value": proxy_without_userinfo(raw)},
             suggestion="pass --proxy http://host:port",
         )
     return raw
@@ -95,18 +96,29 @@ def _env(env: Mapping[str, str], name: str) -> tuple[str, str] | None:
 
 def bypassed(url: SplitResult, no_proxy: str) -> bool:
     """``NO_PROXY`` lists the URL's host: ``*``, the host, a domain it is under (with or
-    without a leading dot), or ``host:port``"""
+    without a leading dot), or ``host:port``, the scheme's port when the URL names none;
+    an IPv6 address is bare or in brackets, ``[::1]:8080`` with a port"""
     host = (url.hostname or "").lower()
+    url_port = url.port if url.port is not None else _DEFAULT_PORTS.get(url.scheme)
     for item in no_proxy.lower().replace(" ", "").split(","):
         if item == "*":
             return True
-        name, _, port = item.partition(":")
+        if item.startswith("["):  # [::1] or [::1]:8080
+            name, _, rest = item[1:].partition("]")
+            port = rest.removeprefix(":")
+        elif item.count(":") > 1:  # a bare IPv6 address, which takes no port
+            name, port = item, ""
+        else:
+            name, _, port = item.partition(":")
         name = name.lstrip(".")
-        if not name or (port and str(url.port) != port):
+        if not name or (port and str(url_port) != port):
             continue
         if host == name or host.endswith("." + name):
             return True
     return False
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,24 +151,48 @@ class ProxyConfig:
         if self.flag_proxy is not None:
             return Route(self.flag_proxy, f"--{PROXY_FLAG}")
         parts = urlsplit(url)
-        found = _env(self.env, f"{parts.scheme.upper()}_PROXY")
-        if found is None:
+        if _env(self.env, f"{parts.scheme.upper()}_PROXY") is None:
             return Route(None, None)
         bypass = _env(self.env, "NO_PROXY")
         if bypass and bypassed(parts, bypass[1]):
             return Route(None, bypass[0])
+        return self._env_route(parts.scheme)
+
+    def _env_route(self, scheme: str) -> Route:
+        """The ``<SCHEME>_PROXY`` variable's proxy, NO_PROXY aside; a ``host:port`` value
+        is read as curl reads it, and one that is no http proxy URL exits 4"""
+        found = _env(self.env, f"{scheme.upper()}_PROXY")
+        if found is None:
+            return Route(None, None)
         name, raw = found
-        proxy = raw if "://" in raw else f"http://{raw}"  # host:port, as curl reads it
+        proxy = raw if "://" in raw else f"http://{raw}"
         problem = _proxy_problem(proxy)
         if problem is not None:
             raise CliExit(
                 ExitCodeName("PRECONDITION"),
-                f"{name} {without_userinfo(raw)!r} {problem}",
+                f"{name} {proxy_without_userinfo(raw)!r} {problem}",
                 code="PROXY_INVALID",
-                context={"variable": name, "value": without_userinfo(raw)},
+                context={"variable": name, "value": proxy_without_userinfo(raw)},
                 fix_required=f"set {name} to http://host:port, or unset it",
             )
         return Route(proxy, name)
+
+    def by_scheme(self) -> dict[str, str]:
+        """``{"http": ..., "https": ...}`` as ``ctx.http`` would go out for each scheme
+        before ``NO_PROXY``: empty under ``--no-proxy`` or a ``NO_PROXY`` of ``*``"""
+        if self.no_proxy_flag:
+            return {}
+        if self.flag_proxy is not None:
+            return dict.fromkeys(_SCHEMES, self.flag_proxy)
+        bypass = _env(self.env, "NO_PROXY")
+        if bypass and "*" in bypass[1].replace(" ", "").split(","):
+            return {}
+        routes = {scheme: self._env_route(scheme).proxy for scheme in _SCHEMES}
+        return {scheme: proxy for scheme, proxy in routes.items() if proxy is not None}
+
+    def ca_bundle(self) -> tuple[str, str] | None:
+        """The CA bundle variable that is set, first of ``CA_BUNDLE_VARS``, and its value"""
+        return next(((n, v) for n in CA_BUNDLE_VARS if (v := self.env.get(n))), None)
 
     def child_env(self) -> dict[str, str]:
         """The variables ``ctx.run`` children get, so ``--proxy`` and ``--no-proxy`` reach
@@ -167,6 +203,50 @@ class ProxyConfig:
             return {}
         names = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
         return dict.fromkeys(names, self.flag_proxy)
+
+
+_SCHEMES = ("http", "https")
+
+
+class NetworkSettings:
+    """``ctx.network``: the proxy and CA bundle the run resolved, for a client other than
+    ``ctx.http``, such as a library's own ``requests.Session``, to go out the same way.
+    ``--proxy`` and ``--no-proxy`` win over the run's environment, as for ``ctx.http``.
+    A proxy URL keeps its ``user:password@`` for the client to authenticate with; the
+    repr removes it"""
+
+    __slots__ = ("_config",)
+
+    def __init__(self, config: ProxyConfig) -> None:
+        self._config = config
+
+    @property
+    def proxies(self) -> dict[str, str]:
+        """A ``requests``-style mapping, ``{"http": url, "https": url}``, holding the
+        schemes that go through a proxy: ``--proxy`` for both, else ``HTTP_PROXY`` and
+        ``HTTPS_PROXY`` (either case); empty under ``--no-proxy`` or a ``NO_PROXY`` of
+        ``*``. ``NO_PROXY``'s hosts are not in it: ``proxy_for(url)`` applies them. A
+        proxy variable that is no http proxy URL exits 4 ``PROXY_INVALID``"""
+        return self._config.by_scheme()
+
+    def proxy_for(self, url: str) -> str | None:
+        """The proxy ``ctx.http`` would use for ``url``, ``NO_PROXY`` applied; None for a
+        direct connection"""
+        return self._config.route(url).proxy
+
+    @property
+    def ca_bundle(self) -> Path | None:
+        """The CA bundle to verify TLS against: ``REQUESTS_CA_BUNDLE``, else
+        ``SSL_CERT_FILE``; None for the system store"""
+        found = self._config.ca_bundle()
+        return None if found is None else Path(found[1])
+
+    def __repr__(self) -> str:
+        try:
+            shown = repr({k: proxy_without_userinfo(v) for k, v in self.proxies.items()})
+        except CliExit as exc:  # a repr names the problem rather than raising it
+            shown = f"<{exc.code}>"
+        return f"NetworkSettings(proxies={shown}, ca_bundle={self.ca_bundle!r})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,10 +485,7 @@ class Http:
 
     def opener(self) -> urllib.request.OpenerDirector:
         if self._opener is None:
-            found = next(
-                ((n, v) for n in CA_BUNDLE_VARS if (v := self.proxies.env.get(n))),
-                None,
-            )
+            found = self.proxies.ca_bundle()
             try:
                 context = ssl.create_default_context(cafile=None if found is None else found[1])
             except OSError as exc:  # FileNotFoundError, or ssl.SSLError on a bad bundle
@@ -500,7 +577,7 @@ class Http:
         route = self.proxies.route(url)
         curl = ["curl", "-v"]
         if route.proxy is not None:
-            curl += ["--proxy", without_userinfo(route.proxy)]
+            curl += ["--proxy", proxy_without_userinfo(route.proxy)]
         elif self.proxies.no_proxy_flag:
             curl += ["--noproxy", "*"]
         curl.append(without_userinfo(url))

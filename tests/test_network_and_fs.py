@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import types
+import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,7 +24,17 @@ from pathlib import Path
 
 import pytest
 
-from treaty import App, Ctx, Exit, Flag, HttpResponse, NoArgs, RegistrationError, Retry
+from treaty import (
+    App,
+    Ctx,
+    Exit,
+    Flag,
+    HttpResponse,
+    NetworkSettings,
+    NoArgs,
+    RegistrationError,
+    Retry,
+)
 from treaty._audit import Finding, Severity, audit, os_walks
 from treaty._http import Http, NetworkFailure, ProxyConfig
 from treaty._profile import probes_for
@@ -578,6 +589,211 @@ def test_ctx_http_needs_has_network_io() -> None:
         @app.command("go", description="Go", danger_level="safe", exit_codes=())
         def go(args: Fetch, ctx: Ctx) -> None:
             ctx.http.get(args.url)
+
+
+def own_client_app() -> App:
+    """A handler whose own client, a urllib opener here as a library's requests.Session
+    would be, takes ctx.network's settings"""
+    app = App("ownctl", version="1.0.0")
+
+    @app.command(
+        "get", description="Get a URL", danger_level="safe", exit_codes=(), has_network_io=True
+    )
+    def get(args: Fetch, ctx: Ctx) -> Got:
+        handler = urllib.request.ProxyHandler(ctx.network.proxies)
+        with urllib.request.build_opener(handler).open(args.url, timeout=5) as r:
+            return Got(r.status, r.read().decode())
+
+    @app.command(
+        "settings", description="Show them", danger_level="safe", exit_codes=(), has_network_io=True
+    )
+    def settings(args: Fetch, ctx: Ctx) -> dict[str, object]:
+        bundle = ctx.network.ca_bundle
+        return {
+            "proxies": ctx.network.proxies,
+            "for_url": ctx.network.proxy_for(args.url),
+            "ca_bundle": None if bundle is None else str(bundle),
+            "repr": repr(ctx.network),
+        }
+
+    return app
+
+
+def network_settings(env: dict[str, str], *flags: str, url: str = "https://example.com/") -> object:
+    code, envelope = run(own_client_app(), ["settings", "--url", url, *flags], env)
+    assert code == 0, envelope
+    return envelope["data"]
+
+
+def test_a_handlers_own_client_honors_proxy_and_no_proxy_through_ctx_network(
+    origin: Recording, proxy: Recording
+) -> None:
+    url = f"{origin.url}/a"
+    code, envelope = run(own_client_app(), ["get", "--url", url, "--proxy", proxy.url])
+    assert code == 0, envelope
+    assert body_of(envelope) == {"via": "proxy", "path": url}
+    env = {"HTTP_PROXY": proxy.url}
+    code, envelope = run(own_client_app(), ["get", "--url", url, "--no-proxy"], env)
+    assert code == 0, envelope
+    assert body_of(envelope) == {"via": "origin", "path": "/a"}
+    assert len(proxy.seen) == 1
+
+
+def test_ctx_network_resolves_proxies_like_ctx_http() -> None:
+    env = {
+        "https_proxy": "proxy.internal:3128",
+        "HTTP_PROXY": "http://plain.internal:80",
+        "NO_PROXY": ".example.com",
+    }
+    assert network_settings(env) == {
+        "proxies": {"http": "http://plain.internal:80", "https": "http://proxy.internal:3128"},
+        "for_url": None,  # NO_PROXY lists example.com
+        "ca_bundle": None,
+        "repr": "NetworkSettings(proxies={'http': 'http://plain.internal:80', 'https': "
+        "'http://proxy.internal:3128'}, ca_bundle=None)",
+    }
+    assert network_settings(env, url="https://other.org/")["for_url"] == (  # type: ignore[index]
+        "http://proxy.internal:3128"
+    )
+    flagged = network_settings(env, "--proxy", "http://flag.internal:8080")
+    assert flagged["proxies"] == dict.fromkeys(("http", "https"), "http://flag.internal:8080")  # type: ignore[index]
+    assert flagged["for_url"] == "http://flag.internal:8080"  # type: ignore[index]
+    direct = network_settings(env, "--no-proxy")
+    assert (direct["proxies"], direct["for_url"]) == ({}, None)  # type: ignore[index]
+    assert network_settings({})["proxies"] == {}  # type: ignore[index]
+    assert network_settings({**env, "no_proxy": "*", "NO_PROXY": ""})["proxies"] == {}  # type: ignore[index]
+
+
+def test_ctx_network_names_the_ca_bundle_requests_ca_bundle_first() -> None:
+    both = {"REQUESTS_CA_BUNDLE": "/etc/a.pem", "SSL_CERT_FILE": "/etc/b.pem"}
+    assert network_settings(both)["ca_bundle"] == str(Path("/etc/a.pem"))  # type: ignore[index]
+    one = {"SSL_CERT_FILE": "/etc/b.pem"}
+    assert network_settings(one)["ca_bundle"] == str(Path("/etc/b.pem"))  # type: ignore[index]
+
+
+def test_ctx_network_keeps_proxy_credentials_for_the_client_but_its_repr_does_not() -> None:
+    data = network_settings({}, "--proxy", "http://alice:s3cret@proxy.internal:3128")
+    assert data["proxies"]["https"] == "http://alice:s3cret@proxy.internal:3128"  # type: ignore[index]
+    assert "s3cret" not in data["repr"] and "alice" not in data["repr"]  # type: ignore[index]
+
+
+def test_ctx_network_refuses_a_proxy_variable_that_is_no_http_url() -> None:
+    code, envelope = run(
+        own_client_app(),
+        ["settings", "--url", "https://example.com/"],
+        {"HTTPS_PROXY": "socks5://bob:pw@proxy.internal:1080"},
+    )
+    assert code == 4
+    assert error_of(envelope)["code"] == "PROXY_INVALID"
+    assert "pw" not in json.dumps(envelope)
+    settings = NetworkSettings(ProxyConfig({"HTTPS_PROXY": "socks5://bob:pw@proxy.internal:1"}))
+    assert repr(settings) == "NetworkSettings(proxies=<PROXY_INVALID>, ca_bundle=None)"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "alice:s3cret@proxy.internal:99999",  # no scheme: urlsplit sees no userinfo
+        "http://alice:pa/s3cret@proxy.internal:8080",  # a / ends the authority early
+        "http://alice:pa#s3cret@proxy.internal:8080",  # as a # does
+        "http://alice:pa?s3cret@proxy.internal:8080",  # and a ?
+    ],
+)
+def test_an_invalid_proxy_never_shows_its_password(value: str) -> None:
+    code, envelope = run(
+        own_client_app(), ["settings", "--url", "https://example.com/"], {"HTTPS_PROXY": value}
+    )
+    assert (code, error_of(envelope)["code"]) == (4, "PROXY_INVALID")
+    assert "s3cret" not in json.dumps(envelope)
+    assert "proxy.internal" in error_of(envelope)["message"]  # type: ignore[operator]
+    if "://" in value:
+        code, envelope = run(net_app(), ["get", "--url", "https://example.com/", "--proxy", value])
+        assert code == 2, envelope
+        assert "s3cret" not in json.dumps(envelope)
+
+
+_P = "http://proxy.internal:3128"
+
+
+@pytest.mark.parametrize(
+    ("env", "flags", "url", "expected"),
+    [
+        ({"HTTP_PROXY": _P}, {}, "http://a.org/", _P),
+        ({"HTTP_PROXY": _P}, {}, "https://a.org/", None),  # no HTTPS_PROXY
+        ({"https_proxy": _P}, {}, "https://a.org/", _P),
+        ({"HTTPS_PROXY": "", "https_proxy": _P}, {}, "https://a.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "no_proxy": "A.ORG"}, {}, "https://x.a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": ".a.org"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org"}, {}, "https://ba.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "b.org, a.org"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "*"}, {}, "https://a.org/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "*.a.org"}, {}, "https://x.a.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org:8443"}, {}, "https://a.org:8443/", None),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org:8443"}, {}, "https://a.org/", _P),
+        ({"HTTPS_PROXY": _P, "NO_PROXY": "a.org:443"}, {}, "https://a.org/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "::1"}, {}, "http://[::1]:8080/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "[::1]"}, {}, "http://[::1]:8080/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "[::1]:8080"}, {}, "http://[::1]:8080/", None),
+        ({"HTTP_PROXY": _P, "NO_PROXY": "[::1]:9"}, {}, "http://[::1]:8080/", _P),
+        (
+            {"HTTP_PROXY": _P, "NO_PROXY": "a.org"},
+            {"flag_proxy": _P + "9"},
+            "http://a.org/",
+            _P + "9",
+        ),
+        ({"HTTP_PROXY": _P}, {"no_proxy_flag": True}, "http://a.org/", None),
+    ],
+)
+def test_ctx_network_routes_each_url_as_ctx_http_does(
+    env: dict[str, str], flags: dict[str, object], url: str, expected: str | None
+) -> None:
+    config = ProxyConfig(env, **flags)  # type: ignore[arg-type]
+    settings = NetworkSettings(config)
+    assert settings.proxy_for(url) == config.route(url).proxy == expected
+    if expected is not None:  # not bypassed: the mapping names the same proxy
+        assert settings.proxies[url.partition(":")[0]] == expected
+
+
+def test_ctx_network_needs_has_network_io() -> None:
+    app = App("t", version="1.0.0")
+    with pytest.raises(RegistrationError, match=r"ctx\.network .*has_network_io"):
+
+        @app.command("go", description="Go", danger_level="safe", exit_codes=())
+        def go(args: Fetch, ctx: Ctx) -> dict[str, str]:
+            return ctx.network.proxies
+
+
+def test_http_client_advises_a_network_command_whose_handler_never_routes_through_ctx() -> None:
+    class Client:
+        def fetch(self, url: str) -> int:
+            return len(url)
+
+    client = Client()
+    app = App("t", version="1.0.0")
+
+    def network(name: str) -> Callable[[Callable[[Fetch, Ctx], object]], object]:
+        return app.command(
+            name, description=name, danger_level="safe", exit_codes=(), has_network_io=True
+        )
+
+    @network("own")
+    def own(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": client.fetch(args.url)}
+
+    @network("passed")
+    def passed(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        proxies = ctx.network.proxies
+        return {"n": client.fetch(args.url) + len(proxies)}
+
+    @network("child")
+    def child(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": ctx.run(["curl", args.url]).returncode}
+
+    found = [(f.command, f.severity) for f in findings(app) if f.rule == "http-client"]
+    assert found == [("own", Severity.ADVICE)]
+    rules = {f.rule for f in (*findings(net_app()), *findings(own_client_app()))}
+    assert "http-client" not in rules
 
 
 def test_network_commands_may_exit_12_undeclared() -> None:

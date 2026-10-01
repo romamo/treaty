@@ -1227,12 +1227,14 @@ def _check_ctx_calls(
     recursive_traversal: bool = False,
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
-    line = ctx_attribute(fn, "http")
-    if line is not None and not has_network_io:
-        raise RegistrationError(
-            f"{path}: ctx.http on line {line} of the handler goes out to the network; declare "
-            "has_network_io=True, which adds --proxy, --no-proxy, and --timeout (REQ-F-036)"
-        )
+    for attribute in ("http", "network"):
+        line = ctx_attribute(fn, attribute)
+        if line is not None and not has_network_io:
+            raise RegistrationError(
+                f"{path}: ctx.{attribute} on line {line} of the handler goes out to the "
+                "network; declare has_network_io=True, which adds --proxy, --no-proxy, and "
+                "--timeout (REQ-F-036)"
+            )
     for shell in shell_calls(fn):
         raise RegistrationError(
             f"{path}: {shell.name}() on line {shell.line} of the handler runs a shell, which "

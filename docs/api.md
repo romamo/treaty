@@ -64,6 +64,7 @@ review), **rename**, **remove**.
 | `Page`, `PageRequest` | keep | `paginated=True` |
 | `Completed`, `Spawned` | keep | Returned by `ctx.run`, `ctx.pipeline`, `ctx.spawn` |
 | `HttpResponse` | keep | Returned by `ctx.http` |
+| `NetworkSettings` | keep | `ctx.network`: the resolved proxies and CA bundle for a client of the handler's own (#171) |
 | `WalkEntry` | keep | Yielded by `ctx.walk` |
 | `CommandPath`, `ExitCode`, `ExitCodeName`, `SchemaVersion`, `Scope` | keep | Value objects in public signatures (`App.commands` keys, `CliExit.name`); the plan asked whether `ExitCodeName` is internal: it is what `CliExit` carries, so it stays |
 | `intercept_stdout` | keep | Captures descriptor 1 around a third-party call |
@@ -133,7 +134,7 @@ Fields (keep): `app_name`, `version`, `mode`, `request_id`, `env`, `state`, `tim
 
 Methods and properties (keep): `log`, `warn`, `debug`, `progress`, `log_error`, `run`,
 `pipeline`, `spawn`, `open_url`, `prompt`, `confirm`, `edit`, `retry`, `lock`, `step`,
-`http`, `walk`, `cache`, `tmp_dir`, `temp_file`, `output_file`, `truncated`,
+`http`, `network`, `walk`, `cache`, `tmp_dir`, `temp_file`, `output_file`, `truncated`,
 `config_path`, `write_config`, `stdin_lines`, `stdin_records`.
 
 Made private in the review: `log_sink`, `warn_sink`, `processes`, `prompter`, `retrier`,
