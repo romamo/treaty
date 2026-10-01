@@ -453,7 +453,10 @@ the run shows, then restored; so no record falls through to `logging.lastResort`
 writes to `sys.stderr` unredacted. A handler abandoned at its timeout keeps it on the
 root until its thread ends: a record at WARNING or above that it logs after the run
 returned is written to `sys.stderr` as `lastResort` would, its secrets redacted, and not at
-all when the host's own handler takes the record.
+all when the host's own handler takes the record. While such a thread lives, `sys.stdout`
+and `sys.stderr` are wrapped: what that thread prints or writes is redacted and goes to
+stderr, every other thread's writes pass through, and the streams are put back once it
+ends, unless the host replaced one meanwhile.
 
 The three flags are exclusive (two exit `2`). Stray `print()` text off a terminal is
 dropped, and still reported in `THIRD_PARTY_STDOUT`. The `log-not-print` audit rule flags
