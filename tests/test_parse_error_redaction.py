@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from treaty import App, AuditLog, Ctx, Flag, ParseError
+from treaty import App, Arg, AuditLog, Ctx, Flag, ParseError
 from treaty._mcp import call_tool, tool_entries
 from treaty._values import InvalidValue
 
@@ -198,3 +198,119 @@ def test_a_non_secret_value_stays_quoted() -> None:
     assert json.loads(out)["error"]["context"]["field"] == "password"
     good = run(["go", "--password-from-env", "PW", "--format", "json"], env={"PW": "ok-1234"})
     assert good[0] == 0
+
+
+@dataclass(frozen=True, slots=True)
+class WipeArgs:
+    password: str = Flag(description="Password", secret=True)
+    dry_run: bool = Flag(default=False, description="Preview only")
+
+    def __post_init__(self) -> None:
+        if self.dry_run:
+            raise ParseError(f"cannot preview with {self.password}", context={"pw": self.password})
+
+
+@dataclass(frozen=True, slots=True)
+class PruneArgs:
+    target: Path = Arg(description="What to prune, relative to the project")
+    password: str = Flag(description="Password", secret=True)
+
+    def __post_init__(self) -> None:
+        if self.target.is_absolute():
+            raise ParseError(f"{self.target} is outside the project for {self.password}")
+
+
+@dataclass(frozen=True, slots=True)
+class Leaf:
+    text: str
+
+    def __post_init__(self) -> None:
+        if self.text.startswith("Zq7"):
+            raise ParseError(f"note {self.text} looks like a credential")
+
+
+@dataclass(frozen=True, slots=True)
+class Branch:
+    leaf: Leaf
+
+
+@dataclass(frozen=True, slots=True)
+class NoteArgs:
+    password: str = Flag(description="Password", secret=True)
+    note: Branch | None = Flag(default=None, description="A nested note")
+
+
+def rebuild_app() -> App:
+    app = App("probe", version="1.0.0")
+
+    @app.command("wipe", description="Wipe", danger_level="destructive", exit_codes=())
+    def wipe(args: WipeArgs, ctx: Ctx) -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @app.command("prune", description="Prune", danger_level="safe", exit_codes=())
+    def prune(args: PruneArgs, ctx: Ctx) -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @app.command("note", description="Note", danger_level="safe", exit_codes=())
+    def note(args: NoteArgs, ctx: Ctx) -> dict[str, str]:
+        return {"ok": "yes"}
+
+    return app
+
+
+def test_issue_repro_a_forced_dry_run_rebuild_is_redacted() -> None:
+    for fmt in ("json", "plain"):
+        code, out, err = run(
+            ["wipe", "--password-from-env", "PW", "--format", fmt], app=rebuild_app()
+        )
+        assert code == 2 and SECRET not in out + err
+        assert "[REDACTED]" in out + err
+    code, out, _ = run(["wipe", "--password-from-env", "PW", "--format", "json"], app=rebuild_app())
+    error = json.loads(out)["error"]
+    assert error["message"].startswith("Cannot preview with [REDACTED]")
+    assert error["errors"][0]["context"] == {"pw": "[REDACTED]"}
+    assert "--confirm-destructive" in error["suggestion"]
+
+
+def test_a_forced_dry_run_rebuild_under_validate_only_is_redacted() -> None:
+    argv = ["wipe", "--password-from-env", "PW", "--validate-only", "--format", "json"]
+    code, out, _ = run(argv, app=rebuild_app())
+    assert code == 2 and SECRET not in out and "[REDACTED]" in out
+
+
+def test_a_forced_dry_run_rebuild_in_exec_call_and_mcp_is_redacted() -> None:
+    line = json.dumps({"_cmd": "wipe", "password_from_env": "PW"})
+    code, out, err = run(["exec"], app=rebuild_app(), stdin=line + "\n")
+    assert code != 0 and SECRET not in out + err and "[REDACTED]" in out
+    envelope = rebuild_app().call("wipe", {"password_from_env": "PW"}, env=ENV)
+    assert envelope.error is not None and envelope.exit_code == 2
+    assert envelope.error.message.startswith("Cannot preview with [REDACTED]")
+    assert SECRET not in json.dumps(envelope.to_json())
+    app = rebuild_app()
+    entries = {e.name: e for e in tool_entries(app)}
+    envelope = call_tool(app, entries, "wipe", {"password_from_env": "PW"}, env=ENV)
+    assert envelope.exit_code == 2 and SECRET not in json.dumps(envelope.to_json())
+
+
+def test_the_cwd_rebuild_is_redacted(tmp_path: Path) -> None:
+    argv = ["prune", "cache", "--password-from-env", "PW", "--cwd", str(tmp_path)]
+    code, out, err = run([*argv, "--format", "json"], app=rebuild_app())
+    assert code == 2 and SECRET not in out + err
+    assert json.loads(out)["error"]["message"].rstrip(".").endswith("for [REDACTED]")
+    line = json.dumps({"_cmd": "prune", "target": "cache", "password_from_env": "PW"})
+    code, out, err = run(["exec", "--cwd", str(tmp_path)], app=rebuild_app(), stdin=line + "\n")
+    assert code != 0 and SECRET not in out + err and "[REDACTED]" in out
+
+
+def test_a_nested_object_post_init_quoting_a_secret_is_redacted() -> None:
+    note = json.dumps({"leaf": {"text": SECRET}})
+    argv = ["note", "--password-from-env", "PW", "--note", note, "--format", "json"]
+    code, out, err = run(argv, app=rebuild_app())
+    assert code == 2 and SECRET not in out + err
+    item = json.loads(out)["error"]["errors"][0]
+    assert item["message"].startswith("Note [REDACTED] looks like")
+    assert item["field"] == "note.leaf"
+    envelope = rebuild_app().call(
+        "note", {"password_from_env": "PW", "note": {"leaf": {"text": SECRET}}}, env=ENV
+    )
+    assert envelope.exit_code == 2 and SECRET not in json.dumps(envelope.to_json())

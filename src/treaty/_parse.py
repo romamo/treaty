@@ -813,9 +813,12 @@ def known_flags(command: Command, *, argv: bool = True) -> list[str]:
 
 def _finish(command: Command, values: dict[str, object], errors: _Collector) -> object:
     """The args dataclass built, or every phase 1 error with the values read, so the
-    envelope can redact the secrets among them from what user code wrote (#165)"""
+    envelope can redact the secrets among them from what user code wrote, such as a
+    nested object's ``__post_init__`` collected beside the args' own (#165)"""
     try:
         return _construct(command, values, errors)
+    except ArgsRefused:
+        raise
     except ParseError as exc:
         raise ArgsRefused(exc, values) from None
 
@@ -880,14 +883,18 @@ def built_args(
     """The args ``build`` returns, running their ``__post_init__``: a ``ParseError`` or
     ``InvalidValue`` it raises is phase 1, exit 2; anything else is ``ArgsCrashed``, a
     bug in user code (exit 1). Parsing and every later rebuild of the args, such as a
-    forced dry run's, go through here (#161); ``values`` are the field values, for the
-    crash report's redaction."""
+    forced dry run's, go through here (#161); ``values`` are the field values, carried
+    by ``ArgsRefused`` and ``ArgsCrashed`` so the envelope is redacted of the secrets
+    among them, which user code may quote (#165)."""
     try:
         return build()
-    except ParseError:
+    except ArgsRefused:
         raise
+    except ParseError as exc:
+        raise ArgsRefused(exc, values) from None
     except InvalidValue as exc:  # a value object built in __post_init__ refused its input
-        raise ParseError(str(exc), context={"command": command.path.value}) from None
+        refused = ParseError(str(exc), context={"command": command.path.value})
+        raise ArgsRefused(refused, values) from None
     except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
         raise ArgsCrashed(exc, values) from exc
 
