@@ -257,6 +257,9 @@ def test_a_non_zero_exit_is_subprocess_failed_with_stderr() -> None:
     error = error_of(env)
     assert code == 1 and error["code"] == "SUBPROCESS_FAILED"
     assert error["context"] == {
+        # The child's stderr is content from outside the tool (#174)
+        "_source": "external",
+        "_trusted": False,
         "argv": ["sh", "-c", "echo broken >&2; exit 3"],
         "returncode": 3,
         "stage": 0,

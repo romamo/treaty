@@ -729,7 +729,8 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   listed in its `children.pids` while they run (REQ-F-030, REQ-F-032)
 - A non-zero exit raises `SUBPROCESS_FAILED` (exit `1`) with `argv`, `returncode`,
   `stage`, and the last 4 KiB of stderr in `context`, with secret argument values and
-  `ctx.token` redacted; `check=False` returns a `Completed` instead. In a pipeline any
+  `ctx.token` redacted and the stderr marked external (see "Output security");
+  `check=False` returns a `Completed` instead. In a pipeline any
   failing stage fails the whole, the first one named (REQ-F-065). `ctx.pipeline` checks
   each stage like `set -o pipefail`, except that a stage ended by SIGPIPE is not a failure
   when a later stage succeeded, so `yes | head -1` exits `0`
@@ -1747,10 +1748,22 @@ class Report:
   `Out(external=True)` tags `data` as a whole whenever the field is not `null`, not each
   object inside the field. A `Batch` is protected by its item type, so a field marked on
   the item type tags the batch's `data`, and a batch keeps its tags when some items failed
-  (exit `3`), since the items that worked are still in `data`. `--no-injection-protection` drops the tags, sets
+  (exit `3`), since the items that worked are still in `data`. A failure's `data`,
+  `raise Exit.X(..., data=...)`, is tagged on an `external=True` command as a success's
+  is. `--no-injection-protection` drops the tags, also those of `error.context`, sets
   `meta.injection_protection: false`, and reports its use on stderr. Rule `external-data`
   warns when a network or child-process command declares neither; `external=False` on the
   command says it returns only values it computed
+- **External context**: `treaty.External(value)` marks a top-level value of a failure's
+  `error.context` as content from outside the tool, such as a play log a failed child
+  wrote: `raise Exit.PLAYBOOK_FAILED(msg, context={"output": External(tail)})`. The
+  marked values are masked as external `data` is, the other context values are left as
+  they are, and `"_source": "external", "_trusted": false` go to the top of
+  `error.context` with an `UNTRUSTED_CONTENT` warning. `SUBPROCESS_FAILED` marks its
+  `context.stderr` itself. `External` anywhere else, nested in a context value or in
+  `data`, is `INVALID_EXIT`. Rule `external-data` also warns when a `context=` value is
+  built from a `ctx.run` result's `stdout` or `stderr` without `External`, whatever the
+  command declares
 
 ```python
 @dataclass(frozen=True, slots=True)

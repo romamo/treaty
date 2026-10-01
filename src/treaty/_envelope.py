@@ -287,10 +287,16 @@ class ErrorDetail:
     _programs: frozenset[str] = field(default=frozenset(), repr=False, compare=False)
     """Programs the command declares: one that opens the message keeps its case
     (REQ-C-013); not part of the envelope"""
+    _external: frozenset[str] = field(default=frozenset(), repr=False, compare=False)
+    """Context keys whose values came from outside the tool, ``treaty.External``: masked
+    as external data is, and the context tagged (REQ-F-035); not part of the envelope"""
 
     def __post_init__(self) -> None:
         # One place, so framework and author messages alike read as sentences (REQ-C-013)
         object.__setattr__(self, "message", sentence(self.message, self._programs))
+        if not self._external <= self.context.keys():
+            missing = ", ".join(sorted(self._external - self.context.keys()))
+            raise RegistrationError(f"error: external context keys {missing} are not in context")
         if self.errors is not None:
             items = [
                 {**e, "message": sentence(str(e["message"]))} if "message" in e else e

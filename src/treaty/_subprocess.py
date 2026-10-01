@@ -33,6 +33,7 @@ from typing import IO, Any, Literal
 
 from ._atomic import exclusive, write_atomic
 from ._errors import CliExit, RegistrationError
+from ._out import External
 from ._redact import StreamRedactor
 from ._session import BACKGROUND_DIR, Session, SessionRoot, private_dir
 from ._signals import Cancelled, CancelSignal
@@ -364,7 +365,8 @@ class Processes:
                     "argv": list(done.argv),
                     "returncode": done.returncode,
                     "stage": stage,
-                    "stderr": stderrs[stage][-STDERR_TAIL:],
+                    # The child's text: masked and tagged as content from outside the tool
+                    "stderr": External(stderrs[stage][-STDERR_TAIL:]),
                 },
             )
         return done

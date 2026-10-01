@@ -269,10 +269,15 @@ app.exit_code(
     if inside.returncode != 0:
         raise Exit.NOT_A_REPOSITORY(
             f"{here} is not in a git repository",
-            context={"directory": str(here), "git": inside.stderr.strip()},
+            context={"directory": str(here), "git": External(inside.stderr.strip())},
             fix_required="--db must name a file inside a git working tree",
         )
 ```
+
+git's message is the program's own text, so `External(...)` marks it as content from
+outside the tool: the agent gets it with `"_trusted": false` at the top of
+`error.context`, and the `external-data` audit rule warns about a program's `stdout` or
+`stderr` put in `context` without it. `SUBPROCESS_FAILED` marks its `stderr` the same way.
 
 `check=False` is also how a program that answers with its exit code is read:
 `git diff --cached --quiet` exits 1 when something is staged, which `save` uses to decide

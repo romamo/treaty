@@ -103,6 +103,31 @@ class Binary:
             raise TypeError(f"Binary.data is bytes, not {type(self.data).__name__}")
 
 
+@dataclass(frozen=True, slots=True)
+class External:
+    """A value of a failure's ``error.context`` that came from outside the tool, such
+    as a child's output: ``Exit.X(msg, context={"output": External(done.stderr)})``.
+    It is masked as external ``data`` is, and the context gets the trust tags
+    ``_source: external`` and ``_trusted: false`` (REQ-F-035). It marks a top-level
+    context value only; ``Out(external=True)`` and ``external=True`` mark ``data``."""
+
+    value: object
+
+
+def holds_external(value: object, depth: int = 0) -> bool:
+    """``value`` is, or holds at any depth a JSON walk reaches, a ``treaty.External``:
+    where nothing masks and tags it, its text would reach the agent as ``External(...)``"""
+    if isinstance(value, External):
+        return True
+    if depth > 64:
+        return False
+    if isinstance(value, Mapping):
+        return any(holds_external(v, depth + 1) for v in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(holds_external(v, depth + 1) for v in value)
+    return False
+
+
 def is_binary(value: object) -> bool:
     """A JSON value that is a binary wrapper, which no cut or sort may look inside"""
     return (

@@ -32,7 +32,7 @@ from ._init import Init
 from ._jobs import Job, JobStore
 from ._journal import AuditLog
 from ._mode import Format
-from ._out import Binary, Out
+from ._out import Binary, External, Out
 from ._output_base import OutputBase
 from ._page import Page, PageRequest
 from ._retry import Retry
@@ -76,6 +76,7 @@ __all__ = [
     "Example",
     "Excludes",
     "Expired",
+    "External",
     "Exit",
     "ExitCode",
     "ExitCodeEntry",

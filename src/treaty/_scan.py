@@ -129,6 +129,85 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     return calls
 
 
+@dataclass(frozen=True, slots=True)
+class RawContext:
+    """A ``context=`` value built from a child's output and not marked ``External``"""
+
+    key: str
+    line: int
+
+
+_CHILD_TEXT = frozenset({"stdout", "stderr"})
+
+
+def raw_child_context(fn: Callable[..., object]) -> list[RawContext]:
+    """Each ``context={"key": ...}`` value of a call in the handler that reads the
+    ``stdout`` or ``stderr`` of a ``<ctx>.run`` or ``<ctx>.pipeline`` result, directly or
+    through a local, without ``External(...)`` around it"""
+    params = list(signature(fn).parameters)
+    tree = None if len(params) < 2 else source_tree(fn)
+    if tree is None:
+        return []
+
+    def runs(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("run", "pipeline")
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == params[1]
+        )
+
+    def bound(node: ast.AST) -> list[tuple[str, ast.expr]]:
+        if isinstance(node, ast.Assign):
+            return [(t.id, node.value) for t in node.targets if isinstance(t, ast.Name)]
+        if isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            target = node.target
+            return [(target.id, node.value)] if isinstance(target, ast.Name) else []
+        return []
+
+    bindings = [b for node in ast.walk(tree) for b in bound(node)]
+    completed = {name for name, value in bindings if runs(value)}
+    carried: set[str] = set()
+
+    def child_text(expr: ast.expr) -> bool:
+        for node in ast.walk(expr):
+            if isinstance(node, ast.Attribute) and node.attr in _CHILD_TEXT:
+                inner = node.value
+                if runs(inner) or (isinstance(inner, ast.Name) and inner.id in completed):
+                    return True
+            if isinstance(node, ast.Name) and node.id in carried:
+                return True
+        return False
+
+    grew = True
+    while grew:  # a local built from one that carries a child's text carries it too
+        before = len(carried)
+        carried |= {name for name, value in bindings if child_text(value)}
+        grew = len(carried) > before
+
+    def marked(expr: ast.expr) -> bool:
+        if not isinstance(expr, ast.Call):
+            return False
+        func = expr.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        return name == "External"
+
+    found: list[RawContext] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg != "context" or not isinstance(keyword.value, ast.Dict):
+                continue
+            for key, value in zip(keyword.value.keys, keyword.value.values, strict=True):
+                if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                    continue
+                if not marked(value) and child_text(value):
+                    found.append(RawContext(key.value, value.lineno))
+    return found
+
+
 def ctx_attribute(fn: Callable[..., object], name: str) -> int | None:
     """The first line of the handler reading ``<ctx>.<name>``, such as ``ctx.http``"""
     params = list(signature(fn).parameters)
