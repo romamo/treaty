@@ -21,6 +21,22 @@ Apps built on treaty keep their own, structured schema changelog with
   treaty already writes in text mode, such as a deprecated flag's notice, the
   `--no-injection-protection` notice, or a `--token-limit` cut, is not written twice.
   stdout and the exit code are unchanged (#152)
+### Added
+
+- Object arguments: a flag annotated with a frozen dataclass, `X | None`, or
+  `tuple[X, ...]` takes a structured record, nesting other objects and lists of them up to
+  8 deep. `exec` lines, `--raw-payload`, `app.call(...)`, and MCP carry it as a JSON
+  object; on argv each repeat of the flag takes one JSON object, and `from_stdin=True` one
+  per line. Each field goes through the same checks as a flag's value (`Decimal`, `Path`,
+  enums, `Literal`, `app.scalar` types, and `Flag(pattern=, max_bytes=, multiline=)` on
+  the dataclass's fields), an unknown or missing key is refused, and every error is one
+  `error.errors` entry at its location, such as `postings[1].number`, exit 2. `--schema`
+  and the MCP `inputSchema` carry the object's schema, and the manifest and `--help` show
+  its shape. An object holds no secret (REQ-C-016): a nested field under a secret's name
+  or declared `secret=True` fails registration naming its path, such as
+  `postings[].token`, so it becomes a top-level flag read from `--x-from-env` or
+  `--x-from-file`. An object flag cannot be positional, a secret, a setting, or a
+  `Subprocess(user_controlled_args=)` field (#6)
 
 ## [1.0.0rc9] - 2026-10-01
 

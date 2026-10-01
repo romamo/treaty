@@ -64,6 +64,13 @@ def check_subprocess(
             f"{where}: Subprocess(user_controlled_args=) names {unknown}, which are not "
             f"fields of the args dataclass; it has {sorted(names)}"
         )
+    controlled = declared.user_controlled_args
+    objects = [f.name for f in fields if f.name in controlled and f.object_type is not None]
+    if objects:
+        raise RegistrationError(
+            f"{where}: Subprocess(user_controlled_args=) names the object fields {objects}, "
+            "whose text the shell-metacharacter check cannot see; pass the child a text field"
+        )
     return declared
 
 

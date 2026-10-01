@@ -11,13 +11,17 @@ import dataclasses
 import inspect
 import types
 import typing
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum, StrEnum
 from pathlib import Path
 
 from ._errors import RegistrationError, SchemaError
 from ._scalars import DECIMAL, ScalarRegistry, ScalarSpec
+
+if typing.TYPE_CHECKING:
+    from ._flags import FieldInfo
 
 
 class FlagType(StrEnum):
@@ -27,6 +31,8 @@ class FlagType(StrEnum):
     BOOLEAN = "boolean"
     ARRAY = "array"
     ENUM = "enum"
+    OBJECT = "object"
+    """A frozen dataclass argument, carried as a JSON object"""
 
 
 _SCALARS: dict[type, FlagType] = {
@@ -51,6 +57,19 @@ class Classified:
     """A ``pathlib.Path`` string: hardened against traversal and encoded bytes"""
     scalar: ScalarSpec | None = None
     """A registered custom scalar: parsed through its spec after the base type"""
+    members: tuple[FieldInfo, ...] = ()
+    """An object's fields, in declaration order: what its JSON object's keys hold"""
+
+    @property
+    def object_cls(self) -> type:
+        """The frozen dataclass an object value is built as"""
+        if self.flag_type is not FlagType.OBJECT or not isinstance(self.base, type):
+            raise TypeError(f"{self.base!r} is not an object type")
+        return self.base
+
+
+ObjectHook = Callable[[type], Classified]
+"""Reads a dataclass annotation as an object, where an argument may be one"""
 
 
 def type_hints(obj: object) -> dict[str, typing.Any]:
@@ -125,7 +144,9 @@ def strip_optional(tp: object) -> tuple[object, bool]:
     return resolve_alias(members[0]), True
 
 
-def classify(tp: object, scalars: ScalarRegistry) -> Classified:
+def classify(tp: object, scalars: ScalarRegistry, objects: ObjectHook | None = None) -> Classified:
+    """``objects`` reads a dataclass, or the items of an array of them, as an object;
+    without it, as for settings, a dataclass is an unsupported annotation"""
     base, optional = strip_optional(tp)
     origin = typing.get_origin(base)
     if origin is typing.Literal:
@@ -140,7 +161,7 @@ def classify(tp: object, scalars: ScalarRegistry) -> Classified:
                 raise SchemaError(f"only homogeneous 'tuple[T, ...]' is supported: {base!r}")
         elif len(args) != 1:
             raise SchemaError(f"list needs exactly one item type: {base!r}")
-        item = classify(args[0], scalars)
+        item = classify(args[0], scalars, objects)
         if item.flag_type in (FlagType.ARRAY, FlagType.BOOLEAN) or item.optional:
             raise SchemaError(f"array items must be scalars: {base!r}")
         return Classified(FlagType.ARRAY, optional, base, item=item)
@@ -151,6 +172,8 @@ def classify(tp: object, scalars: ScalarRegistry) -> Classified:
             return Classified(FlagType.STRING, optional, base, path=True)
         if (spec := scalars.get(base)) is not None:
             return Classified(_SCALARS[spec.base], optional, base, scalar=spec)
+        if objects is not None and dataclasses.is_dataclass(base):
+            return replace(objects(base), optional=optional)
         if base is Decimal:
             # Built in as fixed-point text; an app's own app.scalar(Decimal) above wins
             return Classified(FlagType.STRING, optional, base, scalar=DECIMAL)

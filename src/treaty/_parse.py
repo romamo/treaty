@@ -482,7 +482,8 @@ class _Collector:
         self.errors: list[ParseError] = []
 
     def add(self, exc: ParseError) -> None:
-        self.errors.append(exc)
+        """One error, or each of several an object's checks collected"""
+        self.errors.extend(exc.errors or (exc,))
 
     def fail(self) -> NoReturn:
         raise ParseError.combine(self.errors)
@@ -532,6 +533,8 @@ def parse_command_args(
     framework: dict[str, Any] = {}
     """``Invocation`` fields set by framework flags, plus ``raw_payload``"""
     positionals = [f for f in command.fields if f.positional]
+    counts: dict[str, int] = {}
+    """How many values each field was given, so an object's errors name its index"""
     pos_index = 0
     i = 0
     only_positional = False
@@ -555,16 +558,26 @@ def parse_command_args(
                         context={"flag": field.flag},
                     )
                 for value in stdin_values(field, read_stdin(field.flag)):
-                    store(field, field.parse(value))
+                    store(field, parse_token(field, value))
             except ParseError as exc:
                 errors.add(exc)
             return
         try:
-            parsed = field.parse(raw)
+            parsed = parse_token(field, raw)
         except ParseError as exc:
             errors.add(exc)
             return
         store(field, (not parsed) if negated else parsed)
+
+    def parse_token(field: FieldInfo, raw: str) -> object:
+        """One argv or stdin value: an object field's is a JSON object"""
+        index = counts.get(field.name, 0)
+        counts[field.name] = index + 1
+        target = field.object_type
+        if target is None:
+            return field.parse(raw)
+        where = f"{field.flag}[{index}]" if field.flag_type is FlagType.ARRAY else field.flag
+        return check_object(target, _decode_object(raw, field.flag, where), where)
 
     def value_after(tok: str, flag: str, has_eq: bool, inline: str) -> str:
         """The token's value, consuming the next token when it is not inline"""
@@ -765,6 +778,20 @@ def _decode_raw_payload(raw: str) -> Mapping[str, object]:
     return decoded
 
 
+def _decode_object(raw: str, flag: str, where: str) -> object:
+    """An object field's argv value: strict JSON, or the JSON5 forms agents write; one
+    holds no secret, since registration refuses one in an object"""
+    what = f"--{flag}" if where == flag else f"--{flag} ({where})"
+    try:
+        return loads_forgiving(raw)
+    except Unreadable as exc:
+        raise invalid_json(what, exc, {"flag": where}) from None
+    except ValueError as exc:
+        raise ParseError(
+            f"{what} is not valid JSON", context={"flag": where, "cause": str(exc)}
+        ) from None
+
+
 def known_flags(command: Command, *, argv: bool = True) -> list[str]:
     """The flags a command accepts; ``argv=False`` leaves out those only argv takes, for
     the unknown-field error of ``exec``, MCP, and ``--raw-payload``"""
@@ -785,7 +812,8 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
             refused = shell_safe(f, values[f.name])  # REQ-C-019, REQ-F-044
             if refused is not None:
                 errors.add(refused)
-    failed = {e.field for e in errors.errors}
+    objects = {f.flag for f in command.fields if f.object_type is not None}
+    failed = {_field_of(e.field, objects) for e in errors.errors}
     missing = [
         f.env_flag if f.secret else f.flag
         for f in command.fields
@@ -821,6 +849,14 @@ def _finish(command: Command, values: dict[str, object], errors: _Collector) -> 
         raise ArgsCrashed(exc, values) from exc
     errors.finish()
     return args
+
+
+def _field_of(location: str | None, objects: Collection[str]) -> str | None:
+    """The flag an error's location is in: ``postings`` for ``postings[1].number``"""
+    if location is None:
+        return None
+    head = re.split(r"[.\[]", location, maxsplit=1)[0]
+    return head if head in objects else location
 
 
 def build_from_mapping(
@@ -894,8 +930,115 @@ def _check_field_value(field: FieldInfo, value: object) -> object:
         item = field.classified.item
         if not isinstance(value, list) or item is None:
             raise ParseError(f"{field.flag!r} expects an array", context=ctx)
+        if item.flag_type is FlagType.OBJECT:
+            return _all_items(item, value, field.flag)
         return tuple(_check_patterned(field, item, v) for v in value)
+    if field.flag_type is FlagType.OBJECT:
+        return check_object(field.classified, value, field.flag)
     return _check_patterned(field, field.classified, value)
+
+
+def _all_items(item: Classified, values: list[object], where: str) -> tuple[object, ...]:
+    """Every object of an array, each item's errors collected under its index"""
+    out: list[object] = []
+    errors: list[ParseError] = []
+    for index, value in enumerate(values):
+        try:
+            out.append(check_object(item, value, f"{where}[{index}]"))
+        except ParseError as exc:
+            errors.extend(exc.errors or (exc,))
+    if errors:
+        raise ParseError.combine(errors)
+    return tuple(out)
+
+
+def check_object(target: Classified, value: object, where: str) -> object:
+    """A JSON object as the frozen dataclass of ``target``, checked field by field as
+    argument values are: an unknown key, a missing one, and every field's own error are
+    collected, each at its location, such as ``postings[1].number``"""
+    if not isinstance(value, dict):
+        raise ParseError(
+            f"{where!r} expects a JSON object",
+            context={"field": where, "type": _json_type(value)},
+        )
+    members = {m.name: m for m in target.members}
+    kwargs: dict[str, object] = {}
+    errors: list[ParseError] = []
+    for key, given in value.items():
+        member = members.get(key)
+        at = f"{where}.{key}"
+        if member is None:
+            errors.append(
+                ParseError(
+                    f"unknown field {at!r}",
+                    context={"field": at, "known": list(members)},
+                )
+            )
+            continue
+        try:
+            kwargs[key] = _check_member(replace(member, flag=at), given)
+        except ParseError as exc:
+            errors.extend(exc.errors or (exc,))
+    for member in target.members:
+        if member.name in value:
+            continue
+        if member.required:
+            at = f"{where}.{member.name}"
+            errors.append(ParseError(f"missing required: {at}", context={"field": at}))
+        elif member.default is not MISSING:
+            kwargs[member.name] = member.default  # else its default_factory fills it
+    if errors:
+        raise ParseError.combine(errors)
+    try:
+        return target.object_cls(**kwargs)
+    except ParseError as exc:
+        raise ParseError.combine([_located(e, where) for e in exc.errors or (exc,)]) from None
+    except InvalidValue as exc:  # a value object built in __post_init__ refused its input
+        raise ParseError(str(exc), context={"field": where}) from None
+    except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
+        raise ArgsCrashed(exc, kwargs) from exc
+
+
+def _located(exc: ParseError, where: str) -> ParseError:
+    """An object's own ``__post_init__`` error, at the object unless it names a field"""
+    if exc.field is None:
+        exc.context["field"] = where
+    elif exc.field != where and not exc.field.startswith((f"{where}.", f"{where}[")):
+        exc.context["field"] = f"{where}.{exc.field}"
+    return exc
+
+
+def _json_type(value: object) -> str:
+    """What a JSON value is, for an error that does not echo it"""
+    match value:
+        case None:
+            return "null"
+        case bool():
+            return "boolean"
+        case int() | float():
+            return "number"
+        case str():
+            return "string"
+        case list():
+            return "array"
+        case _:
+            return type(value).__name__
+
+
+def _check_member(member: FieldInfo, value: object) -> object:
+    """One field of an object, ``member.flag`` its location"""
+    if value is None and member.classified.optional:
+        return None
+    if member.flag_type is FlagType.ARRAY and isinstance(value, list):
+        item = member.classified.item
+        assert item is not None, "array fields always carry an item type"
+        if item.flag_type is FlagType.OBJECT:
+            return _all_items(item, value, member.flag)
+        return tuple(
+            _check_patterned(replace(member, flag=f"{member.flag}[{i}]"), item, v)
+            for i, v in enumerate(value)
+        )
+    return _check_field_value(member, value)
 
 
 def _check_patterned(field: FieldInfo, target: Classified, value: object) -> object:
@@ -963,6 +1106,8 @@ def check_json_base(target: Classified, value: object, flag: str) -> object:
             )
         case FlagType.ARRAY:
             raise ParseError(f"{flag!r}: nested arrays are not supported", context=ctx)
+        case FlagType.OBJECT:
+            return check_object(target, value, flag)
 
 
 def _decimal_text(value: object, flag: str) -> str:

@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from ._command import Command
+from ._flags import object_shape
 from ._framework import framework_flags
+from ._types import FlagType
 from ._values import CommandPath
 
 Row = tuple[str, str]
@@ -127,7 +129,13 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
             rows.append((f"${var}", f"{f.spec.description}: default when neither is given"))
             continue
         label = f"--{f.flag}" + (f", -{f.spec.short}" if f.spec.short else "")
-        rows.append((label, f.spec.description + (" (required)" if f.required else "")))
+        text = f.spec.description + (" (required)" if f.required else "")
+        if (shape := f.object_type) is not None:
+            label += " JSON"
+            repeated = f.flag_type is FlagType.ARRAY
+            each = "repeat it, one JSON object each" if repeated else "a JSON object"
+            text += f"; {each}: {object_shape(shape)}"
+        rows.append((label, text))
     rows.extend(_framework_rows(command))
     lines += _section("Flags", rows)
     if command.requires:  # REQ-C-026

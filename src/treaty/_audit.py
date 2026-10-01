@@ -150,7 +150,29 @@ def _sample(name: str, classified: object, spec: object) -> str:
         return "1.5"
     if kind is FlagType.ENUM and enum_values:
         return str(enum_values[0])
+    if kind is FlagType.OBJECT:
+        return shlex.quote(json.dumps(_object_sample(classified)))
     return name.replace("_", "-")
+
+
+def _object_sample(classified: object) -> dict[str, object]:
+    """An object's required keys, each with a JSON value of its type"""
+    sample: dict[str, object] = {}
+    for m in getattr(classified, "members", ()):
+        if not m.required:
+            continue
+        target = m.classified
+        if target.flag_type is FlagType.OBJECT:
+            sample[m.name] = _object_sample(target)
+        elif target.flag_type is FlagType.ARRAY:
+            sample[m.name] = []
+        elif target.flag_type is FlagType.BOOLEAN:
+            sample[m.name] = False
+        else:
+            text = _sample(m.name, target, m.spec)
+            numeric = target.flag_type in (FlagType.INTEGER, FlagType.NUMBER)
+            sample[m.name] = json.loads(text) if numeric else text
+    return sample
 
 
 def _samples(app: App, c: Command) -> list[str]:
