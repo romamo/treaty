@@ -107,6 +107,7 @@ from ._envelope import (
     WarningDetail,
     clean,
     json_safe,
+    open_escape,
     terminal_text,
     visible,
     write_envelope,
@@ -1687,6 +1688,9 @@ class App:
         # goes to a copy of the original; the next envelope warns with what it caught
         stdout.flush()
         interceptor = intercept_stdout()
+        # Colored as the run colors, from the environment as it was started: the CI=1 set
+        # above for children would otherwise strip the colors a print() keeps (#117)
+        interceptor.color = color_allowed(started_env, stdout_tty)
         # REQ-F-072: LF on every platform; Windows text mode would write CRLF
         envelopes = open(  # noqa: SIM115 - closed below, before descriptor 1 is restored
             os.dup(interceptor.saved),
@@ -2049,17 +2053,6 @@ _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 # Shorter values would redact every digit or letter they share with a traceback
 MIN_REDACTED = 4
 
-# An escape a write() ends inside of, 7-bit or C1: print() may write one in two parts, and
-# the second part, cleaned on its own, would reach stderr as text (#105). An OSC is held
-# only within its line: a stray \x9d, as in mojibake, would otherwise take the next lines
-_OPEN_ESCAPE = re.compile(
-    r"(?:\x1b(?:\][^\x07\x1b\n]*\x1b?|\[[0-?]*[ -/]*)?|\x9d[^\x07\x1b\x9c\n]*\x1b?"
-    r"|\x9b[0-?]*[ -/]*)\Z"
-)
-HELD_CAP = 4096
-"""Characters of an unfinished escape held for the next write; past them it is cleaned as
-it stands, and the rest of it arrives as text"""
-
 
 class _StrayStdout(io.TextIOBase):
     """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
@@ -2103,10 +2096,7 @@ class _StrayStdout(io.TextIOBase):
         caller = sys._getframe(1)
         where = self._held_at or f"{caller.f_code.co_filename}:{caller.f_lineno}"
         text = self._held + text
-        unfinished = _OPEN_ESCAPE.search(text)
-        cut = len(text)
-        if unfinished is not None and len(text) - unfinished.start() <= HELD_CAP:
-            cut = unfinished.start()
+        cut = open_escape(text)
         self._held, self._held_at = text[cut:], where if cut < len(text) else ""
         self._show(text[:cut], where)
         return written

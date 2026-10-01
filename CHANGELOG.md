@@ -67,6 +67,17 @@ Apps built on treaty keep their own, structured schema changelog with
   `call()`, MCP, and `--validate-only` alike, and for the rebuild that rebases relative
   paths under `--cwd`; the args are rebuilt once rather than again when the handler
   starts (#161)
+- Security: what a child process or a C extension writes to file descriptor 1 under
+  `App.main()` or `intercept_stdout()` reaches stderr cleaned, as a stray `print()` is
+  (#105): OSC (clipboard writes, links, titles), cursor movement and other CSI escapes,
+  and C1 controls are gone, colors (SGR) stay only where the run may color, and other
+  controls but tab, carriage return, and newline are shown as escapes. Before, the bytes
+  were forwarded raw, so a child could write the clipboard or retitle the terminal. A
+  character or escape split across two reads is held until it completes, an unfinished
+  one for at most 4096 characters, and bytes that are not UTF-8 pass through unchanged.
+  The `THIRD_PARTY_STDOUT` warning still counts the bytes as written. `ctx.run`'s
+  `stream=True` lines and a failed child's stderr already reached stderr cleaned, now
+  covered by tests; `Completed.stdout` and `stderr` stay as the child wrote them (#117)
 
 ## [1.0.0rc9] - 2026-10-01
 
