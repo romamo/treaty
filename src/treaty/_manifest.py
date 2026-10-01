@@ -68,7 +68,8 @@ def global_flag_entries(formats: Sequence[Format], app_name: str) -> dict[str, o
         "max-output": {
             "type": "integer",
             "required": False,
-            "description": "Largest stdout envelope in bytes (at least 4096) before truncation; "
+            "description": "Largest stdout envelope, buffered ndjson answer, or ndjson stream "
+            "record in bytes (at least 4096) before truncation; "
             f"default ${app_var(app_name, MAX_OUTPUT_BYTES.key)}",
         },
         **_FIXED_GLOBAL_FLAGS,

@@ -249,7 +249,7 @@ def env_var(raw: str) -> str:
 
 
 # REQ-O-001: names an agent may pass to --output meaning a representation, not a file
-_FORMAT_NAMES = frozenset({"json", "jsonl", "tsv", "csv", "plain", "table", "id", "yaml"})
+_FORMAT_NAMES = frozenset({"json", "jsonl", "ndjson", "tsv", "csv", "plain", "table", "id", "yaml"})
 
 
 def output_path(raw: str) -> Path:

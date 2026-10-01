@@ -129,3 +129,19 @@ def test_short_secret_follows_the_minimum_and_keys_stay() -> None:
     envelope = app.call("go", {"token_from_env": "T"}, env={"T": "abc"})
     assert envelope.warnings[0].message == "pin abc"
     assert envelope.warnings[0].context == {"api_key": "public-id", "pin": "abc"}
+
+
+@pytest.mark.parametrize("argv", [["go"], ["tail", "--stream"], ["tail", "--no-stream"]])
+def test_ndjson_warning_lines_on_stderr(argv: list[str]) -> None:
+    out, err = io.StringIO(), io.StringIO()
+    probe_app().run(
+        [*argv, "--token-from-env", "PROBE_TOKEN", "--format", "ndjson"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env=ENV,
+    )
+    assert SECRET not in out.getvalue() + err.getvalue()
+    lines = [json.loads(line) for line in err.getvalue().splitlines()]
+    warnings = [line for line in lines if line.get("code") == "TOK"]
+    assert_redacted(warnings)

@@ -472,6 +472,7 @@
         "PLAIN",
         "JSON",
         "JSONL",
+        "NDJSON",
         "CSV",
         "TSV",
         "YAML",

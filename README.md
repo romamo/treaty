@@ -365,7 +365,7 @@ unless the major version went up.
 
 ## Output formats
 
-`--format` takes `json`, `jsonl`, `plain`, `tsv`, and any format the app registers. With no flag,
+`--format` takes `json`, `jsonl`, `ndjson`, `plain`, `tsv`, and any format the app registers. With no flag,
 `<APP>_FORMAT` decides (`DEPLOYCTL_FORMAT` for `deployctl`, failing as the same `--format`
 value would); without that, the format is `json` when stdout is not a terminal
 or `CI` is set, and `plain` otherwise.
@@ -377,6 +377,25 @@ stderr. `tsv` is built in: a header row, then one row per item (nested values as
 JSON, `null` as an empty field, and a backslash, tab, or line break in a value escaped as
 `\\`, `\t`, `\n`, `\r`, never quoted); `treaty.table(",")` is the same renderer for CSV
 with the `csv` module's quoting, `app.format(Format.CSV, render=table(","))`.
+
+`ndjson` writes `data` alone for `jq -c`, `duckdb read_json`, `mlr`, or the next command in a
+pipe: one compact JSON line per item of a list result or per event of a stream (a stream
+event that is a list stays one line), a single result as one line, and nothing for `null`
+data. Keys are sorted and values masked and redacted as in the envelope, and `--fields`
+applies. The status goes elsewhere: the exit code, and on stderr one JSON line each for
+the error (`{"error": {...}}`, credential-named context `[REDACTED]`), every warning
+(a `WarningDetail` object), a cut page (`{"pagination": {...}}`), and `ctx.log` lines.
+`--max-output` caps what a buffered answer writes: whole records only, stopping before
+the first that would pass the cap, so a first record larger than the cap leaves stdout
+empty. A stream is capped record by record, as `jsonl` caps each envelope: a record over
+the cap is left out and the stream goes on, so a pipeline is never silenced. Each cut
+writes one `{"truncation": {...}}` line to stderr (`truncated`, `total_bytes`,
+`returned_bytes`, `total_count`, `returned_count`, `omitted_count`, `max_output_bytes`,
+`seq` for a stream's record, and a `truncation_hint` rerun with a larger `--max-output`)
+and a `FIELD_TRUNCATED` warning on `data`. The exit code is unchanged, as it is for a cut
+envelope, unless `--warnings-as-errors` is set. `ndjson` takes no renderer, and `exec`,
+`App.call`, and the MCP adapter answer with envelopes whatever `--format` says.
+
 A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
 returns the text. Formats are `Format` members, never strings:
 
@@ -398,10 +417,10 @@ app.format(Format.CSV, render=render_csv)  # offers --format csv to every comman
 
 A command's `renderers=` overrides the app's renderer for that format. `app.format()` must
 come before the commands that override it, and a command can only override a format the
-app offers. `Format` lists every format treaty knows (`plain`, `json`, `jsonl`, `csv`,
-`tsv`, `yaml`, `markdown`); an app offers `plain`, `json`, `jsonl`, `tsv`, and the ones it
-registers, and the manifest and `--help` list exactly those. Any other value exits `2`
-listing them, before anything runs or any file is written.
+app offers. `Format` lists every format treaty knows (`plain`, `json`, `jsonl`, `ndjson`,
+`csv`, `tsv`, `yaml`, `markdown`); an app offers `plain`, `json`, `jsonl`, `ndjson`, `tsv`,
+and the ones it registers, and the manifest and `--help` list exactly those. Any other
+value exits `2` listing them, before anything runs or any file is written.
 
 A command declared `output_file=True` takes `--output PATH`: the result goes to the file in
 the `--format` representation, and stdout gets the JSON envelope with `data: {"path": ...,
@@ -412,7 +431,8 @@ Without a renderer, `plain` prints flat lines, one item each: `key: value`, with
 paths for nested values (`release.tag: 1.3.9`) and line breaks inside strings escaped. An
 array prints each element as its own block, the way a stream prints its events.
 `app.format(Format.PLAIN, render=...)` replaces those lines for the whole app.
-`manifest` and `--schema` stay JSON in every text format, since they are read by programs.
+`manifest` and `--schema` stay JSON in every text format, since they are read by programs
+(one line in `ndjson`).
 
 Breaking after 0.0.4: `renderers={Format.PLAIN: ...}` replaces `plain=`, which is no
 longer accepted, and `Format` replaces `OutputMode`.

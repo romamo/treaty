@@ -168,6 +168,59 @@ class Cut:
         )
 
 
+def record_cut(
+    cap: OutputCap, rerun: Rerun, sent: tuple[int, int], omitted: tuple[int, int]
+) -> tuple[WarningDetail, dict[str, object]]:
+    """``--format ndjson`` past ``cap``: whole records were written until the next would
+    pass it (REQ-F-052). ``sent`` and ``omitted`` are (records, bytes). Returns the
+    ``FIELD_TRUNCATED`` warning on ``data`` (REQ-F-064) and the stderr report, its keys
+    named as the envelope's truncation meta is"""
+    total_bytes = sent[1] + omitted[1]
+    report: dict[str, object] = {
+        "truncated": True,
+        "total_bytes": total_bytes,
+        "returned_bytes": sent[1],
+        "total_count": sent[0] + omitted[0],
+        "returned_count": sent[0],
+        "omitted_count": omitted[0],
+        "max_output_bytes": cap.bytes,
+        "truncation_hint": _larger_cap(rerun, total_bytes),
+    }
+    return Cut((), sent[0] + omitted[0], sent[0]).warning(), report
+
+
+def record_dropped(
+    cap: OutputCap, rerun: Rerun, size: int, seq: object
+) -> tuple[WarningDetail, dict[str, object]]:
+    """A stream's ``--format ndjson`` record of ``size`` bytes, over ``cap`` on its own,
+    left out while the stream goes on, as ``jsonl`` caps each envelope (REQ-F-052): the
+    ``FIELD_TRUNCATED`` warning naming its ``seq`` (REQ-F-064) and the stderr report"""
+    report: dict[str, object] = {
+        "truncated": True,
+        "seq": seq,
+        "total_bytes": size,
+        "returned_bytes": 0,
+        "total_count": 1,
+        "returned_count": 0,
+        "omitted_count": 1,
+        "max_output_bytes": cap.bytes,
+        "truncation_hint": _larger_cap(rerun, size),
+    }
+    warning = WarningDetail(
+        code=TRUNCATED_CODE,
+        message=f"event {seq} left out: {size} bytes, over the {cap.bytes}-byte cap",
+        context={"field": "data", "seq": seq, "original_length": size, "truncated_length": 0},
+    )
+    return warning, report
+
+
+def _larger_cap(rerun: Rerun, total: int) -> str:
+    """The rerun with room for ``total`` bytes, or where the cap comes from without argv"""
+    if rerun.argv is not None:
+        return shlex.join(with_flags(rerun.argv, {MAX_OUTPUT_FLAG: str(total + SLACK)}))
+    return f"the full output is {total} bytes, over {env_var(rerun.app_name)}"
+
+
 def cap_envelope(envelope: Envelope, cap: OutputCap, rerun: Rerun) -> Envelope:
     """``envelope`` within ``cap``, with the command that gets the rest in its ``meta``;
     ``data`` is cleaned of terminal escapes first, as every envelope written is"""

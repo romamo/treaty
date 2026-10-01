@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import contextvars
 import dataclasses
@@ -75,6 +76,8 @@ from ._cap import (
     cap_envelope,
     cut_envelope,
     recap,
+    record_cut,
+    record_dropped,
 )
 from ._changelog import load_changelog
 from ._command import (
@@ -159,6 +162,7 @@ from ._manifest import (
 )
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
+    MACHINE,
     Format,
     child_ctype,
     child_settings,
@@ -646,8 +650,8 @@ class App:
         renderer for it; declare it before the commands overriding it
 
         ``plain`` and ``tsv`` are always offered, and registering one replaces its built-in
-        renderer. ``json`` and ``jsonl`` are the response envelope agents read, so they take
-        no renderer.
+        renderer. ``json`` and ``jsonl`` are the response envelope agents read, and
+        ``ndjson`` is ``data`` as JSON lines, so they take no renderer.
         """
         _check_renderer("app.format", mode, render)
         if mode in self._renderers:
@@ -657,7 +661,7 @@ class App:
     @property
     def formats(self) -> tuple[Format, ...]:
         """The ``--format`` values this app offers, in ``Format`` order"""
-        built_in = (Format.PLAIN, Format.JSON, Format.JSONL, Format.TSV)
+        built_in = (Format.PLAIN, Format.JSON, Format.JSONL, Format.NDJSON, Format.TSV)
         ids = any(c.id_field is not None for c in self._commands.values())
         return tuple(
             m for m in Format if m in built_in or m in self._renderers or (m is Format.ID and ids)
@@ -680,6 +684,9 @@ class App:
         if mode is Format.ID:
             assert command.id_field is not None
             return functools.partial(id_lines, field=command.id_field)
+        if mode is Format.NDJSON:
+            # A stream's event is one record, a list in it too; a result's list is records
+            return ndjson_line if command.streaming else ndjson_records
         if command.path == MANIFEST_PATH:
             # The manifest is for agents: every text mode keeps it JSON, indented for reading
             return _json_text
@@ -2575,6 +2582,23 @@ def _json_text(data: Any) -> str:
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
+def ndjson_line(data: Any) -> str:
+    """One record of ``--format ndjson``: compact, keys sorted as the envelope has them"""
+    return json.dumps(data, separators=(",", ":"), sort_keys=True) + "\n"
+
+
+def ndjson_records(data: Any) -> str:
+    """``--format ndjson`` of a result: a line per item of a list, else the one value"""
+    items = data if isinstance(data, list) else [data]
+    return "".join(ndjson_line(i) for i in items)
+
+
+def _machine_text(mode: Format) -> Renderer:
+    """How a text mode writes the manifest, a schema, or the settings: one record in
+    ``ndjson``, indented JSON in the formats a person reads"""
+    return ndjson_line if mode is Format.NDJSON else _json_text
+
+
 def _example_pairs(path: CommandPath, examples: object, usage: str) -> list[tuple[str, str]]:
     """``examples=`` as (description, command) pairs, refused at registration with the
     shape to write: a bare string would otherwise unpack character by character"""
@@ -2611,6 +2635,8 @@ def _check_renderer(where: str, mode: object, render: object) -> None:
         raise RegistrationError(f"{where}: {mode!r} is not a Format member")
     if mode in (Format.JSON, Format.JSONL):
         raise RegistrationError(f"{where}: {mode} is the response envelope and takes no renderer")
+    if mode is Format.NDJSON:
+        raise RegistrationError(f"{where}: {mode} writes data as JSON lines and takes no renderer")
     if mode is Format.ID:
         raise RegistrationError(f"{where}: {mode} writes the id_field= value and takes no renderer")
     if not callable(render):
@@ -2867,6 +2893,10 @@ class _Run:
         """``--warnings-as-errors``: a warning fails an otherwise successful run (REQ-O-025)"""
         self.mode = Format.JSON
         """How the run answers, for the lines ``--debug`` writes"""
+        self.ndjson_shown: collections.Counter[str] = collections.Counter()
+        """How often ``ndjson`` wrote each warning to stderr so far, by its JSON: a stream's
+        envelopes repeat the run's warnings, and add their own (masking) that later ones
+        drop, so a warning is new only where an envelope holds it more often than that"""
         self._logging = False
         """Whether the root logger routes records to this run (``attach_logging``)"""
         self._redaction: tuple[tuple[object, ...], Callable[[str], str]] | None = None
@@ -3187,7 +3217,7 @@ class _Run:
             env=self.env,
             state=self.app._state,
             timeout=timeout,
-            color=mode is not Format.JSON and color_allowed(self.env, self.tty),
+            color=mode not in MACHINE and color_allowed(self.env, self.tty),
             headless=headless,
             cwd=self.cwd,
             _log_sink=self._log_sink(command, args, mode),
@@ -3427,9 +3457,10 @@ class _Run:
         redact: Callable[[str], str],
         mode: Format,
     ) -> None:
-        """A JSON object in JSON mode, ``message key=value`` otherwise, with the trace"""
+        """A JSON object in JSON and NDJSON mode, ``message key=value`` otherwise, with the
+        trace"""
         safe = {k: scrub(k, json_safe(v), redact) for k, v in fields.items()}
-        if mode is Format.JSON:
+        if mode in MACHINE:
             record = {"level": level.value, "message": redact(message), "fields": safe}
             if self.trace_id is not None:
                 record["trace_id"] = self.trace_id
@@ -5214,6 +5245,8 @@ class _Run:
         """Write the answer; ``settle=False`` for help and schemas, which run no command"""
         if mode is Format.JSON:
             return self._write(envelope, settle=settle)
+        if mode is Format.NDJSON and render is None:
+            render = ndjson_records
         return self._emit_text(mode, envelope, render, settle=settle)
 
     def output_closed(self) -> int:
@@ -5240,11 +5273,8 @@ class _Run:
         if not envelope.ok or envelope.data is None:
             return envelope
         data = envelope.data
-        if mode is Format.JSONL:
-            items = data if isinstance(data, list) else [data]
-            text = "".join(
-                json.dumps(i, separators=(",", ":"), sort_keys=True) + "\n" for i in items
-            )
+        if mode in (Format.JSONL, Format.NDJSON):
+            text = ndjson_records(data)
         elif mode is Format.JSON:
             text = _json_text(data)
         else:
@@ -5306,8 +5336,9 @@ class _Run:
             if mode is Format.JSON:
                 code = self._write(envelope, settle=_terminal(envelope))
                 continue
+            fallback = ndjson_line if mode is Format.NDJSON else render_event
             code = self._emit_text(
-                mode, envelope, render, fallback=render_event, settle=_terminal(envelope)
+                mode, envelope, render, fallback=fallback, settle=_terminal(envelope), event=True
             )
             if code != envelope.exit_code:
                 # One traceback is enough: later events use the plain fallback
@@ -5324,8 +5355,10 @@ class _Run:
         *,
         fallback: Renderer = render_plain,
         settle: bool = True,
+        event: bool = False,
     ) -> int:
-        """Data through the renderer on stdout, errors as prose on stderr"""
+        """Data through the renderer on stdout, errors as prose on stderr, or as one JSON
+        line there in ``ndjson``; ``event`` for each envelope of a stream"""
         if self.budget is not None:
             before = len(envelope.warnings)
             envelope = self._budgeted(self.budget, envelope)
@@ -5336,20 +5369,41 @@ class _Run:
                 self.err.write(f"cut to --token-limit {self.budget.limit}{rest}\n", Level.WARN)
                 # That line reports the budget's cuts: their warnings are not written again
                 self.warnings_shown += envelope.warnings[before:]
+        records = ""
+        if mode is Format.NDJSON:
+            records, envelope = self._capped_records(envelope, render or fallback, event)
+        # A program reading ndjson gets every warning once, as a stream's events add them;
+        # a person, those settling added
+        before = len(envelope.warnings)
         if settle:
-            before = len(envelope.warnings)
             envelope = self.settle(envelope)
-            for warning in envelope.warnings[before:]:
-                # No envelope carries it here: one WarningDetail line on stderr (REQ-O-030)
-                line = json.dumps(warning.to_json(), separators=(",", ":"))
-                self.err.write(line + "\n", Level.WARN)
-                self.warnings_shown.append(warning)
+        if mode is Format.NDJSON:
+            fresh = []
+            held: collections.Counter[str] = collections.Counter()
+            for warning in envelope.warnings:
+                key = json.dumps(warning.to_json(), sort_keys=True)
+                held[key] += 1
+                if held[key] > self.ndjson_shown[key]:
+                    fresh.append(warning)
+                    self.ndjson_shown[key] += 1
+        else:
+            fresh = list(envelope.warnings[before:]) if settle else []
+            # That line says it: the warning lines after the result skip it (#152)
+            self.warnings_shown += fresh
+        for warning in fresh:
+            # No envelope carries it here: one WarningDetail line on stderr (REQ-O-030)
+            line = json.dumps(warning.to_json(), separators=(",", ":"))
+            self.err.write(line + "\n", Level.WARN)
         code = envelope.exit_code
         pagination = envelope.extra_meta.get("pagination")
         if isinstance(pagination, dict) and pagination.get("has_more"):
             # The text carries no meta: that a page was cut, and the way on, go to stderr
             cursor = pagination["next_cursor"]
-            if mode is Format.ID:
+            if mode is Format.NDJSON:
+                # The records stay pipeable; the way on is one JSON line a program reads
+                line = json.dumps({"pagination": pagination}, separators=(",", ":"), sort_keys=True)
+                self.err.write(line + "\n", Level.WARN)
+            elif mode is Format.ID:
                 # The ids stay pipeable, and scripts read this line
                 self.err.write(f"next: --cursor {visible(str(cursor))}\n", Level.WARN)
             else:
@@ -5364,7 +5418,9 @@ class _Run:
         # REQ-F-007: data values lose their escapes, as in the JSON envelope; a renderer's
         # own text keeps only its colors, and those only where the run may color
         data = clean(envelope.data)
-        if data is not None and render is not None:
+        if mode is Format.NDJSON:
+            self.out.write(records)
+        elif data is not None and render is not None:
             try:
                 text = _rendered(render, data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
@@ -5377,8 +5433,24 @@ class _Run:
                 self.out.write(terminal_text(text, color=color, keep="\r"))
         elif data is not None:
             self.out.write(fallback(data))
-        self._warning_lines(envelope)
-        if envelope.error is not None:
+        if mode is not Format.NDJSON:
+            # ndjson wrote each warning as its JSON line above
+            self._warning_lines(envelope)
+        if envelope.error is not None and mode is Format.NDJSON:
+            # A program reads this run: the error object the envelope would carry, one
+            # line, its context redacted as the prose lines have it (REQ-F-034)
+            error = envelope.error
+            reported = error.to_json()
+            context = reported.get("context")
+            if isinstance(context, dict):
+                reported["context"] = {
+                    key: value if (error.code, key) in NAME_CONTEXT else scrub(key, value)
+                    for key, value in context.items()
+                }
+            error_line = {"error": reported}
+            line = json.dumps(error_line, separators=(",", ":"), sort_keys=True)
+            self.err.write(line + "\n")
+        elif envelope.error is not None:
             # Error lines show a control as its escape: what a bad value held is the
             # diagnosis, and the terminal acts on none of it
             error = envelope.error
@@ -5418,6 +5490,45 @@ class _Run:
             line = f"warning: {warning.code}: {self._redact_everywhere(warning.message)}"
             self.err.write(terminal_text(line, color=color) + "\n", Level.WARN)
 
+    def _capped_records(
+        self, envelope: Envelope, render: Renderer, event: bool
+    ) -> tuple[str, Envelope]:
+        """The ``ndjson`` lines of ``envelope`` within ``--max-output`` (REQ-F-052), each
+        cut reported as a ``FIELD_TRUNCATED`` warning and one ``{"truncation": ...}`` line
+        on stderr (REQ-F-064). A stream's ``event`` is capped record by record, as
+        ``jsonl`` caps each envelope, so a record over the cap is left out and the stream
+        goes on; a buffered answer keeps whole records up to the cap, and none after."""
+        data = clean(envelope.data)
+        lines = [] if data is None else _rendered(render, data).splitlines(keepends=True)
+        sizes = [len(line.encode("utf-8")) for line in lines]
+        rerun = Rerun(self.argv, self.app.name, self.page)
+        kept: list[str] = []
+        cut: list[tuple[WarningDetail, dict[str, object]]] = []
+        if event:
+            for line, size in zip(lines, sizes, strict=True):
+                if size <= self.cap.bytes:
+                    kept.append(line)
+                    continue
+                seq = envelope.extra_meta.get("seq")
+                cut.append(record_dropped(self.cap, rerun, size, seq))
+        else:
+            sent = 0
+            for line, size in zip(lines, sizes, strict=True):
+                if sent + size > self.cap.bytes:
+                    break
+                kept.append(line)
+                sent += size
+            if len(kept) < len(lines):
+                omitted = (len(lines) - len(kept), sum(sizes) - sent)
+                cut.append(record_cut(self.cap, rerun, (len(kept), sent), omitted))
+        for warning, report in cut:
+            line = json.dumps({"truncation": report}, separators=(",", ":"), sort_keys=True)
+            self.err.write(line + "\n", Level.WARN)
+            # The stream's later envelopes, and its terminal one, carry it too
+            self.warnings.append(warning)
+            envelope = dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
+        return "".join(kept), envelope
+
     def schema(self, mode: Format, path: CommandPath | None, prefix: tuple[str, ...]) -> int:
         """``--schema`` is machine output in every mode; the envelope carries it as data"""
         if path is not None:
@@ -5438,13 +5549,17 @@ class _Run:
                 self.app.name,
                 builtins=self.app.builtins,
             )
-        return self.emit(mode, self._envelope(0, data=data), render=_json_text, settle=False)
+        return self.emit(
+            mode, self._envelope(0, data=data), render=_machine_text(mode), settle=False
+        )
 
     def show_config(self, mode: Format) -> int:
         """``--show-config``: the effective settings, where each came from, and the layers
         in precedence order, as JSON in every mode (REQ-O-015)"""
         data = self.settings.show()
-        return self.emit(mode, self._envelope(0, data=data), render=_json_text, settle=False)
+        return self.emit(
+            mode, self._envelope(0, data=data), render=_machine_text(mode), settle=False
+        )
 
     def output_schema(
         self, mode: Format, command: Command | None, pinned: SchemaVersion | None
@@ -5465,7 +5580,9 @@ class _Run:
             )
         self.pinned = pinned
         data = command.output_schema if pinned is None else command.compat_for(pinned).output_schema
-        return self.emit(mode, self._envelope(0, data=dict(data)), render=_json_text, settle=False)
+        return self.emit(
+            mode, self._envelope(0, data=dict(data)), render=_machine_text(mode), settle=False
+        )
 
     def help_root(self, mode: Format, prefix: tuple[str, ...]) -> int:
         text = render_root(
@@ -5488,8 +5605,9 @@ class _Run:
 
     def _help(self, mode: Format, parts: tuple[str, ...], text: str) -> int:
         """Help text on stdout for a person; in JSON mode it goes to stderr and stdout gets
-        only a pointer to ``--schema`` (REQ-F-048)"""
-        if mode is not Format.JSON:
+        only a pointer to ``--schema`` (REQ-F-048), and in NDJSON mode, which writes no
+        envelope, stdout gets nothing"""
+        if mode not in MACHINE:
             self.out.write(text)
             return 0
         self.err.write(text)  # asked for, so written like an error: all but --quiet

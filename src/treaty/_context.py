@@ -46,7 +46,7 @@ class Ctx:
     state: Mapping[str, object]
     timeout: Timeout
     color: bool
-    """Whether a renderer may color its text: never in JSON mode, under NO_COLOR, CI,
+    """Whether a renderer may color its text: never in JSON or NDJSON mode, under NO_COLOR, CI,
     or TERM=dumb, or when stdout is not a terminal (REQ-F-008)"""
     headless: bool
     """No person or display to open a window for (REQ-F-057); ``meta.headless`` says so"""
@@ -234,7 +234,7 @@ class Ctx:
     def log(self, message: str, **fields: object) -> None:
         """Write one INFO line to stderr, never stdout (REQ-F-006)
 
-        A JSON object in JSON mode, ``message key=value`` otherwise. Only a terminal, or
+        A JSON object in JSON and NDJSON mode, ``message key=value`` otherwise. Only a terminal, or
         ``--verbose``, shows it: off a terminal or under CI the run writes errors only
         (REQ-F-038). Declared secrets and fields named like credentials (token,
         password, api_key, Authorization, ...) are written as ``[REDACTED]`` (REQ-F-051).

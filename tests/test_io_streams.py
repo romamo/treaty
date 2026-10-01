@@ -298,7 +298,7 @@ def test_o001_unknown_format_exits_2_before_any_file(tmp_path: Path) -> None:
     assert not target.exists()
 
 
-@pytest.mark.parametrize("mode", ["json", "jsonl"])
+@pytest.mark.parametrize("mode", ["json", "jsonl", "ndjson"])
 def test_o001_json_modes_written_to_a_file_parse(tmp_path: Path, mode: str) -> None:
     target = tmp_path / "r"
     code, _, _ = run(["rows", "--format", mode, "--output", str(target)])
