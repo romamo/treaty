@@ -341,3 +341,77 @@ def test_cleanup_keeps_an_output_path_a_glob_spells_in_another_case(tmp_path: Pa
     assert code == 0, envelope
     assert (real / "dash" / "index.html").exists()
     assert not (real / "stale").exists()
+
+
+def through_a_file(root: Path) -> None:
+    (root.parent / "afile").write_text("x")
+    (root / "out").symlink_to(root.parent / "afile" / "x")
+
+
+def into_a_loop(root: Path) -> None:
+    (root / "out").symlink_to(root / "out")
+
+
+def into_a_locked_directory(root: Path) -> None:
+    locked = root.parent / "locked"
+    (locked / "inner").mkdir(parents=True)
+    (root / "out").symlink_to(locked / "inner" / "f")
+    locked.chmod(0)
+
+
+@pytest.mark.parametrize("link", [through_a_file, into_a_loop, into_a_locked_directory])
+def test_cleanup_runs_with_an_output_symlink_whose_target_cannot_be_reached(
+    tmp_path: Path, link: object
+) -> None:
+    # Its identity is unknown, so it is kept by name alone; the run still cleans the rest
+    root = tmp_path / "proj"
+    (root / "tmp").mkdir(parents=True)
+    (root / ".cfproject").write_text("")
+    (root / "tmp" / "stale").write_text("x")
+    try:
+        link(root)  # type: ignore[operator]
+    except OSError:
+        pytest.skip("symlinks need privileges here")
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "out",
+        description="Write the output link",
+        danger_level="safe",
+        exit_codes=(),
+        project_root=(".cfproject",),
+        filesystem_side_effects=[
+            SideEffect("{project_root}/out", "output"),
+            SideEffect("{project_root}/tmp/*", "temp"),
+        ],
+    )
+    def out(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    try:
+        code, envelope = run(app, ["cleanup", "--confirm-destructive"], root)
+    finally:
+        if (tmp_path / "locked").exists():
+            (tmp_path / "locked").chmod(0o755)
+    assert code == 0, envelope
+    assert not (root / "tmp" / "stale").exists()
+    assert (root / "out").is_symlink()
+
+
+class NoInode(type(Path())):  # type: ignore[misc]
+    """A path on a filesystem that reports no inode, as some network and FAT ones do"""
+
+    def lstat(self) -> os.stat_result:
+        return os.stat_result((0o40755, 0, 7, 1, 0, 0, 0, 0, 0, 0))
+
+    def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+        return self.lstat()
+
+
+def test_a_path_without_an_inode_has_no_identity(tmp_path: Path) -> None:
+    # Two such paths would otherwise share (dev, 0) and pass for one another
+    from treaty._builtins import _identity
+
+    assert _identity(NoInode(tmp_path), follow=False) is None
+    assert _identity(NoInode(tmp_path), follow=True) is None
+    assert _identity(tmp_path, follow=False) is not None

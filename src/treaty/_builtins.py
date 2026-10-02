@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import glob
 import json
 import os
@@ -326,12 +327,22 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     return sorted((p, kind) for p, kind in found.items() if p not in held)
 
 
+UNREACHABLE = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EACCES, errno.ELOOP})
+"""Why a path cannot be looked at: gone, under a file, under a directory it may not
+search, or behind a symlink loop, as a kept symlink's target may be"""
+LINK_LOOP = 1921
+"""Windows' ERROR_CANT_RESOLVE_FILENAME, its symlink loop, which carries no ELOOP"""
+
+
 def _identity(path: Path, *, follow: bool) -> tuple[int, int] | None:
     """The device and inode of ``path``, a symlink itself unless ``follow``; None when it
-    is gone or the filesystem reports no inode, which identifies nothing"""
+    cannot be reached (see ``UNREACHABLE``) or the filesystem reports no inode, which
+    identifies nothing"""
     try:
         st = path.stat() if follow else path.lstat()
-    except FileNotFoundError:
+    except OSError as exc:
+        if exc.errno not in UNREACHABLE and getattr(exc, "winerror", None) != LINK_LOOP:
+            raise
         return None
     return None if st.st_ino == 0 else (st.st_dev, st.st_ino)
 
