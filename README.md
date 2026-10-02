@@ -952,24 +952,28 @@ def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
   `INVALID_OUTPUT`; the `doctor-fix` audit rule finds one
 - `filesystem_side_effects=` lists where the command writes: `path` (absolute or `~/`,
   with `{placeholders}` matching any segment), `type` (`cache`, `log`, `temp`,
-  `credential`, `config`), `ttl_seconds`, and `clearable_with`, an invocation checked to
-  name a command (REQ-C-011). `cleanup` (destructive; `--dry-run` lists) removes every
+  `credential`, `config`, `output`), `ttl_seconds`, and `clearable_with`, an invocation
+  checked to name a command (REQ-C-011). `output` is where the command writes its product,
+  such as a rendered dashboard, including its default when `--output` is absent: it takes
+  no `ttl_seconds` or `clearable_with` (a `RegistrationError`), and a per-call `--output`
+  path is declared by `output_file=` instead. `cleanup` (destructive; `--dry-run` lists) removes every
   declared `temp`, `cache`, and `log` path, the caches, and handed-out output files;
   `--scope temp|cache|logs` narrows it, `--min-age SECONDS` keeps anything changed more
   recently (listed under `skipped`), and `data.cleaned` gives each path's `type` and
   `bytes_freed`, with `total_bytes_freed` (REQ-O-027). A path it cannot remove is listed
-  in `data.failed` with a `CLEANUP_INCOMPLETE` warning. `credential` and `config` paths
-  are never removed, nor a match reached through a symlink a placeholder matched; a path
+  in `data.failed` with a `CLEANUP_INCOMPLETE` warning. `credential`, `config`, and
+  `output` paths, and a declared path holding one, are never removed under any `--scope`, nor a match reached through a symlink a placeholder matched; a path
   of just `/` or `~/` plus a placeholder, or with a `..` segment, is refused
 - A path under the project starts with `{project_root}/`, such as
-  `SideEffect("{project_root}/tmp/dashboard/", "cache")`, on a command declaring
+  `SideEffect("{project_root}/tmp/dashboard/", "output")`, on a command declaring
   `project_root=` markers (without them it is a `RegistrationError`). `cleanup` and
   `status` find the project from their own cwd (or `--cwd`) up, as the command does; with
   no marker found (one at `/`, in the home directory, or above it counts as none) they
   touch nothing of it and warn `PROJECT_ROOT_NOT_FOUND`, never taking the cwd for the
   project, and a match whose directory resolves outside the project
   through a symlink is left alone. A safe command whose writes are all declared, this way
-  or another, passes the `fs-side-effects` audit rule
+  or another, passes the `fs-side-effects` audit rule; writing `cache`, `log`, `temp`, or
+  `output` paths keeps a command `safe` (REQ-C-002)
 - `status` (safe, exits 0 whatever exists) lists every declared side effect with the
   absolute paths it matches and their sizes (`--show-side-effects`), and the state files,
   config files, idempotency records, the audit log, and declared `credential` and `config`

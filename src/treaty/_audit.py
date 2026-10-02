@@ -867,8 +867,8 @@ def flag_path_writes(handler: Callable[..., object], flags: Mapping[str, str]) -
 
 
 def _fs_side_effects(app: App) -> Iterator[Finding]:
-    # A safe command changes nothing, so what it writes is a cache, log, or temp file; a
-    # mutating command's writes may be its effect, such as the project init creates
+    # A safe command changes nothing, so what it writes is a cache, log, temp, or output
+    # path; a mutating command's writes may be its effect, such as the project init creates
     for c in user_commands(app):
         if c.danger_level is not DangerLevel.SAFE or c.filesystem_side_effects or c.output_file:
             continue
@@ -898,7 +898,8 @@ def _fs_side_effects(app: App) -> Iterator[Finding]:
                 f"{writes[0]}(...) writes to disk, and the safe command declares no "
                 "filesystem_side_effects, so agents cannot find or clean up what it leaves "
                 f"(REQ-C-011, heuristic){unit.where}",
-                'filesystem_side_effects=[treaty.SideEffect("~/.cache/<tool>/", "cache")]',
+                'filesystem_side_effects=[treaty.SideEffect("~/.cache/<tool>/", "cache")], '
+                'or "output" for a product the command writes where it chooses',
             )
 
 
