@@ -2071,7 +2071,9 @@ class App:
             run.current = command
             given = dict(arguments)
             confirmed = given.pop(CONFIRM_KEY, False) if provided.gated else False
-            run.provided_call = (name, given, confirmed is True)
+            # Secret properties are redacted wherever the run writes, as a command's are
+            run.provided_secrets = provided.secret_values(given)
+            run.provided_call = (name, provided.masked(given), confirmed is True)
             if not isinstance(confirmed, bool):
                 refused = ParseError(
                     f"{CONFIRM_KEY} of tool {name} is true or false, not {confirmed!r}",
@@ -2079,7 +2081,7 @@ class App:
                     suggestion=f"pass {CONFIRM_KEY}: true to apply",
                 )
                 return run.arg_error(refused, meta=meta)
-            problems = provided.problems(given)
+            problems = provided.problems(given, run._redactor(command, None))
             if problems:
                 first = problems[0]
                 where = f" at {first['path']}" if first["path"] else ""
@@ -3693,6 +3695,8 @@ class _Run:
         """``--output`` of a passthrough command: where its envelope is written too"""
         self.wire: Wire | None = None
         """The process's stdout and stdin, when argv named ``mcp serve`` (#239)"""
+        self.provided_secrets: list[object] = []
+        """The values of a provided tool call's secret properties (#240)"""
         self.provided_call: tuple[str, Mapping[str, object], bool] | None = None
         """The tool name and arguments of a provided MCP tool's call (#240), which its
         audit entry lists in place of the synthetic command's empty arguments"""
@@ -4702,9 +4706,10 @@ class _Run:
         """What every sink writes of a command's envelope: high-entropy values masked
         unless ``--unmask`` (REQ-F-058), then external content tagged unless
         ``--no-injection-protection`` (REQ-F-035, REQ-O-023); built-ins answer about the
-        tool itself, so only app commands pass through those. Then ``--fields`` keeps the
+        tool itself, so only app commands and the MCP tools an app provides (#240) pass
+        through those. Then ``--fields`` keeps the
         named keys (REQ-O-002); the token budget and the byte cap follow as it is written."""
-        if command.path not in self.app.builtins:
+        if command.path not in self.app.builtins or self.provided_call is not None:
             envelope = self._protected(command, envelope)
         if self.fields is not None and envelope.ok and envelope.data is not None:
             kept = self.fields
@@ -6206,6 +6211,7 @@ class _Run:
         settings': the value, its serialized form for a registered scalar, and the
         escaped form ``repr`` puts in messages"""
         secrets = [(getattr(args, f.name, None), f.default) for f in command.fields if f.secret]
+        secrets += [(value, None) for value in self.provided_secrets]
         return self._spellings(secrets)
 
     def _spellings(self, secrets: list[tuple[object, object]]) -> set[str]:

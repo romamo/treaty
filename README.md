@@ -2034,15 +2034,23 @@ command's handler does, through `App.call`'s path: its result is enveloped and c
 against the output schema its return annotation gives, an `Exit` it raises answers with
 its code (declared in `exit_codes=`), and `meta.tool` names the tool. Hints come from
 `danger_level`, or from `read_only` and `destructive` given explicitly, so a tool whose call
-only previews can still be flagged destructive. A `danger_level="destructive"` tool runs
-only with `confirm_destructive: true`, which treaty adds to its input schema: without it the
-call exits `2` with `CONFIRMATION_REQUIRED` and the handler never runs (treaty cannot
-preview a provided tool's work), and a destructive tool whose schema defines that property
-itself is refused as serving starts. A provided tool named like a command tool
-or another provided tool is refused with exit `4`, `MCP_TOOL_NAME_TAKEN`, before serving;
-an invalid schema is `MCP_TOOL_INVALID`. `instructions=` is the server's text, or a function
-of the startup arguments returning it. The audit log lists each call as `mcp.serve` with
-the `tool` and its `arguments`, credential-named keys redacted.
+only previews can still be flagged destructive. A tool advertised destructive
+(`danger_level="destructive"` or `destructive=True`) runs only with `confirm_destructive:
+true`, which treaty adds to its input schema: without it the call exits `2` with
+`CONFIRMATION_REQUIRED` and the handler never runs (treaty cannot preview a provided tool's
+work), and such a tool whose schema defines that property itself is refused as serving
+starts. A provided tool named like a command tool or another provided tool is refused with
+exit `4`, `MCP_TOOL_NAME_TAKEN`, before serving; an invalid schema is `MCP_TOOL_INVALID`.
+`instructions=` is the server's text, or a function of the startup arguments returning it;
+empty text is refused before serving with `MCP_INSTRUCTIONS_INVALID`.
+
+A property of the input schema marked `writeOnly: true`, `format: "password"`, or
+`"x-secret": true`, at any depth of `properties`, is a secret whatever its name: its value
+is `[REDACTED]` in the audit log, a validation error names only the rule it broke, and
+the value is taken out of what the call writes (error messages and context, a stray
+`print()`, log lines), as a command's secret flag's is. The audit log lists each call as
+`mcp.serve` with the `tool` and its `arguments`, secret properties and credential-named
+keys redacted.
 
 `deployctl mcp serve --project . --list-tools` prints the tool list (provided tools
 included, given the same startup flags) as `treaty-mcp --list-tools` does, and exits;

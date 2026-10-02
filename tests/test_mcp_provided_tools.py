@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 from test_mcp_serve import Server
 
-from treaty import App, Ctx, Flag, McpServe, McpTool, RegistrationError
+from treaty import App, Ctx, Exit, Flag, McpServe, McpTool, RegistrationError
+from treaty._mcp_serve import Provided
 
 pytest.importorskip("mcp")
 
@@ -399,3 +400,130 @@ def test_hints_follow_the_danger_level_unless_given() -> None:
     assert (preview.read_only_hint, preview.destructive_hint) == (True, True)
     safe = _tool("s")
     assert (safe.read_only_hint, safe.destructive_hint) == (True, False)
+
+
+# Secret arguments, the advertised gate, and empty instructions (review of #252)
+
+SECRET = "s3cret-value-0123"
+
+
+@dataclass(frozen=True, slots=True)
+class Leaked:
+    echoed: bool
+
+
+def leak(arguments: Mapping[str, object], ctx: Ctx) -> Leaked:
+    """Echoes the secret every way a handler can: a print, a log line, an error"""
+    value = arguments["value"]
+    print("printed", value)
+    ctx.log(f"logged {value}")
+    if arguments.get("fail"):
+        raise Exit.NOT_FOUND(f"no record for {value}", context={"given": value})
+    return Leaked(True)
+
+
+def _ready(app: App) -> dict[str, Provided]:
+    """The provided tools, built with a real run's ctx"""
+    from treaty._mcp_serve import provided_tools
+
+    ctxs: list[Ctx] = []
+
+    @app.command("grab", description="Grab the ctx", danger_level="safe", exit_codes=())
+    def grab(args: Start, ctx: Ctx) -> dict[str, int]:
+        ctxs.append(ctx)
+        return {}
+
+    app.call("grab", {})
+    assert app.mcp is not None
+    return provided_tools(app, app.mcp, Start(), ctxs[0])
+
+
+@pytest.mark.parametrize(
+    "marker", [{"writeOnly": True}, {"format": "password"}, {"x-secret": True}]
+)
+def test_a_secret_property_under_a_neutral_name_is_redacted_everywhere(
+    marker: dict[str, object], tmp_path: Path
+) -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "value": {"type": "string", "minLength": 4, **marker},
+            "fail": {"type": "boolean"},
+            "count": {"type": "integer"},
+        },
+        "required": ["value"],
+    }
+    tool = _tool("leak", input_schema=schema, handler=leak, exit_codes=("NOT_FOUND",))
+    app = _app([tool])
+    audit = tmp_path / "audit.jsonl"
+    env = {"X_AUDIT_LOG": str(audit)}
+    provided = _ready(app)["leak"]
+    assert app._call_provided(provided, {"value": SECRET}, env=env).ok
+    failed = app._call_provided(provided, {"value": SECRET, "fail": True}, env=env)
+    assert failed.error is not None and failed.error.code == "NOT_FOUND"
+    assert SECRET not in json.dumps(failed.to_json())
+    # A validation error never echoes the value: at the secret path it names the rule,
+    # and elsewhere the value is taken out of the message
+    short = app._call_provided(provided, {"value": "abc"}, env=env)
+    assert short.exit_code == 2
+    assert "abc" not in json.dumps(short.to_json()["error"])
+    other = app._call_provided(provided, {"value": SECRET, "count": SECRET}, env=env)
+    assert other.exit_code == 2
+    assert SECRET not in json.dumps(other.to_json())
+    # A print is checked over stdio: pytest captures this process's streams
+    logged = audit.read_text(encoding="utf-8")
+    assert SECRET not in logged
+    entries = [json.loads(line) for line in logged.splitlines()]
+    leaks = [e["args"] for e in entries if e["args"].get("tool") == "leak"]
+    assert leaks[0] == {"tool": "leak", "arguments": {"value": "[REDACTED]"}}
+
+
+def test_a_nested_secret_property_is_found() -> None:
+    from treaty._mcp_serve import secret_paths
+
+    key = {"type": "string", "writeOnly": True}
+    schema = {
+        "type": "object",
+        "properties": {
+            "auth": {"type": "object", "properties": {"key": key}},
+            "name": {"type": "string"},
+        },
+    }
+    assert secret_paths(schema) == (("auth", "key"),)
+
+
+def test_a_secret_stays_out_of_debug_output_over_stdio(tmp_path: Path, project: Path) -> None:
+    catalog = _catalog(tmp_path, CATALOG)
+    started = Server(["--project", str(project), "--catalog", str(catalog), "-vv"], tmp_path)
+    started.initialize()
+    arguments = {"target": "web", "password": SECRET}
+    called = _result(started.request("tools/call", {"name": "restart-web", "arguments": arguments}))
+    assert called["isError"] is False
+    assert started.close() == 0
+    errors = started.stderr()
+    assert "printed [REDACTED]" in errors
+    assert SECRET not in errors
+    assert SECRET not in started.audit.read_text(encoding="utf-8")
+
+
+def test_a_tool_flagged_destructive_needs_confirmation_whatever_its_danger_level() -> None:
+    flagged = _tool("wipe", destructive=True)  # danger_level stays safe
+    app = _app([flagged])
+    wipe = _ready(app)["wipe"]
+    properties = wipe.entry().input_schema["properties"]
+    assert isinstance(properties, dict) and "confirm_destructive" in properties
+    refused = app._call_provided(wipe, {"text": "a"}, env={})
+    assert refused.error is not None and refused.error.code == "CONFIRMATION_REQUIRED"
+    applied = app._call_provided(wipe, {"text": "a", "confirm_destructive": True}, env={})
+    assert applied.ok
+
+
+@pytest.mark.parametrize("returned", ["", "   ", None])
+def test_empty_instructions_are_refused_before_serving(returned: object) -> None:
+    app = _app([], instructions=lambda args: returned)
+    out, err = io.StringIO(), io.StringIO()
+    code = app.run(["mcp", "serve"], stdout=out, stderr=err, stdin=io.StringIO(), env={})
+    envelope = json.loads(err.getvalue().strip().splitlines()[-1])
+    assert code == 4 and out.getvalue() == ""
+    assert envelope["error"]["code"] == "MCP_INSTRUCTIONS_INVALID"
+    assert "instructions" in envelope["error"]["message"]

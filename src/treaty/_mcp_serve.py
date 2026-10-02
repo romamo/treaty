@@ -40,6 +40,7 @@ from ._context import Ctx
 from ._errors import CliExit, RegistrationError
 from ._flags import Flag
 from ._framework import CONFIRM_FLAG
+from ._redact import REDACTED
 from ._resources import dependency_params
 from ._types import is_dataclass_type, type_hints
 from ._values import CommandPath, ExitCodeName
@@ -55,6 +56,7 @@ MCP_SDK_MISSING = "MCP_SDK_MISSING"
 STDIN_CLOSED = "STDIN_CLOSED"
 MCP_TOOL_INVALID = "MCP_TOOL_INVALID"
 MCP_TOOL_NAME_TAKEN = "MCP_TOOL_NAME_TAKEN"
+MCP_INSTRUCTIONS_INVALID = "MCP_INSTRUCTIONS_INVALID"
 LIST_TOOLS = "list_tools"
 CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
 CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
@@ -212,12 +214,28 @@ class Provided:
     command: Command
     validator: Any
     """The ``jsonschema`` validator of its input schema"""
+    secrets: tuple[tuple[str, ...], ...] = ()
+    """The property paths of its input schema marked secret (``secret_paths``)"""
 
     @property
     def gated(self) -> bool:
-        """A destructive tool runs only with ``confirm_destructive: true``, as a destructive
-        command does over MCP (REQ-C-004)"""
-        return self.tool.level is DangerLevel.DESTRUCTIVE
+        """A tool advertised destructive runs only with ``confirm_destructive: true``, as a
+        destructive command does over MCP (REQ-C-004)"""
+        return advertised_destructive(self.tool)
+
+    def secret_values(self, arguments: Mapping[str, object]) -> list[object]:
+        """The values ``arguments`` holds at the secret paths, every scalar inside them"""
+        found: list[object] = []
+        for path in self.secrets:
+            value: object = arguments
+            for key in path:
+                value = value.get(key) if isinstance(value, Mapping) else None
+            found.extend(_scalars(value))
+        return found
+
+    def masked(self, arguments: Mapping[str, object]) -> dict[str, object]:
+        """``arguments`` with each secret path's value ``[REDACTED]``"""
+        return _masked(arguments, self.secrets, ())
 
     def entry(self) -> ToolEntry:
         from ._tools import ToolEntry, output_schema
@@ -252,13 +270,81 @@ class Provided:
             open_world=False,
         )
 
-    def problems(self, arguments: Mapping[str, object]) -> list[dict[str, object]]:
-        """Where ``arguments`` break the input schema: each error's path and message"""
+    def problems(
+        self, arguments: Mapping[str, object], redact: Callable[[str], str]
+    ) -> list[dict[str, object]]:
+        """Where ``arguments`` break the input schema: each error's path and message. An
+        error at or under a secret path names only the rule it broke, never the value, and
+        ``redact`` takes every secret value out of the other messages"""
         found = sorted(self.validator.iter_errors(arguments), key=lambda e: list(e.path))
-        return [
-            {"path": "/".join(str(p) for p in error.path), "message": error.message}
-            for error in found
-        ]
+        listed: list[dict[str, object]] = []
+        for error in found:
+            path = tuple(str(p) for p in error.path)
+            secret = any(path[: len(s)] == s for s in self.secrets)
+            message = (
+                f"the secret value breaks the schema's {error.validator} rule"
+                if secret
+                else redact(error.message)
+            )
+            listed.append({"path": "/".join(path), "message": message})
+        return listed
+
+
+def is_secret(prop: object) -> bool:
+    """A property of a provided tool's input schema that holds a secret: ``writeOnly:
+    true``, ``format: "password"``, or ``"x-secret": true``"""
+    return isinstance(prop, Mapping) and (
+        prop.get("writeOnly") is True
+        or prop.get("format") == "password"
+        or prop.get("x-secret") is True
+    )
+
+
+def secret_paths(schema: Mapping[str, object]) -> tuple[tuple[str, ...], ...]:
+    """The paths of the secret properties of ``schema``, at any depth of ``properties``"""
+    found: list[tuple[str, ...]] = []
+
+    def walk(node: Mapping[str, object], prefix: tuple[str, ...]) -> None:
+        properties = node.get("properties")
+        if not isinstance(properties, Mapping):
+            return
+        for name, prop in properties.items():
+            if is_secret(prop):
+                found.append((*prefix, str(name)))
+            elif isinstance(prop, Mapping):
+                walk(prop, (*prefix, str(name)))
+
+    walk(schema, ())
+    return tuple(found)
+
+
+def _scalars(value: object) -> list[object]:
+    if isinstance(value, Mapping):
+        return [s for v in value.values() for s in _scalars(v)]
+    if isinstance(value, (list, tuple)):
+        return [s for v in value for s in _scalars(v)]
+    return [] if value is None or isinstance(value, bool) else [value]
+
+
+def _masked(
+    value: Mapping[str, object], secrets: Sequence[tuple[str, ...]], prefix: tuple[str, ...]
+) -> dict[str, object]:
+    shown: dict[str, object] = {}
+    for key, item in value.items():
+        path = (*prefix, str(key))
+        if path in secrets:
+            shown[key] = REDACTED
+        elif isinstance(item, Mapping):
+            shown[key] = _masked(item, secrets, path)
+        else:
+            shown[key] = item
+    return shown
+
+
+def advertised_destructive(tool: McpTool) -> bool:
+    """Whether the tool is advertised destructive: ``danger_level="destructive"`` or
+    ``destructive=True``"""
+    return tool.level is DangerLevel.DESTRUCTIVE or tool.destructive is True
 
 
 _ARGUMENTS: contextvars.ContextVar[Mapping[str, object]] = contextvars.ContextVar(
@@ -347,7 +433,7 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
             )
         properties = tool.input_schema.get("properties")
         if (
-            tool.level is DangerLevel.DESTRUCTIVE
+            advertised_destructive(tool)
             and isinstance(properties, Mapping)
             and CONFIRM_KEY in properties
         ):
@@ -374,7 +460,9 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
             command = _command_for(app, tool)
         except RegistrationError as exc:
             raise _invalid(tool.name, f"cannot be served: {exc}") from None
-        found[tool.name] = Provided(tool, command, validator_class(tool.input_schema))
+        found[tool.name] = Provided(
+            tool, command, validator_class(tool.input_schema), secret_paths(tool.input_schema)
+        )
     return found
 
 
@@ -446,8 +534,13 @@ def instructions_for(app: App, spec: McpServe, args: object) -> str:
         return DEFAULT_INSTRUCTIONS.format(description=app.description or app.name)
     text = given if isinstance(given, str) else given(args)
     if not isinstance(text, str) or not text.strip():
-        raise TypeError(
-            f"McpServe instructions returned {type(text).__name__}; it returns the text"
+        got = "empty text" if isinstance(text, str) else f"a {type(text).__name__}"
+        raise CliExit(
+            ExitCodeName("PRECONDITION"),
+            f"the server's instructions are {got}; McpServe(instructions=...) gives the text "
+            "an MCP client reads, so it cannot be empty",
+            code=MCP_INSTRUCTIONS_INVALID,
+            fix_required="return non-empty text from McpServe(instructions=...)",
         )
     return text
 

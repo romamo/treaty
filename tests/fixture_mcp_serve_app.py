@@ -54,6 +54,12 @@ class Decision:
 def operation(name: str) -> Callable[[Mapping[str, object], Ctx], Decision]:
     def preview(arguments: Mapping[str, object], ctx: Ctx) -> Decision:
         print("previewing", name)  # a stray print: stderr, never the protocol
+        password = arguments.get("password")
+        if password is not None:
+            # A secret argument echoed every way: redacted wherever it lands
+            print("printed", password)
+            ctx.log(f"logged {password}")
+            ctx.debug(f"debugged {password}")
         target = arguments["target"]
         assert isinstance(target, str)
         if target == "missing":
@@ -76,7 +82,10 @@ def provide(args: ServeArgs, ctx: Ctx) -> list[McpTool]:
                 description=entry["description"],
                 input_schema={
                     "type": "object",
-                    "properties": {"target": {"type": "string", "minLength": 1}},
+                    "properties": {
+                        "target": {"type": "string", "minLength": 1},
+                        "password": {"type": "string", "writeOnly": True},
+                    },
                     "required": ["target"],
                     "additionalProperties": False,
                 },

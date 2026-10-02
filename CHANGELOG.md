@@ -40,10 +40,14 @@ Apps built on treaty keep their own, structured schema changelog with
   `treaty.McpTool` values, each with a name, a description, an input JSON Schema that
   every call's arguments are checked against, hints from `danger_level` or explicit
   `read_only` and `destructive`, and a handler whose result is enveloped and checked
-  against its output schema like a command's. A destructive tool runs only with
+  against its output schema like a command's. A tool advertised destructive
+  (`danger_level="destructive"` or `destructive=True`) runs only with
   `confirm_destructive: true`, which its input schema gains; without it the call exits 2
-  with `CONFIRMATION_REQUIRED` and nothing runs. A name clash or an invalid schema is
-  refused before serving. `instructions=` takes text or a function of the startup arguments.
+  with `CONFIRMATION_REQUIRED` and nothing runs. A property marked `writeOnly`,
+  `format: "password"`, or `x-secret` is a secret, redacted in the audit log, validation
+  errors, and whatever the call writes. A name clash, an invalid schema, or empty
+  instructions are refused before serving. `instructions=` takes text or a function of the
+  startup arguments.
   `mcp serve --list-tools` prints the tool list, provided tools included, and
   `mcp-validate --serve-args` compares them
 
