@@ -54,6 +54,13 @@ Apps built on treaty keep their own, structured schema changelog with
   `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
   unchanged, and a test pins it (#241)
 
+- A declared secret written straight to descriptor 1, by C code, `os.write(1, ...)`, or a
+  child process that inherited it, reaches stderr redacted, as printed text does; it went
+  there in the clear. The interceptor redacts a line at a time, so a secret split across
+  two writes or two reads of the pipe is still caught, and passes on a line without its end
+  when the next envelope is written or the run ends, while the run's secrets are still
+  known; bytes that are not UTF-8 pass through unchanged around it (#254)
+
 ## [1.0.0rc21] - 2026-10-02
 
 The 21th 1.0 release candidate: 1 fix.
