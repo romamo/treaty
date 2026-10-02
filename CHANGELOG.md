@@ -25,6 +25,16 @@ The twentieth 1.0 release candidate: 2 changes.
   already forbids the pair and replaces the pairwise rule (REQ-C-026), so the manifest
   never lists both and a call is never refused twice for one mistake
 
+### Fixed
+
+- The long-running work chapter's `import-all` starts a feed only when the time left is at
+  least twice the slowest feed so far took, not just the last one's duration, which started
+  a feed with no room for it to run slower: on a loaded machine that feed ran into the
+  limit and the run exited 10 with `TIMEOUT`, losing the result of the feeds already
+  imported. The chapter explains the margin, and its tests time one feed on the runner and
+  set their limits from it, so a loaded runner's first feed does not outlast a limit fixed
+  in seconds
+
 ## [1.0.0rc19] - 2026-10-02
 
 The nineteenth 1.0 release candidate: 1 change and 1 fix.

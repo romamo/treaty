@@ -437,14 +437,16 @@ def test_debug_logs_the_request_with_the_token_redacted(private_feed: str, tmp_p
 
 
 class _Feeds(http.server.BaseHTTPRequestHandler):
-    """A feed per path: /slower… answers after two seconds, /slow… after one, /bad… with
-    an object, not a list"""
+    """A feed per path: /sleep/S answers after S seconds, /slow… after one, /half… after
+    half a second, /bad… with an object, not a list"""
 
     def do_GET(self) -> None:
-        if self.path.startswith("/slower"):
-            time.sleep(2.0)
+        if self.path.startswith("/sleep/"):
+            time.sleep(float(self.path.removeprefix("/sleep/")))
         elif self.path.startswith("/slow"):
             time.sleep(1.0)
+        elif self.path.startswith("/half"):
+            time.sleep(0.5)
         items = (
             {"oops": 1}
             if self.path.startswith("/bad")
@@ -485,36 +487,72 @@ def test_import_all_reports_each_feed_and_fails_partly(feeds: str, tmp_path: Pat
     assert [w.code for w in env.warnings] == ["UNTRUSTED_CONTENT"]
 
 
-def test_import_all_leaves_the_feeds_it_has_no_time_for(feeds: str, tmp_path: Path) -> None:
-    """Three one-second feeds in 2.8 seconds, as the tutorial runs them: the third is
-    not started, and says so. Issue #119: whether the second starts depends on how long
-    the first took on this runner, so only what holds at any speed is checked here"""
-    urls = [f"{feeds}/slow1", f"{feeds}/slow2", f"{feeds}/slow3"]
-    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 2.8}
+def _one_feed(url: str, tmp_path: Path) -> float:
+    """Seconds this runner takes to import one feed: a loaded runner adds its own delay to
+    every request, so a limit fixed in seconds can be shorter than the first feed (#236)"""
+    started = time.monotonic()
+    args = {"urls": [url], "db": str(tmp_path / "probe.json")}
     env = todo_batch.app.call("import-all", args, env={})
-    assert env.exit_code == 3
+    assert env.exit_code == 0, json.dumps(env.to_json(), indent=2)
+    return time.monotonic() - started
+
+
+def test_import_all_leaves_the_feeds_it_has_no_time_for(feeds: str, tmp_path: Path) -> None:
+    """Half-second feeds under a limit eight feeds long, as this runner times one, and more
+    feeds than fit: a feed starts only with twice the slowest so far left, so the last is
+    not started, and says so. How many start depends on this runner's speed (#119), so only
+    what holds at any speed is checked. A limit fixed in seconds fails a loaded runner,
+    whose first feed alone can outlast it and end the run with TIMEOUT (#236)"""
+    limit = 8 * _one_feed(f"{feeds}/half", tmp_path)
+    urls = [f"{feeds}/half{n}" for n in range(int(limit / 0.5) + 2)]
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": limit}
+    env = todo_batch.app.call("import-all", args, env={})
+    shown = json.dumps(env.to_json(), indent=2)
+    assert env.exit_code == 3, shown
     results = _results(env)
-    # Two feeds take at least two seconds, leaving under 0.8 for a third that needs 1
-    assert results[0] == (True, None) and results[2] == (False, "NOT_STARTED")
-    assert results[1] in [(True, None), (False, "NOT_STARTED")]
+    assert results[0] == (True, None) and results[-1] == (False, "NOT_STARTED"), shown
+    # Every feed finished or never started: none ran into the limit
+    assert set(results) <= {(True, None), (False, "NOT_STARTED")}, shown
     assert isinstance(env.data, dict)
     skipped = [r for r in env.data["results"] if not r["ok"]]
-    assert all(r["error"]["retryable"] is True for r in skipped)
+    assert all(r["error"]["retryable"] is True for r in skipped), shown
 
 
-def test_import_all_skips_a_feed_when_less_time_is_left_than_the_last_took(
+def test_import_all_skips_a_feed_when_less_time_is_left_than_twice_the_slowest_took(
     feeds: str, tmp_path: Path
 ) -> None:
-    """The estimate is the last feed's duration, whatever the runner's speed: a feed
-    after a quick one starts, and a quick feed after a two-second one does not when
-    less than two seconds are left (3.9 - 2, or less on a slower runner)"""
-    urls = [f"{feeds}/a", f"{feeds}/slower", f"{feeds}/b"]
-    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 3.9}
+    """The estimate is the slowest feed so far, whatever the runner's speed: a slow feed
+    after a quick one starts, and a quick feed after the slow one does not, since a limit
+    under three slow feeds leaves less than two of them. The slow feed is two seconds or
+    four quick feeds as this runner times one, whichever is longer, so a loaded runner
+    starts it and finishes it too (#236)"""
+    slow = max(2.0, 4 * _one_feed(f"{feeds}/quick", tmp_path))
+    urls = [f"{feeds}/a", f"{feeds}/sleep/{slow:.3f}", f"{feeds}/b"]
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 2.9 * slow}
     env = todo_batch.app.call("import-all", args, env={})
-    assert env.exit_code == 3
-    assert _results(env) == [(True, None), (True, None), (False, "NOT_STARTED")]
+    shown = json.dumps(env.to_json(), indent=2)
+    assert env.exit_code == 3, shown
+    assert _results(env) == [(True, None), (True, None), (False, "NOT_STARTED")], shown
     assert isinstance(env.data, dict)
     assert env.data["results"][2]["error"]["retryable"] is True
+
+
+def test_import_all_keeps_the_slowest_feed_as_the_estimate_after_a_quicker_one(
+    feeds: str, tmp_path: Path
+) -> None:
+    """A slow feed, one three quarters as long, then a quick one, under 3.375 slow feeds:
+    the second starts with 2.375 left, and the quick one does not with 1.625 left, under
+    twice the slowest. An estimate from the last feed alone, 1.5, would start it. The rule
+    weighs the slow feed's whole duration three times, and a loaded runner wakes a sleeping
+    feed late, so the slow feed is three seconds or twelve quick feeds as this runner times
+    one, whichever is longer: the 0.375 of a slow feed to spare covers that delay (#236)"""
+    slow = max(3.0, 12 * _one_feed(f"{feeds}/quick", tmp_path))
+    urls = [f"{feeds}/sleep/{slow:.3f}", f"{feeds}/sleep/{0.75 * slow:.3f}", f"{feeds}/c"]
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 3.375 * slow}
+    env = todo_batch.app.call("import-all", args, env={})
+    shown = json.dumps(env.to_json(), indent=2)
+    assert env.exit_code == 3, shown
+    assert _results(env) == [(True, None), (True, None), (False, "NOT_STARTED")], shown
 
 
 def test_import_all_marks_what_it_imported_as_external(feeds: str, tmp_path: Path) -> None:

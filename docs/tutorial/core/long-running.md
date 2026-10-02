@@ -111,11 +111,11 @@ treaty that Step 3 explains: `Batch` and `Outcome`, the result and one item of i
 ```python
 def import_all(args: ImportAll, ctx: Ctx, store: Store) -> Batch[Imported]:
     results: list[Outcome[Imported]] = []
-    took = 0.0
+    slowest = 0.0
     for n, url in enumerate(args.urls):
         left = ctx.remaining
-        if left is not None and left < took:
-            # Less time left than the last feed took: leave this one for a retry
+        if left is not None and left < 2 * slowest:
+            # Less time left than twice the slowest feed so far: leave this one for a retry
             not_started = ItemError("NOT_STARTED", "the time ran out before this feed", True)
             results.append(Outcome(url, error=not_started))
             continue
@@ -125,18 +125,33 @@ def import_all(args: ImportAll, ctx: Ctx, store: Store) -> Batch[Imported]:
             results.append(Outcome(url, import_items(Import(url=url, db=args.db), ctx, store)))
         except CliExit as failure:
             results.append(Outcome(url, error=failure))
-        took = time.monotonic() - started
+        slowest = max(slowest, time.monotonic() - started)
     return Batch(results)
 ```
 
-A feed starts only when the time left is at least what the last one took. The ones it has no
-time for are not started, and say so with `NOT_STARTED`, marked retryable, since nothing
-happened to them. The run then ends with a result the agent can act on: what was imported,
-and what to send again. With three feeds that take a second each and `--timeout 2.8`, the
-first two are usually imported and the third is reported as not started. Whether the second
-starts depends on how long the first took, so the tests check what holds at any speed: the
-first feed is imported, the last is `NOT_STARTED` and retryable, and a separate test pins
-the rule itself.
+A feed starts only when the time left is at least twice what the slowest feed so far took.
+The ones it has no time for are not started, and say so with `NOT_STARTED`, marked
+retryable, since nothing happened to them. The run then ends with a result the agent can act
+on: what was imported, and what to send again.
+
+The margin matters more than it looks. A feed is never as fast as an estimate promises: the
+server is busy, or the machine is loaded, and one feed runs slower than those before it.
+One that is still running at the limit is cut there and the run exits 10 with `TIMEOUT`:
+the feeds already imported stay saved, but the result that says which they were is lost,
+so the agent cannot tell what to send again. Starting a feed only when the time left
+covers the last one's duration, and no more, loses that race whenever the next feed is a
+little slower; twice the slowest keeps room for one that takes twice as long as any so far,
+and the margin grows with the feeds, so it suits a second-long feed and a minute-long one
+alike.
+
+With three feeds that take a second each and `--timeout 2.8`, the first is imported, and
+after it 1.8 seconds are left, less than the two the rule asks for, so the other two are
+reported as not started. How many start depends on how fast the feeds answer, so the tests
+check what holds at any speed: under a limit eight feeds long, the first feed is imported,
+the last is `NOT_STARTED` and retryable, and every feed either finished or never started; a
+separate test pins the rule itself. Each test first times one feed and sets its limit from
+that, since a loaded machine adds its own delay to every request, and a limit fixed in
+seconds would end with `TIMEOUT` there before the first feed is done.
 
 Each feed goes through `import_items`, the handler of `import`, called as a plain function:
 the batch adds nothing to how one feed is imported, only to how many are.
@@ -234,7 +249,7 @@ Copy the `_results` helper and the `import_all` tests into a test file, with `En
 `treaty` among its imports.
 
 **Check:** the tests for this chapter pass: a good and a broken feed, tagged as external
-though one failed; three slow feeds under a short limit; and the tags on a full success
+though one failed; slow feeds under a short limit; and the tags on a full success
 
 <!-- check -->
 ```bash
