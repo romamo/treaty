@@ -32,6 +32,7 @@ import contextlib
 import functools
 import http.client
 import json as jsonlib
+import math
 import shlex
 import socket
 import ssl
@@ -288,7 +289,11 @@ def _timeout(value: Timeout | float) -> Timeout:
         return value
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"expected seconds or a treaty.Timeout, not {type(value).__name__}")
-    return Timeout(float(value))
+    try:
+        seconds = float(value)
+    except OverflowError:
+        seconds = math.inf  # a huge integer: Timeout refuses it as out of range
+    return Timeout(seconds)
 
 
 @dataclass(frozen=True, slots=True)

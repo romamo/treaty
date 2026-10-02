@@ -10,6 +10,21 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `ctx.network.timeout(own)` and `ctx.network.fits(seconds)` hand a client of the
+  handler's own, such as a library's `requests.Session`, the command's deadline:
+  `timeout=ctx.network.timeout(30)` is `min(30, ctx.remaining)`, exiting 10 `TIMEOUT`
+  when no time is left, and `fits` says whether one more attempt, its backoff included,
+  still ends in time, so a retry budget stops and the handler answers with the failure
+  it got instead of `TIMEOUT`. Both take seconds or a `treaty.Timeout`. The README shows
+  the recipe for `requests`, `httpx`, and a urllib3 `Retry` (#237)
+- The `network-timeout` audit rule advises on a `has_network_io=True` command whose
+  handler reaches none of `ctx.http`, `ctx.remaining`, `ctx.timeout`,
+  `ctx.network.timeout()`, `ctx.network.fits()`, and `ctx.run`: a client of its own may
+  wait longer than `--timeout` allows, with the fix `timeout=ctx.network.timeout(30)` per
+  call (#237)
+
 ### Changed
 
 - `ctx.remaining` ends a reserve before the command's hard limit: a tenth of the timeout,
@@ -27,20 +42,6 @@ Apps built on treaty keep their own, structured schema changelog with
   left, so a handler watching `ctx.remaining` lost its partial result to `TIMEOUT`. The
   connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
   when a body without a length would have looked complete
-### Added
-
-- `ctx.network.timeout(own)` and `ctx.network.fits(seconds)` hand a client of the
-  handler's own, such as a library's `requests.Session`, the command's deadline:
-  `timeout=ctx.network.timeout(30)` is `min(30, ctx.remaining)`, exiting 10 `TIMEOUT`
-  when no time is left, and `fits` says whether one more attempt, its backoff included,
-  still ends in time, so a retry budget stops and the handler answers with the failure
-  it got instead of `TIMEOUT`. Both take seconds or a `treaty.Timeout`. The README shows
-  the recipe for `requests`, `httpx`, and a urllib3 `Retry` (#237)
-- The `network-timeout` audit rule advises on a `has_network_io=True` command whose
-  handler reaches none of `ctx.http`, `ctx.remaining`, `ctx.timeout`,
-  `ctx.network.timeout()`, `ctx.network.fits()`, and `ctx.run`: a client of its own may
-  wait longer than `--timeout` allows, with the fix `timeout=ctx.network.timeout(30)` per
-  call (#237)
 
 ## [1.0.0rc21] - 2026-10-02
 

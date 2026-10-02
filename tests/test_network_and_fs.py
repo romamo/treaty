@@ -1002,7 +1002,7 @@ def test_ctx_network_fits_says_whether_another_attempt_ends_in_time(
     assert settings_with(left).fits(attempt) is expected
 
 
-@pytest.mark.parametrize("bad", [0, -1, float("nan"), float("inf"), True, "30", None])
+@pytest.mark.parametrize("bad", [0, -1, float("nan"), float("inf"), 10**400, True, "30", None])
 def test_ctx_network_timeout_and_fits_refuse_what_is_no_duration(bad: object) -> None:
     settings = settings_with(10.0)
     with pytest.raises((InvalidValue, TypeError)):
