@@ -360,6 +360,13 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
             validator_class.check_schema(tool.input_schema)
         except SchemaError as exc:
             raise _invalid(tool.name, f"has an invalid input schema: {exc.message}") from None
+        unresolved = _unresolved_ref(tool.input_schema, validator_class)
+        if unresolved is not None:
+            raise _invalid(
+                tool.name,
+                f"refers to {unresolved!r}, which its input schema does not hold; "
+                "nothing is fetched, so a reference resolves within the schema",
+            )
         for name in tool.exit_codes:
             if ExitCodeName(name) not in app.exits:
                 raise _invalid(tool.name, f"declares exit code {name}, which is not registered")
@@ -369,6 +376,33 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
             raise _invalid(tool.name, f"cannot be served: {exc}") from None
         found[tool.name] = Provided(tool, command, validator_class(tool.input_schema))
     return found
+
+
+def _unresolved_ref(schema: Mapping[str, object], validator_class: Any) -> str | None:
+    """The first ``$ref`` or ``$dynamicRef`` of ``schema`` that does not resolve within it,
+    each against the base URI of the subschema it sits in. The registry retrieves nothing,
+    so a remote reference never resolves; unchecked, it failed the first call that reached
+    it, outside any envelope"""
+    from referencing import Registry
+    from referencing.exceptions import Unresolvable
+    from referencing.jsonschema import specification_with
+
+    specification = specification_with(validator_class.META_SCHEMA["$schema"])
+    root = specification.create_resource(schema)
+    pending = [(Registry().resolver_with_root(root), root)]
+    while pending:
+        resolver, resource = pending.pop()
+        contents = resource.contents
+        if isinstance(contents, Mapping):
+            for keyword in ("$ref", "$dynamicRef"):
+                ref = contents.get(keyword)
+                if isinstance(ref, str):
+                    try:
+                        resolver.lookup(ref)
+                    except Unresolvable:
+                        return ref
+        pending.extend((resolver.in_subresource(sub), sub) for sub in resource.subresources())
+    return None
 
 
 def _command_for(app: App, tool: McpTool) -> Command:

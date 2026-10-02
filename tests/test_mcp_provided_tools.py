@@ -211,6 +211,34 @@ def test_an_invalid_input_schema_is_refused_before_serving() -> None:
     assert envelope["error"]["code"] == "MCP_TOOL_INVALID"  # type: ignore[index]
 
 
+@pytest.mark.parametrize(
+    "ref", ["http://127.0.0.1:9/x.json", "other.json", "#/$defs/missing", "#nowhere"]
+)
+def test_a_reference_the_schema_cannot_resolve_is_refused_before_serving(ref: str) -> None:
+    # Nothing is fetched: unrefused, the first call answered a bare JSON-RPC error
+    schema = {"type": "object", "properties": {"x": {"$ref": ref}}}
+    code, out, envelope = _serve(_app([_tool("ref", input_schema=schema)]))
+    assert code == 4 and out == ""
+    assert envelope["error"]["code"] == "MCP_TOOL_INVALID"  # type: ignore[index]
+    assert ref in envelope["error"]["message"]  # type: ignore[index]
+
+
+def test_references_within_the_schema_are_served() -> None:
+    schema = {
+        "$id": "https://example.test/root.json",
+        "type": "object",
+        "properties": {
+            "x": {"$ref": "#/$defs/name"},
+            "y": {"$ref": "#named"},
+            "z": {"$id": "inner.json", "$defs": {"n": {"type": "integer"}}, "$ref": "#/$defs/n"},
+            "w": {"$ref": "inner.json#/$defs/n"},
+        },
+        "$defs": {"name": {"type": "string"}, "anchored": {"$anchor": "named", "type": "string"}},
+    }
+    code, out, _ = _serve(_app([_tool("ref", input_schema=schema)]), ["--list-tools"])
+    assert code == 0 and "ref" in out
+
+
 def test_a_destructive_tool_defining_confirm_destructive_is_refused() -> None:
     schema = {"type": "object", "properties": {"confirm_destructive": {"type": "boolean"}}}
     clash = _tool("wipe", danger_level="destructive", input_schema=schema)
