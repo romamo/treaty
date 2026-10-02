@@ -61,6 +61,14 @@ def test_bare_json_lines_are_records() -> None:
     assert code == 0 and envelope["data"] == {"count": 0, "tickers": []}
 
 
+def test_a_summary_line_ends_bare_records() -> None:
+    """REQ-O-004's stream, which the manifest's stdin mode "records" tells an agent to feed:
+    bare items, then a ``_summary`` line that is not a record and ends the input"""
+    summary = {"_summary": True, "total": 2, "duration_ms": 3}
+    code, [envelope] = run(["summary"], bare(VWRL, GOLD, summary) + "not read\n")
+    assert code == 0 and envelope["data"] == {"count": 2, "tickers": ["LYXGOLD", "VWRL"]}
+
+
 def test_a_whole_response_gives_each_item_then_ends_the_input() -> None:
     code, [envelope] = run(["summary"], produce(["list"]) + "not read\n")
     assert code == 0 and envelope["data"]["count"] == 2

@@ -11,7 +11,7 @@ from conftest import spec_validator
 
 from treaty import Affects, App, Ctx, Exit, Flag, NoArgs
 from treaty._audit import audit
-from treaty._command import IDEMPOTENT_NOTE
+from treaty._tools import tool_entries
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,15 +94,34 @@ def test_an_idempotent_command_passes_the_retryable_rule(tmp_path) -> None:
     assert retryable_findings(app) == []
 
 
-def test_the_manifest_description_says_the_command_is_idempotent(tmp_path) -> None:
+def test_the_manifest_says_the_command_is_idempotent(tmp_path) -> None:
+    """ManifestResponse 3.15: the key, not a sentence in the description; absent is false"""
     app, _ = make_app(tmp_path, idempotent=True)
     manifest = app.manifest()
     spec_validator("manifest-response").validate(manifest)
-    assert manifest["commands"]["observe"]["description"] == (
-        f"Snapshot every host. {IDEMPOTENT_NOTE}"
-    )
+    observe = manifest["commands"]["observe"]
+    assert observe["idempotent"] is True
+    assert observe["description"] == "Snapshot every host"
     plain, _ = make_app(tmp_path, idempotent=False)
-    assert plain.manifest()["commands"]["observe"]["description"] == "Snapshot every host"
+    assert "idempotent" not in plain.manifest()["commands"]["observe"]
+
+
+@pytest.mark.parametrize(
+    ("danger_level", "idempotent", "hint"),
+    [
+        ("safe", False, True),
+        ("mutating", False, False),
+        ("mutating", True, True),
+        ("destructive", True, True),
+    ],
+)
+def test_the_mcp_idempotent_hint_follows_idempotent_too(
+    tmp_path, danger_level: str, idempotent: bool, hint: bool
+) -> None:
+    """A safe command converges, and so does one declared idempotent on any level"""
+    app, _ = make_app(tmp_path, idempotent=idempotent, danger_level=danger_level)
+    [entry] = [e for e in tool_entries(app) if e.path.value == "observe"]
+    assert entry.idempotent is hint
 
 
 def run(app: App, argv: list[str]) -> tuple[int, dict]:
@@ -144,7 +163,7 @@ def test_the_manifest_says_idempotent_on_any_danger_level(tmp_path, danger_level
     app, _ = make_app(tmp_path, idempotent=True, danger_level=danger_level)
     manifest = app.manifest()
     spec_validator("manifest-response").validate(manifest)
-    assert manifest["commands"]["observe"]["description"].endswith(IDEMPOTENT_NOTE)
+    assert manifest["commands"]["observe"]["idempotent"] is True
 
 
 def test_a_retryable_code_on_a_destructive_command_names_idempotent_in_its_fix(

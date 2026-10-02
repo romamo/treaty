@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import re
 import sys
-from collections.abc import Callable, Collection, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -105,6 +105,55 @@ class MediaType:
 
     def __str__(self) -> str:
         return self.value
+
+
+SPEC_MEDIA_TYPES: Mapping[str, MediaType] = {
+    "json": MediaType("application/json"),
+    "jsonl": MediaType("application/x-ndjson"),
+    "tsv": MediaType("text/tab-separated-values"),
+    "plain": MediaType("text/plain"),
+    "table": MediaType("text/plain"),
+    "id": MediaType("text/plain"),
+}
+"""REQ-O-001's table: a format value it names writes this media type, always"""
+
+BUILTIN_MEDIA_TYPES: Mapping[Format, MediaType] = {
+    Format.NDJSON: MediaType("application/x-ndjson"),
+    Format.CSV: MediaType("text/csv"),
+    Format.YAML: MediaType("application/yaml"),
+    Format.MARKDOWN: MediaType("text/markdown"),
+}
+"""What treaty's own values outside that table write, unless the app declares otherwise"""
+
+
+def check_media_type(name: FormatName, media_type: MediaType) -> None:
+    """A value in the spec's table keeps the table's media type (REQ-O-001): ``plain`` is
+    always ``text/plain``; a variant with another shape is a new format name"""
+    fixed = SPEC_MEDIA_TYPES.get(name.value)
+    if fixed is not None and fixed != media_type:
+        raise InvalidValue(
+            f"--format {name} writes {fixed} by the spec's table, not {media_type}; register "
+            "the variant under a name of its own"
+        )
+
+
+def media_type_map(
+    names: Iterable[FormatName], declared: Mapping[FormatName, MediaType]
+) -> dict[str, str]:
+    """``MediaTypeMap`` of ``names`` outside the spec's table (ManifestResponse 3.12): the
+    declared media type, else treaty's own for its built-in value; a name with neither has
+    no entry, so an agent treats its output as opaque"""
+    entries: dict[str, str] = {}
+    for name in names:
+        if name.value in SPEC_MEDIA_TYPES:
+            continue
+        builtin = name.builtin
+        found = declared.get(name) or (
+            None if builtin is None else BUILTIN_MEDIA_TYPES.get(builtin)
+        )
+        if found is not None:
+            entries[name.value] = found.value
+    return entries
 
 
 def resolve_mode(

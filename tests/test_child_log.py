@@ -12,9 +12,8 @@ from dataclasses import dataclass
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Ctx, Flag, RegistrationError
+from treaty import App, Ctx, Flag, NoArgs, RegistrationError
 from treaty._app import _Stderr
-from treaty._command import CHILD_LOG_NOTE
 from treaty._subprocess import Processes, Stream
 from treaty._verbosity import Verbosity
 
@@ -222,12 +221,31 @@ def test_stream_values() -> None:
     assert Stream.of("always") is Stream.ALWAYS
 
 
-def test_the_manifest_description_says_stderr_carries_the_child_log() -> None:
+def test_the_manifest_says_stderr_carries_the_child_log() -> None:
+    """ManifestResponse 3.11: the key, not a sentence in the description"""
     manifest = APP.manifest()
     spec_validator("manifest-response").validate(manifest)
     commands = manifest["commands"]
-    assert commands["deploy"]["description"] == f"Deploy. {CHILD_LOG_NOTE}"
-    assert commands["follow"]["description"] == "Follow"
+    assert commands["deploy"]["stderr"] == "child_log"
+    assert commands["deploy"]["description"] == "Deploy"
+    assert "stderr" not in commands["follow"]
+
+
+def test_a_passthrough_command_cannot_declare_a_child_log() -> None:
+    """REQ-C-031: the delegated tool's own stderr already precedes the envelope line"""
+    app = App("tool", version="1.0.0")
+    with pytest.raises(RegistrationError, match="child_log=True"):
+
+        @app.command(
+            "wrap",
+            description="Wrap",
+            danger_level="mutating",
+            exit_codes=(),
+            passthrough=True,
+            child_log=True,
+        )
+        def wrap(args: NoArgs, ctx: Ctx) -> int:
+            return 0
 
 
 def test_a_large_output_on_both_pipes_drains_without_blocking() -> None:

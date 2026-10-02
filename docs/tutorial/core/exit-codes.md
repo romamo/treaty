@@ -309,9 +309,8 @@ That is a strong promise, so treaty constrains it in two places:
 A command whose repeat with the same arguments leaves the same state (one that rewrites
 the same files, sets a value rather than adding to it, or deletes a named resource) says
 so with `@app.command(..., idempotent=True)`. The `retryable` rule then passes its
-retryable codes, and its manifest description ends "Idempotent: a repeat with the same
-arguments leaves the same state". A safe command needs no such declaration, though it
-accepts one. The declaration changes no run and no exit code; `--idempotency-key` still
+retryable codes, and its manifest entry says `idempotent: true`. A safe command needs no
+such declaration, though it accepts one. The declaration changes no run and no exit code; `--idempotency-key` still
 replays the first result.
 
 For a transient failure (an upstream timeout, a lock held by another process, a rate limit),

@@ -580,6 +580,29 @@ def test_breaking_changes_are_correctly_flagged_as_breaking_true() -> None:
     )
 
 
+def test_manifest_3_15_representation_changes_break_no_caller() -> None:
+    """#231: a passthrough entry's flags went empty (ManifestResponse 3.9), as they go
+    before its path, and an object flag went from string to object (3.7) for the same argv
+    token; neither breaks a saved invocation, as ``audit --baseline`` agrees"""
+    base = deploy_manifest(
+        target={"type": "string", "required": False}, where={"type": "string", "required": False}
+    )
+    base["commands"]["ingest"] = {"flags": {"output": {"type": "string"}}, "exit_codes": {}}
+    new = deploy_manifest(
+        target={"type": "string", "required": False}, where={"type": "object", "required": False}
+    )
+    new["commands"]["ingest"] = {"flags": {}, "exit_codes": {}, "arguments": "passthrough"}
+    change = diff(base, new)
+    assert change.removed == () and change.changed == ("deploy.flags.where",)
+    assert change.breaking is False
+    retyped = deploy_manifest(
+        target={"type": "string", "required": False}, where={"type": "integer", "required": False}
+    )
+    retyped["commands"]["ingest"] = new["commands"]["ingest"]
+    change = diff(base, retyped)
+    assert change.removed == () and change.breaking is True
+
+
 CHG_MODULE = """
 from dataclasses import dataclass
 from pathlib import Path

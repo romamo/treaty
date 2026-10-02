@@ -275,7 +275,7 @@ class Command:
     """Children keep the user's locale instead of the C locale (REQ-F-066)"""
     child_log: bool = False
     """``ctx.run(stream="always")`` writes a child's lines to stderr in any format and
-    verbosity but ``--quiet``; the manifest description says so (#173)"""
+    verbosity but ``--quiet``; the manifest says ``stderr: child_log`` (#173)"""
     cache: CachePolicy | None = None
     """``ctx.cache`` with ``--no-cache`` and ``--cache-ttl`` (REQ-O-018)"""
     recursive_traversal: bool = False
@@ -298,7 +298,7 @@ class Command:
     after its path; None hands those to the tool verbatim"""
     idempotent: bool = False
     """A repeat with the same arguments leaves the same state, so its retryable codes are
-    safe to retry; the manifest description says so on any danger level (#210, #226)"""
+    safe to retry; the manifest says ``idempotent: true`` on any danger level (#210, #226)"""
 
     def handler_args(self, args: object) -> object:
         """What the handler, its resources, and its rollback receive for parsed ``args``"""
@@ -408,21 +408,6 @@ INPUT_FILE_FLAG = "input-file"
 OUTPUT_FLAG = "output"
 DEFAULT_HEARTBEAT_MS = 10_000
 
-PASSTHROUGH_NOTE = (
-    "Arguments after the command path go to the delegated tool unparsed; the envelope is the "
-    "last stderr line"
-)
-"""What a passthrough command's manifest description adds: the spec's CommandEntry has
-no key that says so, and ``option_placement: strict`` alone does not (#35)"""
-CHILD_LOG_NOTE = (
-    "While it runs, the log of the program it runs streams to stderr as plain lines in any "
-    "--format, silenced only by --quiet"
-)
-"""What a ``child_log=True`` command's manifest description adds: the spec's CommandEntry
-has no key for a command whose stderr carries a child's log (#173)"""
-IDEMPOTENT_NOTE = "Idempotent: a repeat with the same arguments leaves the same state"
-"""What an ``idempotent=True`` command's manifest description adds: the spec's CommandEntry
-has no key that says a command is safe to repeat (#210)"""
 ARGV_KEY = "argv"
 """A passthrough command's argv for its tool in an exec line or ``App.call``"""
 HELP_TOKENS = ("--help", "-h")
@@ -545,6 +530,8 @@ def build_command(
                 "cache=": cache is not None,
                 "recursive_traversal=True": recursive_traversal,
                 "id_field=": id_field is not None,
+                # REQ-C-031: the tool's own stderr already precedes the envelope line
+                "child_log=True": child_log,
             },
         )
         # REQ-C-027: everything after the path reaches the tool verbatim
@@ -704,9 +691,13 @@ def build_command(
             f"{path}: safe_default=True is for destructive commands, whose dry run it makes "
             "the default (REQ-O-048)"
         )
+    args_schema = schema_for(args_type, scalars)
     for f in fields:
         # A default the manifest cannot list fails now, not on --help
-        f.to_flag_entries(default_env_var(app_name, f.name) if f.spec.env else None)
+        f.to_flag_entries(
+            default_env_var(app_name, f.name) if f.spec.env else None,
+            args_schema["properties"][f.name],
+        )
     if danger_level is not DangerLevel.SAFE:
         # A passthrough command's data is treaty's own Delegated, whose replay says noop
         if not passthrough and not _carries(path, output_type, "effect", scalars.adapters):
@@ -819,7 +810,7 @@ def build_command(
         args_type=args_type,
         output_type=output_type,
         output_schema=output_schema,
-        args_schema=_with_field_keys(schema_for(args_type, scalars), fields),
+        args_schema=_with_field_keys(args_schema, fields),
         fields=fields,
         description=description,
         danger_level=danger_level,

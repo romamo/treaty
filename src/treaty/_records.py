@@ -7,8 +7,9 @@ reimplements it, and so none can mistake a failed upstream run for short valid i
 
 - ``ok: true`` yields its ``data``: an object is one record, an array one record per item,
   ``null`` none
-- a stream's terminal envelope (``meta.end``), or a whole response (no ``meta.seq``),
-  ends the input; nothing after it is read
+- a stream's terminal envelope (``meta.end``), a whole response (no ``meta.seq``), or
+  REQ-O-004's ``{"_summary": true, ...}`` line after bare records ends the input; nothing
+  after it is read
 - ``ok: false`` ends the run with ``UPSTREAM_FAILED``, the upstream error in ``context``
 - envelopes that stop before their terminal one (the producer was killed) end the run with
   ``UPSTREAM_INCOMPLETE``, rather than look like the end of the input
@@ -50,6 +51,8 @@ UPSTREAM_TRUNCATED = "UPSTREAM_TRUNCATED"
 ENVELOPE_KEYS = frozenset({"ok", "data", "error", "meta", "warnings"})
 _HEARTBEAT_KEYS = frozenset({"status", "heartbeat", "elapsed_ms"})
 _HEARTBEAT_STEP = "step"
+SUMMARY_KEY = "_summary"
+"""``"_summary": true`` marks REQ-O-004's terminal line of a stream of bare items"""
 """A heartbeat inside ``ctx.step`` names the step in progress (REQ-C-008)"""
 _TRUST_KEYS = frozenset({SOURCE_KEY, TRUSTED_KEY})
 """Trust tags an external upstream adds (REQ-F-035); not fields of the record"""
@@ -239,6 +242,11 @@ class Records(Iterator[object]):
             raise _invalid(line, None, f"line {line} is not JSON: {exc}") from None
         if not isinstance(value, dict) or not _is_envelope(value):
             if isinstance(value, dict) and _is_heartbeat(value):
+                return
+            if isinstance(value, dict) and value.get(SUMMARY_KEY) is True:
+                # REQ-O-004's terminal line after bare items: never a record
+                self._ended = True
+                self._lines.close()
                 return
             self._queue.append((line, value))
             return

@@ -157,13 +157,18 @@ above). `Ctx.config` was already private (`_config_file`, workstream 02).
   `refresh_command`, `expires_at`, `required_permission`, `network_context`, `redirect`,
   `corrected_input`
 - `warnings[]`: `code`, `message`, `context`
-- Manifest root: `schema_version` (`"3.5"`, the spec's `ManifestResponse`),
+- Manifest root: `schema_version` (`"3.15"`, the spec's `ManifestResponse`),
   `framework_version`, `etag`, `flags`, `exit_codes`, `env_vars` (the variables that back
-  no flag, each with a `description`), `commands`, and `dependencies` when declared; a flag
-  that reads variables carries `env_vars`, `{name, deprecated?}` in precedence order with
-  `<APP>_<NAME>` first; a built-in's `CommandEntry` carries `builtin: true`, an app command omits it;
-  an `output_file=` command's carries `output_file`, `"binary"` or `"formatted"`; a
-  passthrough command's omits it
+  no flag, each with a `description`), `commands`, `dependencies` when declared, and
+  `secret_env_vars` (the secret settings) when there are any; a flag that reads variables
+  carries `env_vars`, `{name, deprecated?}` in precedence order with `<APP>_<NAME>` first,
+  and the `format` flag `media_types` for its values outside the spec's table; a built-in's
+  `CommandEntry` carries `builtin: true`, an app command omits it; `output_file` is
+  `"binary"`, `"formatted"`, `"envelope"` (passthrough), or `"handler"` (the app's own
+  `output` field), with `output_file_base` off the working directory; an object flag is
+  `type: "object"` with `schema`; `stdin`, `arguments` and `help_argv`, `stderr`,
+  `output_media_types`, `confirm_flag`, and `idempotent` appear on the commands that
+  declare them
 - `framework_version` is treaty's version; the app's version is `meta.tool_version`. Before
   the review it carried the app's version
 

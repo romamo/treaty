@@ -10,6 +10,45 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Changed
+
+- The manifest is ManifestResponse 3.15, the version CI's spec pin defines, and states in
+  keys what it said in descriptions: `idempotent: true` (3.15), `confirm_flag` naming a
+  `Flag(confirm=True)` (3.14), `stderr: "child_log"` (3.11), and a passthrough command's
+  `arguments: "passthrough"` with `help_argv` from `help_command=` (3.9), each in place of
+  its sentence in the command's or the flag's description. A passthrough entry's `flags` is
+  empty, since its flags go before the path as global options do; `--schema` still lists
+  them, and `treaty audit --baseline` does not report them removed. `output_file` is
+  `"envelope"` on a passthrough command and `"handler"` where the app's own `output` field
+  takes the path (3.6), and `output_file_base` is `project_root` or `resource` when a
+  relative `--output` does not land in the working directory (3.7). An object flag is
+  `type: "object"` (an `array` of them stays `array`) with the value's `schema`, in place
+  of `string` and its shape in the description (3.7). `stdin` declares the mode of every
+  command that reads stdin, `buffered`, `lines`, or `records` with its `record_schema`, the
+  `exec` built-in's `buffered` included, with `max_bytes` or `max_line_bytes` when the app
+  changed the cap (3.8). The root `format` flag's `media_types` names what each value
+  outside the spec's table writes: an `app.format(media_type=)` and treaty's own `ndjson`,
+  `csv`, `yaml`, and `markdown`; a command's `output_media_types` names what its own formats
+  write, in place of the "--format html writes text/html" sentences (3.12). A secret setting
+  is in the root `secret_env_vars` with its declared names (3.13). An app without these
+  features sees `schema_version`, the etag, the `format` flag's `{"ndjson":
+  "application/x-ndjson"}`, and `exec`'s `stdin` change. The MCP `idempotentHint` is true on
+  an `idempotent=True` command too, not only a `safe` one. `child_log=True` on a passthrough
+  command, and an `app.format` or `FormatRenderer` media type for `plain` or `tsv` other
+  than the spec's, are now a `RegistrationError` (#231)
+
+### Fixed
+
+- A `stdin_records=` command ends its input at REQ-O-004's `{"_summary": true, ...}` line
+  after bare records, as the manifest's `stdin` mode `records` tells an agent to feed it,
+  instead of failing that line with `RECORD_INVALID`. A passthrough command that also sets
+  `output_file=` is `output_file: "envelope"` in the manifest, as its `--output` file holds
+  the envelope, not `"formatted"`. `treaty changelog-add` no longer records an upgrade to
+  this manifest as breaking for a passthrough command's flags, now listed before its path,
+  or an object flag's new `object` type, which takes the same argv token. A secret field
+  that shares a secret setting's `<APP>_<NAME>` no longer repeats it in the command's
+  `secret_env_vars`, as the root `secret_env_vars` lists it (#231)
+
 ## [1.0.0rc18] - 2026-10-02
 
 The eighteenth 1.0 release candidate: 1 change and 1 fix.

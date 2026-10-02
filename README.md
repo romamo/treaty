@@ -260,7 +260,9 @@ line number in `error.context.line`. With `streaming=True` the command is a filt
 event out as each line comes in, so `a | b | c` runs concurrently; every line read restarts
 the stream's idle timeout, as every event does. `--input-file` reads the lines from a file,
 and in `exec`, `App.call`, and MCP the request gives them as `input_lines`, an array of
-strings. `--schema` says `"stdin_mode": "lines"`.
+strings. `--schema` says `"stdin_mode": "lines"`, and the manifest's `stdin` declares each
+command's mode, `buffered`, `lines`, or `records`, with a cap other than the spec's
+default (ManifestResponse 3.8).
 
 ```python
 @app.command("resolve", description="Resolve each ISIN", danger_level="safe",
@@ -350,14 +352,15 @@ well. Treaty's own flags go before the path: `tool --output env.json --timeout 6
 extract statement.csv`. The timeout, signals, session deduplication, and the audit log
 apply as to any other command; the log records `argv` as `[OMITTED]`, since treaty cannot
 tell a secret in it. `help_command=("help",)` hands the tool that argv in place of a lone
-`--help` or `-h` after the path. The manifest entry stays within the spec's schema: it
-has `option_placement: "strict"`, and its description ends with "Arguments after the
-command path go to the delegated tool unparsed; the envelope is the last stderr line".
-Exec lines and `App.call` pass the tool's tokens as `"argv": [...]`, and `treaty-mcp`
+`--help` or `-h` after the path. The manifest entry says so (REQ-C-031,
+ManifestResponse 3.9): `arguments: "passthrough"`, `option_placement: "strict"`,
+`help_argv` for `help_command=`, `output_file: "envelope"`, and no `flags`, since treaty's
+own go before the path as global options do; `--schema` lists them. Exec lines and `App.call` pass the tool's tokens as `"argv": [...]`, and `treaty-mcp`
 lists no passthrough command. The delegated parser follows its own colour rules, not
 treaty's: Python 3.14's argparse colours its help and errors when `FORCE_COLOR` is set,
 even off a terminal, and `NO_COLOR` turns that off. A passthrough command cannot be
-destructive, and departs from a few spec requirements by design; COMPLIANCE.md lists them.
+destructive, and REQ-C-031 exempts it from the requirements that would need treaty to
+parse or shape the tool's arguments and output.
 
 A command flag placed before the path fails with `ARG_ERROR`, names the command the remaining
 words resolve to in `context.command`, and puts the corrected order in `suggestion`. Plain
@@ -458,7 +461,8 @@ alone offers it. Its manifest entry lists it in `output_formats`, its `--help` a
 completion offer it, and `--format` naming it on another command exits `2` listing that
 command's formats. `<APP>_FORMAT` naming it is a default for the session, so a command
 without it answers as if the variable were unset. Wrap the renderer in `FormatRenderer`
-to state what it writes, which the command's manifest description carries:
+to state what it writes, which the command's manifest entry lists in
+`output_media_types` (ManifestResponse 3.12):
 
 ```python
 @app.command(
@@ -477,8 +481,10 @@ the manifest, `--help`, and completion, and a command's `renderers={"html": ...}
 it. It runs as `plain` does: errors go to stderr as prose, `--output` writes the rendered
 text, and `ctx.mode` is `Format.PLAIN`; `ctx.format_name` is the name the caller asked for
 (`FormatName("html")`), so a handler can tell it from `plain`; an `exec` line and
-`App.call` report `json`, as they run in JSON. `media_type` is stated in the `--format` flag's
-description, since the manifest has no key for it. A string naming a `Format` member is
+`App.call` report `json`, as they run in JSON. `media_type` is the root `format` flag's
+`media_types` entry in the manifest (ManifestResponse 3.12), beside treaty's own for
+`ndjson`, `csv`, `yaml`, and `markdown`, and `--help` states it; `plain` and `tsv` keep the
+spec's media type. A string naming a `Format` member is
 that member, and `json`, `jsonl`, `ndjson`, and `id`, which treaty writes itself, take no
 renderer.
 
@@ -491,8 +497,10 @@ A command returning `treaty.Binary` writes the raw bytes instead, whatever the `
 and `data` is `{"path": ..., "bytes": N, "content_type": ..., "sha256": ...}`, with
 `sha256` in lowercase hex and `content_type` only when the command declared one. The
 manifest says which a command does: `"output_file": "binary"` here, `"formatted"` on the
-other `output_file=` commands (ManifestResponse 3.3); a passthrough command and an app's
-own `output` flag have none (see COMPLIANCE.md). Without `--output` the bytes stay
+other `output_file=` commands (ManifestResponse 3.3), `"envelope"` on a passthrough
+command, and `"handler"` where the app's own `output` field takes the path and its handler
+writes the file (3.6). A base other than the working directory adds `output_file_base`,
+`project_root` or `resource` (3.7). Without `--output` the bytes stay
 base64 in `data`, and the `binary-output-file` audit rule suggests `output_file=True`.
 `--output -` exits `2` there, as stdout carries only the envelope.
 
@@ -789,7 +797,8 @@ head = ctx.pipeline([["git", "log", "--oneline"], ["head", "-5"]]).stdout
   any `--format` and verbosity; `--quiet` silences it, and `App.call` and MCP drop it. Two
   children streaming at once interleave whole lines. The command declares
   `@app.command(..., child_log=True)`, else the call raises `RegistrationError`, and its
-  manifest description says that stderr carries the child's log
+  manifest entry has `stderr: "child_log"` (ManifestResponse 3.11); a passthrough command
+  cannot declare it
 - On Windows only the child itself is stopped, not its grandchildren
 
 `App.main()` writes the same pager and, off a terminal, editor and update-notifier
@@ -1246,8 +1255,8 @@ with `INIT_FAILED` and `context.reason`: `permissions`, `network`, `disk`, or `i
 
 Every variable treaty reads carries the app's prefix (`DEPLOYCTL_FORMAT`,
 `DEPLOYCTL_MAX_OUTPUT_BYTES`, `DEPLOYCTL_STATE_DIR`, ...), and `--help` lists them under
-Environment; in the manifest, each global flag's description names its variable (the spec's
-manifest has no `environment` key yet). Unprefixed, treaty reads only shared conventions:
+Environment; in the manifest, a flag's `env_vars` names the variables it reads, the root
+`env_vars` the others, and the root `secret_env_vars` each secret setting's. Unprefixed, treaty reads only shared conventions:
 `CI`, `NO_COLOR`, `TERM`, `COLUMNS`, `HOME`, `XDG_*`, `GITHUB_ACTIONS`, `JENKINS_URL`, the
 proxy and CA bundle variables, and `TOOL_TRACE_ID`. The `env-prefix` audit rule flags handlers that read an unprefixed
 variable such as `DEBUG`.
@@ -1350,9 +1359,9 @@ field is checked as a flag's value is (the `Decimal`, `Path`, enum, `Literal`, a
 `app.scalar` rules included), an unknown or missing key is refused, and every error is one
 entry in `error.errors` at its location, such as `postings[1].number`, exit `2`. The
 dataclass's `__post_init__` runs in phase 1 too. `--schema` and the MCP `inputSchema`
-carry the object's schema; the manifest lists the flag as a `string` (an `array` for a list)
-whose description shows its shape, as `--help` does, and completion offers no values for
-it. An object travels on argv, so it holds no secret (REQ-C-016): a field under a
+carry the object's schema; the manifest lists the flag as an `object` (an `array` for a
+list) whose `schema` is one value's (ManifestResponse 3.7), `--help` shows its shape, and
+completion offers no values for it. An object travels on argv, so it holds no secret (REQ-C-016): a field under a
 secret's name, such as `postings[].token`, or declared `secret=True`, fails registration;
 make it a top-level flag, read from `--x-from-env` or `--x-from-file`, or declare
 `secret=False` when the name misleads. An object flag cannot be positional, a secret, or a
@@ -1588,8 +1597,8 @@ run under the same contract (a `would_*` effect, `meta.dry_run: true`, not store
 idempotency key), and with it the command runs. The flag keeps its name, its default is
 `False`, and a missing value is a preview on every input path: argv, `--raw-payload`,
 `exec` lines, and `App.call` and MCP. `exec --dry-run` previews even a line that passes
-it. The manifest's description of the flag says the command previews without it, and the
-audit log records the preview with `dry_run: true`. A safe or destructive command, a
+it. The manifest names the flag in the command's `confirm_flag` (ManifestResponse 3.14),
+and the audit log records the preview with `dry_run: true`. A safe or destructive command, a
 non-boolean field, `env=` (it is passed on each run, never read from a variable), or a
 command that also declares a dry-run switch is a `RegistrationError`; a destructive command previews through `dry_run` and
 `--confirm-destructive`, or `safe_default=True`.
@@ -1903,7 +1912,8 @@ envelope as `structuredContent` and as JSON text; `isError` mirrors `ok`. Calls 
 `App.call`, the same path as an `exec` line, so an unconfirmed destructive tool call
 returns `CONFIRMATION_REQUIRED` with its dry-run preview, idempotency keys, timeouts,
 effect validation, and output caps all apply, and a streaming command returns its buffered
-envelope. Tool annotations map `safe` to read-only and idempotent, `destructive` to
+envelope. Tool annotations map `safe` to read-only and idempotent, `idempotent=True` to
+idempotent too, `destructive` to
 destructive, and `has_network_io` to open-world. `App.call(path, arguments)` is public
 for other in-process adapters.
 

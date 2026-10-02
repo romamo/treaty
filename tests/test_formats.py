@@ -265,8 +265,14 @@ def test_manifest_help_and_completion_list_a_custom_name() -> None:
     spec_validator("manifest-response").validate(manifest)
     entry = manifest["flags"]["format"]  # type: ignore[index]
     assert entry["enum_values"] == ["plain", "json", "jsonl", "ndjson", "csv", "tsv", "html", "rst"]
-    # FlagEntry has no media type key, so the description states it
-    assert entry["description"].endswith("; html writes text/html")
+    # ManifestResponse 3.12: every value outside the spec's table has its media type,
+    # treaty's own built-in ones too; rst declared none, so an agent treats it as opaque
+    assert entry["media_types"] == {
+        "ndjson": "application/x-ndjson",
+        "csv": "text/csv",
+        "html": "text/html",
+    }
+    assert "writes" not in entry["description"]
     _, out, _ = run(app, ["--help"])
     assert "--format plain|json|jsonl|ndjson|csv|tsv|html|rst" in out
     assert "html writes text/html" in out
@@ -474,8 +480,12 @@ def test_the_manifest_lists_a_commands_own_formats_on_its_entry() -> None:
     assert commands["tag"]["output_formats"] == ["csv"]
     assert commands["show"]["output_formats"] == ["csv"]
     assert commands["manifest"]["output_formats"] == ["csv"]
-    # output_formats holds names only, so the entry's description states the media type
-    assert commands["why"]["description"] == "Why it happened. --format html writes text/html"
+    # ManifestResponse 3.12: what each writes where the root map does not say it, a
+    # built-in value included; the description stays the command's own
+    assert commands["why"]["output_media_types"] == {"html": "text/html"}
+    assert commands["why"]["description"] == "Why it happened"
+    assert commands["label"]["output_media_types"] == {"yaml": "application/yaml"}
+    assert "output_media_types" not in commands["tag"]
 
 
 def test_schema_lists_the_inherited_formats_and_a_commands_own() -> None:
