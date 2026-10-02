@@ -10,6 +10,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Changed
+
+- `@app.command(..., idempotent=True)` registers on a `safe` or `destructive` command, as
+  REQ-C-002 requires, instead of raising `RegistrationError`. On a `safe` command it is
+  redundant and accepted without warning; on any danger level the manifest description
+  ends with the idempotent note, and the declared exit codes are unchanged. The
+  `retryable` audit rule passes an idempotent destructive command's retryable codes as it
+  does a mutating one's, and its fix on a destructive command now names `idempotent=True`
+  too (#226)
+
 ## [1.0.0rc17] - 2026-10-02
 
 The seventeenth 1.0 release candidate: 2 additions.

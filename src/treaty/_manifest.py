@@ -372,7 +372,7 @@ def command_entry(
         # #173: no CommandEntry key says stderr is busy; an agent reads it here
         description = f"{description}. {CHILD_LOG_NOTE}"
     if command.idempotent:
-        # #210: no CommandEntry key says a mutating command is safe to repeat
+        # #210: no CommandEntry key in the 3.5 schema says a command is safe to repeat
         description = f"{description}. {IDEMPOTENT_NOTE}"
     if command.media_types:
         # #209: output_formats holds names only, so what each writes is stated here
