@@ -27,6 +27,13 @@ Apps built on treaty keep their own, structured schema changelog with
   left, so a handler watching `ctx.remaining` lost its partial result to `TIMEOUT`. The
   connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
   when a body without a length would have looked complete
+- The long-running work chapter's `import-all` starts a feed only when the time left is at
+  least twice the slowest feed so far took, not just the last one's duration, which started
+  a feed with no room for it to run slower: on a loaded machine that feed ran into the
+  limit and the run exited 10 with `TIMEOUT`, losing the result of the feeds already
+  imported. The chapter explains the margin, and its tests time one feed on the runner and
+  set their limits from it, so a loaded runner's first feed does not outlast a limit fixed
+  in seconds
 
 ## [1.0.0rc21] - 2026-10-02
 
