@@ -475,7 +475,8 @@ def _receivers(fn: Callable[..., object], known: set[type]) -> Receivers:
 def _retryable(app: App) -> Iterator[Finding]:
     exits: ExitCodeRegistry = app.exits
     for c in user_commands(app):
-        # A repeat of an idempotent command leaves the same state, so a retry is safe (#210)
+        # A repeat of an idempotent command leaves the same state, so a retry is safe, on a
+        # mutating command as on a destructive one (#210, #226)
         if c.danger_level is DangerLevel.SAFE or c.idempotent:
             continue
         for name in c.exit_codes:
@@ -490,13 +491,8 @@ def _retryable(app: App) -> Iterator[Finding]:
                     c.path.value,
                     f"{name} is retryable on a {c.danger_level.value} command; "
                     "only safe if the handler is idempotent",
-                    (
-                        f"idempotent=True if a repeat of {c.path.parts[-1]} leaves the same "
-                        f"state, or declare {name} with retryable=False"
-                    )
-                    if c.danger_level is DangerLevel.MUTATING
-                    else f"declare {name} with retryable=False: a destructive command's "
-                    "repeat after a partial run cannot be assumed safe",
+                    f"idempotent=True if a repeat of {c.path.parts[-1]} leaves the same "
+                    f"state, or declare {name} with retryable=False",
                 )
 
 
