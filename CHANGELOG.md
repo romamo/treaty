@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc20] - 2026-10-02
+
+The twentieth 1.0 release candidate: 2 changes.
+
 ### Changed
 
 - The manifest's `requires` lists a command's `RequiresAny` and `RequiresOne` rules as the
@@ -1558,7 +1562,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc19...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc20...HEAD
+[1.0.0rc20]: https://github.com/romamo/treaty/compare/v1.0.0rc19...v1.0.0rc20
 [1.0.0rc19]: https://github.com/romamo/treaty/compare/v1.0.0rc18...v1.0.0rc19
 [1.0.0rc18]: https://github.com/romamo/treaty/compare/v1.0.0rc17...v1.0.0rc18
 [1.0.0rc17]: https://github.com/romamo/treaty/compare/v1.0.0rc16...v1.0.0rc17
