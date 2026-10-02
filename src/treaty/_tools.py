@@ -50,6 +50,11 @@ def tool_description(command: Command) -> str:
             f" Destructive: without {CONFIRM_KEY}=true the call is a dry run and returns "
             "CONFIRMATION_REQUIRED with a preview of what would change."
         )
+    elif command.danger_level is DangerLevel.MUTATING and command.streaming:
+        text += (
+            " Mutating: each event in data carries its own effect and meta.effects counts "
+            "them; a repeat runs again."
+        )
     elif command.danger_level is DangerLevel.MUTATING:
         text += f" Mutating; pass {IDEMPOTENCY_KEY} to make retries safe."
     if command.streaming:

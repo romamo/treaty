@@ -248,7 +248,7 @@ the README covers each:
 
 | The work | Use | README |
 | --- | --- | --- |
-| produces results as it goes, and may never end | `streaming=True`, a generator handler; one JSON line per event; `safe` commands only | [Streaming](../../../README.md#streaming) |
+| produces results as it goes, and may never end | `streaming=True`, a generator handler; one JSON line per event; `safe` or `mutating`, never `destructive` | [Streaming](../../../README.md#streaming) |
 | goes on after the command returns | `async_job=True` returning a `treaty.Job`, and `App(jobs=...)` for `job status` and `job cancel` | [Async jobs](../../../README.md#async-jobs) |
 | is ordered steps that can be resumed | `steps=[...]`, `ctx.step(name)` before each, `resumable=True` for `--resume-from` | [Multi-step commands](../../../README.md#multi-step-commands) |
 | starts a process that outlives the run | `ctx.spawn`, declared with `background=` | [Declarations](../../../README.md#declarations) |

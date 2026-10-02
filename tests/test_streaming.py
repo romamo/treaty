@@ -324,8 +324,8 @@ def test_streaming_events_must_be_payloads() -> None:
             yield 1
 
 
-def test_streaming_commands_must_be_safe() -> None:
-    register("streaming commands must be safe", danger_level="mutating")
+def test_streaming_commands_cannot_be_destructive() -> None:
+    register("cannot ask confirmation for each action", danger_level="destructive")
 
 
 def test_iterator_annotation_without_streaming_is_refused() -> None:

@@ -676,10 +676,14 @@ def build_command(
             f"{path}: editor_alternatives {unknown} are not flags of the command; name the "
             "flags that supply the text instead of the editor (REQ-C-023)"
         )
-    if streaming and danger_level is not DangerLevel.SAFE:
+    if streaming and danger_level is DangerLevel.DESTRUCTIVE:
         raise RegistrationError(
-            f"{path}: streaming commands must be safe; the effect and idempotency contracts "
-            "describe one response, not a stream"
+            f"{path}: a stream cannot ask confirmation for each action it takes (REQ-O-021); "
+            'declare danger_level="mutating" or drop streaming=True (REQ-O-004)'
+        )
+    if streaming and config_write_scope is not None:
+        raise RegistrationError(
+            f"{path}: a stream does not write config; drop config_write_scope= or streaming=True"
         )
     shadowed: list[str] = []
     for f in fields:
@@ -711,6 +715,11 @@ def build_command(
             raise RegistrationError(
                 f"{path}: {danger_level.value} commands must return {what} with an "
                 "'effect' field (REQ-C-003)"
+            )
+        if streaming and any(f.name == "idempotency_key" for f in fields):
+            raise RegistrationError(
+                f"{path}: a stream has no idempotency replay, so it takes no "
+                "--idempotency-key; drop the idempotency_key field (REQ-C-007, REQ-O-004)"
             )
         if any(f.name == "idempotency_key" for f in fields):
             raise RegistrationError(
@@ -783,7 +792,8 @@ def build_command(
         if danger_level is not DangerLevel.SAFE:
             effect: JsonSchema = {"type": "string", "description": "What the batch did overall"}
             output_schema["properties"]["effect"] = effect
-    if danger_level is not DangerLevel.SAFE:
+    if danger_level is not DangerLevel.SAFE and not streaming:
+        # A stream has no replay (REQ-C-007): each event reports its own effect
         output_schema = with_replay_effect(output_schema)
     if step_names:
         output_schema = _with_step_fields(output_schema, step_names)
