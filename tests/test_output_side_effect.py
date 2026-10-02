@@ -255,3 +255,163 @@ def test_cleanup_removes_a_temp_path_sharing_only_a_name_prefix_with_an_output_p
     assert code == 0, envelope
     assert (tmp_path / "dash").exists()
     assert not (tmp_path / "dash-tmp").exists()
+
+
+def linked_project(tmp_path: Path) -> tuple[Path, Path]:
+    """A project whose ``tmp`` is a symlink to a scratch directory outside it (#227)"""
+    scratch = tmp_path / "scratch" / "tmp"
+    scratch.mkdir(parents=True)
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / ".cfproject").write_text("")
+    try:
+        (root / "tmp").symlink_to(scratch, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need privileges here")
+    (scratch / "dashboard").mkdir()
+    (scratch / "dashboard" / "index.html").write_text("<html></html>")
+    (scratch / "stale").write_text("x")
+    return root, scratch
+
+
+@pytest.mark.parametrize(
+    "output", [DASHBOARD, SideEffect("{project_root}/tm*/dashboard/", "output")]
+)
+def test_cleanup_keeps_an_output_path_whose_project_directory_links_outside(
+    tmp_path: Path, output: SideEffect
+) -> None:
+    # The output's match resolves outside the project, so cleanup never removes through
+    # it; it still keeps what another command's temp glob reaches by the resolved path
+    root, scratch = linked_project(tmp_path)
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "dashboard",
+        description="Build the dashboard under the project",
+        danger_level="safe",
+        exit_codes=(),
+        project_root=(".cfproject",),
+        filesystem_side_effects=[output],
+    )
+    def build(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    @app.command(
+        "scratch",
+        description="Use the scratch directory",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[SideEffect(f"{scratch.as_posix()}/*", "temp")],
+    )
+    def use(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["cleanup", "--scope", "all", "--confirm-destructive"], root)
+    assert code == 0, envelope
+    assert (scratch / "dashboard" / "index.html").read_text() == "<html></html>"
+    assert not (scratch / "stale").exists()
+    assert (root / "tmp").is_symlink()
+
+
+def test_cleanup_keeps_an_output_path_a_glob_spells_in_another_case(tmp_path: Path) -> None:
+    # On a case-insensitive filesystem /x/Scratch and /x/scratch are one directory
+    real = tmp_path / "scratch"
+    (real / "dash").mkdir(parents=True)
+    (real / "dash" / "index.html").write_text("<html></html>")
+    (real / "stale").write_text("x")
+    other = tmp_path / "SCRATCH"
+    if not other.exists():
+        pytest.skip("the filesystem here is case-sensitive")
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "dash",
+        description="Build the dashboard",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[
+            SideEffect(f"{real.as_posix()}/dash/", "output"),
+            SideEffect(f"{other.as_posix()}/*", "temp"),
+        ],
+    )
+    def dash(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["cleanup", "--confirm-destructive"], tmp_path)
+    assert code == 0, envelope
+    assert (real / "dash" / "index.html").exists()
+    assert not (real / "stale").exists()
+
+
+def through_a_file(root: Path) -> None:
+    (root.parent / "afile").write_text("x")
+    (root / "out").symlink_to(root.parent / "afile" / "x")
+
+
+def into_a_loop(root: Path) -> None:
+    (root / "out").symlink_to(root / "out")
+
+
+def into_a_locked_directory(root: Path) -> None:
+    locked = root.parent / "locked"
+    (locked / "inner").mkdir(parents=True)
+    (root / "out").symlink_to(locked / "inner" / "f")
+    locked.chmod(0)
+
+
+@pytest.mark.parametrize("link", [through_a_file, into_a_loop, into_a_locked_directory])
+def test_cleanup_runs_with_an_output_symlink_whose_target_cannot_be_reached(
+    tmp_path: Path, link: object
+) -> None:
+    # Its identity is unknown, so it is kept by name alone; the run still cleans the rest
+    root = tmp_path / "proj"
+    (root / "tmp").mkdir(parents=True)
+    (root / ".cfproject").write_text("")
+    (root / "tmp" / "stale").write_text("x")
+    try:
+        link(root)  # type: ignore[operator]
+    except OSError:
+        pytest.skip("symlinks need privileges here")
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "out",
+        description="Write the output link",
+        danger_level="safe",
+        exit_codes=(),
+        project_root=(".cfproject",),
+        filesystem_side_effects=[
+            SideEffect("{project_root}/out", "output"),
+            SideEffect("{project_root}/tmp/*", "temp"),
+        ],
+    )
+    def out(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    try:
+        code, envelope = run(app, ["cleanup", "--confirm-destructive"], root)
+    finally:
+        if (tmp_path / "locked").exists():
+            (tmp_path / "locked").chmod(0o755)
+    assert code == 0, envelope
+    assert not (root / "tmp" / "stale").exists()
+    assert (root / "out").is_symlink()
+
+
+class NoInode(type(Path())):  # type: ignore[misc]
+    """A path on a filesystem that reports no inode, as some network and FAT ones do"""
+
+    def lstat(self) -> os.stat_result:
+        return os.stat_result((0o40755, 0, 7, 1, 0, 0, 0, 0, 0, 0))
+
+    def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+        return self.lstat()
+
+
+def test_a_path_without_an_inode_has_no_identity(tmp_path: Path) -> None:
+    # Two such paths would otherwise share (dev, 0) and pass for one another
+    from treaty._builtins import _identity
+
+    assert _identity(NoInode(tmp_path), follow=False) is None
+    assert _identity(NoInode(tmp_path), follow=True) is None
+    assert _identity(tmp_path, follow=False) is not None

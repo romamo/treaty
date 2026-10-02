@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import glob
 import json
 import os
@@ -285,8 +286,10 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     for item in every:
         if item.effect.kind in KEPT:
             # Both where it is and, through a symlink, what it is: two spellings of one
-            # directory, such as /tmp and /private/tmp on macOS, must not slip past
-            spots = [s for m in item.matches for s in (_located(m), Path(m).resolve())]
+            # directory, such as /tmp and /private/tmp on macOS, must not slip past. A
+            # match never removed through its symlink still holds what it reaches (#227)
+            reached = [*item.matches, *item.excluded]
+            spots = [s for m in reached for s in (_located(m), Path(m).resolve())]
             kept.extend(spots)
             if item.effect.kind is SideEffectType.OUTPUT:
                 products.extend(spots)
@@ -302,12 +305,18 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
         if where is not None and where.exists():
             found[str(where)] = SideEffectType.CACHE  # wherever XDG_CACHE_HOME put it
     # REQ-O-027: a path another glob also declares, or a directory holding one, stays;
-    # so does anything inside an output path, which is part of the command's product
+    # so does anything inside an output path, which is part of the command's product.
+    # Compared by name and by file identity: a case-insensitive filesystem spells one
+    # directory several ways
+    holding = {i for k in kept for i in _lineage(k)}
+    product_ids = {i for k in products if (i := _identity(k, follow=True)) is not None}
     held = sorted(
         p
         for p in found
         if any(k.is_relative_to(_located(p)) for k in kept)
         or any(_located(p).is_relative_to(k) for k in products)
+        or _identity(_located(p), follow=False) in holding
+        or not product_ids.isdisjoint(_lineage(_located(p)))
     )
     if held:
         ctx.warn(
@@ -316,6 +325,33 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
             paths=held,
         )
     return sorted((p, kind) for p, kind in found.items() if p not in held)
+
+
+UNREACHABLE = frozenset({errno.ENOENT, errno.ENOTDIR, errno.EACCES, errno.ELOOP})
+"""Why a path cannot be looked at: gone, under a file, under a directory it may not
+search, or behind a symlink loop, as a kept symlink's target may be"""
+LINK_LOOP = 1921
+"""Windows' ERROR_CANT_RESOLVE_FILENAME, its symlink loop, which carries no ELOOP"""
+
+
+def _identity(path: Path, *, follow: bool) -> tuple[int, int] | None:
+    """The device and inode of ``path``, a symlink itself unless ``follow``; None when it
+    cannot be reached (see ``UNREACHABLE``) or the filesystem reports no inode, which
+    identifies nothing"""
+    try:
+        st = path.stat() if follow else path.lstat()
+    except OSError as exc:
+        if exc.errno not in UNREACHABLE and getattr(exc, "winerror", None) != LINK_LOOP:
+            raise
+        return None
+    return None if st.st_ino == 0 else (st.st_dev, st.st_ino)
+
+
+def _lineage(path: Path) -> set[tuple[int, int]]:
+    """The identities of ``path``, a symlink itself, and of each directory above it"""
+    own = _identity(path, follow=False)
+    above = (_identity(d, follow=True) for d in path.parents)
+    return {i for i in (own, *above) if i is not None}
 
 
 def _located(path: str) -> Path:
@@ -335,6 +371,10 @@ class Declared:
     """The absolute glob; None for a ``{project_root}/`` path whose project was not found"""
     matches: list[str]
     """The paths it covers now, in native form"""
+    excluded: list[str]
+    """The paths its glob matches that it does not cover, reached through a symlink a
+    wildcard matched or resolving outside the project: never removed through, but a kept
+    kind still holds what they reach"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,7 +396,7 @@ def declared(app: App, home: str | None, cwd: Path) -> Iterator[Declared]:
     the command's ``project_root=`` markers from ``cwd`` up, never the cwd itself: with no
     marker found it has no pattern and no matches, nor with one found at ``/``, the home
     directory, or above it (see ``_cleanable``), and a match whose directory resolves
-    outside the project, through a symlink, is left out"""
+    outside the project, through a symlink, is left out: ``excluded`` holds it"""
     roots: dict[tuple[str, ...], Path | None] = {}
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         for effect in command.filesystem_side_effects:
@@ -367,18 +407,20 @@ def declared(app: App, home: str | None, cwd: Path) -> Iterator[Declared]:
                     roots[markers] = _cleanable(find_project_root(cwd, markers), home)
                 project = roots[markers]
                 if project is None:
-                    yield Declared(path, effect, None, [])
+                    yield Declared(path, effect, None, [], [])
                     continue
             pattern = effect.pattern(home, project)
             if pattern is None:
                 continue
             where = glob.escape(pattern).replace("[*]", "*")
             found = glob.glob(where, include_hidden=True)
-            matches = [os.path.normpath(m) for m in found if not _linked(m, pattern)]
+            every = [os.path.normpath(m) for m in found]
+            matches = [m for m in every if not _linked(m, pattern)]
             if project is not None:
                 inside = project.resolve()
                 matches = [m for m in matches if Path(m).parent.resolve().is_relative_to(inside)]
-            yield Declared(path, effect, pattern, sorted(matches))
+            excluded = sorted(set(every) - set(matches))
+            yield Declared(path, effect, pattern, sorted(matches), excluded)
 
 
 def _cleanable(root: Path | None, home: str | None) -> Path | None:

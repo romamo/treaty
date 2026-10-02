@@ -19,6 +19,15 @@ Apps built on treaty keep their own, structured schema changelog with
   `retryable` audit rule passes an idempotent destructive command's retryable codes as it
   does a mutating one's, and its fix on a destructive command now names `idempotent=True`
   too (#226)
+### Fixed
+
+- `cleanup` no longer removes an `output`, `credential`, or `config` path that its
+  declaration reaches through a symlink it never removes through, such as a
+  `{project_root}/tmp/dashboard/` output whose `<project>/tmp` links to a scratch directory
+  another command declares as `temp`: the match still joins the kept set by its resolved
+  path. A path a `temp`, `cache`, or `log` glob spells in another case on a
+  case-insensitive filesystem is compared by file identity too, so it no longer slips
+  past the kept check (#227)
 
 ## [1.0.0rc17] - 2026-10-02
 
