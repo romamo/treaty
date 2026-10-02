@@ -730,8 +730,11 @@ def _network_timeout(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.has_network_io:
             continue
-        for unit in reached_functions(c.handler):
+        units = reached_functions(c.handler)
+        warned = False
+        for unit in units:
             for name in untimed_network_calls(unit.fn):
+                warned = True
                 yield Finding(
                     "network-timeout",
                     Severity.WARNING,
@@ -739,6 +742,21 @@ def _network_timeout(app: App) -> Iterator[Finding]:
                     f"{name}(...) has no timeout=, so it can outlive --timeout{unit.where}",
                     f"{name}(..., timeout=ctx.timeout.seconds)",
                 )
+        if warned or any(
+            _reads_ctx(u.fn, _DEADLINE_ROUTES, first=i == 0) for i, u in enumerate(units)
+        ):
+            continue
+        yield Finding(
+            "network-timeout",
+            Severity.ADVICE,
+            c.path.value,
+            "the handler reaches none of ctx.http, ctx.remaining, ctx.timeout, and "
+            "ctx.network.timeout(), so if a client of its own goes out, such as a library's "
+            "requests.Session, its timeout and retries may not fit --timeout, and the run "
+            "answers TIMEOUT where the request failed (REQ-C-012, heuristic)",
+            "pass each call timeout=ctx.network.timeout(30), its own timeout cut to "
+            "ctx.remaining, and retry only while ctx.network.fits(the next attempt)",
+        )
 
 
 def _subprocess_declared(app: App) -> Iterator[Finding]:
@@ -1082,21 +1100,33 @@ _NETWORK_ROUTES = frozenset({"http", "network", "run", "pipeline", "spawn"})
 ctx.pipeline, and ctx.spawn start, whose environment holds them"""
 
 
-def _routes_network(fn: Callable[..., object], *, first: bool) -> bool:
-    """Whether ``fn`` reads one of ``_NETWORK_ROUTES`` off ctx: the handler's second
-    parameter, or a helper's ``ctx`` taken by name"""
+_DEADLINE_ROUTES = frozenset(
+    {
+        *("http", "run", "pipeline", "spawn"),
+        *("remaining", "timeout", "network.timeout", "network.fits"),
+    }
+)
+"""What hands a call the command's deadline: ctx.http and the children ctx.run,
+ctx.pipeline, and ctx.spawn start clamp to it, and ctx.remaining, ctx.timeout, and
+ctx.network's timeout() and fits() give it to a client of the handler's own (#237)"""
+
+
+def _reads_ctx(fn: Callable[..., object], routes: frozenset[str], *, first: bool) -> bool:
+    """Whether ``fn`` reads one of ``routes`` off ctx, the handler's second parameter or a
+    helper's ``ctx`` taken by name: ``name`` for ``ctx.name``, ``network.name`` for
+    ``ctx.network.name``"""
     params = list(signature(fn).parameters)
     name = (params[1] if len(params) > 1 else None) if first else "ctx"
     tree = source_tree(fn)
     if name is None or tree is None:
         return tree is None  # no source to read: assume it does, rather than advise
-    return any(
-        isinstance(node, ast.Attribute)
-        and node.attr in _NETWORK_ROUTES
-        and isinstance(node.value, ast.Name)
-        and node.value.id == name
-        for node in ast.walk(tree)
-    )
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        read = _dotted(node) or ""
+        if read.startswith(f"{name}.") and read.removeprefix(f"{name}.") in routes:
+            return True
+    return False
 
 
 def _http_client(app: App) -> Iterator[Finding]:
@@ -1116,7 +1146,7 @@ def _http_client(app: App) -> Iterator[Finding]:
                 f"(REQ-F-036, REQ-F-037){unit.where}",
                 "response = ctx.http.get(url)",
             )
-        elif not any(_routes_network(u.fn, first=i == 0) for i, u in enumerate(units)):
+        elif not any(_reads_ctx(u.fn, _NETWORK_ROUTES, first=i == 0) for i, u in enumerate(units)):
             yield Finding(
                 "http-client",
                 Severity.ADVICE,
