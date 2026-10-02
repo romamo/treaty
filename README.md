@@ -1509,10 +1509,31 @@ blocks, then ends the stream with the normal `CANCELLED` envelope and exit `130`
 The manifest declares `streaming_default: true` and a `--no-stream` flag (REQ-O-004),
 which returns one envelope with every event in `data` and `meta.total`; a failure under
 `--no-stream` keeps the events seen so far in `data`. In `exec`, each event line carries
-`_line` and `_cmd`. Streaming commands must be `safe`: the effect and idempotency
-contracts describe one response. In a text format the renderer gets one event per call.
+`_line` and `_cmd`. In a text format the renderer gets one event per call.
 Summary lines carry `meta.pagination`; `--stream` on a command that cannot stream answers
 with one envelope and a `STREAMING_NOT_SUPPORTED` warning.
+
+A stream is `safe` or `mutating`; a `destructive` one is refused at registration, since a
+stream cannot ask confirmation for each action. A mutating stream, such as a watch loop
+that acts on what it sees, reports what it did event by event: each event's `data` carries
+its own `effect`, checked as a single response's is, and the terminal envelope counts them
+in `meta.effects` (`{"created": 2, "noop": 1}`), as does `--no-stream`. Its dry-run flag
+covers the whole stream: every event reports a `would_*` effect (`would_noop` for one that
+changes nothing), and every line carries `meta.dry_run: true`. A stream has no idempotency
+replay, so it takes no `--idempotency-key` and an `<APP>_SESSION` repeat runs again; a
+mutating stream that fails after a live effect other than `noop` ends with `retryable:
+false`, since its events already applied. The audit log writes one entry per run, with the
+counts in `effects`.
+
+```python
+@app.command("operator.run", description="Act on alerts each pass", streaming=True,
+             danger_level="mutating", exit_codes=())
+def operate(args: OperatorArgs, ctx: Ctx) -> Iterator[Pass]:
+    while True:
+        receipt = None if args.dry_run else write_receipt(alerts())
+        yield Pass(effect="would_create" if args.dry_run else "created", receipt=receipt)
+        time.sleep(args.interval)
+```
 
 ## Asking for less output
 

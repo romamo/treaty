@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 
-from ._command import Command
+from ._command import Command, DangerLevel
 from ._envelope import visible
 from ._envnames import declared_text
 from ._flags import FieldInfo, object_shape
@@ -197,6 +197,10 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
     lines.append(f"Danger level: {command.danger_level.value}")
     if command.streaming:
         lines.append("Streams one JSONL envelope per event; --no-stream returns a single envelope")
+        if command.danger_level is not DangerLevel.SAFE:
+            lines.append(
+                "Each event reports its own effect; the last line counts them in meta.effects"
+            )
     if command.examples:
         lines.append("")
         lines.append("Examples")

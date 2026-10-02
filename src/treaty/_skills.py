@@ -89,7 +89,14 @@ def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) ->
                 f"Previews unless --{confirming.flag}: read the would_* effect first, then "
                 f"apply with --{confirming.flag}"
             )
-        rails.append("Mutating: pass --idempotency-key so a retry cannot apply it twice")
+        if command.streaming:
+            rails.append(
+                "Mutating stream: each event's effect says what it did and the summary's "
+                "meta.effects counts them; it takes no --idempotency-key, so a rerun is a new "
+                "run, and a failure after a live effect is not retryable"
+            )
+        else:
+            rails.append("Mutating: pass --idempotency-key so a retry cannot apply it twice")
     if command.required_scopes:
         scopes = ", ".join(str(s) for s in command.required_scopes)
         rails.append(f"Needs the credential scopes {scopes}")

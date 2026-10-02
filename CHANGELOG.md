@@ -22,6 +22,20 @@ Apps built on treaty keep their own, structured schema changelog with
   `output` side effect is a `RegistrationError`. A `safe` command whose only writes are
   `cache`, `log`, `temp`, or `output` paths stays `safe` and passes the `fs-side-effects`
   audit rule, whose fix now names the `output` kind too (#184)
+- A streaming command can be `danger_level="mutating"`, for a watch loop that acts on what
+  it sees. Each event carries its own `effect`, checked as a single response's is: an
+  event without one, with an unknown value, or with a live value in a dry run ends the
+  stream with `INVALID_EFFECT` before it is written. The terminal envelope counts the
+  events per effect in `meta.effects` (`{"created": 2, "noop": 1}`), as do `--no-stream`,
+  `exec`, `App.call`, and MCP. The command's dry-run flag covers the whole stream: every
+  event reports a `would_*` effect and every line, the error envelope included, carries
+  `meta.dry_run: true`. A stream has no idempotency replay, so it gets no
+  `--idempotency-key`, no implicit `CONFLICT` exit code, and no `<APP>_SESSION` dedup; a
+  field named `idempotency_key` on one is refused at registration. A failure after a live
+  effect other than `noop` is `retryable: false`, and the audit log writes one entry per
+  run with its counts in `effects`. A `destructive` stream, and a streaming command with
+  `config_write_scope=`, are still refused at registration. Implements cli-agent-spec
+  ResponseEnvelope 2.2 and AuditLogEntry 1.1 (#175)
 
 ## [1.0.0rc16] - 2026-10-02
 

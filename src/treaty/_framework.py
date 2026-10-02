@@ -396,7 +396,8 @@ FLAGS: tuple[FrameworkFlag, ...] = (
     FrameworkFlag(
         IDEMPOTENCY_FLAG,
         "idempotency_key",
-        lambda c: c.danger_level is not DangerLevel.SAFE,
+        # A stream has no replay: one stored result cannot stand in for its events (REQ-C-007)
+        lambda c: c.danger_level is not DangerLevel.SAFE and not c.streaming,
         "string",
         lambda c: (
             "Repeat calls with the same key return the original result with effect noop "

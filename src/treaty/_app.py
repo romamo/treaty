@@ -109,6 +109,7 @@ from ._effect import affects_summary, effect_problem, is_preview
 from ._env import KNOWN, SESSION, STATE_DIR, app_var
 from ._envelope import (
     ENVELOPE_SCHEMA_VERSION,
+    RETRY_SUGGESTION,
     Envelope,
     ErrorDetail,
     Meta,
@@ -2064,7 +2065,8 @@ class App:
             ):
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
             return buffer_stream(
-                run.stream(command, invocation, Format.JSON, meta=meta, whole=True)
+                run.stream(command, invocation, Format.JSON, meta=meta, whole=True),
+                run.counted_effects,
             )
         return run.execute(command, invocation, Format.JSON, meta=meta)
 
@@ -2321,7 +2323,8 @@ class App:
             if command.streaming:
                 if invocation.no_stream:
                     envelopes = run.stream(command, invocation, mode, whole=True)
-                    return run.emit(mode, buffer_stream(envelopes), render=_each(render))
+                    buffered = buffer_stream(envelopes, run.counted_effects)
+                    return run.emit(mode, buffered, render=_each(render))
                 envelopes = run.stream(command, invocation, mode)
                 run.in_flight = command
                 return run.emit_stream(mode, envelopes, render=render)
@@ -3352,8 +3355,37 @@ def drain(envelopes: Generator[Envelope]) -> Iterator[Envelope]:
         yield envelopes.throw(exc)
 
 
-def buffer_stream(envelopes: Generator[Envelope]) -> Envelope:
-    """``--no-stream``: every event in ``data`` under one envelope; a failure keeps its events"""
+class _EffectBroken(Exception):
+    """An event of a mutating stream without a valid ``effect`` for its mode (REQ-C-003)"""
+
+
+def _after_live_effects(envelope: Envelope) -> Envelope:
+    """A mutating stream that failed after a live effect other than ``noop``: retrying
+    would repeat what its events already applied, so the error is not retryable (REQ-O-004)"""
+    error = envelope.error
+    if error is None or not error.retryable:
+        return envelope
+    suggestion = error.suggestion
+    if suggestion == RETRY_SUGGESTION:
+        suggestion = (
+            "the events already written applied their effects; check them before running "
+            "the command again"
+        )
+    applied = dataclasses.replace(
+        error,
+        retryable=False,
+        retry_after_ms=None,
+        retry_strategy=None,
+        suggestion=suggestion,
+    )
+    return dataclasses.replace(envelope, error=applied)
+
+
+def buffer_stream(
+    envelopes: Generator[Envelope], effects: Callable[[], Mapping[str, int] | None] | None = None
+) -> Envelope:
+    """``--no-stream``: every event in ``data`` under one envelope; a failure keeps its events.
+    ``effects`` gives a mutating stream's counts once it ended, for ``meta.effects``"""
     events: list[object] = []
     # An event's own warnings, such as what was masked in it, which the terminal lacks
     warnings: list[WarningDetail] = []
@@ -3368,6 +3400,10 @@ def buffer_stream(envelopes: Generator[Envelope]) -> Envelope:
     for warning in warnings:
         if warning not in merged:
             merged.append(warning)
+    counted = None if effects is None else effects()
+    if counted is not None:
+        # REQ-O-004: also on a failure, whose data keeps the events it counts
+        meta["effects"] = dict(counted)
     return dataclasses.replace(
         last, data=events, warnings=tuple(merged), extra_meta={**meta, "total": len(events)}
     )
@@ -3409,6 +3445,9 @@ class _Run:
         self.cancellation = Cancellation()
         self.in_flight: Command | None = None
         """A streaming command whose events are still being written"""
+        self.stream_effects: collections.Counter[str] | None = None
+        """The events per effect of the mutating stream that runs now (REQ-O-004), for its
+        buffered answer and its audit entry; None for any other command"""
         self.abandoned: Pending | None = None
         """Set by ``_execute`` when the handler outlived its timeout and still runs"""
         self.page: tuple[CommandPath, Position] | None = None
@@ -3753,7 +3792,19 @@ class _Run:
             entry["trace_id"] = self.trace_id
         if session := self.env.get(app_var(self.app.name, SESSION.key)):
             entry["session_id"] = session
+        effects = self.counted_effects()
+        if effects is not None:
+            # REQ-O-030: one entry per stream, its events counted per effect
+            entry["effects"] = dict(effects)
         return entry
+
+    def counted_effects(self) -> Mapping[str, int] | None:
+        """The events per effect of the mutating stream answered now, or None when the
+        invocation is no mutating stream or ended before its handler ran"""
+        command, effects = self.current, self.stream_effects
+        if command is None or not command.streaming or effects is None:
+            return None
+        return effects
 
     def _ctx(
         self,
@@ -5397,6 +5448,7 @@ class _Run:
         their count in ``meta.seq`` and marks the response ``partial``.
         """
         self.args, self.invocation = invocation.args, invocation
+        self.stream_effects = None
         self._pin(command, invocation)
         if invocation.validate_only:
             yield self._present(command, self.validated(meta))
@@ -5412,9 +5464,18 @@ class _Run:
         waiting_since = started
         timeout = self.app._effective_timeout(command, invocation.timeout)
         full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
+        args = invocation.args
+        # REQ-O-004: a mutating stream reports an effect per event and counts them; a dry
+        # run covers the whole stream, so every line says so
+        effects: collections.Counter[str] | None = None
+        preview = False
+        if command.danger_level is not DangerLevel.SAFE:
+            effects = self.stream_effects = collections.Counter()
+            preview = _dry_run_requested(command, args)
+            if preview:
+                full_meta["dry_run"] = True
         ctx = self._ctx(command, invocation.args, mode, timeout, invocation=invocation)
         before = _process_cwd()
-        args = invocation.args
         seq = 0
         events: Iterator[object] | None = None
         terminal: Callable[[], Envelope]
@@ -5488,17 +5549,24 @@ class _Run:
                     break
                 seq += 1
                 data = self._payload(self._shimmed(command, event), *self._output(command))
+                if effects is not None:
+                    problem = effect_problem(data, preview=preview)
+                    if problem is not None:
+                        seq -= 1  # never delivered: the error names it, meta.seq does not
+                        raise _EffectBroken(problem)
+                    assert isinstance(data, dict)
+                    effects[str(data["effect"])] += 1
                 event = self._envelope(
                     0, data=data, started=started, meta={**full_meta, "seq": seq}
                 )
                 yield self._present(command, event)
             # REQ-O-004: the summary line carries the stream's pagination
             summary = Pagination(total=seq, returned=seq, next_cursor=None).to_json()
+            end: dict[str, object] = {"seq": seq, "end": True, "total": seq, "pagination": summary}
+            if effects is not None:
+                end["effects"] = dict(effects)
             terminal = functools.partial(
-                self._envelope,
-                0,
-                started=started,
-                meta={**full_meta, "seq": seq, "end": True, "total": seq, "pagination": summary},
+                self._envelope, 0, started=started, meta={**full_meta, **end}
             )
         except CliExit as exc:
             terminal = functools.partial(
@@ -5533,6 +5601,11 @@ class _Run:
             terminal = functools.partial(
                 self._broken, command, "INVALID_OUTPUT", message, started, partial()
             )
+        except _EffectBroken as exc:
+            message = f"Command {command.path} broke the effect contract in event {seq + 1}: {exc}"
+            terminal = functools.partial(
+                self._broken, command, "INVALID_EFFECT", message, started, partial()
+            )
         except GeneratorExit:
             raise  # the consumer closed the stream; nothing more may be yielded
         except BaseException as exc:  # noqa: BLE001 - the handler boundary; see _crashed
@@ -5548,7 +5621,10 @@ class _Run:
                 self.teardown.run(GRACE_SECONDS)  # beside a held worker, past its grace (06-D3)
             self._restore_cwd(before)
         # Built after the teardown, so a CLEANUP_FAILED warning reaches it
-        yield self._present(command, terminal())
+        last = terminal()
+        if effects is not None and not preview and any(e != "noop" for e in effects):
+            last = _after_live_effects(last)
+        yield self._present(command, last)
 
     def _timed_out(self, command: Command, timeout: Timeout, what: str) -> tuple[int, ErrorDetail]:
         """The exit code and ``TIMEOUT`` error of a handler or stream past ``timeout``: a
@@ -7006,7 +7082,7 @@ class _Run:
                     ),
                 )
                 continue
-            self.current = command
+            self.current, self.stream_effects = command, None
             try:
                 invocation = self._exec_invocation(command, request, args.dry_run, line_no)
             except ParseError as exc:
@@ -7019,7 +7095,7 @@ class _Run:
             if command.streaming:
                 if invocation.no_stream:
                     envelopes = self.stream(command, invocation, Format.JSON, meta=meta, whole=True)
-                    yield line_no, buffer_stream(envelopes)
+                    yield line_no, buffer_stream(envelopes, self.counted_effects)
                     continue
                 envelopes = self.stream(command, invocation, Format.JSON, meta=meta)
                 self.in_flight = command

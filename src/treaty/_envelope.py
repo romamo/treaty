@@ -165,7 +165,9 @@ def sentence(text: str, programs: Collection[str] = ()) -> str:
     return text
 
 
-_RETRY = "retry the same command; it had no side effects"
+RETRY_SUGGESTION = "retry the same command; it had no side effects"
+"""The suggestion a retryable error gets when it names none"""
+_RETRY = RETRY_SUGGESTION
 
 
 def without_userinfo(url: str) -> str:

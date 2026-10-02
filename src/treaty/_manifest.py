@@ -74,10 +74,10 @@ _ALWAYS = (
 
 def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
     """The codes a command may exit with undeclared: the shared ones, CONFLICT for a
-    reused idempotency key on a non-safe command, 7 and 8 behind the credential gate, and
-    12 when ``ctx.http`` can fail"""
+    reused idempotency key on a non-safe command that does not stream, 7 and 8 behind the
+    credential gate, and 12 when ``ctx.http`` can fail"""
     codes = list(_ALWAYS)
-    if command.danger_level is not DangerLevel.SAFE:
+    if command.danger_level is not DangerLevel.SAFE and not command.streaming:
         codes.append(FrameworkCode.CONFLICT)
     if command.requires_auth:
         # Not logged in, or the credential lacks a required scope (REQ-C-029)
