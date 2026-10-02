@@ -1976,6 +1976,40 @@ idempotent too, `destructive` to
 destructive, and `has_network_io` to open-world. `App.call(path, arguments)` is public
 for other in-process adapters.
 
+### An app's own `mcp serve`
+
+`treaty-mcp module:app` takes no startup flags. An app whose server needs some (which
+project, which schema directory) declares the `mcp serve` built-in instead:
+
+```python
+@dataclass(frozen=True, slots=True)
+class ServeArgs:
+    project: Path = Flag(description="Project the tools work in")
+
+def setup(args: ServeArgs, ctx: Ctx) -> None:
+    if not args.project.is_dir():
+        raise Exit.PROJECT_INVALID(f"no project at {args.project}")
+
+app = App("deployctl", version="1.4.0",
+          mcp=McpServe(args=ServeArgs, setup=setup, exit_codes=("PROJECT_INVALID",)))
+app.exit_code("PROJECT_INVALID", 80, description="No project there", retryable=False,
+              side_effects="none")
+```
+
+`deployctl mcp serve --project .` parses and validates its flags, and `--schema` lists
+them, as for any command; a secret flag comes from the environment or a file and is
+redacted as anywhere. `setup(args, ctx, *resources)` runs once before serving and takes
+resources as a handler does; they are released when the server stops. Stdout and stdin
+carry the protocol from the first byte, so the command's envelope is a JSON line on
+stderr: a failure before serving (a bad flag exits `2`, `setup` raising
+`Exit.PROJECT_INVALID` exits its code) writes nothing to stdout. While serving, a stray
+`print()` or a write to descriptor 1 goes to stderr, never into the protocol. Closing
+stdin, `SIGINT`, or `SIGTERM` stops the server with exit `0`; `data` says which
+(`stopped_by`) and how many `tool_calls` it answered. The audit log gets one entry for the
+server run, and each tool call one as its command's. The manifest says in the command's
+description that its stdout is a protocol, since the spec has no key for that yet. `exec`
+lines and `App.call` refuse it with `NEEDS_STDIO`.
+
 `treaty-mcp deployctl:app --list-tools` prints the tools as JSON with `cli_version`, no
 `mcp` package needed; commit it, and `deployctl mcp-validate --mcp-schema-file mcp.json`
 in CI exits `1` with `SCHEMA_DRIFT_DETECTED` when the commands drifted from it: `added`

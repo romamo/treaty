@@ -53,6 +53,16 @@ Apps built on treaty keep their own, structured schema changelog with
   `RequiresAny`, `RequiresOne`, and `Excludes` only when true: an explicit `--no-x`, or
   `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
   unchanged, and a test pins it (#241)
+- `App(mcp=McpServe(args=ServeArgs, setup=..., exit_codes=...))` adds the `mcp serve`
+  built-in (#239): an app serves its commands as MCP tools over stdio as one of its own
+  commands, with startup flags parsed, validated, and listed in `--schema` like any
+  command's, and a `setup(args, ctx, *resources)` that runs once before serving. A failure
+  before serving answers with the usual envelope and exit code on stderr, with nothing on
+  stdout; once serving, stdout and stdin carry only the protocol, and a stray `print()` or
+  write to descriptor 1 still goes to stderr. Closing stdin, `SIGINT`, or `SIGTERM` stops
+  the server with exit 0 and one audit log entry for the run. The manifest marks the
+  command's stdout as a protocol in its description; `exec` and `App.call` refuse it with
+  `NEEDS_STDIO`
 
 ## [1.0.0rc21] - 2026-10-02
 

@@ -8,8 +8,13 @@ confirmation, idempotency, timeouts, effect validation, and output caps all
 apply. An unconfirmed destructive call returns the ``CONFIRMATION_REQUIRED``
 envelope with its dry-run preview, exactly as the CLI does.
 
-Only ``serve`` and ``main`` import the ``mcp`` package; everything else is
-plain data so it can be inspected and tested without the SDK.
+``treaty-mcp module:app`` serves on the process's streams as they are. An app's own
+``mcp serve`` (#239) runs inside its CLI run instead, where descriptor 1 and
+``sys.stdout`` lead to stderr: ``serve_wire`` speaks the protocol on the copy of the
+original stdout the run holds, so a stray write never reaches the client.
+
+Only ``build_server``, ``serve``, ``serve_wire``, and ``main`` import the ``mcp`` package;
+everything else is plain data so it can be inspected and tested without the SDK.
 """
 
 from __future__ import annotations
@@ -19,14 +24,19 @@ import dataclasses
 import io
 import json
 import sys
-from collections.abc import Mapping
+import threading
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import IO, Any, Literal, TextIO, cast
 
 from ._app import App, _Run
+from ._context import Wire
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
+from ._mcp_serve import McpServed
 from ._prompt import NoPromptStdin
+from ._signals import Cancelled
+from ._subprocess import GRACE_SECONDS
 from ._tools import (
     DRAFT_07,
     ToolEntry,
@@ -119,8 +129,14 @@ def _as_tools(envelope: Envelope) -> Envelope:
 # The SDK-facing part
 
 
-def build_server(app: App) -> Any:
-    """A low-level ``mcp`` Server whose tools are the app's commands"""
+def build_server(
+    app: App,
+    *,
+    env: Mapping[str, str] | None = None,
+    called: Callable[[], None] | None = None,
+) -> Any:
+    """A low-level ``mcp`` Server whose tools are the app's commands, called with ``env``
+    (the process's when None); ``called`` runs as each tool call is answered"""
     from mcp import types
     from mcp.server.lowlevel.server import Server
 
@@ -146,7 +162,9 @@ def build_server(app: App) -> Any:
 
     async def on_call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
         arguments = params.arguments or {}
-        envelope = await asyncio.to_thread(call_tool, app, entries, params.name, arguments)
+        envelope = await asyncio.to_thread(call_tool, app, entries, params.name, arguments, env=env)
+        if called is not None:
+            called()
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=serialize(envelope))],
             structured_content=without_surrogates(envelope.to_json()),
@@ -179,6 +197,191 @@ async def serve(app: App) -> None:
         sys.stdout = sys.stderr
         sys.stdin = cast(TextIO, NoPromptStdin(io.StringIO()))
         await server.run(read, write, server.create_initialization_options())
+
+
+JOIN_SECONDS = 0.25
+"""How often the run's thread wakes while the server runs: a wait without a timeout may
+not see a signal's handler run on Windows"""
+
+
+class _Serving:
+    """The server thread's loop and cancel scope, so the run's thread can stop it, and how
+    the server ended"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._stop: Callable[[], None] | None = None
+        self._stopped = False
+        self.calls = 0
+        self.error: BaseException | None = None
+
+    def started(self, stop: Callable[[], None]) -> None:
+        with self._lock:
+            self._stop = stop
+            stopped = self._stopped
+        if stopped:
+            stop()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stopped = True
+            stop = self._stop
+        if stop is not None:
+            stop()
+
+    def called(self) -> None:
+        with self._lock:
+            self.calls += 1
+
+
+def serve_wire(app: App, wire: Wire, *, env: Mapping[str, str]) -> McpServed:
+    """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends, or until a
+    signal raises ``Cancelled`` here, on the run's thread, which stops the server. The
+    server runs on a thread of its own, so the run's thread only waits, where a signal
+    can interrupt it without tearing the event loop."""
+    stdin = wire.stdin
+    assert stdin is not None, "mcp serve refuses a closed stdin before serving"
+    serving = _Serving()
+    server = build_server(app, env=env, called=serving.called)
+
+    def run() -> None:
+        try:
+            asyncio.run(_serve_wire(server, wire.out, stdin, serving))
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the run's thread below
+            serving.error = exc
+
+    thread = threading.Thread(target=run, name="treaty-mcp", daemon=True)
+    thread.start()
+    try:
+        while thread.is_alive():
+            thread.join(JOIN_SECONDS)
+    except Cancelled as exc:
+        serving.stop()
+        thread.join(GRACE_SECONDS)
+        return McpServed(_signal_name(exc.signal.name), serving.calls)
+    except KeyboardInterrupt:
+        # No treaty handler on this thread (a run started off the main thread)
+        serving.stop()
+        thread.join(GRACE_SECONDS)
+        return McpServed("SIGINT", serving.calls)
+    if serving.error is not None:
+        raise serving.error
+    return McpServed("eof", serving.calls)
+
+
+def _signal_name(name: str) -> Literal["SIGINT", "SIGTERM"]:
+    if name == "SIGTERM":
+        return "SIGTERM"
+    if name == "SIGINT":
+        return "SIGINT"
+    raise ValueError(f"no server stop for {name}")
+
+
+async def _serve_wire(server: Any, out: IO[str], stdin: IO[str], serving: _Serving) -> None:
+    import anyio
+    from mcp.server.stdio import stdio_server
+
+    loop = asyncio.get_running_loop()
+    lines: asyncio.Queue[str | Exception | None] = asyncio.Queue()
+    reader = threading.Thread(
+        target=_read_lines, args=(stdin, loop, lines), name="treaty-mcp-stdin", daemon=True
+    )
+    with anyio.CancelScope() as scope:
+        serving.started(lambda: _call_soon(loop, scope.cancel))
+        reader.start()
+        # Explicit streams: the SDK claims no descriptor, and the protocol goes to the copy
+        # of the original stdout, not descriptor 1, which leads to stderr
+        async with stdio_server(
+            stdin=cast(Any, _Lines(lines)), stdout=cast(Any, _WireOut(out))
+        ) as (read, write):
+            await server.run(read, write, server.create_initialization_options())
+
+
+def _call_soon(loop: asyncio.AbstractEventLoop, fn: Callable[[], object]) -> None:
+    try:
+        loop.call_soon_threadsafe(fn)
+    except RuntimeError:
+        pass  # the loop already closed: the server stopped on its own
+
+
+def _read_lines(
+    stdin: IO[str],
+    loop: asyncio.AbstractEventLoop,
+    lines: asyncio.Queue[str | Exception | None],
+) -> None:
+    """Stdin's lines, read on a daemon thread of their own, so stopping the server never
+    waits for a read; UTF-8 whatever the platform's encoding, as the SDK reads them. None
+    marks the end, and an error reading is handed to the server, which raises it"""
+    buffer = getattr(stdin, "buffer", None)
+    item: str | Exception | None
+    try:
+        while True:
+            raw = buffer.readline() if buffer is not None else stdin.readline()
+            if not raw:
+                break
+            item = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+            loop.call_soon_threadsafe(lines.put_nowait, item)
+        item = None
+    except (OSError, ValueError) as exc:
+        item = exc
+    except RuntimeError:
+        return  # the loop closed: the server stopped first
+    try:
+        loop.call_soon_threadsafe(lines.put_nowait, item)
+    except RuntimeError:
+        return
+
+
+class _Lines:
+    """What the SDK's transport iterates for stdin's lines"""
+
+    def __init__(self, lines: asyncio.Queue[str | Exception | None]) -> None:
+        self._lines = lines
+
+    def __aiter__(self) -> _Lines:
+        return self
+
+    async def __anext__(self) -> str:
+        item = await self._lines.get()
+        if item is None:
+            raise StopAsyncIteration
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class _WireOut:
+    """What the SDK's transport writes each message to: UTF-8 bytes on the run's stdout,
+    whatever the platform's encoding, as the SDK writes them; text on a stream without
+    bytes, as in a test. Writes run on a worker thread, so a client that stops reading
+    blocks no shutdown."""
+
+    def __init__(self, out: IO[str]) -> None:
+        self._out = out
+        self._buffer: IO[bytes] | None = getattr(out, "buffer", None)
+
+    async def write(self, text: str) -> None:
+        import anyio
+
+        await anyio.to_thread.run_sync(self._write, text, abandon_on_cancel=True)
+
+    async def flush(self) -> None:
+        import anyio
+
+        await anyio.to_thread.run_sync(self._flush, abandon_on_cancel=True)
+
+    def _write(self, text: str) -> None:
+        if self._buffer is None:
+            self._out.write(text)
+            return
+        self._out.flush()
+        self._buffer.write(text.encode("utf-8"))
+
+    def _flush(self) -> None:
+        if self._buffer is None:
+            self._out.flush()
+            return
+        self._buffer.flush()
 
 
 def main(argv: list[str] | None = None) -> int:

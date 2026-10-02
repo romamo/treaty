@@ -31,6 +31,7 @@ from ._http import HttpResponse, NetworkSettings
 from ._init import Init
 from ._jobs import Job, JobStore
 from ._journal import AuditLog
+from ._mcp_serve import McpServe
 from ._mode import Format, FormatName
 from ._out import Binary, External, Out
 from ._output_base import OutputBase
@@ -89,6 +90,7 @@ __all__ = [
     "ItemError",
     "Job",
     "JobStore",
+    "McpServe",
     "Meta",
     "NetworkContext",
     "NetworkSettings",

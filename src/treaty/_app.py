@@ -100,7 +100,7 @@ from ._command import (
 )
 from ._completion import COMPLETION_PATH
 from ._config import ConfigFile, ConfigScope, local_config, user_config
-from ._context import Ctx, LogSink, OutputSlot
+from ._context import Ctx, LogSink, OutputSlot, Wire
 from ._declare import UNSUPPORTED_PLATFORM, Background, SideEffect, Subprocess, supports
 from ._deprecation import Deprecated
 from ._deps import CheckFn, Dependency, check_checks, check_dependencies
@@ -171,6 +171,7 @@ from ._manifest import (
     global_flag_entries,
     implicit_exit_codes,
 )
+from ._mcp_serve import MCP_SERVE_PATH, McpServe, protocol_command, register_mcp_serve
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
     MACHINE,
@@ -455,6 +456,7 @@ class App:
         audit_log: AuditLog | None = None,
         schema_changelog: str | Path | None = None,
         exec_fallback: ExecFallback | None = None,
+        mcp: McpServe | None = None,
     ) -> None:
         """``version`` is semver, or a PEP 440 release such as ``importlib.metadata.version``
         returns, ``a``, ``b``, ``rc``, ``.post``, and ``.dev`` parts included; ``--version``
@@ -491,7 +493,9 @@ class App:
         object, an array, or None, is the line's ``data`` in a success envelope. A
         ``ParseError`` it raises answers exit 2, a ``KeyboardInterrupt`` ``CANCELLED`` as
         from a handler, any other exception exit 1 ``FALLBACK_FAILED``; without it, such a
-        line is ``UNKNOWN_COMMAND``.
+        line is ``UNKNOWN_COMMAND``. ``mcp``, a ``treaty.McpServe``, adds the ``mcp
+        serve`` built-in: the app's commands as MCP tools over stdio, with startup flags
+        of the app's own (#239).
 
         ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
         ``mcp-validate``, ``audit-log``, and ``completion`` are built-ins that yield: an app
@@ -563,6 +567,9 @@ class App:
                 f"App {name}: exec_fallback needs the exec built-in; drop enable_exec=False"
             )
         self.exec_fallback = exec_fallback
+        if mcp is not None and not isinstance(mcp, McpServe):
+            raise RegistrationError(f"App {name}: mcp is a treaty.McpServe, or None")
+        self.mcp = mcp
         self.changelog = (
             () if self.schema_changelog is None else load_changelog(self.schema_changelog, name)
         )
@@ -1402,6 +1409,8 @@ class App:
         if self._fixes_checked:
             return
         _ = self.settings
+        if self.mcp is not None and self.mcp.exit_codes:
+            self._declare_serve_exits(self.mcp.exit_codes)
         for path, command in self._commands.items():
             old = command.deprecated
             if old is not None and old.replacement is not None:
@@ -1418,6 +1427,17 @@ class App:
             if problems:
                 raise RegistrationError(f"{path}: {problems[0]}")
         self._fixes_checked = True
+
+    def _declare_serve_exits(self, names: Sequence[str]) -> None:
+        """``McpServe(exit_codes=)`` names app codes, which ``app.exit_code`` registers after
+        the ``App`` that registered ``mcp serve`` was built: they join it once the table is
+        in use (#239)"""
+        command = self._commands[MCP_SERVE_PATH]
+        for name in names:
+            if ExitCodeName(name) not in self.exits:
+                raise RegistrationError(f"McpServe(exit_codes=...): {name} is not registered")
+        declared = tuple(dict.fromkeys((*command.exit_codes, *map(ExitCodeName, names))))
+        self._commands[MCP_SERVE_PATH] = dataclasses.replace(command, exit_codes=declared)
 
     def _named_commands(self, command: Command) -> list[str]:
         """Each ``clearable_with`` and ``cleanup_command`` that does not run a command of
@@ -1572,6 +1592,8 @@ class App:
         if self.schema_changelog is not None:
             self._yielding.add(register_changelog(self, self.changelog))
         self._yielding.add(register_audit_log(self))
+        if self.mcp is not None:
+            register_mcp_serve(self, self.mcp)
 
         if self.init is not None:
             setup = self.init
@@ -2303,8 +2325,11 @@ class App:
             return run.help_root(mode, route.prefix)
         if globals_.help:
             return run.help_command(mode, command)
-        # The delegated tool owns stdout: every answer about its run is a line on stderr
-        run.delegating = command.passthrough
+        # The delegated tool, or mcp serve's protocol, owns stdout: every answer about the
+        # run is a line on stderr
+        run.delegating = command.passthrough or protocol_command(self, command.path)
+        if run.delegating and not command.passthrough:
+            run.wire = Wire(run.out, None if run.payload_stdin is None else run.stdin)
         if config_error is not None and not _answers_over(config_error, command.path.value):
             return run.emit(mode, run.arg_error(config_error, meta=_mode_meta(command)))
         # Installed before the arguments are read: --flag - waits on stdin (REQ-O-006)
@@ -3583,6 +3608,8 @@ class _Run:
         is a line on stderr (#35)"""
         self.envelope_file: Path | None = None
         """``--output`` of a passthrough command: where its envelope is written too"""
+        self.wire: Wire | None = None
+        """The process's stdout and stdin, when argv named ``mcp serve`` (#239)"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -3949,6 +3976,7 @@ class _Run:
             _stdin_records=None
             if command.stdin_records is None or invocation.lines is None
             else Records(invocation.lines, command.stdin_records, self._warn),
+            _wire=self.wire,
             argv_rest=invocation.argv_rest,
             page=page,
             token=invocation.token,
