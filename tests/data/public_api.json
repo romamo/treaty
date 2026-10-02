@@ -603,6 +603,15 @@
         "status"
       ]
     },
+    "McpServe": {
+      "fields": [
+        "args",
+        "setup",
+        "exit_codes"
+      ],
+      "kind": "class",
+      "methods": []
+    },
     "Meta": {
       "fields": [
         "duration_ms",
@@ -937,7 +946,8 @@
       "update_check",
       "audit_log",
       "schema_changelog",
-      "exec_fallback"
+      "exec_fallback",
+      "mcp"
     ],
     "App.command": [
       "path",

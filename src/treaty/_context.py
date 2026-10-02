@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from typing import IO, TYPE_CHECKING, Any, Literal, TypeVar
 
 from ._cache import Cache
 from ._cap import MARKER, TRUNCATED_CODE
@@ -50,6 +50,17 @@ class OutputSlot:
     ``output_file=`` resource or function, before the handler runs (#68)"""
 
     directory: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Wire:
+    """The process's own stdout and stdin, handed to a command whose stdout carries a
+    protocol rather than an envelope: ``mcp serve`` (#239). Set only when argv named that
+    command; an ``exec`` line and ``App.call`` have none"""
+
+    out: IO[str]
+    stdin: IO[str] | None
+    """None when stdin was closed at startup"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +125,7 @@ class Ctx:
     """Set when a relative ``--output`` lands in a directory the run resolves (#68)"""
     _stdin_lines: Lines | None = field(default=None, repr=False, compare=False)
     _stdin_records: Records | None = field(default=None, repr=False, compare=False)
+    _wire: Wire | None = field(default=None, repr=False, compare=False)
 
     @property
     def stdin_lines(self) -> Iterator[str]:

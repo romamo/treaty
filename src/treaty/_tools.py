@@ -13,6 +13,7 @@ from ._command import Command, DangerLevel
 from ._completion import COMPLETION_PATH
 from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._manifest import EXEC_PATH, payload_schema
+from ._mcp_serve import MCP_SERVE_PATH
 from ._schema import JsonSchema
 from ._values import CommandPath
 
@@ -121,11 +122,14 @@ def output_schema(command: Command) -> JsonSchema:
 
 def tool_entries(app: App) -> list[ToolEntry]:
     """Every command except ``exec``, the ``completion`` built-in, a script for a shell
-    rather than a tool, and passthrough commands, whose arguments and stdout belong to
-    another tool that no input or output schema describes (#35), in path order"""
+    rather than a tool, the ``mcp serve`` built-in, the server itself (#239), and
+    passthrough commands, whose arguments and stdout belong to another tool that no input
+    or output schema describes (#35), in path order"""
     entries: list[ToolEntry] = []
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
-        if path == EXEC_PATH or (path == COMPLETION_PATH and path in app.builtins):
+        if path == EXEC_PATH or (
+            path in (COMPLETION_PATH, MCP_SERVE_PATH) and path in app.builtins
+        ):
             continue
         if command.passthrough:
             continue

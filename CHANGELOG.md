@@ -29,6 +29,17 @@ additive over rc21: see Breaking.
   `ctx.network.timeout()`, `ctx.network.fits()`, and `ctx.run`: a client of its own may
   wait longer than `--timeout` allows, with the fix `timeout=ctx.network.timeout(30)` per
   call (#237)
+- `App(mcp=McpServe(args=ServeArgs, setup=..., exit_codes=...))` adds the `mcp serve`
+  built-in (#239): an app serves its commands as MCP tools over stdio as one of its own
+  commands, with startup flags parsed, validated, and listed in `--schema` like any
+  command's, and a `setup(args, ctx, *resources)` that runs once before serving. A failure
+  before serving answers with the usual envelope and exit code on stderr, with nothing on
+  stdout; once serving, stdout and stdin carry only the protocol, and a stray `print()` or
+  write to descriptor 1 still goes to stderr, and a handler or child reading stdin reads
+  an empty stream. Closing stdin or stdout, `SIGINT`, or `SIGTERM` stops the server with
+  exit 0 and one audit log entry for the run. The manifest marks the
+  command's stdout as a protocol in its description; `exec` and `App.call` refuse it with
+  `NEEDS_STDIO`
 
 ### Changed
 
@@ -39,6 +50,10 @@ additive over rc21: see Breaking.
   to return its partial result before exit 10 `TIMEOUT`. `ctx.remaining` reads that much
   less than before and `ctx.expired` turns true that much sooner; the hard limit and
   `meta.timeout_ms` are unchanged
+- The README and the conditional rules' docstrings say a boolean flag counts toward
+  `RequiresAny`, `RequiresOne`, and `Excludes` only when true: an explicit `--no-x`, or
+  `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
+  unchanged, and a test pins it (#241)
 
 ### Fixed
 
@@ -47,17 +62,12 @@ additive over rc21: see Breaking.
   left, so a handler watching `ctx.remaining` lost its partial result to `TIMEOUT`. The
   connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
   when a body without a length would have looked complete
+
 ### Breaking
 
 - Per-command `--schema` no longer has `requires_groups`: its `requires` lists a command's
   `RequiresAny` and `RequiresOne` rules as `{"any_of": [...]}` and `{"one_of": [...]}`
   among its other rules, as the manifest does, so a consumer reads `requires` alone
-### Changed
-
-- The README and the conditional rules' docstrings say a boolean flag counts toward
-  `RequiresAny`, `RequiresOne`, and `Excludes` only when true: an explicit `--no-x`, or
-  `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
-  unchanged, and a test pins it (#241)
 
 - A declared secret written straight to descriptor 1, by C code, `os.write(1, ...)`, or a
   child process that inherited it, reaches stderr redacted, as printed text does; it went

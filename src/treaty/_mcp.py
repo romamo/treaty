@@ -8,25 +8,37 @@ confirmation, idempotency, timeouts, effect validation, and output caps all
 apply. An unconfirmed destructive call returns the ``CONFIRMATION_REQUIRED``
 envelope with its dry-run preview, exactly as the CLI does.
 
-Only ``serve`` and ``main`` import the ``mcp`` package; everything else is
-plain data so it can be inspected and tested without the SDK.
+``treaty-mcp module:app`` serves on the process's streams as they are. An app's own
+``mcp serve`` (#239) runs inside its CLI run instead, where descriptor 1 and
+``sys.stdout`` lead to stderr: ``serve_wire`` speaks the protocol on the copy of the
+original stdout the run holds, so a stray write never reaches the client.
+
+Only ``build_server``, ``serve``, ``serve_wire``, and ``main`` import the ``mcp`` package;
+everything else is plain data so it can be inspected and tested without the SDK.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import io
 import json
+import os
 import sys
-from collections.abc import Mapping
+import threading
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import IO, Any, Literal, TextIO, cast
 
-from ._app import App, _Run
+from ._app import App, _closed_pipe, _Run
+from ._context import Wire
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
+from ._mcp_serve import McpServed
 from ._prompt import NoPromptStdin
+from ._signals import Cancelled
+from ._subprocess import GRACE_SECONDS
 from ._tools import (
     DRAFT_07,
     ToolEntry,
@@ -119,8 +131,14 @@ def _as_tools(envelope: Envelope) -> Envelope:
 # The SDK-facing part
 
 
-def build_server(app: App) -> Any:
-    """A low-level ``mcp`` Server whose tools are the app's commands"""
+def build_server(
+    app: App,
+    *,
+    env: Mapping[str, str] | None = None,
+    called: Callable[[], None] | None = None,
+) -> Any:
+    """A low-level ``mcp`` Server whose tools are the app's commands, called with ``env``
+    (the process's when None); ``called`` runs as each tool call is answered"""
     from mcp import types
     from mcp.server.lowlevel.server import Server
 
@@ -146,7 +164,9 @@ def build_server(app: App) -> Any:
 
     async def on_call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
         arguments = params.arguments or {}
-        envelope = await asyncio.to_thread(call_tool, app, entries, params.name, arguments)
+        envelope = await asyncio.to_thread(call_tool, app, entries, params.name, arguments, env=env)
+        if called is not None:
+            called()
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=serialize(envelope))],
             structured_content=without_surrogates(envelope.to_json()),
@@ -179,6 +199,262 @@ async def serve(app: App) -> None:
         sys.stdout = sys.stderr
         sys.stdin = cast(TextIO, NoPromptStdin(io.StringIO()))
         await server.run(read, write, server.create_initialization_options())
+
+
+JOIN_SECONDS = 0.25
+"""How often the run's thread wakes while the server runs: a wait without a timeout may
+not see a signal's handler run on Windows"""
+
+
+class _Serving:
+    """The server thread's loop and cancel scope, so the run's thread can stop it, and how
+    the server ended"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._stop: Callable[[], None] | None = None
+        self._stopped = False
+        self.calls = 0
+        self.error: BaseException | None = None
+        self.read_all = threading.Event()
+        """Set once the stdin reader left its last read: no read of the protocol's
+        descriptor is pending"""
+
+    def started(self, stop: Callable[[], None]) -> None:
+        with self._lock:
+            self._stop = stop
+            stopped = self._stopped
+        if stopped:
+            stop()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stopped = True
+            stop = self._stop
+        if stop is not None:
+            stop()
+
+    def called(self) -> None:
+        with self._lock:
+            self.calls += 1
+
+
+def serve_wire(app: App, wire: Wire, *, env: Mapping[str, str]) -> McpServed:
+    """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends, or until a
+    signal raises ``Cancelled`` here, on the run's thread, which stops the server. The
+    server runs on a thread of its own, so the run's thread only waits, where a signal
+    can interrupt it without tearing the event loop."""
+    assert wire.stdin is not None, "mcp serve refuses a closed stdin before serving"
+    serving = _Serving()
+    server = build_server(app, env=env, called=serving.called)
+    with _claimed_stdin(wire.stdin, serving.read_all) as stdin:
+
+        def run() -> None:
+            try:
+                asyncio.run(_serve_wire(server, wire.out, stdin, serving))
+            except BaseException as exc:  # noqa: BLE001 - re-raised on the run's thread below
+                serving.error = exc
+
+        thread = threading.Thread(target=run, name="treaty-mcp", daemon=True)
+        thread.start()
+        try:
+            while thread.is_alive():
+                thread.join(JOIN_SECONDS)
+        except Cancelled as exc:
+            serving.stop()
+            thread.join(GRACE_SECONDS)
+            return McpServed(_signal_name(exc.signal.name), serving.calls)
+        except KeyboardInterrupt:
+            # No treaty handler on this thread (a run started off the main thread)
+            serving.stop()
+            thread.join(GRACE_SECONDS)
+            return McpServed("SIGINT", serving.calls)
+    if serving.error is not None:
+        raise serving.error
+    return McpServed("eof", serving.calls)
+
+
+@contextlib.contextmanager
+def _claimed_stdin(stdin: IO[str], read_all: threading.Event) -> Iterator[IO[str] | IO[bytes]]:
+    """The protocol's stdin, read from a private copy of its descriptor while the
+    descriptor itself reads an empty pipe, its write end closed: a handler reading
+    ``sys.stdin``, or a child that inherited the descriptor, reads its end at once instead
+    of blocking on or taking the client's requests. Not the null device, which Windows
+    reports as a terminal, so a read would pass for a prompt. A stream with no descriptor, as in a
+    test, is read as it is. The copy stays open while the reader thread may still read it."""
+    try:
+        fd = stdin.fileno()
+    except AttributeError, OSError, ValueError:  # io.UnsupportedOperation: no descriptor
+        yield stdin
+        return
+    private = os.dup(fd)
+    source = os.fdopen(private, "rb")
+    empty, end = os.pipe()
+    os.close(end)
+    try:
+        os.dup2(empty, fd)  # inheritable, as descriptor 0 is, so a child reads its end too
+    finally:
+        os.close(empty)
+    _rebind_std_handle(fd)
+    try:
+        yield source
+    finally:
+        # On Windows a read still pending on the copy (the client left by closing stdout,
+        # or a signal stopped the server, with stdin open) holds the C runtime's lock on
+        # that descriptor, so restoring from it would block until the client writes or
+        # closes stdin: the run is ending, and descriptor 0 keeps reading the empty pipe
+        if sys.platform != "win32" or read_all.is_set():
+            os.dup2(private, fd)
+            _rebind_std_handle(fd)
+
+
+def _rebind_std_handle(fd: int) -> None:
+    """On Windows, point the process's standard handle for ``fd`` at what the descriptor
+    holds now: ``os.dup2`` changes only the C runtime's table, and ``subprocess`` hands a
+    child the standard handle, so a child would still read the client's pipe"""
+    if sys.platform == "win32":
+        from mcp.os.win32.utilities import rebind_std_handle_to_fd
+
+        rebind_std_handle_to_fd(fd)
+
+
+def _signal_name(name: str) -> Literal["SIGINT", "SIGTERM"]:
+    if name == "SIGTERM":
+        return "SIGTERM"
+    if name == "SIGINT":
+        return "SIGINT"
+    raise ValueError(f"no server stop for {name}")
+
+
+async def _serve_wire(
+    server: Any, out: IO[str], stdin: IO[str] | IO[bytes], serving: _Serving
+) -> None:
+    import anyio
+    from mcp.server.stdio import stdio_server
+
+    loop = asyncio.get_running_loop()
+    lines: asyncio.Queue[str | Exception | None] = asyncio.Queue()
+    reader = threading.Thread(
+        target=_read_lines,
+        args=(stdin, loop, lines, serving.read_all),
+        name="treaty-mcp-stdin",
+        daemon=True,
+    )
+    with anyio.CancelScope() as scope:
+        serving.started(lambda: _call_soon(loop, scope.cancel))
+        reader.start()
+        # Explicit streams: the SDK claims no descriptor, and the protocol goes to the copy
+        # of the original stdout, not descriptor 1, which leads to stderr
+        async with stdio_server(
+            stdin=cast(Any, _Lines(lines)), stdout=cast(Any, _WireOut(out, serving.stop))
+        ) as (read, write):
+            await server.run(read, write, server.create_initialization_options())
+
+
+def _call_soon(loop: asyncio.AbstractEventLoop, fn: Callable[[], object]) -> None:
+    try:
+        loop.call_soon_threadsafe(fn)
+    except RuntimeError:
+        pass  # the loop already closed: the server stopped on its own
+
+
+def _read_lines(
+    stdin: IO[str] | IO[bytes],
+    loop: asyncio.AbstractEventLoop,
+    lines: asyncio.Queue[str | Exception | None],
+    read_all: threading.Event,
+) -> None:
+    """Stdin's lines, read on a daemon thread of their own, so stopping the server never
+    waits for a read; UTF-8 whatever the platform's encoding, as the SDK reads them. None
+    marks the end, and an error reading is handed to the server, which raises it.
+    ``read_all`` is set once no read is pending any more"""
+    buffer = getattr(stdin, "buffer", None)
+    item: str | Exception | None
+    try:
+        while True:
+            raw = buffer.readline() if buffer is not None else stdin.readline()
+            if not raw:
+                break
+            item = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+            loop.call_soon_threadsafe(lines.put_nowait, item)
+        item = None
+    except (OSError, ValueError) as exc:
+        item = exc
+    except RuntimeError:
+        return  # the loop closed: the server stopped first
+    finally:
+        read_all.set()
+    try:
+        loop.call_soon_threadsafe(lines.put_nowait, item)
+    except RuntimeError:
+        return
+
+
+class _Lines:
+    """What the SDK's transport iterates for stdin's lines"""
+
+    def __init__(self, lines: asyncio.Queue[str | Exception | None]) -> None:
+        self._lines = lines
+
+    def __aiter__(self) -> _Lines:
+        return self
+
+    async def __anext__(self) -> str:
+        item = await self._lines.get()
+        if item is None:
+            raise StopAsyncIteration
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class _WireOut:
+    """What the SDK's transport writes each message to: UTF-8 bytes on the run's stdout's
+    descriptor, whatever the platform's encoding, as the SDK writes them, and unbuffered,
+    so nothing is left for the run's last flush; text on a stream without one, as in a
+    test. Writes run on a worker thread, so a client that stops reading blocks no
+    shutdown. A client that closed stdout left: ``gone`` stops the server, as the end of
+    stdin does, and what is left to write is dropped."""
+
+    def __init__(self, out: IO[str], gone: Callable[[], None]) -> None:
+        self._out = out
+        self._gone = gone
+        self._closed = False
+        try:
+            self._fd: int | None = out.fileno()
+        except AttributeError, OSError, ValueError:  # io.UnsupportedOperation: none
+            self._fd = None
+
+    async def write(self, text: str) -> None:
+        import anyio
+
+        await anyio.to_thread.run_sync(self._write, text, abandon_on_cancel=True)
+
+    async def flush(self) -> None:
+        import anyio
+
+        await anyio.to_thread.run_sync(self._flush, abandon_on_cancel=True)
+
+    def _write(self, text: str) -> None:
+        if self._closed:
+            return
+        try:
+            if self._fd is None:
+                self._out.write(text)
+                return
+            self._out.flush()
+            view = memoryview(text.encode("utf-8"))
+            while view:
+                view = view[os.write(self._fd, view) :]
+        except OSError as exc:
+            if not _closed_pipe(exc):
+                raise
+            self._closed = True
+            self._gone()
+
+    def _flush(self) -> None:
+        if self._fd is None and not self._closed:
+            self._out.flush()
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -56,6 +56,7 @@ review), **rename**, **remove**.
 | `Init` | keep | `App(init=)` base class |
 | `Credentials`, `Expired` | keep | `App(credentials=)`, `refreshes_auth=` |
 | `Job`, `JobStore` | keep | `async_job=True`, `App(jobs=)` |
+| `McpServe` | added in 1.0 (#239) | `App(mcp=)`: the `mcp serve` built-in, its startup flags and `setup` |
 
 ### Results and values
 
@@ -97,7 +98,7 @@ Keywords: `name`, `version` (semver, or a PEP 440 release with optional `a`, `b`
 `1.0.0.post1` is `1.0.0+post.1`; epochs and local versions are refused), `description`, `state`, `default_timeout`,
 `max_output_bytes`, `max_stdin_bytes`, `max_line_bytes`, `state_dir`, `enable_exec`, `credentials`, `jobs`,
 `settings`, `init`, `companions`, `dependencies`, `checks`, `update_check`, `audit_log`,
-`schema_changelog`, `exec_fallback`. All keep.
+`schema_changelog`, `exec_fallback`, and `mcp` (added in 1.0, #239). All keep.
 
 Public methods (keep): `command`, `group`, `redirect`, `exit_code`, `scalar`,
 `output_adapter`, `args_adapter`, `format`,
