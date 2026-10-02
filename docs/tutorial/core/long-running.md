@@ -141,17 +141,18 @@ on: what was imported, and what to send again.
 
 The margin matters more than it looks. A feed is never as fast as an estimate promises: the
 server is busy, or the machine is loaded, and one feed runs slower than those before it.
-One that is still running at the limit is cut there and the run exits 10 with `TIMEOUT`:
-the feeds already imported stay saved, but the result that says which they were is lost,
-so the agent cannot tell what to send again. Starting a feed only when the time left
+One still downloading when `ctx.remaining` runs out is cut there and fails with `TIMEOUT`:
+its time was spent for nothing, and any work after the download that runs on into the
+hard limit ends the run with exit 10, where the feeds already imported stay saved but the
+result that says which they were is lost. Starting a feed only when the time left
 covers the last one's duration, and no more, loses that race whenever the next feed is a
 little slower; twice the slowest keeps room for one that takes twice as long as any so far,
 and the margin grows with the feeds, so it suits a second-long feed and a minute-long one
 alike.
 
 With three feeds that take a second each and `--timeout 2.8`, the first is imported, and
-after it 1.8 seconds are left, less than the two the rule asks for, so the other two are
-reported as not started. How many start depends on how fast the feeds answer, so the tests
+after it about 1.5 seconds are left (the reserve holds back 0.28 of the 2.8), less than
+the two the rule asks for, so the other two are reported as not started. How many start depends on how fast the feeds answer, so the tests
 check what holds at any speed: under a limit eight feeds long, the first feed is imported,
 the last is `NOT_STARTED` and retryable, and every feed either finished or never started; a
 separate test pins the rule itself. Each test first times one feed and sets its limit from
