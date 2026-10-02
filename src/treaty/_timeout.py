@@ -65,6 +65,50 @@ class Timeout:
         return None if self.seconds is None else int(self.seconds * 1000)
 
 
+@dataclass(frozen=True, slots=True)
+class Reserve:
+    """The time held back before a command's hard limit, so a handler that watches
+    ``ctx.remaining`` still has time to return its partial result (#244)
+
+    ``ctx.remaining`` and every clamp the framework applies (``ctx.http``, ``ctx.run``,
+    ``ctx.lock``, ``ctx.retry``, an async handler's cancellation) end ``seconds_of`` the
+    timeout before it; the hard limit, which answers ``TIMEOUT``, stays where it was. The
+    reserve is ``fraction`` of the timeout, at least ``floor`` and at most ``cap`` seconds,
+    and never more than half the timeout, so a tiny limit keeps time to work in.
+    """
+
+    fraction: float
+    floor: float
+    cap: float
+
+    def __post_init__(self) -> None:
+        if not 0 < self.fraction < 0.5:
+            raise InvalidValue("reserve fraction must be in (0, 0.5)")
+        if not 0 < self.floor <= self.cap <= MAX_SECONDS:
+            raise InvalidValue(f"reserve must satisfy 0 < floor <= cap <= {MAX_SECONDS:g}")
+
+    def seconds_of(self, timeout: Timeout) -> float:
+        """Seconds held back from ``timeout``; 0 without a limit"""
+        if timeout.seconds is None:
+            return 0.0
+        held = min(self.cap, max(self.floor, timeout.seconds * self.fraction))
+        return min(held, timeout.seconds / 2)
+
+    def deadline(self, timeout: Timeout, start: float) -> float | None:
+        """The ``time.monotonic()`` a handler's work must end by, when the run started at
+        ``start``: the hard limit less the reserve; None without a limit"""
+        if timeout.seconds is None:
+            return None
+        return start + timeout.seconds - self.seconds_of(timeout)
+
+
+DEADLINE_RESERVE = Reserve(fraction=0.1, floor=0.1, cap=2.0)
+"""A tenth of the timeout, from 100 ms to 2 s: returning a result takes a few milliseconds,
+but a loaded runner's thread switches and a collection pause take tens of them, so 100 ms
+is the least that reliably gets an envelope out; a tenth scales with the work a long limit
+implies (its partial result is larger), and 2 s caps what a long limit gives up"""
+
+
 def _shown(raw: int | float | str) -> str:
     """The rejected value as text: NaN is invalid JSON and a huge int refuses str()"""
     if isinstance(raw, int):

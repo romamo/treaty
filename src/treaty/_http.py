@@ -5,7 +5,10 @@ and ``NO_PROXY`` (either case) from the run's environment, never ``os.environ``,
 Basic proxy auth from a proxy URL's ``user:password@``, and verifies TLS against
 ``REQUESTS_CA_BUNDLE``, else ``SSL_CERT_FILE``, else the system store. ``--proxy URL``
 overrides the variables and ``--no-proxy`` connects directly (REQ-O-019). Every request
-waits at most what is left of the command's timeout.
+ends by ``ctx.remaining``'s deadline, the whole of it and not only each socket operation:
+a server that trickles its answer has the connection shut at the deadline, and the
+request fails with exit 10 ``TIMEOUT`` while the handler still has the reserve before the
+hard limit to return what it has (#244).
 
 A failed request ends the run with ``error.network_context`` saying how it went out
 (REQ-F-037): exit 12 ``CONNECTION_FAILED`` or ``TLS_VERIFY_FAILED``, exit 10 ``TIMEOUT``,
@@ -25,11 +28,14 @@ stay with the origin the caller addressed.
 from __future__ import annotations
 
 import base64
+import contextlib
+import functools
 import http.client
 import json as jsonlib
 import shlex
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -38,7 +44,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 from urllib.parse import SplitResult, unquote, urlsplit
 
 from ._envelope import NetworkContext, proxy_without_userinfo, without_userinfo
@@ -376,6 +382,133 @@ class _Proxied(urllib.request.BaseHandler):
     https_request = http_request
 
 
+_CURRENT = threading.local()
+"""The ``_Cutoff`` of the request this thread is sending; urllib builds a request's
+connections on the thread that sends it, redirects included"""
+
+
+class _Cutoff:
+    """Shuts one request's connections when its time runs out: urllib's timeout bounds
+    each socket operation, so a server that keeps sending a little at a time could hold a
+    request well past the deadline (#244). Used as a context manager around the request,
+    which it makes this thread's current one"""
+
+    def __init__(self, seconds: float | None) -> None:
+        self._lock = threading.Lock()
+        self._connections: list[http.client.HTTPConnection] = []
+        self._sockets: list[socket.socket] = []
+        """Each connection's socket, kept: urllib drops ``connection.sock`` once the
+        response arrives, while the response still reads from it"""
+        self._stopped = False
+        self.fired = False
+        """The deadline came while the request was running"""
+        self._timer = None if seconds is None else threading.Timer(seconds, self._fire)
+        if self._timer is not None:
+            self._timer.daemon = True
+
+    def __enter__(self) -> _Cutoff:
+        _CURRENT.cutoff = self
+        if self._timer is not None:
+            self._timer.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.stop()
+        del _CURRENT.cutoff
+
+    def track(self, connection: http.client.HTTPConnection) -> None:
+        with self._lock:
+            self._connections.append(connection)
+
+    def connected(self, connection: http.client.HTTPConnection) -> None:
+        """Keep a connected socket; one that connected after the deadline is shut at once"""
+        sock = connection.sock
+        assert isinstance(sock, socket.socket)
+        with self._lock:
+            self._sockets.append(sock)
+            if self.fired:
+                _shut(sock)
+
+    def stop(self) -> bool:
+        """End the watch, the request being over; whether the deadline came first"""
+        with self._lock:
+            self._stopped = True
+        if self._timer is not None:
+            self._timer.cancel()
+        return self.fired
+
+    def _fire(self) -> None:
+        with self._lock:
+            if self._stopped:
+                return
+            self.fired = True
+            # A connection still connecting has a socket it has not handed over yet
+            for sock in [*self._sockets, *(c.sock for c in self._connections)]:
+                _shut(sock)
+
+
+def _shut(sock: socket.socket | None) -> None:
+    """Shut a connection both ways, which wakes a read blocked on it on any thread. The
+    plain socket's shutdown, also for TLS: ``SSLSocket.shutdown`` drops its TLS state
+    under the reading thread"""
+    if sock is None:
+        return
+    # Closed, or no longer connected: the request it carried is already over
+    with contextlib.suppress(OSError):
+        socket.socket.shutdown(sock, socket.SHUT_RDWR)
+
+
+def _cutoff() -> _Cutoff:
+    found = _CURRENT.cutoff
+    assert isinstance(found, _Cutoff)
+    return found
+
+
+class _Connection(http.client.HTTPConnection):
+    """An HTTP connection its request's ``_Cutoff`` can shut"""
+
+    def __init__(self, host: str, *, cutoff: _Cutoff, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._cutoff = cutoff
+        cutoff.track(self)
+
+    def connect(self) -> None:
+        super().connect()
+        self._cutoff.connected(self)
+
+
+class _TLSConnection(http.client.HTTPSConnection):
+    """An HTTPS connection its request's ``_Cutoff`` can shut"""
+
+    def __init__(self, host: str, *, cutoff: _Cutoff, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._cutoff = cutoff
+        cutoff.track(self)
+
+    def connect(self) -> None:
+        super().connect()
+        self._cutoff.connected(self)
+
+
+class _CutHTTP(urllib.request.HTTPHandler):
+    """urllib's ``http://`` handler on connections the request's ``_Cutoff`` tracks"""
+
+    def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        return self.do_open(functools.partial(_Connection, cutoff=_cutoff()), req)
+
+
+class _CutHTTPS(urllib.request.HTTPSHandler):
+    """urllib's ``https://`` handler on connections the request's ``_Cutoff`` tracks"""
+
+    def __init__(self, context: ssl.SSLContext) -> None:
+        super().__init__(context=context)
+        self.tls = context
+
+    def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        connection = functools.partial(_TLSConnection, cutoff=_cutoff())
+        return self.do_open(connection, req, context=self.tls)
+
+
 class Http:
     """``ctx.http`` of one run"""
 
@@ -452,24 +585,38 @@ class Http:
             if timeout <= 0:
                 raise self._failure(url, "TIMEOUT", "TIMEOUT", "the command's timeout ran out")
         started = time.perf_counter()
+        with _Cutoff(timeout) as cutoff:
+            try:
+                response, failed = self._exchange(request, timeout)
+            except (TimeoutError, http.client.HTTPException, OSError) as exc:
+                # URLError is an OSError; a connection shut at the deadline fails as
+                # whatever the read was doing, and is a timeout all the same
+                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                failure = self._timed_out(url) if cutoff.stop() else self._reason(url, reason)
+                self._trace(request, started, error=failure.code)
+                raise failure from exc
+        if cutoff.fired:
+            # A body read to the end of a connection shut early would look complete
+            failure = self._timed_out(url)
+            self._trace(request, started, error=failure.code)
+            raise failure
+        self._trace(request, started, status=response.status)
+        return self._status(url, response) if failed else response
+
+    def _exchange(
+        self, request: urllib.request.Request, timeout: float | None
+    ) -> tuple[HttpResponse, bool]:
+        """The response, and whether urllib raised it as an ``HTTPError``"""
         try:
             with self.opener().open(request, timeout=timeout) as reply:
-                response = HttpResponse(reply.status, _headers(reply.headers), reply.read())
-            failed = False
+                return HttpResponse(reply.status, _headers(reply.headers), reply.read()), False
         except urllib.error.HTTPError as exc:
             response = HttpResponse(exc.code, _headers(exc.headers), exc.read())
             exc.close()
-            failed = True
-        except urllib.error.URLError as exc:
-            failure = self._reason(url, exc.reason)
-            self._trace(request, started, error=failure.code)
-            raise failure from exc
-        except (TimeoutError, http.client.HTTPException, OSError) as exc:
-            failure = self._reason(url, exc)
-            self._trace(request, started, error=failure.code)
-            raise failure from exc
-        self._trace(request, started, status=response.status)
-        return self._status(url, response) if failed else response
+            return response, True
+
+    def _timed_out(self, url: str) -> NetworkFailure:
+        return self._failure(url, "TIMEOUT", "TIMEOUT", "the request timed out")
 
     def _trace(self, request: urllib.request.Request, started: float, **outcome: object) -> None:
         """REQ-O-008: --debug shows each request, answered (``status``) or not (``error``);
@@ -501,13 +648,14 @@ class Http:
                 urllib.request.ProxyHandler({}),
                 _Proxied(self.proxies),
                 _Redirects(),
-                urllib.request.HTTPSHandler(context=context),
+                _CutHTTP(),
+                _CutHTTPS(context),
             )
         return self._opener
 
     def _reason(self, url: str, reason: object) -> NetworkFailure:
         if isinstance(reason, TimeoutError):
-            return self._failure(url, "TIMEOUT", "TIMEOUT", "the request timed out")
+            return self._timed_out(url)
         if isinstance(reason, ssl.SSLCertVerificationError):
             return self._failure(
                 url,

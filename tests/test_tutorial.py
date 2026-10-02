@@ -35,9 +35,10 @@ from examples.tutorial import (
     todo_v2,
 )
 from examples.tutorial.todo_treaty import app
-from treaty import App, Ctx, Envelope, Exit, NoArgs, RegistrationError
+from treaty import App, Ctx, Envelope, Exit, NoArgs, RegistrationError, Timeout
 from treaty._cli import cli
 from treaty._profile import build_profile, probes_for
+from treaty._timeout import DEADLINE_RESERVE
 
 ROOT = Path(__file__).resolve().parents[1]
 TUTORIAL = ROOT / "docs" / "tutorial"
@@ -497,6 +498,15 @@ def _one_feed(url: str, tmp_path: Path) -> float:
     return time.monotonic() - started
 
 
+def _limit_leaving(seconds: float) -> float:
+    """The timeout whose ``ctx.remaining`` starts at ``seconds``: the reserve before the
+    hard limit grows with the limit, so the limit is found by repeating the sum (#244)"""
+    limit = seconds
+    for _ in range(50):
+        limit = seconds + DEADLINE_RESERVE.seconds_of(Timeout(limit))
+    return limit
+
+
 def test_import_all_leaves_the_feeds_it_has_no_time_for(feeds: str, tmp_path: Path) -> None:
     """Half-second feeds under a limit eight feeds long, as this runner times one, and more
     feeds than fit: a feed starts only with twice the slowest so far left, so the last is
@@ -545,10 +555,13 @@ def test_import_all_keeps_the_slowest_feed_as_the_estimate_after_a_quicker_one(
     twice the slowest. An estimate from the last feed alone, 1.5, would start it. The rule
     weighs the slow feed's whole duration three times, and a loaded runner wakes a sleeping
     feed late, so the slow feed is three seconds or twelve quick feeds as this runner times
-    one, whichever is longer: the 0.375 of a slow feed to spare covers that delay (#236)"""
+    one, whichever is longer: the 0.375 of a slow feed to spare covers that delay (#236).
+    The 3.375 slow feeds are the handler's time, where ``ctx.remaining`` starts, so the
+    limit adds the reserve, which would otherwise eat most of the spare (#244)"""
     slow = max(3.0, 12 * _one_feed(f"{feeds}/quick", tmp_path))
     urls = [f"{feeds}/sleep/{slow:.3f}", f"{feeds}/sleep/{0.75 * slow:.3f}", f"{feeds}/c"]
-    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 3.375 * slow}
+    limit = _limit_leaving(3.375 * slow)
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": limit}
     env = todo_batch.app.call("import-all", args, env={})
     shown = json.dumps(env.to_json(), indent=2)
     assert env.exit_code == 3, shown

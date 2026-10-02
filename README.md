@@ -563,7 +563,12 @@ caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
 response. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to
 pass the same deadline to their network calls, and `ctx.expired` to stop a long loop
-with the work done so far rather than run on after `TIMEOUT`;
+with the work done so far rather than run on after `TIMEOUT`. `ctx.remaining` ends a
+reserve before the hard limit (a tenth of the timeout, from 100 ms to 2 s, and at most
+half of it), and `ctx.http`, `ctx.run`, `ctx.pipeline`, `ctx.lock`, `ctx.retry`, and an
+async handler's cancellation all stop there, so a handler that catches a request cut at
+its deadline still has time to return its partial result; `ctx.http` bounds a request's
+whole time, not only each socket read;
 the `network-timeout` audit rule flags `urlopen`, `http.client` connections,
 `socket.create_connection`, `requests`, and `httpx` calls without `timeout=` in network
 commands (REQ-C-012). The `timeout-budget` rule warns when a command's `retry=Retry(...)`

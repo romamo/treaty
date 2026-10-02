@@ -9,7 +9,14 @@ import pytest
 from conftest import spec_validator
 
 from treaty import App, Ctx, Flag, NoArgs, RegistrationError, Timeout
-from treaty._timeout import Heartbeat, TimeoutExpired, call_with_timeout
+from treaty._timeout import (
+    DEADLINE_RESERVE,
+    Heartbeat,
+    Reserve,
+    TimeoutExpired,
+    call_with_timeout,
+)
+from treaty._values import InvalidValue
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,7 +362,36 @@ def remaining_app(default_timeout: float | None) -> tuple[App, list[bool]]:
 def test_ctx_remaining_counts_down_from_the_timeout() -> None:
     code, env = run_json(remaining_app(5)[0], ["left"])
     assert code == 0 and env["data"]["expired"] is False
-    assert 4 < env["data"]["remaining"] <= 5
+    # A 5 s limit holds back a tenth of it, so the handler's time starts at 4.5 s (#244)
+    assert 4 < env["data"]["remaining"] <= 4.5
+
+
+@pytest.mark.parametrize(
+    ("limit", "held"),
+    [
+        (None, 0.0),
+        (0.1, 0.05),  # the floor would be all of a tiny limit: half of it instead
+        (0.5, 0.1),  # the floor
+        (5, 0.5),  # a tenth
+        (20, 2.0),
+        (3600, 2.0),  # the cap
+    ],
+)
+def test_the_deadline_reserve_is_a_tenth_from_100_ms_to_2_s(
+    limit: float | None, held: float
+) -> None:
+    assert DEADLINE_RESERVE.seconds_of(Timeout(limit)) == pytest.approx(held)
+    deadline = DEADLINE_RESERVE.deadline(Timeout(limit), 100.0)
+    assert deadline == (None if limit is None else pytest.approx(100.0 + limit - held))
+
+
+@pytest.mark.parametrize(
+    ("fraction", "floor", "cap"),
+    [(0, 0.1, 2), (0.5, 0.1, 2), (0.1, 0, 2), (0.1, 3, 2), (0.1, 0.1, float("inf"))],
+)
+def test_a_reserve_out_of_range_is_refused(fraction: float, floor: float, cap: float) -> None:
+    with pytest.raises(InvalidValue):
+        Reserve(fraction=fraction, floor=floor, cap=cap)
 
 
 def test_ctx_remaining_is_none_without_a_limit() -> None:
