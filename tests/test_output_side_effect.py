@@ -151,7 +151,8 @@ def test_cleanup_keeps_a_handed_out_output_file_declared_as_output(tmp_path: Pat
 
         return app
 
-    declared = SideEffect(f"{tmp_path.as_posix()}/cf-*/out/*", "output")
+    # The session directory is cf-<uid> on POSIX and cf on Windows, which has no getuid
+    declared = SideEffect(f"{tmp_path.as_posix()}/cf*/out/*", "output")
     code, envelope = run(report_app(declared), ["report"], tmp_path)
     assert code == 0, envelope
     handed = Path(str(data(envelope)["path"]))
