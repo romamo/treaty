@@ -188,6 +188,31 @@ def test_3_6_output_written_by_the_handler_or_the_envelope(manifest: dict[str, A
     assert commands["download"]["output_file"] == "binary"
 
 
+def test_3_6_a_passthrough_command_with_output_file_writes_the_envelope(tmp_path: Path) -> None:
+    """``output_file=`` on a passthrough command sets only where a relative --output lands:
+    the file still gets the final envelope as JSON, whatever --format says"""
+    app = App("pt", version="1.0.0")
+
+    @app.command(
+        "ingest",
+        description="Run the ingest tool",
+        danger_level="safe",
+        exit_codes=(),
+        passthrough=True,
+        output_file=True,
+    )
+    def ingest(args: NoArgs, ctx: Ctx) -> int:
+        return 0
+
+    target = tmp_path / "envelope.json"
+    argv = ["--output", str(target), "--format", "plain", "ingest"]
+    assert app.run(argv, stdout=io.StringIO(), stderr=io.StringIO(), env={}) == 0
+    assert json.loads(target.read_text())["data"] == {"exit_code": 0}
+    built = app.manifest()
+    spec_validator("manifest-response").validate(built)
+    assert built["commands"]["ingest"]["output_file"] == "envelope"
+
+
 def test_3_7_object_flags_and_the_output_base(manifest: dict[str, Any]) -> None:
     report = manifest["commands"]["report"]
     single, many = report["flags"]["filter"], report["flags"]["lines"]

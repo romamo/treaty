@@ -355,11 +355,12 @@ def flag_entries(command: Command) -> dict[str, object]:
 
 def _output_file(command: Command) -> str | None:
     """REQ-O-001 (ManifestResponse 3.6): what ``--output`` gets. A passthrough command's
-    gets the final envelope; an app's own ``--output PATH`` field, what its handler writes"""
-    if command.output_file:
-        return "binary" if command.returns_binary else "formatted"
+    gets the final envelope, even with ``output_file=``, which then only sets its base; an
+    app's own ``--output PATH`` field, what its handler writes"""
     if command.passthrough:
         return "envelope"
+    if command.output_file:
+        return "binary" if command.returns_binary else "formatted"
     own = command.field_by_flag(OUTPUT_FLAG)
     if (
         own is not None
