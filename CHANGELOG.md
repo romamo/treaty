@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc17] - 2026-10-02
+
+The seventeenth 1.0 release candidate: 2 additions.
+
 ### Added
 
 - `SideEffect(path, "output")` declares a location a command writes as its product, such
@@ -1477,7 +1481,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc16...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc17...HEAD
+[1.0.0rc17]: https://github.com/romamo/treaty/compare/v1.0.0rc16...v1.0.0rc17
 [1.0.0rc16]: https://github.com/romamo/treaty/compare/v1.0.0rc15...v1.0.0rc16
 [1.0.0rc15]: https://github.com/romamo/treaty/compare/v1.0.0rc14...v1.0.0rc15
 [1.0.0rc14]: https://github.com/romamo/treaty/compare/v1.0.0rc13...v1.0.0rc14
