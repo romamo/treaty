@@ -178,14 +178,16 @@ class Ctx:
 
     @property
     def network(self) -> NetworkSettings:
-        """The proxy and CA bundle ``ctx.http`` goes out with, for a client of the
-        handler's own, such as a library's ``requests.Session``: ``proxies``, a
+        """The proxy, CA bundle, and deadline ``ctx.http`` goes out with, for a client of
+        the handler's own, such as a library's ``requests.Session``: ``proxies``, a
         ``{"http": ..., "https": ...}`` mapping honoring ``--proxy`` and ``--no-proxy``;
-        ``proxy_for(url)``, with ``NO_PROXY`` applied; and ``ca_bundle``. Needs
-        ``has_network_io=True`` (REQ-F-036, REQ-O-019)."""
+        ``proxy_for(url)``, with ``NO_PROXY`` applied; ``ca_bundle``; ``timeout(own)``, a
+        call's own timeout cut to ``ctx.remaining``; and ``fits(seconds)``, whether
+        another attempt still ends in time. Needs ``has_network_io=True`` (REQ-F-036,
+        REQ-O-019, REQ-C-012)."""
         if self._http is None:
             raise RegistrationError("ctx.network needs has_network_io=True on the command")
-        return NetworkSettings(self._http.proxies)
+        return NetworkSettings(self._http.proxies, lambda: self.remaining)
 
     def walk(self, root: Path | str) -> Walk:
         """Every entry under ``root``, depth first in name order, as ``treaty.WalkEntry``;

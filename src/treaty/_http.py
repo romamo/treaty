@@ -39,7 +39,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -50,6 +50,7 @@ from urllib.parse import SplitResult, unquote, urlsplit
 from ._envelope import NetworkContext, proxy_without_userinfo, without_userinfo
 from ._errors import CliExit, ParseError
 from ._retry import Retrier, retry_after
+from ._timeout import Timeout
 from ._values import ExitCodeName
 from ._verbosity import trace
 
@@ -215,16 +216,42 @@ _SCHEMES = ("http", "https")
 
 
 class NetworkSettings:
-    """``ctx.network``: the proxy and CA bundle the run resolved, for a client other than
-    ``ctx.http``, such as a library's own ``requests.Session``, to go out the same way.
-    ``--proxy`` and ``--no-proxy`` win over the run's environment, as for ``ctx.http``.
-    A proxy URL keeps its ``user:password@`` for the client to authenticate with; the
-    repr removes it"""
+    """``ctx.network``: the proxy, CA bundle, and deadline the run resolved, for a client
+    other than ``ctx.http``, such as a library's own ``requests.Session``, to go out the
+    same way. ``--proxy`` and ``--no-proxy`` win over the run's environment, as for
+    ``ctx.http``. A proxy URL keeps its ``user:password@`` for the client to authenticate
+    with; the repr removes it"""
 
-    __slots__ = ("_config",)
+    __slots__ = ("_config", "_remaining")
 
-    def __init__(self, config: ProxyConfig) -> None:
+    def __init__(self, config: ProxyConfig, remaining: Callable[[], float | None]) -> None:
         self._config = config
+        self._remaining = remaining
+
+    def timeout(self, own: Timeout | float) -> float | None:
+        """The ``timeout=`` for one call of the client: its ``own`` timeout, cut to
+        ``ctx.remaining`` so the call cannot outlive ``--timeout`` (REQ-C-012). None only
+        when neither limits the call. With no time left it exits 10 ``TIMEOUT`` before
+        the call goes out, as ``ctx.run`` does"""
+        seconds = _timeout(own).seconds
+        left = self._remaining()
+        if left is None:
+            return seconds
+        if left <= 0:
+            raise CliExit(
+                ExitCodeName("TIMEOUT"),
+                "No time is left on the command's deadline for another request",
+            )
+        return left if seconds is None else min(seconds, left)
+
+    def fits(self, attempt: Timeout | float) -> bool:
+        """Whether one more attempt taking up to ``attempt`` seconds, its backoff
+        included, still ends before the command's deadline: a retry budget stops when it
+        does not, so the handler answers with the last failure instead of ``TIMEOUT``.
+        Always true without a limit; an attempt of ``Timeout(None)`` fits only then"""
+        seconds = _timeout(attempt).seconds
+        left = self._remaining()
+        return left is None or (seconds is not None and seconds <= left)
 
     @property
     def proxies(self) -> dict[str, str]:
@@ -253,6 +280,15 @@ class NetworkSettings:
         except CliExit as exc:  # a repr names the problem rather than raising it
             shown = f"<{exc.code}>"
         return f"NetworkSettings(proxies={shown}, ca_bundle={self.ca_bundle!r})"
+
+
+def _timeout(value: Timeout | float) -> Timeout:
+    """``value`` as a ``Timeout``: seconds above 0, or a ``Timeout`` as it is"""
+    if isinstance(value, Timeout):
+        return value
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"expected seconds or a treaty.Timeout, not {type(value).__name__}")
+    return Timeout(float(value))
 
 
 @dataclass(frozen=True, slots=True)

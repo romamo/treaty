@@ -67,7 +67,7 @@ review), **rename**, **remove**.
 | `Page`, `PageRequest` | keep | `paginated=True` |
 | `Completed`, `Spawned` | keep | Returned by `ctx.run`, `ctx.pipeline`, `ctx.spawn` |
 | `HttpResponse` | keep | Returned by `ctx.http` |
-| `NetworkSettings` | keep | `ctx.network`: the resolved proxies and CA bundle for a client of the handler's own (#171) |
+| `NetworkSettings` | keep | `ctx.network`: the resolved proxies, CA bundle, and deadline (`timeout(own)`, `fits(seconds)`) for a client of the handler's own (#171, #237) |
 | `WalkEntry` | keep | Yielded by `ctx.walk` |
 | `CommandPath`, `ExitCode`, `ExitCodeName`, `SchemaVersion`, `Scope` | keep | Value objects in public signatures (`App.commands` keys, `CliExit.name`); the plan asked whether `ExitCodeName` is internal: it is what `CliExit` carries, so it stays |
 | `intercept_stdout` | keep | Captures descriptor 1 around a third-party call |

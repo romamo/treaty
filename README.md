@@ -902,6 +902,57 @@ session.verify = True if bundle is None else str(bundle)
 - The `http-client` audit rule advises on a network command whose handler reaches none of
   `ctx.http`, `ctx.network`, and `ctx.run`: a client of its own would not see `--proxy`
 
+The same client keeps its own timeout and retries, which may not fit `--timeout`: a
+`timeout=30` with three retries can outlast a 60 s limit, and the run then answers `TIMEOUT`
+where the host was unreachable. `ctx.network` hands it the deadline too:
+
+- `timeout(own)` is the call's own timeout cut to `ctx.remaining`, `min(own, remaining)`,
+  for `timeout=` on each call; with no time left it exits `10` `TIMEOUT` before the call
+  goes out. `own` is seconds or a `treaty.Timeout`
+- `fits(seconds)` says whether one more attempt taking that long, its backoff included,
+  still ends before the deadline; always true without a limit. A retry budget that stops
+  when it is false leaves the handler time to answer with the failure it got
+
+```python
+response = session.post(url, json=body, timeout=ctx.network.timeout(30))
+```
+
+A urllib3 `Retry` mounted on a `requests.Session` stops the same way when its
+`is_exhausted` also asks `fits`:
+
+```python
+from urllib3.util.retry import Retry
+
+
+class DeadlineRetry(Retry):
+    """Retries only while the next attempt, backoff included, ends in time"""
+
+    network: treaty.NetworkSettings | None = None
+    attempt = 30.0
+
+    def new(self, **kw):
+        retry = super().new(**kw)
+        retry.network, retry.attempt = self.network, self.attempt
+        return retry
+
+    def is_exhausted(self) -> bool:
+        if super().is_exhausted():
+            return True
+        wait = self.get_backoff_time() + self.attempt
+        return self.network is not None and not self.network.fits(wait)
+
+
+retry = DeadlineRetry(total=3, backoff_factor=2)
+retry.network = ctx.network
+session.mount("https://", HTTPAdapter(max_retries=retry))
+```
+
+With `httpx`, or retries the handler loops over itself, check `ctx.network.fits(...)`
+before each attempt and raise the last failure when it is false. The `network-timeout`
+audit rule advises on a network command whose handler reaches none of `ctx.http`,
+`ctx.remaining`, `ctx.timeout`, `ctx.network.timeout()`, `ctx.network.fits()`, and
+`ctx.run`: its own client's waits may not fit `--timeout`
+
 A `recursive_traversal=True` command gets `ctx.walk(root)`, which yields a
 `treaty.WalkEntry(path, depth, is_dir, is_symlink)` per entry, depth first in name order,
 plus `--no-follow-symlinks` and `--max-depth N` (default 50):

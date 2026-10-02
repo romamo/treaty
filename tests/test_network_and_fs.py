@@ -37,12 +37,14 @@ from treaty import (
     NoArgs,
     RegistrationError,
     Retry,
+    Timeout,
 )
 from treaty._audit import Finding, Severity, audit, os_walks
+from treaty._errors import CliExit
 from treaty._http import Http, NetworkFailure, ProxyConfig
 from treaty._profile import probes_for
 from treaty._retry import Retrier
-from treaty._values import ExitCodeName
+from treaty._values import ExitCodeName, InvalidValue
 
 DATA = Path(__file__).resolve().parent / "data"
 CERT = DATA / "test-server.pem"
@@ -756,7 +758,9 @@ def own_client_app() -> App:
     )
     def get(args: Fetch, ctx: Ctx) -> Got:
         handler = urllib.request.ProxyHandler(ctx.network.proxies)
-        with urllib.request.build_opener(handler).open(args.url, timeout=5) as r:
+        with urllib.request.build_opener(handler).open(
+            args.url, timeout=ctx.network.timeout(5)
+        ) as r:
             return Got(r.status, r.read().decode())
 
     @app.command(
@@ -841,7 +845,9 @@ def test_ctx_network_refuses_a_proxy_variable_that_is_no_http_url() -> None:
     assert code == 4
     assert error_of(envelope)["code"] == "PROXY_INVALID"
     assert "pw" not in json.dumps(envelope)
-    settings = NetworkSettings(ProxyConfig({"HTTPS_PROXY": "socks5://bob:pw@proxy.internal:1"}))
+    settings = NetworkSettings(
+        ProxyConfig({"HTTPS_PROXY": "socks5://bob:pw@proxy.internal:1"}), lambda: None
+    )
     assert repr(settings) == "NetworkSettings(proxies=<PROXY_INVALID>, ca_bundle=None)"
 
 
@@ -904,7 +910,7 @@ def test_ctx_network_routes_each_url_as_ctx_http_does(
     env: dict[str, str], flags: dict[str, object], url: str, expected: str | None
 ) -> None:
     config = ProxyConfig(env, **flags)  # type: ignore[arg-type]
-    settings = NetworkSettings(config)
+    settings = NetworkSettings(config, lambda: None)
     assert settings.proxy_for(url) == config.route(url).proxy == expected
     if expected is not None:  # not bypassed: the mapping names the same proxy
         assert settings.proxies[url.partition(":")[0]] == expected
@@ -949,6 +955,137 @@ def test_http_client_advises_a_network_command_whose_handler_never_routes_throug
     assert found == [("own", Severity.ADVICE)]
     rules = {f.rule for f in (*findings(net_app()), *findings(own_client_app()))}
     assert "http-client" not in rules
+
+
+def settings_with(left: float | None) -> NetworkSettings:
+    return NetworkSettings(ProxyConfig({}), lambda: left)
+
+
+@pytest.mark.parametrize(
+    ("left", "own", "expected"),
+    [
+        (None, 30, 30.0),
+        (None, Timeout(None), None),
+        (12.5, 30, 12.5),
+        (60.0, 30, 30.0),
+        (60.0, Timeout(30), 30.0),
+        (12.5, Timeout(None), 12.5),
+    ],
+)
+def test_ctx_network_timeout_cuts_a_call_s_own_timeout_to_the_time_left(
+    left: float | None, own: Timeout | float, expected: float | None
+) -> None:
+    """#237: timeout=ctx.network.timeout(30) is min(30, ctx.remaining)"""
+    assert settings_with(left).timeout(own) == expected
+
+
+def test_ctx_network_timeout_with_no_time_left_exits_timeout_before_the_call() -> None:
+    with pytest.raises(CliExit) as caught:
+        settings_with(0.0).timeout(30)
+    assert caught.value.code == "TIMEOUT"
+
+
+@pytest.mark.parametrize(
+    ("left", "attempt", "expected"),
+    [
+        (None, 34, True),
+        (None, Timeout(None), True),
+        (40.0, 34, True),
+        (34.0, 34, True),
+        (20.0, 34, False),
+        (0.0, 1, False),
+        (40.0, Timeout(None), False),
+    ],
+)
+def test_ctx_network_fits_says_whether_another_attempt_ends_in_time(
+    left: float | None, attempt: Timeout | float, expected: bool
+) -> None:
+    assert settings_with(left).fits(attempt) is expected
+
+
+@pytest.mark.parametrize("bad", [0, -1, float("nan"), float("inf"), True, "30", None])
+def test_ctx_network_timeout_and_fits_refuse_what_is_no_duration(bad: object) -> None:
+    settings = settings_with(10.0)
+    with pytest.raises((InvalidValue, TypeError)):
+        settings.timeout(bad)  # type: ignore[arg-type]
+    with pytest.raises((InvalidValue, TypeError)):
+        settings.fits(bad)  # type: ignore[arg-type]
+
+
+def test_ctx_network_timeout_follows_the_command_s_deadline() -> None:
+    app = App("t", version="1.0.0")
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=(), has_network_io=True)
+    def go(args: Fetch, ctx: Ctx) -> dict[str, object]:
+        return {
+            "cut": ctx.network.timeout(30),
+            "fits_long": ctx.network.fits(30),
+            "fits_short": ctx.network.fits(0.5),
+        }
+
+    code, envelope = run(app, ["go", "--url", "http://a.org/", "--timeout", "5"])
+    data = envelope["data"]
+    assert code == 0 and isinstance(data, dict)
+    assert 0 < data["cut"] <= 5 and data["fits_long"] is False and data["fits_short"] is True
+    code, envelope = run(app, ["go", "--url", "http://a.org/", "--timeout", "0"])
+    assert envelope["data"] == {"cut": 30.0, "fits_long": True, "fits_short": True}
+
+
+def test_network_timeout_advises_a_command_that_never_hands_its_client_the_deadline() -> None:
+    """#237: a library's own client keeps its own timeout and retries unless the handler
+    passes the deadline on; reaching ctx.network for the proxies alone is not enough"""
+
+    class Client:
+        def fetch(self, url: str, timeout: float | None = None) -> int:
+            return len(url)
+
+    client = Client()
+    app = App("t", version="1.0.0")
+
+    def network(name: str) -> Callable[[Callable[[Fetch, Ctx], object]], object]:
+        return app.command(
+            name, description=name, danger_level="safe", exit_codes=(), has_network_io=True
+        )
+
+    @network("own")
+    def own(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": client.fetch(args.url)}
+
+    @network("proxied")
+    def proxied(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": client.fetch(args.url) + len(ctx.network.proxies)}
+
+    @network("cut")
+    def cut(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": client.fetch(args.url, timeout=ctx.network.timeout(30))}
+
+    @network("left")
+    def left(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": client.fetch(args.url, timeout=ctx.remaining)}
+
+    @network("budget")
+    def budget(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": client.fetch(args.url) if ctx.network.fits(30) else 0}
+
+    @network("child")
+    def child(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        return {"n": ctx.run(["curl", args.url]).returncode}
+
+    @network("untimed")
+    def untimed(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        with urllib.request.urlopen(args.url) as r:  # the warning already says it
+            return {"n": r.status}
+
+    found = [(f.command, f.severity) for f in findings(app) if f.rule == "network-timeout"]
+    assert found == [
+        ("own", Severity.ADVICE),
+        ("proxied", Severity.ADVICE),
+        ("untimed", Severity.WARNING),
+    ]
+    advice = next(f for f in findings(app) if f.rule == "network-timeout")
+    assert "ctx.network.timeout(30)" in advice.fix
+    rules = {(f.rule, f.command) for f in (*findings(net_app()), *findings(own_client_app()))}
+    assert ("network-timeout", "get") not in rules
 
 
 def test_network_commands_may_exit_12_undeclared() -> None:

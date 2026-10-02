@@ -640,8 +640,10 @@
       "kind": "class",
       "methods": [
         "ca_bundle",
+        "fits",
         "proxies",
-        "proxy_for"
+        "proxy_for",
+        "timeout"
       ]
     },
     "NoArgs": {

@@ -47,9 +47,9 @@ def create_item(args: Wide, ctx: Ctx) -> dict[str, object]:
     exit_codes=(),
 )
 def good(args: Name, ctx: Ctx) -> Name:
-    return lookup(args, proxies=ctx.network.proxies)
+    return lookup(args, proxies=ctx.network.proxies, timeout=ctx.network.timeout(30))
 
 
-def lookup(name: Name, *, proxies: Mapping[str, str]) -> Name:
-    """Stands in for a library's own client, which takes the run's proxies"""
+def lookup(name: Name, *, proxies: Mapping[str, str], timeout: float | None) -> Name:
+    """Stands in for a library's own client, which takes the run's proxies and deadline"""
     return name
