@@ -3248,17 +3248,6 @@ def _named_secrets(value: object, name: str = "") -> list[object]:
     return []
 
 
-def _redact_strings(value: object, redact: Callable[[str], str]) -> object:
-    """A JSON value with ``redact`` applied to every string in it"""
-    if isinstance(value, dict):
-        return {k: _redact_strings(v, redact) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_strings(v, redact) for v in value]
-    if isinstance(value, str):
-        return redact(value)
-    return value
-
-
 def _warned(envelope: Envelope, code: str, message: str, command: Command) -> Envelope:
     warning = WarningDetail(code, message, context={"command": command.path.value})
     return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
@@ -6352,7 +6341,7 @@ class _Run:
             )
         if isinstance(data, Crashed):
             return self._fallback_failed(cmd, data.exc, redact, started, meta)
-        data = _redact_strings(data, redact)
+        data = redacted(data, redact)
         envelope = self._envelope(0, data=data, started=started, meta=meta)
         warnings = list(envelope.warnings)
         if data is not None:
