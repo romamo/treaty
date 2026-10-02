@@ -235,7 +235,25 @@ def bind_rules(
                 )
         if any(o is bound[-1].field for o in bound[-1].others):
             raise RegistrationError(f"{where}: a rule on --{bound[-1].field.flag} names itself")
+    _check_one_of_replaces_excludes(bound, where)
     return tuple(bound)
+
+
+def _check_one_of_replaces_excludes(bound: Sequence[BoundRule], where: str) -> None:
+    """REQ-C-026: a ``one_of`` replaces pairwise ``prohibited`` rules between its flags
+    rather than adding to them, so an ``Excludes`` inside a ``RequiresOne`` fails"""
+    groups = [tuple(f.flag for f in b.flags) for b in bound if isinstance(b.rule, RequiresOne)]
+    for b in bound:
+        if not isinstance(b.rule, Excludes):
+            continue
+        for group in groups:
+            inside = [o.flag for o in b.others if b.field.flag in group and o.flag in group]
+            if inside:
+                raise RegistrationError(
+                    f"{where}: Excludes({b.field.flag!r}, ...) prohibits {inside} with "
+                    f"--{b.field.flag}, which RequiresOne({group}) already "
+                    "forbids; drop them from prohibited"
+                )
 
 
 def _typed(field: FieldInfo, value: object, where: str) -> tuple[object, object]:

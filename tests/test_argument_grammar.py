@@ -659,6 +659,29 @@ def test_a_group_naming_too_few_unknown_or_repeated_flags_fails_registration(
         lookup_app(rules=[rule])
 
 
+@pytest.mark.parametrize(
+    "rules",
+    [
+        [RequiresOne(("exact", "fuzzy")), Excludes("exact", ("fuzzy",))],
+        [Excludes("fuzzy", ("limit", "exact")), RequiresOne(("exact", "fuzzy"))],
+    ],
+)
+def test_an_excludes_inside_a_requires_one_fails_registration(rules: list[object]) -> None:
+    """REQ-C-026: a one_of replaces pairwise prohibited rules, so the manifest never lists
+    both and a call never gets the same refusal twice"""
+    with pytest.raises(RegistrationError, match="already forbids"):
+        lookup_app(rules=rules)
+
+
+def test_an_excludes_reaching_outside_a_requires_one_is_kept() -> None:
+    rules = [RequiresOne(("exact", "fuzzy")), Excludes("exact", ("limit",))]
+    requires = lookup_app(rules=rules).manifest()["commands"]["fetch"]["requires"]
+    assert requires == [
+        {"one_of": ["exact", "fuzzy"]},
+        {"if_flag": "exact", "prohibited": ["limit"]},
+    ]
+
+
 def test_a_group_naming_a_required_flag_fails_registration() -> None:
     app = App("bad", version="1.0.0")
     with pytest.raises(RegistrationError, match="always required"):

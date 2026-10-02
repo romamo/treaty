@@ -17,6 +17,9 @@ Apps built on treaty keep their own, structured schema changelog with
   3.2), in declaration order among its other rules, so an agent reading the manifest alone
   sees that one of the group's flags is required. `--schema`'s `requires` lists them too,
   and keeps `requires_groups`; a manifest without such rules is unchanged
+- An `Excludes` between two flags of one `RequiresOne` fails registration: the `one_of`
+  already forbids the pair and replaces the pairwise rule (REQ-C-026), so the manifest
+  never lists both and a call is never refused twice for one mistake
 
 ## [1.0.0rc19] - 2026-10-02
 
