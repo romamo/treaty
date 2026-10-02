@@ -522,7 +522,7 @@ def test_the_manifest_and_schema_list_a_group_as_a_conditional_rule() -> None:
     code, envelope = run(lookup_app(), ["fetch", "--schema"])
     data = envelope["data"]
     assert code == 0 and data["requires"] == groups
-    assert data["requires_groups"] == groups
+    assert "requires_groups" not in data  # #245: requires is the one source
     assert data["raw_payload_schema"]["allOf"] == [
         {
             "anyOf": [
@@ -553,7 +553,7 @@ def test_the_manifest_keeps_a_group_in_declaration_order_among_the_other_rules()
     assert manifest["commands"]["fetch"]["requires"] == expected
     spec_validator("manifest-response").validate(manifest)
     schema = run(lookup_app(rules=rules), ["fetch", "--schema"])[1]["data"]
-    assert schema["requires"] == expected and schema["requires_groups"] == expected[1:3]
+    assert schema["requires"] == expected
 
 
 def test_the_raw_payload_schema_decides_what_validation_decides() -> None:

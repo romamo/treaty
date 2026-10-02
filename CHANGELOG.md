@@ -42,6 +42,11 @@ Apps built on treaty keep their own, structured schema changelog with
   left, so a handler watching `ctx.remaining` lost its partial result to `TIMEOUT`. The
   connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
   when a body without a length would have looked complete
+### Breaking
+
+- Per-command `--schema` no longer has `requires_groups`: its `requires` lists a command's
+  `RequiresAny` and `RequiresOne` rules as `{"any_of": [...]}` and `{"one_of": [...]}`
+  among its other rules, as the manifest does, so a consumer reads `requires` alone
 
 ## [1.0.0rc21] - 2026-10-02
 
