@@ -289,7 +289,7 @@ from ._settings import (
 from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
-from ._stdout import TEXT_CAP, intercept_stdout, prose, redact_with
+from ._stdout import TEXT_CAP, LineBuffer, intercept_stdout, prose, redact_with
 from ._stdout import active as active_interceptor
 from ._steps import Rollback, RollbackStatus, StepError, StepTracker
 from ._subprocess import (
@@ -2668,7 +2668,12 @@ MIN_REDACTED = 4
 
 class _StrayStdout(io.TextIOBase):
     """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
-    to stderr, and the next envelope reports how much (REQ-F-006)"""
+    to stderr, and the next envelope reports how much (REQ-F-006).
+
+    It reaches stderr a line at a time, redacted whole, as what reaches descriptor 1 does
+    (#256): a secret split across two writes is still caught. What a line has without its
+    end waits for the end, a carriage return too, for the next envelope, or for a run to
+    detach, while its secrets are still known"""
 
     def __init__(self, err: _Stderr, redact: Callable[[str], str], *, color: bool) -> None:
         super().__init__()
@@ -2683,6 +2688,13 @@ class _StrayStdout(io.TextIOBase):
         self._held = ""
         """The unfinished escape the last write ended with, until the next completes it"""
         self._held_at = ""
+        self._lines = LineBuffer()
+        """What was printed since the last line end, held to be redacted whole"""
+        self._line_at = ""
+        """Where the line held was started, for its ``--debug`` trace"""
+        self._order = threading.RLock()
+        """Holds a write whole against another thread's, and a release; reentrant, so a
+        signal handler that prints on the same thread cannot deadlock"""
         self._through: IO[str] | None = None
         """The run's stdout while a passthrough command's delegated tool owns it (#35)"""
 
@@ -2724,34 +2736,36 @@ class _StrayStdout(io.TextIOBase):
             through.write(self._redact(text))
             return len(text)
         written = len(text)
-        self._bytes += len(text.encode("utf-8", "surrogatepass"))
-        # Redacted as it arrives: the text may be another run's, whose secrets are only
-        # known while that run is attached, not when this run's envelope is written
-        text = self._redact(text)
-        # As printed: the envelope cleans the warning's copy as it cleans its other text
-        if len(self._text) < TEXT_CAP:
-            self._text += text[: TEXT_CAP - len(self._text)]
         caller = sys._getframe(1)
-        where = self._held_at or f"{caller.f_code.co_filename}:{caller.f_lineno}"
-        text = self._held + text
-        cut = open_escape(text)
-        self._held, self._held_at = text[cut:], where if cut < len(text) else ""
-        self._show(text[:cut], where)
+        with self._order:
+            self._bytes += len(text.encode("utf-8", "surrogatepass"))
+            # As printed: the envelope cleans the warning's copy as it cleans its other
+            # text, and redacts it whole. Redacted as it arrives too: the text may be
+            # another run's, whose secrets are only known while that run is attached
+            if len(self._text) < TEXT_CAP:
+                self._text += self._redact(text)[: TEXT_CAP - len(self._text)]
+            where = self._held_at or f"{caller.f_code.co_filename}:{caller.f_lineno}"
+            text = self._held + text
+            cut = open_escape(text)
+            self._held, self._held_at = text[cut:], where if cut < len(text) else ""
+            self._show(text[:cut], where)
         return written
 
     def _show(self, text: str, where: str) -> None:
         """``text`` on stderr as a ``ctx.log`` line has it, but for a carriage return: colors
         only where the run may color, every other escape gone, other controls shown as
-        escapes (REQ-F-007, #105).
-        Redacted before and after: a secret an escape splits, such as
-        ``hun\\x1b[0mter2``, is whole once the escapes are gone"""
+        escapes (REQ-F-007, #105). A line at a time, redacted whole (#256)"""
         if not text:
             return
-        # A carriage return stays: a progress line printed with "\r" rewrites itself
-        shown = terminal_text(text, color=self._color, keep="\r", rewrite=True)
-        bare = terminal_text(text, color=False, keep="\r", rewrite=True) if self._color else shown
-        if self._redact(bare) != bare:
-            shown = self._redact(bare)
+        started = self._line_at if self._lines.held else where
+        shown = self._lines.add(text, self._redact, color=self._color)
+        ended = "\n" in text or "\r" in text
+        self._line_at = (where if ended else started) if self._lines.held else ""
+        self._pass_on(shown, started)
+
+    def _pass_on(self, shown: str, where: str) -> None:
+        if not shown:
+            return
         if self._err.verbosity >= Verbosity.DEBUG:
             if shown.strip():
                 # REQ-F-060: under --debug, the line that printed it
@@ -2760,11 +2774,15 @@ class _StrayStdout(io.TextIOBase):
             self._err.write(shown, Level.INFO)  # 11-D5: off a terminal, dropped
 
     def release(self) -> None:
-        """An unfinished escape still held, cleaned as it stands: the run is writing an
-        envelope, or is over"""
-        held, where = self._held, self._held_at
-        self._held = self._held_at = ""
-        self._show(held, where)
+        """An unfinished escape and line still held, cleaned and redacted as they stand:
+        the run is writing an envelope, or detaching, or is over"""
+        with self._order:
+            held, where = self._held, self._held_at
+            self._held = self._held_at = ""
+            self._show(held, where)
+            where = self._line_at or where
+            self._line_at = ""
+            self._pass_on(self._lines.drain(self._redact), where)
 
     def flush(self) -> None:
         if self._through is not None:
@@ -3997,7 +4015,7 @@ class _Run:
             child_log=functools.partial(self._child_line, command, args, mode)
             if command.child_log
             else None,
-            secrets=functools.partial(self._stream_spellings, command, args),
+            secrets=functools.partial(self._secret_spellings, command, args),
         )
         if not supports(command.platform, sys.platform):
             self._warn(
@@ -4371,6 +4389,11 @@ class _Run:
         if not self._logging:
             return
         self._logging = False
+        # #256: a line printed without its end is redacted with this run's secrets, which
+        # are forgotten once it detaches; sys.stdout may be a later run's stand-in
+        for stray in (self.stray, sys.stdout):
+            if isinstance(stray, _StrayStdout):
+                stray.release()  # a second release finds nothing held
         below = active_interceptor()
         if below is not None:
             # #254: a line written to descriptor 1 without its end is redacted with this
@@ -6206,23 +6229,20 @@ class _Run:
 
         return redact
 
-    def _stream_spellings(self, command: Command, args: object) -> set[str]:
-        """What a streamed child's lines are redacted of: every spelling, and each line of
-        a multi-line one, since the child's output is echoed a line at a time"""
-        spellings = self._secret_spellings(command, args)
-        return spellings | line_fragments(spellings, MIN_REDACTED)
-
     def _secret_spellings(self, command: Command, args: object) -> set[str]:
         """Every spelling of the run's secret values, the secret arguments' and
-        settings': the value, its serialized form for a registered scalar, and the
-        escaped form ``repr`` puts in messages"""
+        settings': the value, its serialized form for a registered scalar, the escaped
+        form ``repr`` puts in messages, and each line of a multi-line one"""
         secrets = [(getattr(args, f.name, None), f.default) for f in command.fields if f.secret]
         secrets += [(value, None) for value in self.provided_secrets]
         return self._spellings(secrets)
 
     def _spellings(self, secrets: list[tuple[object, object]]) -> set[str]:
         """Every spelling of ``secrets``, (value, default) pairs, of the login token, and of
-        the secret settings"""
+        the secret settings. Each line of a multi-line spelling, such as a PEM key's, at
+        least ``MIN_REDACTED`` long, is one too: text reaches stderr a line at a time, from
+        a streamed child, ``print``, or descriptor 1, where the whole value never appears
+        in one piece (#256)"""
         spellings: set[str] = set()
         if self.token is not None and len(self.token) >= MIN_REDACTED:
             spellings.update({self.token, repr(self.token)[1:-1]})
@@ -6244,7 +6264,7 @@ class _Run:
             for form in forms:
                 if isinstance(form, str) and len(form) >= MIN_REDACTED:
                     spellings.update({form, repr(form)[1:-1]})
-        return spellings
+        return spellings | line_fragments(spellings, MIN_REDACTED)
 
     def _fallback_redactor(self, request: DispatchRequest) -> Callable[[str], str]:
         """Replace every spelling of an exec_fallback line's secret values: those under a

@@ -177,11 +177,13 @@ class StreamRedactor:
 
 def line_fragments(spellings: Collection[str], shortest: int) -> set[str]:
     """Each line of a multi-line secret, at least ``shortest`` long: a streamed child's
-    output is echoed line by line, where the whole value never appears in one line"""
+    output, printed text, and what reaches descriptor 1 go to stderr line by line, where
+    the whole value never appears in one line. Its indentation is no part of the length: a
+    line of only spaces would replace every run of them in every message"""
     return {
         line
         for spelling in spellings
         if "\n" in spelling
         for line in spelling.splitlines()
-        if len(line) >= shortest
+        if len(line.strip()) >= shortest
     }
