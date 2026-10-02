@@ -277,9 +277,10 @@ def serve_wire(app: App, wire: Wire, *, env: Mapping[str, str]) -> McpServed:
 @contextlib.contextmanager
 def _claimed_stdin(stdin: IO[str], read_all: threading.Event) -> Iterator[IO[str] | IO[bytes]]:
     """The protocol's stdin, read from a private copy of its descriptor while the
-    descriptor itself reads the null device: a handler reading ``sys.stdin``, or a child
-    that inherited the descriptor, reads its end at once, as under ``treaty-mcp``, instead
-    of blocking on or taking the client's requests. A stream with no descriptor, as in a
+    descriptor itself reads an empty pipe, its write end closed: a handler reading
+    ``sys.stdin``, or a child that inherited the descriptor, reads its end at once instead
+    of blocking on or taking the client's requests. Not the null device, which Windows
+    reports as a terminal, so a read would pass for a prompt. A stream with no descriptor, as in a
     test, is read as it is. The copy stays open while the reader thread may still read it."""
     try:
         fd = stdin.fileno()
@@ -288,11 +289,12 @@ def _claimed_stdin(stdin: IO[str], read_all: threading.Event) -> Iterator[IO[str
         return
     private = os.dup(fd)
     source = os.fdopen(private, "rb")
-    null = os.open(os.devnull, os.O_RDONLY)
+    empty, end = os.pipe()
+    os.close(end)
     try:
-        os.dup2(null, fd)
+        os.dup2(empty, fd)  # inheritable, as descriptor 0 is, so a child reads its end too
     finally:
-        os.close(null)
+        os.close(empty)
     _rebind_std_handle(fd)
     try:
         yield source
@@ -300,7 +302,7 @@ def _claimed_stdin(stdin: IO[str], read_all: threading.Event) -> Iterator[IO[str
         # On Windows a read still pending on the copy (the client left by closing stdout,
         # or a signal stopped the server, with stdin open) holds the C runtime's lock on
         # that descriptor, so restoring from it would block until the client writes or
-        # closes stdin: the run is ending, and descriptor 0 keeps reading the null device
+        # closes stdin: the run is ending, and descriptor 0 keeps reading the empty pipe
         if sys.platform != "win32" or read_all.is_set():
             os.dup2(private, fd)
             _rebind_std_handle(fd)

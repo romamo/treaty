@@ -71,7 +71,7 @@ def ping(args: NoArgs, ctx: Ctx) -> dict[str, str]:
 @app.command("read-stdin", description="Read stdin, in the handler and in a child",
              danger_level="safe", exit_codes=())  # fmt: skip
 def read_stdin(args: NoArgs, ctx: Ctx) -> dict[str, str]:
-    # Neither may block on, or take, the client's requests: both read the null device
+    # Neither may block on, or take, the client's requests: both read an empty pipe
     child = [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"]
     done = subprocess.run(child, capture_output=True, timeout=5, check=True)
     return {"handler": sys.stdin.read(), "child": done.stdout.decode()}
