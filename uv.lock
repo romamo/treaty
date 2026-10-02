@@ -1057,7 +1057,7 @@ wheels = [
 
 [[package]]
 name = "treaty"
-version = "1.0.0rc17"
+version = "1.0.0rc18"
 source = { editable = "." }
 
 [package.optional-dependencies]
