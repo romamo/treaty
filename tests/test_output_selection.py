@@ -368,6 +368,17 @@ def test_help_offers_id_on_a_command_with_an_id_only() -> None:
     assert "|id" in user_help and "|id" not in migrate_help
 
 
+def test_completion_offers_id_on_a_command_with_an_id_only() -> None:
+    """As its --help: a command without an id refuses --format id, so it is not completed"""
+    code, script, _ = run(["completion", "bash", "--format", "plain"])
+    assert code == 0
+    lines = script.splitlines()
+    migrate = lines[lines.index("    'migrate|--format')") + 1]
+    assert "tsv" in migrate and " id" not in migrate
+    assert "'user|--format')" not in script  # the global case's values hold id
+    assert any(line.endswith(" tsv id ;;") for line in lines)
+
+
 def test_an_id_that_cannot_be_piped_is_invalid_output() -> None:
     app = make_app()
 

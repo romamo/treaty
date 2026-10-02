@@ -19,7 +19,8 @@ Apps built on treaty keep their own, structured schema changelog with
   The manifests and `--schema` of apps that register a format change: each entry gains
   those names; other apps' manifests are unchanged. `<APP>_FORMAT=id` is passed over by a
   command without an `id_field`, which answers in its default instead of exiting `2`, as
-  for another command's own format; `--format id` there still exits `2` (#216)
+  for another command's own format; `--format id` there still exits `2`, and neither its
+  `--help` nor its shell completion offers it (#216)
 
 ## [1.0.0rc14] - 2026-10-02
 
