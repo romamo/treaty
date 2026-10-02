@@ -171,7 +171,15 @@ from ._manifest import (
     global_flag_entries,
     implicit_exit_codes,
 )
-from ._mcp_serve import MCP_SERVE_PATH, McpServe, protocol_command, register_mcp_serve
+from ._mcp_serve import (
+    MCP_SERVE_PATH,
+    McpServe,
+    Provided,
+    bound,
+    protocol_command,
+    register_mcp_serve,
+    unbound,
+)
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
     MACHINE,
@@ -2040,6 +2048,55 @@ class App:
         ``unmask=True`` is ``--unmask``: high-entropy values stay raw. Used by the MCP
         adapter, which never unmasks.
         """
+        return self._in_call(
+            path,
+            env,
+            unmask,
+            lambda run, environ: self._call(run, path, arguments, environ),
+        )
+
+    def _call_provided(
+        self, provided: Provided, arguments: Mapping[str, object], *, env: Mapping[str, str]
+    ) -> Envelope:
+        """One call of a tool ``McpServe(tools=)`` provided (#240), as ``call`` runs a
+        command: the arguments are checked against the tool's input schema, then its
+        handler runs as its synthetic command, with ``meta.tool`` naming it"""
+
+        def answer(run: _Run, environ: Mapping[str, str]) -> Envelope:
+            name = provided.tool.name
+            meta: dict[str, object] = {"tool": name}
+            command = provided.command
+            run.current = command
+            run.provided_call = (name, arguments)
+            problems = provided.problems(arguments)
+            if problems:
+                first = problems[0]
+                where = f" at {first['path']}" if first["path"] else ""
+                refused = ParseError(
+                    f"the arguments of tool {name} break its input schema{where}: "
+                    f"{first['message']}",
+                    context={"tool": name, "errors": problems},
+                    suggestion="correct the arguments to match the tool's inputSchema",
+                )
+                return run.arg_error(refused, meta=meta)
+            invocation = build_from_mapping(command, {}, environ)
+            token = bound(arguments)
+            try:
+                return run.execute(command, invocation, Format.JSON, meta=meta)
+            finally:
+                unbound(token)
+
+        return self._in_call(MCP_SERVE_PATH.value, env, False, answer)
+
+    def _in_call(
+        self,
+        path: str,
+        env: Mapping[str, str] | None,
+        unmask: bool,
+        answer: Callable[[_Run, Mapping[str, str]], Envelope],
+    ) -> Envelope:
+        """``call``'s run around ``answer``: the settings, logging, the audit log, and
+        the byte cap"""
         environ = env if env is not None else os.environ
         self._check_fixes()
         # Tracebacks of crashed or late handlers go to the host process's stderr
@@ -2062,7 +2119,7 @@ class App:
             return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
         run.attach_logging(call=True)
         try:
-            envelope = run.settle(self._call(run, path, arguments, environ))
+            envelope = run.settle(answer(run, environ))
         finally:
             run.detach_logging()
         return cap_envelope(envelope, cap, Rerun(argv=None, app_name=self.name, page=run.page))
@@ -3610,6 +3667,9 @@ class _Run:
         """``--output`` of a passthrough command: where its envelope is written too"""
         self.wire: Wire | None = None
         """The process's stdout and stdin, when argv named ``mcp serve`` (#239)"""
+        self.provided_call: tuple[str, Mapping[str, object]] | None = None
+        """The tool name and arguments of a provided MCP tool's call (#240), which its
+        audit entry lists in place of the synthetic command's empty arguments"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -3807,6 +3867,11 @@ class _Run:
                     continue
                 value = to_jsonable(getattr(args, f.name), self.app.scalars, base=self.cwd)
                 parameters[f.name] = scrub(f.name, value, redact)
+        if self.provided_call is not None:
+            # A provided tool's arguments are plain JSON: redacted by name, as an
+            # exec_fallback line's are
+            tool, arguments = self.provided_call
+            parameters = {"tool": tool, "arguments": scrub("arguments", dict(arguments), redact)}
         if command is None and self.fallback is not None:
             redact = self._fallback_redactor(self.fallback)
             parameters = {

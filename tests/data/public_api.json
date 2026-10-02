@@ -607,10 +607,30 @@
       "fields": [
         "args",
         "setup",
-        "exit_codes"
+        "exit_codes",
+        "tools",
+        "instructions"
       ],
       "kind": "class",
       "methods": []
+    },
+    "McpTool": {
+      "fields": [
+        "name",
+        "description",
+        "input_schema",
+        "handler",
+        "danger_level",
+        "read_only",
+        "destructive",
+        "exit_codes"
+      ],
+      "kind": "class",
+      "methods": [
+        "destructive_hint",
+        "level",
+        "read_only_hint"
+      ]
     },
     "Meta": {
       "fields": [

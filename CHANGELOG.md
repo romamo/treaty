@@ -35,6 +35,15 @@ Apps built on treaty keep their own, structured schema changelog with
   exit 0 and one audit log entry for the run. The manifest marks the
   command's stdout as a protocol in its description; `exec` and `App.call` refuse it with
   `NEEDS_STDIO`
+- `McpServe(tools=provide, instructions=...)` serves tools from runtime data beside the
+  command tools (#240): `provide(args, ctx)` runs once as serving starts and returns
+  `treaty.McpTool` values, each with a name, a description, an input JSON Schema that
+  every call's arguments are checked against, hints from `danger_level` or explicit
+  `read_only` and `destructive`, and a handler whose result is enveloped and checked
+  against its output schema like a command's. A name clash or an invalid schema is refused
+  before serving. `instructions=` takes text or a function of the startup arguments.
+  `mcp serve --list-tools` prints the tool list, provided tools included, and
+  `mcp-validate --serve-args` compares them
 
 ### Changed
 
