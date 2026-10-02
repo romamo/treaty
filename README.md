@@ -448,8 +448,10 @@ app.format(Format.CSV, render=render_csv)  # offers --format csv to every comman
 A command's `renderers=` overrides the app's renderer for that format. `Format` lists every
 format treaty knows (`plain`, `json`, `jsonl`, `ndjson`, `csv`, `tsv`, `yaml`,
 `markdown`); an app offers `plain`, `json`, `jsonl`, `ndjson`, `tsv`, and the ones it
-registers, and the manifest and `--help` list exactly those. Any other value exits `2`
-listing them, before anything runs or any file is written.
+registers, and the manifest and `--help` list exactly those. Each command's manifest
+entry lists the ones beyond `json`, `jsonl`, `tsv`, `plain`, and `ndjson` in
+`output_formats`, with `id` where it has an `id_field`. Any other value exits `2` listing
+them, before anything runs or any file is written.
 
 A command's `renderers=` can also name a format the app does not register: that command
 alone offers it. Its manifest entry lists it in `output_formats`, its `--help` and

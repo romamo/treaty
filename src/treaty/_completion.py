@@ -11,12 +11,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from ._envelope import visible
+from ._mode import Format
 from ._values import CommandPath
 
 COMPLETION_PATH = CommandPath("completion")
 FORMAT_FLAG = "format"
 _DESCRIPTION_CHARS = 72
 _UNSAFE = re.compile(r"[^A-Za-z0-9_]")
+_ID = Format.ID.value
 
 
 class Shell(StrEnum):
@@ -128,7 +130,10 @@ def _node(
     beyond = entry.get("output_formats", [])
     assert isinstance(beyond, list)
     own = tuple(str(f) for f in beyond if f not in formats)
-    takes = Takes((*formats, *own)) if own else None
+    # The root lists id when some command has an id_field; a command without one refuses
+    # --format id, so its values leave it out, as its --help does (#216)
+    inherited = tuple(f for f in formats if f != _ID or _ID in beyond)
+    takes = Takes((*inherited, *own)) if own or inherited != formats else None
     return Node(words, children, _options(flags), slots, variadic, strict, takes)
 
 

@@ -467,22 +467,49 @@ def test_the_manifest_lists_a_commands_own_formats_on_its_entry() -> None:
     flag = manifest["flags"]["format"]  # type: ignore[index]
     assert "html" not in flag["enum_values"] and "yaml" not in flag["enum_values"]
     commands: Any = manifest["commands"]
-    assert commands["why"]["output_formats"] == ["html"]
-    assert commands["label"]["output_formats"] == ["yaml"]
-    # Overriding the app's csv leaves the entry as it was: the root flag lists csv
-    assert "output_formats" not in commands["tag"]
-    assert "output_formats" not in commands["show"]
+    # Each entry lists the app's csv it inherits (#216), then the formats only it offers
+    assert commands["why"]["output_formats"] == ["csv", "html"]
+    assert commands["label"]["output_formats"] == ["csv", "yaml"]
+    # Overriding the app's csv lists it once, as on every other command
+    assert commands["tag"]["output_formats"] == ["csv"]
+    assert commands["show"]["output_formats"] == ["csv"]
+    assert commands["manifest"]["output_formats"] == ["csv"]
     # output_formats holds names only, so the entry's description states the media type
     assert commands["why"]["description"] == "Why it happened. --format html writes text/html"
 
 
-def test_schema_lists_only_a_commands_own_formats() -> None:
-    """An override of an app format adds nothing to --schema, as in the manifest"""
+def test_schema_lists_the_inherited_formats_and_a_commands_own() -> None:
+    """An override of an app format is listed once in --schema, as in the manifest"""
     app = page_app()
     _, why = run_json(app, ["why", "--schema"])
     _, tag = run_json(app, ["tag", "--schema"])
-    assert why["data"]["output_formats"] == ["html"]
-    assert "output_formats" not in tag["data"]
+    assert why["data"]["output_formats"] == ["csv", "html"]
+    assert tag["data"]["output_formats"] == ["csv"]
+
+
+def test_output_formats_lists_every_format_the_app_registered() -> None:
+    """An agent takes no format the entry leaves out, so each one a command inherits is
+    listed, in the app's order, custom names among them (#216)"""
+    app = html_app()
+    app.format(Format.YAML, render=lambda d: f"{d}\n")
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    commands: Any = manifest["commands"]
+    for path in ("show", "why", "manifest"):
+        assert commands[path]["output_formats"] == ["csv", "yaml", "html", "rst"]
+    code, out, _ = run(app, ["show", "--format", "yaml"])
+    assert code == 0 and "1.3.9" in out
+
+
+def test_output_formats_stays_out_with_no_format_beyond_the_defaults() -> None:
+    app = App("plainctl", version="1.0.0")
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"tag": "1.3.9"}
+
+    commands: Any = app.manifest()["commands"]
+    assert all("output_formats" not in entry for entry in commands.values())
 
 
 def test_help_and_completion_offer_a_format_on_its_command_only() -> None:

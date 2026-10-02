@@ -412,6 +412,15 @@ _BUILT_IN_FEATURE = {
 """Framework flags that do what a field of the same name did, so the field goes, not renamed"""
 
 
+def _no_id(command: Command) -> ParseError:
+    """``--format id`` on a command without an ``id_field`` (REQ-O-005)"""
+    return ParseError(
+        f"--format id writes a command's primary id, and {command.path} declares none",
+        context={"flag": "format", "value": "id", "command": command.path.value},
+        suggestion="use --format json; the command author adds id_field= to offer id",
+    )
+
+
 class App:
     def __init__(
         self,
@@ -737,9 +746,14 @@ class App:
     @property
     def formats(self) -> tuple[FormatName, ...]:
         """The ``--format`` values this app offers: the ``Format`` members in their order,
-        then the names it registered, in the order it did"""
+        then the names it registered, in the order it did. ``id`` is among them when some
+        command declares an ``id_field``, and only such a command takes it (#216)"""
+        return self._formats(ids=any(c.id_field is not None for c in self._commands.values()))
+
+    def _formats(self, *, ids: bool) -> tuple[FormatName, ...]:
+        """The app's ``--format`` values, with ``id`` in its place among the members when
+        ``ids``"""
         built_in = (Format.PLAIN, Format.JSON, Format.JSONL, Format.NDJSON, Format.TSV)
-        ids = any(c.id_field is not None for c in self._commands.values())
         members = tuple(
             FormatName.of(m)
             for m in Format
@@ -748,9 +762,10 @@ class App:
         return members + tuple(n for n in self._renderers if n.builtin is None)
 
     def _command_formats(self, command: Command) -> tuple[FormatName, ...]:
-        """The ``--format`` values ``command`` takes: the app's, then the names its own
-        ``renderers=`` introduced, which no other command offers (#209)"""
-        offered = self.formats
+        """The ``--format`` values ``command`` takes: the app's, ``id`` when it declares an
+        ``id_field`` (#216), then the names its own ``renderers=`` introduced, which no
+        other command offers (#209)"""
+        offered = self._formats(ids=command.id_field is not None)
         return offered + tuple(n for n in command.renderers if n not in offered)
 
     def _command_media(self, command: Command) -> Mapping[FormatName, MediaType]:
@@ -762,7 +777,7 @@ class App:
         before the command path is read"""
         names = dict.fromkeys(self.formats)
         for command in self._commands.values():
-            names.update(dict.fromkeys(command.renderers))
+            names.update(dict.fromkeys(self._command_formats(command)))
         return tuple(names)
 
     def _selected_format(
@@ -774,7 +789,10 @@ class App:
         path = resolve_path(rest, self._commands).path
         if path is None:
             return resolve_mode(explicit, env, tty, everywhere, self.name)
-        offered = self._command_formats(self._commands[path])
+        command = self._commands[path]
+        offered = self._command_formats(command)
+        if explicit == Format.ID.value and command.id_field is None:
+            raise _no_id(command)
         return resolve_mode(
             explicit,
             env,
@@ -1810,11 +1828,7 @@ class App:
                 suggestion=f"use --format {raw} to choose the representation",
             )
         if mode is Format.ID and command.id_field is None:
-            return ParseError(
-                f"--format id writes a command's primary id, and {command.path} declares none",
-                context={"flag": "format", "value": "id", "command": command.path.value},
-                suggestion="use --format json; the command author adds id_field= to offer id",
-            )
+            return _no_id(command)
         return None
 
     def _misplaced_flag(self, route: Route) -> ParseError:

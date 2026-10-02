@@ -47,8 +47,9 @@ SCHEMA_VERSION = "3.5"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.3: CommandEntry.output_file (REQ-O-001)
 # 3.4: FlagEntry.env_vars; 3.5: the root env_vars of variables that back no flag (REQ-F-073)
 
-# The --format values CommandEntry.output_formats leaves out (REQ-O-049)
-_DEFAULT_FORMATS = frozenset({Format.JSON, Format.JSONL, Format.TSV, Format.PLAIN})
+# The --format values CommandEntry.output_formats leaves out (REQ-O-049): the spec's
+# universal ones, and ndjson, which every treaty command takes
+_DEFAULT_FORMATS = frozenset({Format.JSON, Format.JSONL, Format.TSV, Format.PLAIN, Format.NDJSON})
 
 # The framework variables a root flag reads when it is not passed (REQ-O-042); the rest of
 # KNOWN back no flag and are listed in the root env_vars
@@ -338,7 +339,7 @@ def command_entry(
     all_paths: Mapping[CommandPath, Command],
     *,
     builtin: bool,
-    offered: Collection[FormatName],
+    offered: Sequence[FormatName],
     shared: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """One CommandEntry; ``builtin`` when treaty registered the command, not the app.
@@ -409,10 +410,11 @@ def command_entry(
         out["output_file"] = "binary" if command.returns_binary else "formatted"
     if command.streaming:
         out["streaming_default"] = True
-    # REQ-O-049: the values beyond the defaults: id (REQ-O-005), then the formats only this
-    # command offers (#209). Its override of an app format is listed by the root flag, as
-    # for every other command
+    # REQ-O-049: every value the command takes beyond the defaults (#216): id (REQ-O-005),
+    # the app's formats it inherits, then the formats only it offers (#209). Its override
+    # of an app format is listed once, among the inherited
     beyond = [Format.ID.value] if command.id_field is not None else []
+    beyond += (n.value for n in offered if n not in _DEFAULT_FORMATS and n.builtin is not Format.ID)
     beyond += (n.value for n in command.renderers if n not in _DEFAULT_FORMATS and n not in offered)
     if beyond:
         out["output_formats"] = beyond
@@ -467,7 +469,7 @@ def command_schema(
     all_paths: Mapping[CommandPath, Command],
     *,
     builtin: bool,
-    offered: Collection[FormatName],
+    offered: Sequence[FormatName],
 ) -> dict[str, object]:
     """``--schema`` output for one command (REQ-C-015, REQ-O-032)"""
     entry = command_entry(command, exits, all_paths, builtin=builtin, offered=offered)

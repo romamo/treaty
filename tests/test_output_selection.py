@@ -351,6 +351,34 @@ def test_format_id_on_a_command_without_an_id_is_an_argument_error() -> None:
     assert "id_field=" in env["error"]["suggestion"]
 
 
+def test_the_format_variable_set_to_id_is_passed_over_by_a_command_without_an_id() -> None:
+    """``<APP>_FORMAT=id`` is a default for the session: a command without an id answers
+    in its default, as for another command's own format (#216)"""
+    env = {"SELCTL_FORMAT": "id"}
+    code, out, _ = run(["migrate"], env=env)
+    assert code == 0 and json.loads(out)["ok"] is True
+    assert run(["user", "u1"], env=env) == (0, "u1\n", "")
+    code, out, _ = run(["migrate", "--format", "id"], env=env)
+    assert code == 2 and json.loads(out)["error"]["context"]["value"] == "id"
+
+
+def test_help_offers_id_on_a_command_with_an_id_only() -> None:
+    _, user_help, _ = run(["user", "--help"], isatty=True)
+    _, migrate_help, _ = run(["migrate", "--help"], isatty=True)
+    assert "|id" in user_help and "|id" not in migrate_help
+
+
+def test_completion_offers_id_on_a_command_with_an_id_only() -> None:
+    """As its --help: a command without an id refuses --format id, so it is not completed"""
+    code, script, _ = run(["completion", "bash", "--format", "plain"])
+    assert code == 0
+    lines = script.splitlines()
+    migrate = lines[lines.index("    'migrate|--format')") + 1]
+    assert "tsv" in migrate and " id" not in migrate
+    assert "'user|--format')" not in script  # the global case's values hold id
+    assert any(line.endswith(" tsv id ;;") for line in lines)
+
+
 def test_an_id_that_cannot_be_piped_is_invalid_output() -> None:
     app = make_app()
 
@@ -413,6 +441,14 @@ def test_the_manifest_offers_id_where_a_command_has_an_id() -> None:
     assert data["commands"]["user"]["output_formats"] == ["id"]
     assert data["commands"]["mail"]["output_formats"] == ["id"]
     assert "output_formats" not in data["commands"]["migrate"]
+
+
+def test_output_formats_lists_id_before_the_inherited_formats() -> None:
+    app = make_app()
+    app.format("csv", render=lambda d: f"{d}\n")
+    commands: Any = app.manifest()["commands"]
+    assert commands["user"]["output_formats"] == ["id", "csv"]
+    assert commands["migrate"]["output_formats"] == ["csv"]
 
 
 def test_audit_suggests_id_field_for_an_output_with_one_id_like_field() -> None:
