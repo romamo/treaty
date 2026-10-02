@@ -284,9 +284,12 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     _warn_unresolved(ctx, unresolved(app, every), "left in place; run cleanup inside it")
     for item in every:
         if item.effect.kind in KEPT:
-            kept.extend(Path(m) for m in item.matches)
+            # Both where it is and, through a symlink, what it is: two spellings of one
+            # directory, such as /tmp and /private/tmp on macOS, must not slip past
+            spots = [s for m in item.matches for s in (_located(m), Path(m).resolve())]
+            kept.extend(spots)
             if item.effect.kind is SideEffectType.OUTPUT:
-                products.extend(Path(m) for m in item.matches)
+                products.extend(spots)
         else:
             found.update(dict.fromkeys(item.matches, item.effect.kind))
     if ctx._session is not None:
@@ -303,8 +306,8 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     held = sorted(
         p
         for p in found
-        if any(k.is_relative_to(p) for k in kept)
-        or any(Path(p).is_relative_to(k) for k in products)
+        if any(k.is_relative_to(_located(p)) for k in kept)
+        or any(_located(p).is_relative_to(k) for k in products)
     )
     if held:
         ctx.warn(
@@ -313,6 +316,13 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
             paths=held,
         )
     return sorted((p, kind) for p, kind in found.items() if p not in held)
+
+
+def _located(path: str) -> Path:
+    """Where ``path`` is, its directory resolved and the last segment kept: what cleanup
+    removes, a symlink as the link itself"""
+    where = Path(path)
+    return where.parent.resolve() / where.name
 
 
 @dataclass(frozen=True, slots=True)

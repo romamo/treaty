@@ -161,3 +161,96 @@ def test_cleanup_keeps_a_handed_out_output_file_declared_as_output(tmp_path: Pat
     code, envelope = run(report_app(), ["cleanup", "--confirm-destructive"], tmp_path)
     assert code == 0, envelope
     assert not handed.exists()
+
+
+@pytest.mark.parametrize("product", ["alias", "real"])
+def test_cleanup_keeps_an_output_path_spelled_through_a_symlink(
+    tmp_path: Path, product: str
+) -> None:
+    # One directory under two spellings, as /tmp and /private/tmp on macOS: a cache glob
+    # in one must not remove the output path declared in the other
+    real = tmp_path / "real"
+    (real / "dash").mkdir(parents=True)
+    (real / "dash" / "index.html").write_text("<html></html>")
+    (real / "scratch").write_text("x")
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need privileges here")
+    cache = alias if product == "real" else real
+    out = real if product == "real" else alias
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "dash",
+        description="Build the dashboard",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[
+            SideEffect(f"{out.as_posix()}/dash/", "output"),
+            SideEffect(f"{cache.as_posix()}/*", "cache"),
+        ],
+    )
+    def dash(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["cleanup", "--confirm-destructive"], tmp_path)
+    assert code == 0, envelope
+    assert (real / "dash" / "index.html").exists()
+    assert not (real / "scratch").exists()
+
+
+def test_cleanup_keeps_the_target_of_an_output_path_that_is_a_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "scratch" / "dash"
+    target.mkdir(parents=True)
+    (target / "index.html").write_text("<html></html>")
+    (tmp_path / "proj").mkdir()
+    try:
+        (tmp_path / "proj" / "dash").symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need privileges here")
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "dash",
+        description="Build the dashboard",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[
+            SideEffect(f"{tmp_path.as_posix()}/proj/dash/", "output"),
+            SideEffect(f"{tmp_path.as_posix()}/scratch/*", "temp"),
+        ],
+    )
+    def dash(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["cleanup", "--confirm-destructive"], tmp_path)
+    assert code == 0, envelope
+    assert (target / "index.html").exists()
+
+
+def test_cleanup_removes_a_temp_path_sharing_only_a_name_prefix_with_an_output_path(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "dash").mkdir()
+    (tmp_path / "dash-tmp").mkdir()
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "dash",
+        description="Build the dashboard",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[
+            SideEffect(f"{tmp_path.as_posix()}/dash/", "output"),
+            SideEffect(f"{tmp_path.as_posix()}/dash-tmp/", "temp"),
+        ],
+    )
+    def dash(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["cleanup", "--confirm-destructive"], tmp_path)
+    assert code == 0, envelope
+    assert (tmp_path / "dash").exists()
+    assert not (tmp_path / "dash-tmp").exists()
