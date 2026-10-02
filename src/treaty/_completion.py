@@ -14,6 +14,7 @@ from ._envelope import visible
 from ._values import CommandPath
 
 COMPLETION_PATH = CommandPath("completion")
+FORMAT_FLAG = "format"
 _DESCRIPTION_CHARS = 72
 _UNSAFE = re.compile(r"[^A-Za-z0-9_]")
 
@@ -55,6 +56,8 @@ class Node:
     """The last positional takes every remaining word"""
     strict: bool
     """Options end at the first positional (REQ-C-027)"""
+    formats: Takes | None = None
+    """The ``--format`` values of a command that offers its own, beside the app's (#209)"""
 
     @property
     def key(self) -> str:
@@ -82,11 +85,14 @@ def tree(manifest: Mapping[str, object], groups: Mapping[CommandPath, str]) -> T
             described.setdefault(parent, "")
             parent = parent.parent
     paths = set(described)
-    root = _node((), paths, described, None)
+    root = _node((), paths, described, None, ())
     version = Option(("--version",), "Print the tool name and version", None)
     nodes = [Node(root.words, root.children, (version,), (), False, False)]
+    format_flag = flags.get(FORMAT_FLAG)
+    offered = tuple(format_flag["enum_values"]) if isinstance(format_flag, dict) else ()
     nodes += [
-        _node(p.parts, paths, described, commands.get(p.value)) for p in sorted(paths, key=str)
+        _node(p.parts, paths, described, commands.get(p.value), offered)
+        for p in sorted(paths, key=str)
     ]
     return Tree(_options(flags), tuple(nodes))
 
@@ -101,6 +107,7 @@ def _node(
     paths: set[CommandPath],
     described: Mapping[CommandPath, str],
     entry: Mapping[str, object] | None,
+    formats: tuple[str, ...],
 ) -> Node:
     children = tuple(
         (p.parts[-1], described[p]) for p in sorted(paths, key=str) if p.parts[:-1] == words
@@ -118,7 +125,11 @@ def _node(
     slots = tuple(_takes({**flags.get(p["name"], {}), **p}) for p in positionals)
     variadic = bool(positionals) and bool(positionals[-1].get("variadic"))
     strict = entry.get("option_placement") == "strict"
-    return Node(words, children, _options(flags), slots, variadic, strict)
+    beyond = entry.get("output_formats", [])
+    assert isinstance(beyond, list)
+    own = tuple(str(f) for f in beyond if f not in formats)
+    takes = Takes((*formats, *own)) if own else None
+    return Node(words, children, _options(flags), slots, variadic, strict, takes)
 
 
 def _options(flags: Mapping[str, object]) -> tuple[Option, ...]:
@@ -191,6 +202,8 @@ def _takes_table(fn: str, tree_: Tree, shell: Shell) -> list[str]:
                 emit([_q(f"{node.key}|{n}") for n in option.names], option.takes)
         for index, slot in enumerate(node.slots):
             emit([_q(f"{node.key}|#{index}")], slot)
+        if node.formats is not None:
+            emit([_q(f"{node.key}|--{FORMAT_FLAG}")], node.formats)
     for option in tree_.globals:
         if option.takes is not None:
             emit(["*" + _q(f"|{n}") for n in option.names], option.takes)

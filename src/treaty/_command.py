@@ -36,7 +36,7 @@ from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo, confirm_field, dry_run_field, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._lines import INPUT_LINES_FLAG, StdinInput
-from ._mode import FormatName
+from ._mode import FormatName, MediaType
 from ._out import NO_ORDER, Binary, OutSpec, check_order
 from ._output_base import OutputBase, OutputRoot, output_root
 from ._page import DEFAULT_LIMIT, Limit, Page
@@ -108,6 +108,34 @@ class Example:
 
 
 @dataclass(frozen=True, slots=True)
+class FormatRenderer:
+    """A command's renderer for one ``--format`` and the media type it writes:
+    ``renderers={"html": FormatRenderer(render_page, media_type="text/html")}``. The
+    command's manifest entry states the media type, so an agent knows not to parse the
+    output as JSON (#209)"""
+
+    render: Renderer
+    media_type: MediaType
+
+    if TYPE_CHECKING:
+
+        def __init__(self, render: Renderer, *, media_type: MediaType | str) -> None: ...
+
+    else:
+
+        def __init__(self, render: Renderer, *, media_type: MediaType | str) -> None:
+            if not callable(render):
+                raise RegistrationError(f"FormatRenderer: {render!r} is not callable")
+            if not isinstance(media_type, MediaType):
+                try:
+                    media_type = MediaType(media_type)
+                except InvalidValue as exc:
+                    raise RegistrationError(f"FormatRenderer: {exc}") from None
+            object.__setattr__(self, "render", render)
+            object.__setattr__(self, "media_type", media_type)
+
+
+@dataclass(frozen=True, slots=True)
 class Compat:
     """One older major of a command's output that ``--schema-version`` can still select"""
 
@@ -137,7 +165,10 @@ class Command:
     supports_raw_payload: bool
     cleanup: Cleanup | None
     renderers: Mapping[FormatName, Renderer]
-    """Per-format overrides of the app's renderers"""
+    """Per-format overrides of the app's renderers, and the formats only this command
+    offers"""
+    media_types: Mapping[FormatName, MediaType]
+    """What the command's own renderers write, where it declared it (#209)"""
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
     flag_env_vars: Mapping[str, str]
@@ -426,6 +457,7 @@ def build_command(
     supports_raw_payload: bool,
     cleanup: Cleanup | None,
     renderers: Mapping[FormatName, Renderer],
+    media_types: Mapping[FormatName, MediaType],
     scalars: ScalarRegistry,
     outlasts_default: bool = False,
     streaming: bool = False,
@@ -791,6 +823,7 @@ def build_command(
         supports_raw_payload=supports_raw_payload,
         cleanup=cleanup,
         renderers=dict(renderers),
+        media_types=dict(media_types),
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
         flag_env_vars={
             f.name: default_env_var(app_name, f.name) for f in fields if not f.secret and f.spec.env

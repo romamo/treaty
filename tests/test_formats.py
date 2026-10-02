@@ -6,7 +6,17 @@ from typing import Any
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Ctx, Exit, Format, FormatName, NoArgs, RegistrationError, Renderer
+from treaty import (
+    App,
+    Ctx,
+    Exit,
+    Format,
+    FormatName,
+    FormatRenderer,
+    NoArgs,
+    RegistrationError,
+    Renderer,
+)
 
 
 def csv_rows(data: Any) -> str:
@@ -187,18 +197,6 @@ def test_json_takes_no_renderer() -> None:
         )
 
 
-def test_a_command_renderer_needs_the_format_registered_first() -> None:
-    app = App("t", version="1.0.0")
-    with pytest.raises(RegistrationError, match=r"app\.format\(Format\.CSV"):
-        app.command(
-            "show",
-            description="Show",
-            renderers={Format.CSV: csv_rows},
-            danger_level="safe",
-            exit_codes=(),
-        )
-
-
 def test_a_format_is_registered_once() -> None:
     app = App("t", version="1.0.0")
     app.format(Format.CSV, render=csv_rows)
@@ -322,18 +320,6 @@ def test_a_media_type_is_validated(media_type: str) -> None:
         App("t", version="1.0.0").format("html", render=csv_rows, media_type=media_type)
 
 
-def test_a_command_renderer_for_a_custom_name_needs_it_registered_first() -> None:
-    app = App("t", version="1.0.0")
-    with pytest.raises(RegistrationError, match=r"app\.format\('html'"):
-        app.command(
-            "show",
-            description="Show",
-            renderers={"html": csv_rows},
-            danger_level="safe",
-            exit_codes=(),
-        )
-
-
 def test_a_handler_tells_a_custom_name_from_plain() -> None:
     """``ctx.mode`` is plain's for a custom name; ``ctx.format_name`` is what was asked"""
     app = html_app()
@@ -397,3 +383,201 @@ def test_output_is_argv_only_so_no_other_path_can_name_a_format_file() -> None:
         isatty=False,
     )
     assert code == 2 and json.loads(out.getvalue())["error"]["context"]["value"] == "html"
+
+
+# A format one command offers (#209)
+
+
+def page(data: Any) -> str:
+    return f"<h1>{data['tag']}</h1>\n"
+
+
+def page_app() -> App:
+    """``html`` is ``why``'s alone and ``yaml`` is ``label``'s; ``csv`` is the app's"""
+    app = formats_app()
+
+    @app.command(
+        "why",
+        description="Why it happened",
+        renderers={"html": FormatRenderer(page, media_type="text/html")},
+        output_file=True,
+        danger_level="safe",
+        exit_codes=(),
+    )
+    def why(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"service": "api", "tag": "1.3.9"}
+
+    @app.command(
+        "label",
+        description="Show the label",
+        renderers={Format.YAML: lambda d: f"tag: {d['tag']}\n"},
+        danger_level="safe",
+        exit_codes=(),
+    )
+    def label(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {"tag": "1.3.9"}
+
+    return app
+
+
+def run_json(app: App, argv: list[str], env: dict[str, str] | None = None) -> tuple[int, Any]:
+    out = io.StringIO()
+    code = app.run(argv, stdout=out, stderr=io.StringIO(), env=env or {}, isatty=False)
+    return code, json.loads(out.getvalue())
+
+
+def test_a_command_offers_a_format_the_app_does_not_register() -> None:
+    app = page_app()
+    assert run(app, ["why", "--format", "html"]) == (0, "<h1>1.3.9</h1>\n", "")
+    assert run(app, ["label", "--format", "yaml"]) == (0, "tag: 1.3.9\n", "")
+    assert "html" not in [n.value for n in app.formats] and Format.YAML not in app.formats
+
+
+def test_another_commands_format_is_an_argument_error_listing_this_ones() -> None:
+    code, envelope = run_json(page_app(), ["show", "--format", "html"])
+    error = envelope["error"]
+    assert code == 2 and error["code"] == "ARG_ERROR"
+    assert error["message"] == "--format 'html' is not offered by showctl show."
+    assert error["context"]["command"] == "show"
+    assert error["context"]["allowed"] == ["plain", "json", "jsonl", "ndjson", "csv", "tsv"]
+    code, envelope = run_json(page_app(), ["why", "--format", "yaml"])
+    assert code == 2 and envelope["error"]["context"]["allowed"][-1] == "html"
+
+
+def test_the_format_variable_naming_another_commands_format_keeps_the_default() -> None:
+    """``<APP>_FORMAT`` is a default for the whole session: a command without the format
+    answers as if it were unset, rather than failing"""
+    app = page_app()
+    env = {"SHOWCTL_FORMAT": "html"}
+    assert run(app, ["why"], env=env) == (0, "<h1>1.3.9</h1>\n", "")
+    code, out, _ = run(app, ["show"], env=env)
+    assert code == 0 and "<" not in out and "1.3.9" in out
+    code, envelope = run_json(app, ["show"], env=env)
+    assert code == 0 and envelope["data"]["tag"] == "1.3.9"
+    code, envelope = run_json(app, ["manifest"], env=env)
+    assert code == 0 and "commands" in envelope["data"]
+    # A value no command offers still fails, naming the variable
+    code, envelope = run_json(app, ["show"], env={"SHOWCTL_FORMAT": "xml"})
+    assert code == 2 and envelope["error"]["context"]["source"] == "SHOWCTL_FORMAT"
+
+
+def test_the_manifest_lists_a_commands_own_formats_on_its_entry() -> None:
+    manifest = page_app().manifest()
+    spec_validator("manifest-response").validate(manifest)
+    flag = manifest["flags"]["format"]  # type: ignore[index]
+    assert "html" not in flag["enum_values"] and "yaml" not in flag["enum_values"]
+    commands: Any = manifest["commands"]
+    assert commands["why"]["output_formats"] == ["html"]
+    assert commands["label"]["output_formats"] == ["yaml"]
+    # Overriding the app's csv leaves the entry as it was: the root flag lists csv
+    assert "output_formats" not in commands["tag"]
+    assert "output_formats" not in commands["show"]
+    # output_formats holds names only, so the entry's description states the media type
+    assert commands["why"]["description"] == "Why it happened. --format html writes text/html"
+
+
+def test_schema_lists_only_a_commands_own_formats() -> None:
+    """An override of an app format adds nothing to --schema, as in the manifest"""
+    app = page_app()
+    _, why = run_json(app, ["why", "--schema"])
+    _, tag = run_json(app, ["tag", "--schema"])
+    assert why["data"]["output_formats"] == ["html"]
+    assert "output_formats" not in tag["data"]
+
+
+def test_help_and_completion_offer_a_format_on_its_command_only() -> None:
+    app = page_app()
+    _, why_help, _ = run(app, ["why", "--help"])
+    assert "--format plain|json|jsonl|ndjson|csv|tsv|html" in why_help
+    assert "html writes text/html" in why_help
+    _, show_help, _ = run(app, ["show", "--help"])
+    assert "--format plain|json|jsonl|ndjson|csv|tsv " in show_help and "html" not in show_help
+    _, root_help, _ = run(app, ["--help"])
+    assert "--format plain|json|jsonl|ndjson|csv|tsv " in root_help
+    code, script, _ = run(app, ["completion", "bash", "--format", "plain"])
+    assert code == 0
+    assert "'why|--format')" in script
+    assert "'label|--format')" in script
+    assert "'show|--format')" not in script
+
+
+def test_a_command_renderer_wins_over_the_apps_for_the_same_name() -> None:
+    app = App("t", version="1.0.0")
+    app.format("html", render=lambda d: "app\n", media_type="text/html")
+
+    @app.command(
+        "why",
+        description="Why",
+        renderers={"html": FormatRenderer(lambda d: "why\n", media_type="application/xhtml+xml")},
+        danger_level="safe",
+        exit_codes=(),
+    )
+    def why(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {}
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        return {}
+
+    assert run(app, ["why", "--format", "html"]) == (0, "why\n", "")
+    assert run(app, ["show", "--format", "html"]) == (0, "app\n", "")
+    _, why_help, _ = run(app, ["why", "--help"])
+    assert "html writes application/xhtml+xml" in why_help
+
+
+def test_a_handler_sees_the_command_format_it_was_asked_for() -> None:
+    app = page_app()
+    seen: list[FormatName] = []
+
+    @app.command(
+        "trace",
+        description="Trace",
+        renderers={"dot": lambda d: "digraph {}\n"},
+        danger_level="safe",
+        exit_codes=(),
+    )
+    def trace(args: NoArgs, ctx: Ctx) -> dict[str, object]:
+        seen.append(ctx.format_name)
+        return {}
+
+    assert run(app, ["trace", "--format", "dot"]) == (0, "digraph {}\n", "")
+    assert seen == [FormatName("dot")]
+
+
+def test_output_refuses_a_commands_own_format_as_a_path(tmp_path: Any) -> None:
+    out = io.StringIO()
+    code = page_app().run(
+        ["--cwd", str(tmp_path), "why", "--output", "html"],
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    assert code == 2 and json.loads(out.getvalue())["error"]["context"]["value"] == "html"
+
+
+@pytest.mark.parametrize("name", ["json", "jsonl", "ndjson", "id"])
+def test_a_command_cannot_take_treatys_own_formats(name: str) -> None:
+    with pytest.raises(RegistrationError, match="takes no renderer"):
+        App("t", version="1.0.0").command(
+            "show",
+            description="Show",
+            renderers={name: FormatRenderer(csv_rows, media_type="text/csv")},
+            danger_level="safe",
+            exit_codes=(),
+        )
+
+
+def test_a_format_renderer_is_validated() -> None:
+    with pytest.raises(RegistrationError, match="media type"):
+        FormatRenderer(page, media_type="html")
+    with pytest.raises(RegistrationError, match="not callable"):
+        FormatRenderer("page", media_type="text/html")  # type: ignore[arg-type]
+    with pytest.raises(RegistrationError, match="format name"):
+        App("t", version="1.0.0").command(
+            "show",
+            description="Show",
+            renderers={"HTML": page},
+            danger_level="safe",
+            exit_codes=(),
+        )

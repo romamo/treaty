@@ -21,14 +21,22 @@ Apps built on treaty keep their own, structured schema changelog with
   declared or not, as the run reports it as `HANDLER_CRASHED`; the fix is a `ParseError`
   (#211)
 
-### Added
-
 - `@app.command(..., idempotent=True)` declares that a repeat of a mutating command with
   the same arguments leaves the same state: the `retryable` audit rule passes its
   retryable codes, and its manifest description says so, as the spec's CommandEntry has
   no key for it. The rule's fix names the option instead of asking to "confirm" the
   command is idempotent. A safe or destructive command refuses it, and it changes no run:
   `--idempotency-key` still replays the first result (#210)
+
+- A command's `renderers=` can name a format the app does not register, such as
+  `renderers={"html": render_page}`: that command alone offers it. Its manifest entry
+  lists it in `output_formats`, its `--help` and completion offer it, and the root
+  `--format` values, root `--help`, and other commands leave it out. `--format html` on
+  another command exits `2` listing that command's formats; `<APP>_FORMAT=html` is passed
+  over there, which answers in its default instead of failing. `treaty.FormatRenderer(render,
+  media_type="text/html")` states what a command's renderer writes, in its manifest
+  description, as the output_formats list has no room for it. A command's renderer still
+  wins over the app's for a name both declare (#209)
 
 ## [1.0.0rc13] - 2026-10-02
 

@@ -510,6 +510,14 @@
         "mode"
       ]
     },
+    "FormatRenderer": {
+      "fields": [
+        "render",
+        "media_type"
+      ],
+      "kind": "class",
+      "methods": []
+    },
     "FrameworkCode": {
       "kind": "enum",
       "members": [

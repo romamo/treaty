@@ -445,12 +445,28 @@ app.format(Format.CSV, render=render_csv)  # offers --format csv to every comman
 )
 ```
 
-A command's `renderers=` overrides the app's renderer for that format. `app.format()` must
-come before the commands that override it, and a command can only override a format the
-app offers. `Format` lists every format treaty knows (`plain`, `json`, `jsonl`, `ndjson`,
-`csv`, `tsv`, `yaml`, `markdown`); an app offers `plain`, `json`, `jsonl`, `ndjson`, `tsv`,
-and the ones it registers, and the manifest and `--help` list exactly those. Any other
-value exits `2` listing them, before anything runs or any file is written.
+A command's `renderers=` overrides the app's renderer for that format. `Format` lists every
+format treaty knows (`plain`, `json`, `jsonl`, `ndjson`, `csv`, `tsv`, `yaml`,
+`markdown`); an app offers `plain`, `json`, `jsonl`, `ndjson`, `tsv`, and the ones it
+registers, and the manifest and `--help` list exactly those. Any other value exits `2`
+listing them, before anything runs or any file is written.
+
+A command's `renderers=` can also name a format the app does not register: that command
+alone offers it. Its manifest entry lists it in `output_formats`, its `--help` and
+completion offer it, and `--format` naming it on another command exits `2` listing that
+command's formats. `<APP>_FORMAT` naming it is a default for the session, so a command
+without it answers as if the variable were unset. Wrap the renderer in `FormatRenderer`
+to state what it writes, which the command's manifest description carries:
+
+```python
+@app.command(
+    "why",
+    description="Explain a failure",
+    danger_level="safe",
+    exit_codes=(),
+    renderers={"html": FormatRenderer(render_page, media_type="text/html")},
+)
+```
 
 An app can offer a format treaty does not list, such as a page for a person:
 `app.format("html", render=render_html, media_type="text/html")`. The name (lowercase

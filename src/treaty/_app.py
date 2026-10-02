@@ -91,6 +91,7 @@ from ._command import (
     Command,
     DangerLevel,
     Example,
+    FormatRenderer,
     Handler,
     OptionPlacement,
     Renderer,
@@ -710,7 +711,8 @@ class App:
         self, mode: Format | str, *, render: Renderer, media_type: str | None = None
     ) -> None:
         """Offer ``--format <mode>``, written by ``render`` for every command without its own
-        renderer for it; declare it before the commands overriding it
+        renderer for it. A format only some commands offer is theirs to declare instead, in
+        their ``renderers=`` (#209)
 
         ``plain`` and ``tsv`` are always offered, and registering one replaces its built-in
         renderer. ``json`` and ``jsonl`` are the response envelope agents read, and
@@ -744,6 +746,44 @@ class App:
             if m in built_in or FormatName.of(m) in self._renderers or (m is Format.ID and ids)
         )
         return members + tuple(n for n in self._renderers if n.builtin is None)
+
+    def _command_formats(self, command: Command) -> tuple[FormatName, ...]:
+        """The ``--format`` values ``command`` takes: the app's, then the names its own
+        ``renderers=`` introduced, which no other command offers (#209)"""
+        offered = self.formats
+        return offered + tuple(n for n in command.renderers if n not in offered)
+
+    def _command_media(self, command: Command) -> Mapping[FormatName, MediaType]:
+        """What each of the command's formats writes: its own declaration over the app's"""
+        return {**self._media_types, **command.media_types}
+
+    def _any_formats(self) -> tuple[FormatName, ...]:
+        """Every ``--format`` value some command takes: what a value is checked against
+        before the command path is read"""
+        names = dict.fromkeys(self.formats)
+        for command in self._commands.values():
+            names.update(dict.fromkeys(command.renderers))
+        return tuple(names)
+
+    def _selected_format(
+        self, explicit: str | None, env: Mapping[str, str], tty: bool, rest: list[str]
+    ) -> FormatName:
+        """The run's ``--format``: checked against the formats of the command the words
+        name, or, when they name none, against every command's (#209)"""
+        everywhere = self._any_formats()
+        path = resolve_path(rest, self._commands).path
+        if path is None:
+            return resolve_mode(explicit, env, tty, everywhere, self.name)
+        offered = self._command_formats(self._commands[path])
+        return resolve_mode(
+            explicit,
+            env,
+            tty,
+            offered,
+            self.name,
+            command=path.value,
+            elsewhere=[n for n in everywhere if n not in offered],
+        )
 
     def tokenizer(self, name: str, *, count: Callable[[str], int], default: bool = False) -> None:
         """Offer ``--tokenizer <name>``, counting the tokens of a text with ``count``;
@@ -798,7 +838,7 @@ class App:
         timeout: float | None | _Inherit = INHERIT,
         supports_raw_payload: bool = False,
         cleanup: Cleanup | None = None,
-        renderers: Mapping[Format | str, Renderer] | None = None,
+        renderers: Mapping[Format | str, Renderer | FormatRenderer] | None = None,
         streaming: bool = False,
         safe_default: bool = False,
         gui_operations: Sequence[str] = (),
@@ -1048,17 +1088,15 @@ class App:
             raise RegistrationError(
                 f"{cmd_path}: config_write_scope={config_write_scope!r} is not one of {scopes}"
             )
+        # A name the app does not offer is this command's own: only it offers it (#209)
         overrides: dict[FormatName, Renderer] = {}
-        for mode, render in (renderers or {}).items():
+        command_media: dict[FormatName, MediaType] = {}
+        for mode, given in (renderers or {}).items():
             name = _format_name(f"{cmd_path}: renderers", mode)
+            render = given.render if isinstance(given, FormatRenderer) else given
             _check_renderer(f"{cmd_path}: renderers", name, render)
-            if name not in self.formats:
-                member = name.builtin
-                spelled = repr(name.value) if member is None else f"Format.{member.name}"
-                raise RegistrationError(
-                    f"{cmd_path}: --format {name} is not offered; "
-                    f"register it first with app.format({spelled}, render=...)"
-                )
+            if isinstance(given, FormatRenderer):
+                command_media[name] = given.media_type
             overrides[name] = render
         try:
             contract = SchemaVersion(schema_version)
@@ -1106,6 +1144,7 @@ class App:
                             supports_raw_payload=supports_raw_payload,
                             cleanup=cleanup,
                             renderers=overrides,
+                            media_types=command_media,
                             scalars=self.scalars,
                             args_adapters=self.args_adapters,
                             streaming=streaming,
@@ -1762,7 +1801,7 @@ class App:
                 "--stream and --no-stream contradict each other; pass one",
                 context={"flag": "stream", "also_given": ["no-stream"]},
             )
-        custom = {n.value for n in self.formats if n.builtin is None}
+        custom = {n.value for n in self._command_formats(command) if n.builtin is None}
         if invocation.output is not None and str(invocation.output) in custom:
             raw = str(invocation.output)
             return ParseError(
@@ -2116,7 +2155,7 @@ class App:
             globals_, rest = split_globals(bound, short_verbose=not self._claims_v(bound))
             run.err.verbosity = resolve_verbosity(globals_.verbosity, environ, run.tty)
             run.warnings_as_errors = globals_.warnings_as_errors
-            selected = resolve_mode(globals_.format, environ, run.tty, self.formats, self.name)
+            selected = self._selected_format(globals_.format, environ, run.tty, rest)
             requested = selected
             if selected.mode is Format.JSONL or globals_.token_count:
                 # Every JSON envelope is already one compact line; a token count is JSON
@@ -6507,6 +6546,7 @@ class _Run:
                 self.app.exits,
                 self.app.commands,
                 builtin=path in self.app.builtins,
+                offered=self.app.formats,
             )
         else:
             subtree = {
@@ -6562,20 +6602,24 @@ class _Run:
             self.app.description,
             self.app.commands,
             self.app._groups,
-            self._global_rows(),
+            self._global_rows(self.app.formats, self.app._media_types),
             self.app.environment(),
             prefix,
         )
         return self._help(mode, prefix, text)
 
     def help_command(self, mode: Format, command: Command) -> int:
-        text = render_command(self.app.name, command, self._global_rows())
+        # The --format values this command takes, its own among them (#209)
+        rows = self._global_rows(
+            self.app._command_formats(command), self.app._command_media(command)
+        )
+        text = render_command(self.app.name, command, rows)
         return self._help(mode, command.path.parts, text)
 
-    def _global_rows(self) -> list[tuple[str, str]]:
-        return global_rows(
-            global_flag_entries(self.app.formats, self.app.name, self.app._media_types)
-        )
+    def _global_rows(
+        self, formats: Sequence[FormatName], media_types: Mapping[FormatName, MediaType]
+    ) -> list[tuple[str, str]]:
+        return global_rows(global_flag_entries(formats, self.app.name, media_types))
 
     def _help(self, mode: Format, parts: tuple[str, ...], text: str) -> int:
         """Help text on stdout for a person; in JSON mode it goes to stderr and stdout gets
