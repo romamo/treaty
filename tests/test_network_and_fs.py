@@ -40,7 +40,6 @@ from treaty import (
     Timeout,
 )
 from treaty._audit import Finding, Severity, audit, os_walks
-from treaty._errors import CliExit
 from treaty._http import Http, NetworkFailure, ProxyConfig
 from treaty._profile import probes_for
 from treaty._retry import Retrier
