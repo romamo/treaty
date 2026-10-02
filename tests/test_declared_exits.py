@@ -300,3 +300,24 @@ def test_a_method_on_an_object_of_unknown_class_is_not_followed() -> None:
         return {}
 
     assert findings(app) == []
+
+
+def test_a_parameter_bound_again_in_the_handler_is_not_followed() -> None:
+    """A loop target or a nested function's parameter of the same name holds another
+    object, so its method is not the resource's"""
+    app = ledger_app()
+
+    @app.command("post", description="Post", danger_level="mutating", exit_codes=())
+    def post(args: NoArgs, ctx: Ctx, ledger: Ledger) -> dict[str, str]:
+        def flush(ledger: object) -> None:
+            ledger.post()  # type: ignore[attr-defined]
+
+        return {}
+
+    @app.command("replay", description="Replay", danger_level="mutating", exit_codes=())
+    def replay(args: NoArgs, ctx: Ctx, ledger: Ledger) -> dict[str, str]:
+        for ledger in []:  # noqa: B020
+            ledger.post()
+        return {}
+
+    assert findings(app) == []

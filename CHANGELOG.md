@@ -27,7 +27,8 @@ Apps built on treaty keep their own, structured schema changelog with
   the args class or a resource class, such as `store.load()`, and the methods it calls on
   its own `self`, so the tutorial's `STORE_CORRUPT`, raised in `Store.load`, is found when
   a command does not declare it, instead of failing only at run time as
-  `UNDECLARED_EXIT_CODE`. A method on an object of unknown class is still not followed
+  `UNDECLARED_EXIT_CODE`. A method on an object of unknown class, or on a parameter the
+  function binds again (a loop target, a nested function's parameter), is not followed
   (#218)
 
 ## [1.0.0rc14] - 2026-10-02

@@ -599,10 +599,13 @@ def _method_callees(
 ) -> list[tuple[types.FunctionType, dict[str, type]]]:
     """The methods ``fn`` calls on a parameter of a known class, ``name.method(...)``, each
     with its own first parameter bound to that class, as ``self`` is; a static or class
-    method binds nothing"""
+    method binds nothing. A name the body binds again holds some other object there, so
+    a call on it is not followed"""
     tree = None if not typed else source_tree(fn)
     if tree is None:
         return []
+    rebound = _rebound(tree)
+    typed = {name: cls for name, cls in typed.items() if name not in rebound}
     found: list[tuple[types.FunctionType, dict[str, type]]] = []
     for node in ast.walk(tree):
         if not (
@@ -625,6 +628,27 @@ def _method_callees(
         bound = {code.co_varnames[0]: cls} if plain and code.co_argcount else {}
         found.append((target, bound))
     return found
+
+
+def _rebound(tree: ast.Module) -> set[str]:
+    """The names a function binds in its body: an assignment, a loop, ``with``, or
+    ``except`` target, an import, or a parameter of a function or lambda nested in it"""
+    names: set[str] = set()
+    outermost = True
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if not outermost:
+                names.update(a.arg for a in ast.walk(node.args) if isinstance(a, ast.arg))
+                if not isinstance(node, ast.Lambda):
+                    names.add(node.name)
+            outermost = False
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+            names.add(node.name)
+        elif isinstance(node, ast.alias):
+            names.add((node.asname or node.name).split(".")[0])
+    return names
 
 
 @dataclass(frozen=True, slots=True)
