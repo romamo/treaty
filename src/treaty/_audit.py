@@ -3235,8 +3235,11 @@ def removals(
                     'deprecated=treaty.Deprecated("<this version>", replacement=...) for a release',
                 )
             continue
+        # A passthrough command lists no flags since ManifestResponse 3.9: the framework
+        # flags it takes go before its path (REQ-C-031), so none of them is gone
+        passthrough = current.get("arguments") == "passthrough"
         for flag, flag_entry in sorted(entry.get("flags", {}).items()):
-            if flag not in current["flags"] and not _deprecated(flag_entry):
+            if flag not in current["flags"] and not passthrough and not _deprecated(flag_entry):
                 yield Finding(
                     "additive",
                     Severity.ERROR,

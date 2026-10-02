@@ -182,7 +182,7 @@ def test_a_deprecated_name_warns_naming_the_replacement() -> None:
 def test_the_manifest_lists_the_names_and_validates_against_the_spec() -> None:
     manifest = make_app().manifest()
     spec_validator("manifest-response").validate(manifest)
-    assert manifest["schema_version"] == "3.5"
+    assert manifest["schema_version"] == "3.15"
     entry = manifest["commands"]["download"]
     assert entry["secret_env_vars"] == ["PY_IBKR_TOKEN", "IBKR_FLEX_TOKEN", "IBKR_TOKEN"]
     flags = entry["flags"]
@@ -256,8 +256,10 @@ def test_every_recognized_variable_has_exactly_one_home() -> None:
         "PY_IBKR_ENDPOINT",
         "ENDPOINT",
     ]
-    # A secret setting has no home of its own: root env_vars holds no secret
+    # A secret setting is the app's, read by any command: root secret_env_vars, never
+    # root env_vars (ManifestResponse 3.13)
     assert "PY_IBKR_API_KEY" not in names
+    assert manifest["secret_env_vars"] == ["PY_IBKR_API_KEY"]
     assert manifest["flags"]["format"]["env_vars"] == [{"name": "PY_IBKR_FORMAT"}]
     flagged = [
         e["name"]
@@ -268,6 +270,7 @@ def test_every_recognized_variable_has_exactly_one_home() -> None:
     secrets = [v for c in manifest["commands"].values() for v in c.get("secret_env_vars", [])]
     assert not set(names) & set(flagged) and not set(names) & set(secrets)
     assert not set(flagged) & set(secrets)
+    assert not set(manifest["secret_env_vars"]) & set(secrets)
     assert {"PY_IBKR_FORMAT", "PY_IBKR_MAX_OUTPUT_BYTES", "PY_IBKR_NO_UPDATE"} <= set(flagged)
 
 

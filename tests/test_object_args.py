@@ -246,13 +246,12 @@ def test_schema_manifest_and_mcp_carry_the_object_shape() -> None:
     app = make_app()
     spec_validator("manifest-response").validate(app.manifest())
     entry = app.manifest()["commands"]["add"]
-    assert entry["flags"]["postings"]["type"] == "array"
-    assert entry["flags"]["postings"]["default"] == []
-    assert entry["flags"]["primary"]["type"] == "string"
-    assert (
-        "{account: string, amount: {number: decimal, currency?: EUR|USD}"
-        in (entry["flags"]["primary"]["description"])
-    )
+    # ManifestResponse 3.7: an object flag carries its schema; an array's is one item's
+    postings, primary = entry["flags"]["postings"], entry["flags"]["primary"]
+    assert postings["type"] == "array" and postings["default"] == []
+    assert postings["schema"]["title"] == "Posting"
+    assert primary["type"] == "object" and primary["schema"] == postings["schema"]
+    assert primary["description"] == "The primary posting"
     out = io.StringIO()
     app.run(["add", "--schema"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
     schema = json.loads(out.getvalue())["data"]["raw_payload_schema"]
@@ -264,6 +263,7 @@ def test_schema_manifest_and_mcp_carry_the_object_shape() -> None:
     assert posting["properties"]["side"] == {"type": "string", "enum": ["debit", "credit"]}
     tool = input_schema(app.commands[next(iter(c for c in app.commands if c.value == "add"))])
     assert tool["properties"]["postings"]["items"] == posting
+    assert primary["schema"]["required"] == posting["required"]
 
 
 def test_help_shows_the_shape_and_completion_offers_no_values() -> None:

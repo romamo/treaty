@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._deprecation import Deprecated
 from ._envnames import EnvName, env_names, env_var_entries
@@ -30,6 +30,9 @@ from ._scalars import (
 )
 from ._secrets import source_flags
 from ._types import Classified, FlagType, ObjectHook, classify, type_hints
+
+if TYPE_CHECKING:
+    from ._schema import JsonSchema
 
 _META = "treaty"
 FLAG_META = _META
@@ -346,11 +349,14 @@ class FieldInfo:
                 suggestion=_PRESET_HINTS[preset],
             )
 
-    def to_flag_entries(self, own_env: str | None) -> dict[str, dict[str, object]]:
+    def to_flag_entries(
+        self, own_env: str | None, prop: JsonSchema
+    ) -> dict[str, dict[str, object]]:
         """Manifest entries keyed by exposed flag; a secret shows only its two sources.
-        ``own_env`` is the ``<APP>_<NAME>`` a plain flag that declares ``env`` reads first"""
+        ``own_env`` is the ``<APP>_<NAME>`` a plain flag that declares ``env`` reads first;
+        ``prop`` is the field's property in the args schema"""
         if not self.secret:
-            return {self.flag: self.to_flag_entry(own_env)}
+            return {self.flag: self.to_flag_entry(own_env, prop)}
         what = self.spec.description
         return {
             self.env_flag: {
@@ -366,7 +372,7 @@ class FieldInfo:
             },
         }
 
-    def to_flag_entry(self, own_env: str | None) -> dict[str, object]:
+    def to_flag_entry(self, own_env: str | None, prop: JsonSchema) -> dict[str, object]:
         description = self.spec.description
         if self.spec.multiline:
             # FlagEntry allows no extra keys, so the opt-out is stated in the description
@@ -377,28 +383,21 @@ class FieldInfo:
             description = f"{description} (- reads it from stdin)"
         if not self.spec.audit:
             description = f"{description} ({UNAUDITED})"
-        if self.spec.confirm:
-            # FlagEntry allows no extra keys and CommandEntry has none for it, so the
-            # preview is stated here (#197)
-            description = (
-                f"{description} (without it the command previews: meta.dry_run is true and "
-                "effect a would_* value)"
-            )
         if (old := self.spec.deprecated) is not None:
             instead = "" if old.replacement is None else f"; use --{old.replacement}"
             description = f"{description} (deprecated since {old.since}{instead})"
-        kind = self.flag_type
-        if (shape := self.object_type) is not None:
-            # FlagEntry has no object type: argv takes the object as JSON text
-            each = "each value" if kind is FlagType.ARRAY else "the value"
-            description = f"{description} ({each} a JSON object {object_shape(shape)})"
-            kind = FlagType.ARRAY if kind is FlagType.ARRAY else FlagType.STRING
         entry: dict[str, object] = {
-            "type": kind.value,
+            "type": self.flag_type.value,
             # A variable may supply it, as --x-from-env does a secret's
             "required": self.required and not self.spec.env,
             "description": description,
         }
+        if self.object_type is not None:
+            # ManifestResponse 3.7: one argv token of JSON text, as the schema describes it;
+            # an array flag's schema is one item's
+            entry["schema"] = object_schema(
+                prop["items"] if self.flag_type is FlagType.ARRAY else prop, self.flag
+            )
         if self.spec.env:
             # ManifestResponse 3.4: in precedence order, the prefixed name first (REQ-F-073)
             if own_env is None:
@@ -441,6 +440,20 @@ class FieldInfo:
         if variadic:
             entry["variadic"] = True
         return entry
+
+
+def object_schema(prop: JsonSchema, flag: str) -> JsonSchema:
+    """The object schema of one value of an object flag: an optional field's property
+    is ``anyOf`` the object and null, and argv never passes null"""
+    branches = prop.get("anyOf")
+    if isinstance(branches, list):
+        kept = [b for b in branches if b != {"type": "null"}]
+        if len(kept) != 1:
+            raise RegistrationError(f"--{flag}: its schema has no single object branch: {prop}")
+        [prop] = kept
+    if prop.get("type") != "object":
+        raise RegistrationError(f"--{flag}: its schema is not an object: {prop}")
+    return prop
 
 
 _PRESET_HINTS = {

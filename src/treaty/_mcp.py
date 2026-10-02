@@ -134,7 +134,7 @@ def build_server(app: App) -> Any:
             annotations=types.ToolAnnotations(
                 read_only_hint=e.read_only,
                 destructive_hint=e.destructive,
-                idempotent_hint=e.read_only,
+                idempotent_hint=e.idempotent,
                 open_world_hint=e.open_world,
             ),
         )

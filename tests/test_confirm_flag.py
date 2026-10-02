@@ -134,9 +134,12 @@ def test_a_preview_is_not_recorded_under_its_idempotency_key(tmp_path: Path) -> 
 def test_the_manifest_says_the_command_previews_unless_confirmed() -> None:
     app = approve_app([])
     manifest = app.manifest()
-    entry = manifest["commands"]["approve"]["flags"]["yes"]  # type: ignore[index]
+    approve = manifest["commands"]["approve"]  # type: ignore[index]
+    # ManifestResponse 3.14: the key, not a sentence in the flag's description
+    assert approve["confirm_flag"] == "yes"
+    entry = approve["flags"]["yes"]
     assert entry["type"] == "boolean" and entry["default"] is False
-    assert "previews" in entry["description"] and "would_*" in entry["description"]
+    assert entry["description"] == "Approve and apply it"
     spec_validator("manifest-response").validate(manifest)
     assert "Previews unless --yes" in render(app)["SKILL-approve.md"]
 

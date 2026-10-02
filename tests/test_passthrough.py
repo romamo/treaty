@@ -336,15 +336,21 @@ def test_the_manifest_marks_it_within_the_spec_schema() -> None:
     manifest = ledger.manifest()
     spec_validator("manifest-response").validate(manifest)
     entry = manifest["commands"]["ingest"]
+    # REQ-C-031 (ManifestResponse 3.9): the keys, not a sentence in the description; the
+    # flags it takes go before its path, as global options do, so the entry lists none
+    assert entry["arguments"] == "passthrough"
+    assert entry["help_argv"] == ["extract", "--help"]
     assert entry["option_placement"] == "strict" and "positionals" not in entry
-    assert entry["description"].endswith(
-        ". Arguments after the command path go to the delegated tool unparsed; the envelope "
-        "is the last stderr line"
-    )
-    assert "output" in entry["flags"] and "validate-only" in entry["flags"]
-    # Its --output gets the JSON envelope whatever --format says, neither of output_file's
-    # values: no key, a REQ-O-001 departure until cli-agent-spec#27
-    assert "output_file" not in entry
+    assert entry["description"] == "Import statements with the ingest tool's own arguments"
+    assert entry["flags"] == {}
+    # Its --output gets the final envelope whatever --format says (ManifestResponse 3.6)
+    assert entry["output_file"] == "envelope"
+    assert "stdin" not in entry and "stderr" not in entry and "confirm_flag" not in entry
+    schema = ledger.run(["--schema", "ingest"], stdout=(got := io.StringIO()), env={})
+    assert schema == 0
+    data = json.loads(got.getvalue())["data"]
+    assert {"output", "validate-only", "idempotency-key"} <= set(data["flags"])
+    assert data["parameters"] == data["flags"]
     out = io.StringIO()
     assert ledger.run(["--schema"], stdout=out, stderr=io.StringIO(), env={}) == 0
     spec_validator("manifest-response").validate(json.loads(out.getvalue())["data"])

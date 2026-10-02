@@ -165,6 +165,7 @@ from ._lifecycle import Teardown
 from ._lines import DEFAULT_LINE_CAP, INPUT_LINES_KEY, LineCap, Lines, StdinInput, stdin_input_of
 from ._locks import LockHeld, Locks
 from ._manifest import (
+    EXEC_PATH,
     build_manifest,
     command_schema,
     global_flag_entries,
@@ -176,6 +177,7 @@ from ._mode import (
     Format,
     FormatName,
     MediaType,
+    check_media_type,
     child_ctype,
     child_settings,
     color_allowed,
@@ -289,7 +291,6 @@ from ._subprocess import (
 from ._suggest import closest, hint
 from ._table import table
 from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
-from ._tools import EXEC_PATH
 from ._types import FlagType
 from ._update import UpdateCheck, available, check_allowed
 from ._values import (
@@ -739,7 +740,9 @@ class App:
             raise RegistrationError(f"--format {name} already has a renderer")
         if media_type is not None:
             try:
-                self._media_types[name] = MediaType(media_type)
+                declared = MediaType(media_type)
+                check_media_type(name, declared)
+                self._media_types[name] = declared
             except InvalidValue as exc:
                 raise RegistrationError(f"app.format({name.value!r}): {exc}") from None
         self._renderers[name] = render
@@ -1117,6 +1120,10 @@ class App:
             render = given.render if isinstance(given, FormatRenderer) else given
             _check_renderer(f"{cmd_path}: renderers", name, render)
             if isinstance(given, FormatRenderer):
+                try:
+                    check_media_type(name, given.media_type)
+                except InvalidValue as exc:
+                    raise RegistrationError(f"{cmd_path}: renderers: {exc}") from None
                 command_media[name] = given.media_type
             overrides[name] = render
         try:
@@ -1917,14 +1924,16 @@ class App:
             audit_log_path=None if audit_log_path is None else str(audit_log_path),
             unlogged=UNLOGGED & self._builtins,
             settings_env_vars=self._settings_env_vars(),
+            secret_env_vars=self._settings_secret_env_vars(),
             media_types=self._media_types,
+            max_stdin=self.max_stdin,
+            max_line=self.max_line,
         )
 
     def _settings_env_vars(self) -> list[dict[str, object]]:
         """Root ``env_vars`` entries of the settings (ManifestResponse 3.5): each plain
         setting's ``<APP>_<NAME>``, then the names it declares. A secret setting is left
-        out, since root ``env_vars`` holds no secret and a setting has no command whose
-        ``secret_env_vars`` could list it"""
+        out, since root ``env_vars`` holds no secret: the root ``secret_env_vars`` lists it"""
         entries: list[dict[str, object]] = []
         for f in () if self.settings is None else self.settings.fields:
             if f.secret:
@@ -1940,6 +1949,17 @@ class App:
                     entry["deprecated"] = True
                 entries.append(entry)
         return entries
+
+    def _settings_secret_env_vars(self) -> list[str]:
+        """Root ``secret_env_vars`` (ManifestResponse 3.13): each secret setting's
+        ``<APP>_<NAME>``, then the names it declares, in the order it reads them. A setting
+        is the app's, so any command may read it (REQ-F-073)"""
+        return [
+            name
+            for f in (() if self.settings is None else self.settings.fields)
+            if f.secret
+            for name in (app_var(self.name, f.name), *(n.name for n in f.env))
+        ]
 
     def environment(self) -> list[tuple[str, str]]:
         """Every variable the app reads, by its exact name, with what it sets
@@ -6679,6 +6699,9 @@ class _Run:
                 self.app.commands,
                 builtin=path in self.app.builtins,
                 offered=self.app.formats,
+                media_types=self.app._media_types,
+                max_stdin=self.app.max_stdin,
+                max_line=self.app.max_line,
             )
         else:
             subtree = {
@@ -6691,7 +6714,10 @@ class _Run:
                 self.app.name,
                 builtins=self.app.builtins,
                 settings_env_vars=self.app._settings_env_vars(),
+                secret_env_vars=self.app._settings_secret_env_vars(),
                 media_types=self.app._media_types,
+                max_stdin=self.app.max_stdin,
+                max_line=self.app.max_line,
             )
         return self.emit(
             mode, self._envelope(0, data=data), render=_machine_text(mode), settle=False

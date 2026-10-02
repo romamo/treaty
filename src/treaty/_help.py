@@ -10,6 +10,7 @@ from ._envelope import visible
 from ._envnames import declared_text
 from ._flags import FieldInfo, object_shape
 from ._framework import framework_flags
+from ._mode import FormatName
 from ._types import FlagType
 from ._values import CommandPath
 
@@ -17,14 +18,21 @@ Row = tuple[str, str]
 
 
 def global_rows(entries: Mapping[str, object]) -> list[Row]:
-    """The manifest's root ``flags`` as help rows: every command takes them"""
+    """The manifest's root ``flags`` as help rows: every command takes them. The
+    ``--format`` row names what each format an app registered writes (#179)"""
     rows: list[Row] = []
     for flag, entry in entries.items():
         assert isinstance(entry, dict)
         label = f"--{flag}" + (f", -{entry['short']}" if "short" in entry else "")
         if entry["type"] != "boolean":
             label += " " + ("|".join(entry["enum_values"]) if "enum_values" in entry else "VALUE")
-        rows.append((label, str(entry["description"])))
+        written = entry.get("media_types", {})
+        text = str(entry["description"]) + "".join(
+            f"; {name} writes {kind}"
+            for name, kind in written.items()
+            if FormatName(name).builtin is None
+        )
+        rows.append((label, text))
     return rows
 
 

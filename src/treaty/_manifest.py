@@ -8,12 +8,11 @@ from collections.abc import Collection, Mapping, Sequence
 from importlib.metadata import version
 from types import MappingProxyType
 
+from ._cap import DEFAULT_STDIN_CAP, StdinCap
 from ._command import (
     ARGV_KEY,
-    CHILD_LOG_NOTE,
     DEFAULT_HEARTBEAT_MS,
-    IDEMPOTENT_NOTE,
-    PASSTHROUGH_NOTE,
+    OUTPUT_FLAG,
     Command,
     DangerLevel,
 )
@@ -36,16 +35,27 @@ from ._framework import (
     UNMASK_FLAG,
     framework_flags,
 )
-from ._lines import INPUT_LINES_KEY, StdinInput
-from ._mode import Format, FormatName, MediaType
+from ._lines import DEFAULT_LINE_CAP, INPUT_LINES_KEY, LineCap, StdinInput
+from ._mode import Format, FormatName, MediaType, media_type_map
+from ._output_base import OutputBase
 from ._schema import JsonSchema
 from ._select import FIELDS_KEY
+from ._types import FlagType
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "3.5"  # 3.1: CommandEntry.builtin (REQ-O-041)
+SCHEMA_VERSION = "3.15"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.2: ConditionalRule any_of and one_of, which the manifest does not emit (--schema does)
 # 3.3: CommandEntry.output_file (REQ-O-001)
 # 3.4: FlagEntry.env_vars; 3.5: the root env_vars of variables that back no flag (REQ-F-073)
+# 3.6: output_file handler and envelope; 3.7: object flags and output_file_base (REQ-O-001)
+# 3.8: CommandEntry.stdin (REQ-F-054, REQ-O-004); 3.9: arguments and help_argv (REQ-C-031)
+# 3.10: the output side-effect kind (REQ-C-011); 3.11: stderr child_log (REQ-F-038)
+# 3.12: the format flag's media_types and output_media_types (REQ-O-001, REQ-O-049)
+# 3.13: the root secret_env_vars (REQ-F-073); 3.14: confirm_flag (REQ-O-048)
+# 3.15: CommandEntry.idempotent (REQ-C-002)
+
+EXEC_PATH = CommandPath("exec")
+"""The ``exec`` built-in, which reads its plan from stdin as a buffered payload"""
 
 # The --format values CommandEntry.output_formats leaves out (REQ-O-049): the spec's
 # universal ones, and ndjson, which every treaty command takes
@@ -96,19 +106,19 @@ def global_flag_entries(
 ) -> dict[str, object]:
     """REQ-F-079: split_globals accepts these anywhere on every command path; a flag with
     an environment variable default names it, and lists it in ``env_vars`` (REQ-O-042).
-    The ``--format`` values include the names an app registered, and the description
-    states the media type each declared, which ``FlagEntry`` has no key for (#179)"""
-    written = "".join(
-        f"; {name} writes {media_types[name]}" for name in formats if name in media_types
-    )
+    The ``--format`` values include the names an app registered, and ``media_types`` the
+    media type of each value outside the spec's table (ManifestResponse 3.12, #179)"""
+    output_format: dict[str, object] = {
+        "type": "enum",
+        "required": False,
+        "enum_values": [m.value for m in formats],
+        "description": f"Output representation; default ${app_var(app_name, FORMAT.key)}, "
+        "else json when stdout is not a terminal, plain otherwise",
+    }
+    if written := media_type_map(formats, media_types):
+        output_format["media_types"] = written
     entries: dict[str, object] = {
-        "format": {
-            "type": "enum",
-            "required": False,
-            "enum_values": [m.value for m in formats],
-            "description": f"Output representation; default ${app_var(app_name, FORMAT.key)}, "
-            f"else json when stdout is not a terminal, plain otherwise{written}",
-        },
+        "format": output_format,
         "max-output": {
             "type": "integer",
             "required": False,
@@ -333,6 +343,57 @@ def shared_exit_codes(exits: ExitCodeRegistry) -> dict[str, object]:
     return table
 
 
+def flag_entries(command: Command) -> dict[str, object]:
+    """Every flag the command takes, its own fields' and the framework's, keyed by name"""
+    flags: dict[str, object] = {}
+    properties = command.args_schema["properties"]
+    for f in command.fields:
+        flags.update(f.to_flag_entries(command.own_env_var(f.name), properties[f.name]))
+    flags.update((f.name, f.to_entry(command)) for f in framework_flags(command))
+    return flags
+
+
+def _output_file(command: Command) -> str | None:
+    """REQ-O-001 (ManifestResponse 3.6): what ``--output`` gets. A passthrough command's
+    gets the final envelope; an app's own ``--output PATH`` field, what its handler writes"""
+    if command.output_file:
+        return "binary" if command.returns_binary else "formatted"
+    if command.passthrough:
+        return "envelope"
+    own = command.field_by_flag(OUTPUT_FLAG)
+    if (
+        own is not None
+        and not own.positional
+        and not own.secret
+        and (own.path or own.flag_type is FlagType.STRING)
+    ):
+        return "handler"
+    return None
+
+
+def _stdin(
+    command: Command, *, builtin: bool, max_stdin: StdinCap, max_line: LineCap
+) -> dict[str, object] | None:
+    """``StdinDeclaration`` (ManifestResponse 3.8): how the command reads stdin and
+    ``--input-file``; a cap equal to the spec's default is left out, as absent means it"""
+    if command.stdin_records is not None:
+        stdin: dict[str, object] = {"mode": "records"}
+    elif command.stdin_input is StdinInput.LINES:
+        stdin = {"mode": "lines"}
+    elif command.stdin_input is StdinInput.TEXT or (builtin and command.path == EXEC_PATH):
+        # exec reads its whole plan as a payload, under the same cap
+        if max_stdin == DEFAULT_STDIN_CAP:
+            return {"mode": "buffered"}
+        return {"mode": "buffered", "max_bytes": max_stdin.bytes}
+    else:
+        return None
+    if max_line != DEFAULT_LINE_CAP:
+        stdin["max_line_bytes"] = max_line.bytes
+    if command.stdin_records is not None:
+        stdin["record_schema"] = command.stdin_records.schema
+    return stdin
+
+
 def command_entry(
     command: Command,
     exits: ExitCodeRegistry,
@@ -340,11 +401,15 @@ def command_entry(
     *,
     builtin: bool,
     offered: Sequence[FormatName],
+    media_types: Mapping[FormatName, MediaType],
+    max_stdin: StdinCap,
+    max_line: LineCap,
     shared: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """One CommandEntry; ``builtin`` when treaty registered the command, not the app.
-    ``offered`` is the app's ``--format`` values, which the root flag lists. With
-    ``shared`` given, entries equal to the shared table are hoisted"""
+    ``offered`` is the app's ``--format`` values, which the root flag lists with
+    ``media_types``, the app's; ``max_stdin`` and ``max_line`` are the app's stdin caps.
+    With ``shared`` given, entries equal to the shared table are hoisted"""
     exit_codes: dict[str, object] = dict(shared_exit_codes(exits))
     for name in command.exit_codes:
         entry = exits.by_name(name)
@@ -356,28 +421,14 @@ def command_entry(
     exit_codes[str(timeout.code.value)] = timeout.to_json()
     if shared is not None:
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
-    flags: dict[str, object] = {}
-    for f in command.fields:
-        flags.update(f.to_flag_entries(command.own_env_var(f.name)))
-    flags.update((f.name, f.to_entry(command)) for f in framework_flags(command))
+    # REQ-C-031: a passthrough command's own flags go before its path, as global options
+    # do, so its entry lists none; --schema lists them
+    flags = {} if command.passthrough else flag_entries(command)
     description = command.description
     if (old := command.deprecated) is not None:
         # CommandEntry has no deprecation keys (04-D2); a baseline audit reads this marker
         instead = "" if old.replacement is None else f"; use {old.replacement}"
         description = f"{description} (deprecated since {old.since}{instead})"
-    if command.passthrough:
-        # #35: CommandEntry has no key for it; option_placement says strict, this says why
-        description = f"{description}. {PASSTHROUGH_NOTE}"
-    if command.child_log:
-        # #173: no CommandEntry key says stderr is busy; an agent reads it here
-        description = f"{description}. {CHILD_LOG_NOTE}"
-    if command.idempotent:
-        # #210: no CommandEntry key in the 3.5 schema says a command is safe to repeat
-        description = f"{description}. {IDEMPOTENT_NOTE}"
-    if command.media_types:
-        # #209: output_formats holds names only, so what each writes is stated here
-        written = "; ".join(f"--format {n} writes {t}" for n, t in command.media_types.items())
-        description = f"{description}. {written}"
     out: dict[str, object] = {
         "description": description,
         "danger_level": command.danger_level.value,
@@ -403,11 +454,26 @@ def command_entry(
         out["examples"] = [e.to_json() for e in command.examples]
     if command.has_network_io:
         out["has_network_io"] = True
-    if command.output_file:
-        # REQ-O-001: whether --output gets the --format representation or the raw bytes. A
-        # passthrough command's --output (its JSON envelope) and an app's own output flag
-        # have no key, a departure until cli-agent-spec#27
-        out["output_file"] = "binary" if command.returns_binary else "formatted"
+    if (output_file := _output_file(command)) is not None:
+        out["output_file"] = output_file
+        base = command.output_root
+        if base is not None and not base.is_cwd:
+            # ManifestResponse 3.7: a resource class or a function names the directory
+            project = base.label == OutputBase.PROJECT_ROOT.value
+            out["output_file_base"] = OutputBase.PROJECT_ROOT.value if project else "resource"
+    stdin = _stdin(command, builtin=builtin, max_stdin=max_stdin, max_line=max_line)
+    if stdin is not None:
+        out["stdin"] = stdin
+    if command.passthrough:
+        out["arguments"] = "passthrough"  # REQ-C-031 (ManifestResponse 3.9)
+        if command.help_command is not None:
+            out["help_argv"] = list(command.help_command)
+    if command.child_log:
+        out["stderr"] = "child_log"  # REQ-F-038 (ManifestResponse 3.11)
+    if command.idempotent:
+        out["idempotent"] = True  # REQ-C-002 (ManifestResponse 3.15), on any danger level
+    if (confirming := command.confirm_field) is not None:
+        out["confirm_flag"] = confirming.flag  # REQ-O-048 (ManifestResponse 3.14)
     if command.streaming:
         out["streaming_default"] = True
     # REQ-O-049: every value the command takes beyond the defaults (#216): id (REQ-O-005),
@@ -418,6 +484,14 @@ def command_entry(
     beyond += (n.value for n in command.renderers if n not in _DEFAULT_FORMATS and n not in offered)
     if beyond:
         out["output_formats"] = beyond
+    # ManifestResponse 3.12: what each of them writes, where the root map does not say it
+    root = media_type_map(offered, media_types)
+    written = media_type_map(
+        [FormatName(n) for n in beyond], {**media_types, **command.media_types}
+    )
+    own = {name: kind for name, kind in written.items() if root.get(name) != kind}
+    if own:
+        out["output_media_types"] = own
     if command.safe_default:
         out["safe_default"] = True
     if command.interactive:
@@ -470,10 +544,23 @@ def command_schema(
     *,
     builtin: bool,
     offered: Sequence[FormatName],
+    media_types: Mapping[FormatName, MediaType],
+    max_stdin: StdinCap,
+    max_line: LineCap,
 ) -> dict[str, object]:
-    """``--schema`` output for one command (REQ-C-015, REQ-O-032)"""
-    entry = command_entry(command, exits, all_paths, builtin=builtin, offered=offered)
-    entry["parameters"] = entry["flags"]
+    """``--schema`` output for one command (REQ-C-015, REQ-O-032); a passthrough
+    command's lists the framework flags it takes before its path, too (REQ-C-031)"""
+    entry = command_entry(
+        command,
+        exits,
+        all_paths,
+        builtin=builtin,
+        offered=offered,
+        media_types=media_types,
+        max_stdin=max_stdin,
+        max_line=max_line,
+    )
+    entry["flags"] = entry["parameters"] = flag_entries(command)
     # REQ-O-014; not ManifestResponse keys
     entry["schema_version"] = command.schema_version.value
     entry["min_schema_version"] = command.min_schema_version.value
@@ -603,7 +690,10 @@ def build_manifest(
     audit_log_path: str | None = None,
     unlogged: Collection[CommandPath] = (),
     settings_env_vars: Sequence[Mapping[str, object]] = (),
+    secret_env_vars: Sequence[str] = (),
     media_types: Mapping[FormatName, MediaType] = MappingProxyType({}),
+    max_stdin: StdinCap = DEFAULT_STDIN_CAP,
+    max_line: LineCap = DEFAULT_LINE_CAP,
 ) -> dict[str, object]:
     """The manifest tree with the shared exit-code table hoisted to the root, each of
     ``builtins`` marked ``builtin: true`` (REQ-O-041); the app's
@@ -611,13 +701,22 @@ def build_manifest(
     treaty's own version; the app's is ``meta.tool_version`` of the response. While the
     audit log is on, ``audit_log_path`` is a ``log`` side effect of every command it
     records, those not ``unlogged`` (REQ-O-030). The root ``env_vars`` lists the
-    framework's variables that back no flag, then ``settings_env_vars`` (REQ-F-073)"""
+    framework's variables that back no flag, then ``settings_env_vars``; the root
+    ``secret_env_vars`` are the secrets any command may read (REQ-F-073)"""
     shared = shared_exit_codes(exits)
     root_env = [*framework_env_vars(app_name), *(dict(e) for e in settings_env_vars)]
     flags = global_flag_entries(formats, app_name, media_types)
     entries = {
         path.value: command_entry(
-            cmd, exits, commands, builtin=path in builtins, offered=formats, shared=shared
+            cmd,
+            exits,
+            commands,
+            builtin=path in builtins,
+            offered=formats,
+            media_types=media_types,
+            max_stdin=max_stdin,
+            max_line=max_line,
+            shared=shared,
         )
         for path, cmd in sorted(commands.items(), key=lambda kv: kv[0].value)
     }
@@ -641,6 +740,8 @@ def build_manifest(
     }
     if dependencies:
         shape["dependencies"] = [dict(d) for d in sorted(dependencies, key=lambda d: d["name"])]
+    if secret_env_vars:
+        shape["secret_env_vars"] = list(secret_env_vars)
     digest = hashlib.sha256(canonical_json(shape).encode()).hexdigest()
     etag = Etag(f"sha256:{digest[:32]}")
     manifest: dict[str, object] = {
@@ -654,4 +755,6 @@ def build_manifest(
     }
     if dependencies:
         manifest["dependencies"] = shape["dependencies"]
+    if secret_env_vars:
+        manifest["secret_env_vars"] = shape["secret_env_vars"]
     return manifest

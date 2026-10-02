@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from ._command import Command, DangerLevel
 from ._completion import COMPLETION_PATH
 from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
-from ._manifest import payload_schema
+from ._manifest import EXEC_PATH, payload_schema
 from ._schema import JsonSchema
 from ._values import CommandPath
 
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
 IDEMPOTENCY_KEY = IDEMPOTENCY_FLAG.replace("-", "_")
-EXEC_PATH = CommandPath("exec")
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +34,8 @@ class ToolEntry:
     output_schema: JsonSchema
     read_only: bool
     destructive: bool
+    idempotent: bool
+    """A repeat converges: a safe command, or one declared ``idempotent=True``"""
     open_world: bool
 
 
@@ -137,6 +138,7 @@ def tool_entries(app: App) -> list[ToolEntry]:
                 output_schema=output_schema(command),
                 read_only=command.danger_level is DangerLevel.SAFE,
                 destructive=command.danger_level is DangerLevel.DESTRUCTIVE,
+                idempotent=command.danger_level is DangerLevel.SAFE or command.idempotent,
                 open_world=command.has_network_io,
             )
         )
@@ -157,7 +159,7 @@ def tool_list(app: App) -> dict[str, object]:
                 "annotations": {
                     "readOnlyHint": e.read_only,
                     "destructiveHint": e.destructive,
-                    "idempotentHint": e.read_only,
+                    "idempotentHint": e.idempotent,
                     "openWorldHint": e.open_world,
                 },
             }
