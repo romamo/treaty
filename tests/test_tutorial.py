@@ -537,6 +537,24 @@ def test_import_all_skips_a_feed_when_less_time_is_left_than_twice_the_slowest_t
     assert env.data["results"][2]["error"]["retryable"] is True
 
 
+def test_import_all_keeps_the_slowest_feed_as_the_estimate_after_a_quicker_one(
+    feeds: str, tmp_path: Path
+) -> None:
+    """A slow feed, one three quarters as long, then a quick one, under 3.375 slow feeds:
+    the second starts with 2.375 left, and the quick one does not with 1.625 left, under
+    twice the slowest. An estimate from the last feed alone, 1.5, would start it. The rule
+    weighs the slow feed's whole duration three times, and a loaded runner wakes a sleeping
+    feed late, so the slow feed is three seconds or twelve quick feeds as this runner times
+    one, whichever is longer: the 0.375 of a slow feed to spare covers that delay (#236)"""
+    slow = max(3.0, 12 * _one_feed(f"{feeds}/quick", tmp_path))
+    urls = [f"{feeds}/sleep/{slow:.3f}", f"{feeds}/sleep/{0.75 * slow:.3f}", f"{feeds}/c"]
+    args = {"urls": urls, "db": str(tmp_path / "t.json"), "timeout": 3.375 * slow}
+    env = todo_batch.app.call("import-all", args, env={})
+    shown = json.dumps(env.to_json(), indent=2)
+    assert env.exit_code == 3, shown
+    assert _results(env) == [(True, None), (True, None), (False, "NOT_STARTED")], shown
+
+
 def test_import_all_marks_what_it_imported_as_external(feeds: str, tmp_path: Path) -> None:
     env = todo_batch.app.call(
         "import-all", {"urls": [f"{feeds}/a"], "db": str(tmp_path / "t.json")}, env={}

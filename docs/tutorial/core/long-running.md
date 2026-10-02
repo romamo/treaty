@@ -136,8 +136,9 @@ on: what was imported, and what to send again.
 
 The margin matters more than it looks. A feed is never as fast as an estimate promises: the
 server is busy, or the machine is loaded, and one feed runs slower than those before it.
-One that is still running at the limit is cut there and the run exits 10 with `TIMEOUT`,
-losing the feeds already imported along with it. Starting a feed only when the time left
+One that is still running at the limit is cut there and the run exits 10 with `TIMEOUT`:
+the feeds already imported stay saved, but the result that says which they were is lost,
+so the agent cannot tell what to send again. Starting a feed only when the time left
 covers the last one's duration, and no more, loses that race whenever the next feed is a
 little slower; twice the slowest keeps room for one that takes twice as long as any so far,
 and the margin grows with the feeds, so it suits a second-long feed and a minute-long one
