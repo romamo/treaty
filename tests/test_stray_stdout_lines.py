@@ -212,3 +212,30 @@ def test_a_multi_line_secret_written_a_line_at_a_time_is_redacted(how: str, entr
     assert "[REDACTED]" in err.decode()
     for pem_line in PEM_LINES:
         assert pem_line not in text
+
+
+def test_a_blank_line_of_a_multi_line_secret_is_no_secret() -> None:
+    """A line of only spaces, as indentation in a YAML or JSON key has, is no secret of its
+    own: as one, every run of four spaces in a message, a warning, or printed code read
+    ``[REDACTED]``"""
+    app = App("probe", version="1.0.0")
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: Args, ctx: Ctx) -> dict[str, bool]:
+        print("def f():\n    return 1")
+        ctx.warn("SEEN", "indented    text")
+        return {"ok": True}
+
+    out, err = io.StringIO(), io.StringIO()
+    app.run(
+        ["show", "--key-from-env", "KEY", "-v"],
+        stdin=io.StringIO(""),
+        stdout=out,
+        stderr=err,
+        env={"KEY": "data:\n    \n  value: s3cr3tvalue"},
+        isatty=False,
+    )
+    warnings = json.loads(out.getvalue())["warnings"]
+    assert warnings[0]["message"] == "indented    text"
+    assert warnings[1]["context"]["text"] == "def f():\n    return 1"
+    assert "    return 1" in err.getvalue() and "s3cr3tvalue" not in out.getvalue()

@@ -104,9 +104,10 @@ additive over rc21: see Breaking.
   redacted whole, as descriptor 1's text does: a declared secret split across two writes
   went to stderr in the clear. A partial line now waits for its newline or carriage
   return, the next envelope, or the run's end, so a `ctx.log` line written in between
-  comes first. Each line of a multi-line secret, such as a PEM key, at least 4 characters
-  long, is redacted on its own too, so the key written a line at a time by `print`,
-  `os.write(1, ...)`, or a child process no longer reaches stderr line by line (#256)
+  comes first. Each line of a multi-line secret, such as a PEM key, with at least 4
+  characters besides its indentation, is redacted on its own too, so the key written a
+  line at a time by `print`, `os.write(1, ...)`, or a child process no longer reaches
+  stderr line by line (#256)
 
 ## [1.0.0rc21] - 2026-10-02
 
