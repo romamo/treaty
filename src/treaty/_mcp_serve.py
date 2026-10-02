@@ -214,8 +214,6 @@ class Provided:
     command: Command
     validator: Any
     """The ``jsonschema`` validator of its input schema"""
-    secrets: tuple[tuple[str, ...], ...] = ()
-    """The property paths of its input schema marked secret (``secret_paths``)"""
 
     @property
     def gated(self) -> bool:
@@ -223,19 +221,23 @@ class Provided:
         destructive command does over MCP (REQ-C-004)"""
         return advertised_destructive(self.tool)
 
+    def secret_locations(self, arguments: Mapping[str, object]) -> list[tuple[str, ...]]:
+        """Where ``arguments`` hold a value its input schema marks secret (``is_secret``)"""
+        return secret_locations(self.validator, arguments)
+
     def secret_values(self, arguments: Mapping[str, object]) -> list[object]:
-        """The values ``arguments`` holds at the secret paths, every scalar inside them"""
+        """The values ``arguments`` holds at the secret locations, every scalar inside"""
         found: list[object] = []
-        for path in self.secrets:
-            value: object = arguments
-            for key in path:
-                value = value.get(key) if isinstance(value, Mapping) else None
-            found.extend(_scalars(value))
+        for path in self.secret_locations(arguments):
+            found.extend(_scalars(_at(arguments, path)))
         return found
 
     def masked(self, arguments: Mapping[str, object]) -> dict[str, object]:
-        """``arguments`` with each secret path's value ``[REDACTED]``"""
-        return _masked(arguments, self.secrets, ())
+        """``arguments`` with each secret location's value ``[REDACTED]``"""
+        secrets = set(self.secret_locations(arguments))
+        if () in secrets:
+            return {key: REDACTED for key in arguments}
+        return {k: _masked(v, secrets, (str(k),)) for k, v in arguments.items()}
 
     def entry(self) -> ToolEntry:
         from ._tools import ToolEntry, output_schema
@@ -277,10 +279,11 @@ class Provided:
         error at or under a secret path names only the rule it broke, never the value, and
         ``redact`` takes every secret value out of the other messages"""
         found = sorted(self.validator.iter_errors(arguments), key=lambda e: list(e.path))
+        secrets = self.secret_locations(arguments)
         listed: list[dict[str, object]] = []
         for error in found:
             path = tuple(str(p) for p in error.path)
-            secret = any(path[: len(s)] == s for s in self.secrets)
+            secret = any(path[: len(s)] == s for s in secrets)
             message = (
                 f"the secret value breaks the schema's {error.validator} rule"
                 if secret
@@ -300,22 +303,110 @@ def is_secret(prop: object) -> bool:
     )
 
 
-def secret_paths(schema: Mapping[str, object]) -> tuple[tuple[str, ...], ...]:
-    """The paths of the secret properties of ``schema``, at any depth of ``properties``"""
+def secret_locations(validator: Any, instance: object) -> list[tuple[str, ...]]:
+    """The paths in ``instance`` whose value a subschema marks secret: one reached through
+    ``properties``, ``patternProperties``, ``additionalProperties``, array items, a local
+    ``$ref``, or any branch of ``allOf``, ``anyOf``, ``oneOf`` and ``if``/``then``/``else``.
+    A branch the instance may not match counts too: redacting more never leaks"""
+    from referencing import Registry
+    from referencing.jsonschema import specification_with
+
+    specification = specification_with(type(validator).META_SCHEMA["$schema"])
+    root = specification.create_resource(validator.schema)
     found: list[tuple[str, ...]] = []
 
-    def walk(node: Mapping[str, object], prefix: tuple[str, ...]) -> None:
-        properties = node.get("properties")
-        if not isinstance(properties, Mapping):
-            return
-        for name, prop in properties.items():
-            if is_secret(prop):
-                found.append((*prefix, str(name)))
-            elif isinstance(prop, Mapping):
-                walk(prop, (*prefix, str(name)))
+    def applicable(resolver: Any, schema: object) -> list[tuple[Any, Mapping[str, Any]]]:
+        """``schema`` and every subschema that applies at the same instance location"""
+        listed: list[tuple[Any, Mapping[str, Any]]] = []
+        pending: list[tuple[Any, object]] = [(resolver, schema)]
+        seen: set[int] = set()
+        while pending:
+            at, node = pending.pop()
+            if not isinstance(node, Mapping) or id(node) in seen:
+                continue
+            seen.add(id(node))
+            at = at.in_subresource(specification.create_resource(node))
+            listed.append((at, node))
+            for keyword in ("$ref", "$dynamicRef"):
+                ref = node.get(keyword)
+                if isinstance(ref, str):
+                    resolved = at.lookup(ref)
+                    pending.append((resolved.resolver, resolved.contents))
+            for keyword in ("allOf", "anyOf", "oneOf"):
+                branches = node.get(keyword)
+                if isinstance(branches, list):
+                    pending.extend((at, branch) for branch in branches)
+            for keyword in ("if", "then", "else"):
+                pending.append((at, node.get(keyword)))
+            for keyword in ("dependentSchemas", "dependencies"):
+                dependent = node.get(keyword)
+                if isinstance(dependent, Mapping):
+                    pending.extend((at, sub) for sub in dependent.values())
+        return listed
 
-    walk(schema, ())
-    return tuple(found)
+    def children(
+        schemas: list[tuple[Any, Mapping[str, Any]]], key: str | int
+    ) -> list[tuple[Any, object]]:
+        """The subschemas that apply to the ``key`` member or item"""
+        reached: list[tuple[Any, object]] = []
+        for at, node in schemas:
+            if isinstance(key, str):
+                matched = False
+                properties = node.get("properties")
+                if isinstance(properties, Mapping) and key in properties:
+                    reached.append((at, properties[key]))
+                    matched = True
+                patterns = node.get("patternProperties")
+                if isinstance(patterns, Mapping):
+                    for pattern, sub in patterns.items():
+                        if _matches(pattern, key):
+                            reached.append((at, sub))
+                            matched = True
+                if not matched:
+                    reached += [(at, node.get("additionalProperties"))]
+                    reached += [(at, node.get("unevaluatedProperties"))]
+            else:
+                prefix = node.get("prefixItems")
+                items = node.get("items")
+                tuple_form = prefix if isinstance(prefix, list) else items
+                if isinstance(tuple_form, list) and key < len(tuple_form):
+                    reached.append((at, tuple_form[key]))
+                else:
+                    reached += [(at, items), (at, node.get("additionalItems"))]
+                reached += [(at, node.get("contains")), (at, node.get("unevaluatedItems"))]
+        return reached
+
+    def walk(subschemas: list[tuple[Any, object]], value: object, path: tuple[str, ...]) -> None:
+        schemas = [pair for at, sub in subschemas for pair in applicable(at, sub)]
+        if any(is_secret(node) for _, node in schemas):
+            found.append(path)
+        elif isinstance(value, Mapping):
+            for key, item in value.items():
+                walk(children(schemas, str(key)), item, (*path, str(key)))
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                walk(children(schemas, index), item, (*path, str(index)))
+
+    walk([(Registry().resolver_with_root(root), validator.schema)], instance, ())
+    return found
+
+
+def _matches(pattern: str, key: str) -> bool:
+    """Whether a ``patternProperties`` pattern matches ``key``; one Python cannot compile
+    counts as a match, since redacting more never leaks"""
+    try:
+        return re.search(pattern, key) is not None
+    except re.error:
+        return True
+
+
+def _at(value: object, path: tuple[str, ...]) -> object:
+    for key in path:
+        if isinstance(value, Mapping):
+            value = value.get(key)
+        elif isinstance(value, (list, tuple)):
+            value = value[int(key)]
+    return value
 
 
 def _scalars(value: object) -> list[object]:
@@ -326,19 +417,14 @@ def _scalars(value: object) -> list[object]:
     return [] if value is None or isinstance(value, bool) else [value]
 
 
-def _masked(
-    value: Mapping[str, object], secrets: Sequence[tuple[str, ...]], prefix: tuple[str, ...]
-) -> dict[str, object]:
-    shown: dict[str, object] = {}
-    for key, item in value.items():
-        path = (*prefix, str(key))
-        if path in secrets:
-            shown[key] = REDACTED
-        elif isinstance(item, Mapping):
-            shown[key] = _masked(item, secrets, path)
-        else:
-            shown[key] = item
-    return shown
+def _masked(value: object, secrets: set[tuple[str, ...]], path: tuple[str, ...]) -> object:
+    if path in secrets:
+        return REDACTED
+    if isinstance(value, Mapping):
+        return {k: _masked(v, secrets, (*path, str(k))) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_masked(v, secrets, (*path, str(i))) for i, v in enumerate(value)]
+    return value
 
 
 def advertised_destructive(tool: McpTool) -> bool:
@@ -460,9 +546,7 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
             command = _command_for(app, tool)
         except RegistrationError as exc:
             raise _invalid(tool.name, f"cannot be served: {exc}") from None
-        found[tool.name] = Provided(
-            tool, command, validator_class(tool.input_schema), secret_paths(tool.input_schema)
-        )
+        found[tool.name] = Provided(tool, command, validator_class(tool.input_schema))
     return found
 
 

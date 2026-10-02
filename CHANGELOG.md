@@ -44,8 +44,10 @@ Apps built on treaty keep their own, structured schema changelog with
   (`danger_level="destructive"` or `destructive=True`) runs only with
   `confirm_destructive: true`, which its input schema gains; without it the call exits 2
   with `CONFIRMATION_REQUIRED` and nothing runs. A property marked `writeOnly`,
-  `format: "password"`, or `x-secret` is a secret, redacted in the audit log, validation
-  errors, and whatever the call writes. A name clash, an invalid schema, or empty
+  `format: "password"`, or `x-secret` is a secret wherever the schema reaches it (nested
+  properties, array items, `additionalProperties`, `patternProperties`, a local `$ref`, or
+  a branch of `allOf`, `anyOf` and `oneOf`), redacted in the audit log, validation errors,
+  and whatever the call writes. A name clash, an invalid schema, or empty
   instructions are refused before serving. `instructions=` takes text or a function of the
   startup arguments.
   `mcp serve --list-tools` prints the tool list, provided tools included, and

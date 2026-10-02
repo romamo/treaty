@@ -478,18 +478,77 @@ def test_a_secret_property_under_a_neutral_name_is_redacted_everywhere(
     assert leaks[0] == {"tool": "leak", "arguments": {"value": "[REDACTED]"}}
 
 
-def test_a_nested_secret_property_is_found() -> None:
-    from treaty._mcp_serve import secret_paths
-
-    key = {"type": "string", "writeOnly": True}
-    schema = {
-        "type": "object",
-        "properties": {
-            "auth": {"type": "object", "properties": {"key": key}},
-            "name": {"type": "string"},
+SECRET_SHAPES: dict[str, tuple[dict[str, object], dict[str, object], list[tuple[str, ...]]]] = {
+    "nested": (
+        {"properties": {"auth": {"properties": {"value": {"writeOnly": True}}}}},
+        {"auth": {"value": SECRET}, "name": "n"},
+        [("auth", "value")],
+    ),
+    "array items": (
+        {"properties": {"creds": {"items": {"properties": {"value": {"writeOnly": True}}}}}},
+        {"creds": [{"value": SECRET}, {"other": 1}]},
+        [("creds", "0", "value")],
+    ),
+    "tuple items": (
+        {"properties": {"pair": {"prefixItems": [{}, {"format": "password"}]}}},
+        {"pair": ["shown", SECRET]},
+        [("pair", "1")],
+    ),
+    "anyOf": (
+        {"properties": {"a": {"anyOf": [{"type": "null"}, {"x-secret": True}]}}},
+        {"a": SECRET},
+        [("a",)],
+    ),
+    "allOf at the root": (
+        {"allOf": [{"properties": {"value": {"writeOnly": True}}}]},
+        {"value": SECRET},
+        [("value",)],
+    ),
+    "local $ref": (
+        {
+            "properties": {"value": {"$ref": "#/$defs/hidden"}},
+            "$defs": {"hidden": {"writeOnly": True}},
         },
-    }
-    assert secret_paths(schema) == (("auth", "key"),)
+        {"value": SECRET},
+        [("value",)],
+    ),
+    "additionalProperties": (
+        {"properties": {"m": {"additionalProperties": {"writeOnly": True}}}},
+        {"m": {"any": SECRET}},
+        [("m", "any")],
+    ),
+    "patternProperties": (
+        {"properties": {"m": {"patternProperties": {"^k": {"writeOnly": True}}}}},
+        {"m": {"k1": SECRET, "other": "shown"}},
+        [("m", "k1")],
+    ),
+}
+
+
+def refused(arguments: Mapping[str, object], ctx: Ctx) -> Leaked:
+    """Quotes every argument, the secret among them, in its error"""
+    raise Exit.NOT_FOUND(f"nothing for {json.dumps(arguments, default=dict)}")
+
+
+@pytest.mark.parametrize("shape", SECRET_SHAPES)
+def test_a_secret_is_found_wherever_the_schema_reaches(shape: str, tmp_path: Path) -> None:
+    schema, arguments, locations = SECRET_SHAPES[shape]
+    tool = _tool(
+        "leak",
+        input_schema={"type": "object", **schema},
+        handler=refused,
+        exit_codes=("NOT_FOUND",),
+    )
+    app = _app([tool])
+    provided = _ready(app)["leak"]
+    assert provided.secret_locations(arguments) == locations
+    audit = tmp_path / "audit.jsonl"
+    envelope = app._call_provided(provided, arguments, env={"X_AUDIT_LOG": str(audit)})
+    assert envelope.error is not None and envelope.error.code == "NOT_FOUND"
+    assert "[REDACTED]" in envelope.error.message
+    assert SECRET not in json.dumps(envelope.to_json())
+    logged = audit.read_text(encoding="utf-8")
+    assert SECRET not in logged and "[REDACTED]" in logged
 
 
 def test_a_secret_stays_out_of_debug_output_over_stdio(tmp_path: Path, project: Path) -> None:
