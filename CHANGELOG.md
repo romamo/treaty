@@ -10,6 +10,31 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- A mutating command can preview unless its own confirmation flag is passed:
+  `yes: bool = Flag(confirm=True, description=...)`. Without `--yes` the run is a dry run
+  under the `--dry-run` contract: a `would_*` effect, `meta.dry_run: true`, and nothing
+  stored under an idempotency key; with it the command runs, and the flag keeps its name.
+  A missing value is a preview on argv, `--raw-payload`, `exec`, and `App.call` and MCP,
+  and `exec --dry-run` previews even a line that passes it. The flag's manifest
+  description says the command previews without it, and generated skills say so too. A
+  confirmation on a safe or destructive command, on a non-boolean field, with a default
+  other than `False`, with `env=` (a variable left set would confirm every run), or
+  beside a `dry_run` switch is a `RegistrationError`. The audit log records a preview's
+  `args` with `dry_run: true` (#197)
+
+- A `SideEffect` path may start at the project: `SideEffect("{project_root}/tmp/dashboard/",
+  "cache")` on a command declaring `project_root=` markers, so a safe command that writes
+  its regenerated reports under the project can declare them and pass `fs-side-effects`.
+  `cleanup` and `status` resolve the project from their own cwd up; with no marker found
+  (one at `/`, in the home directory, or above it counts as none) they leave its paths alone with a `PROJECT_ROOT_NOT_FOUND` warning instead of guessing
+  the cwd, and `cleanup` never follows a symlink out of the project. A project path on a
+  command without markers, or one reaching out with `..`, is a `RegistrationError`. The
+  manifest carries the template as declared (#184)
+
+### Fixed
+
 - Commands that run children at the same time from several threads no longer crash on
   Windows with `PermissionError: [WinError 5] Access is denied` rewriting the session's
   `children.pids`, and no longer lose a child's pid from it on any platform: the
@@ -30,29 +55,6 @@ Apps built on treaty keep their own, structured schema changelog with
   `_source` on a command that is not external still prints. A boolean in the stderr error
   block reads `true` or `false`, as in the rest of plain output, not Python's `True` or
   `False` (#198)
-### Added
-
-- A mutating command can preview unless its own confirmation flag is passed:
-  `yes: bool = Flag(confirm=True, description=...)`. Without `--yes` the run is a dry run
-  under the `--dry-run` contract: a `would_*` effect, `meta.dry_run: true`, and nothing
-  stored under an idempotency key; with it the command runs, and the flag keeps its name.
-  A missing value is a preview on argv, `--raw-payload`, `exec`, and `App.call` and MCP,
-  and `exec --dry-run` previews even a line that passes it. The flag's manifest
-  description says the command previews without it, and generated skills say so too. A
-  confirmation on a safe or destructive command, on a non-boolean field, with a default
-  other than `False`, with `env=` (a variable left set would confirm every run), or
-  beside a `dry_run` switch is a `RegistrationError`. The audit log records a preview's
-  `args` with `dry_run: true` (#197)
-### Added
-
-- A `SideEffect` path may start at the project: `SideEffect("{project_root}/tmp/dashboard/",
-  "cache")` on a command declaring `project_root=` markers, so a safe command that writes
-  its regenerated reports under the project can declare them and pass `fs-side-effects`.
-  `cleanup` and `status` resolve the project from their own cwd up; with no marker found
-  (one at `/`, in the home directory, or above it counts as none) they leave its paths alone with a `PROJECT_ROOT_NOT_FOUND` warning instead of guessing
-  the cwd, and `cleanup` never follows a symlink out of the project. A project path on a
-  command without markers, or one reaching out with `..`, is a `RegistrationError`. The
-  manifest carries the template as declared (#184)
 
 ## [1.0.0rc12] - 2026-10-01
 
