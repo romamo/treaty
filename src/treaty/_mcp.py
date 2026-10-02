@@ -216,6 +216,9 @@ class _Serving:
         self._stopped = False
         self.calls = 0
         self.error: BaseException | None = None
+        self.read_all = threading.Event()
+        """Set once the stdin reader left its last read: no read of the protocol's
+        descriptor is pending"""
 
     def started(self, stop: Callable[[], None]) -> None:
         with self._lock:
@@ -244,7 +247,7 @@ def serve_wire(app: App, wire: Wire, *, env: Mapping[str, str]) -> McpServed:
     assert wire.stdin is not None, "mcp serve refuses a closed stdin before serving"
     serving = _Serving()
     server = build_server(app, env=env, called=serving.called)
-    with _claimed_stdin(wire.stdin) as stdin:
+    with _claimed_stdin(wire.stdin, serving.read_all) as stdin:
 
         def run() -> None:
             try:
@@ -272,7 +275,7 @@ def serve_wire(app: App, wire: Wire, *, env: Mapping[str, str]) -> McpServed:
 
 
 @contextlib.contextmanager
-def _claimed_stdin(stdin: IO[str]) -> Iterator[IO[str] | IO[bytes]]:
+def _claimed_stdin(stdin: IO[str], read_all: threading.Event) -> Iterator[IO[str] | IO[bytes]]:
     """The protocol's stdin, read from a private copy of its descriptor while the
     descriptor itself reads the null device: a handler reading ``sys.stdin``, or a child
     that inherited the descriptor, reads its end at once, as under ``treaty-mcp``, instead
@@ -290,10 +293,27 @@ def _claimed_stdin(stdin: IO[str]) -> Iterator[IO[str] | IO[bytes]]:
         os.dup2(null, fd)
     finally:
         os.close(null)
+    _rebind_std_handle(fd)
     try:
         yield source
     finally:
-        os.dup2(private, fd)
+        # On Windows a read still pending on the copy (the client left by closing stdout,
+        # or a signal stopped the server, with stdin open) holds the C runtime's lock on
+        # that descriptor, so restoring from it would block until the client writes or
+        # closes stdin: the run is ending, and descriptor 0 keeps reading the null device
+        if sys.platform != "win32" or read_all.is_set():
+            os.dup2(private, fd)
+            _rebind_std_handle(fd)
+
+
+def _rebind_std_handle(fd: int) -> None:
+    """On Windows, point the process's standard handle for ``fd`` at what the descriptor
+    holds now: ``os.dup2`` changes only the C runtime's table, and ``subprocess`` hands a
+    child the standard handle, so a child would still read the client's pipe"""
+    if sys.platform == "win32":
+        from mcp.os.win32.utilities import rebind_std_handle_to_fd
+
+        rebind_std_handle_to_fd(fd)
 
 
 def _signal_name(name: str) -> Literal["SIGINT", "SIGTERM"]:
@@ -313,7 +333,10 @@ async def _serve_wire(
     loop = asyncio.get_running_loop()
     lines: asyncio.Queue[str | Exception | None] = asyncio.Queue()
     reader = threading.Thread(
-        target=_read_lines, args=(stdin, loop, lines), name="treaty-mcp-stdin", daemon=True
+        target=_read_lines,
+        args=(stdin, loop, lines, serving.read_all),
+        name="treaty-mcp-stdin",
+        daemon=True,
     )
     with anyio.CancelScope() as scope:
         serving.started(lambda: _call_soon(loop, scope.cancel))
@@ -337,10 +360,12 @@ def _read_lines(
     stdin: IO[str] | IO[bytes],
     loop: asyncio.AbstractEventLoop,
     lines: asyncio.Queue[str | Exception | None],
+    read_all: threading.Event,
 ) -> None:
     """Stdin's lines, read on a daemon thread of their own, so stopping the server never
     waits for a read; UTF-8 whatever the platform's encoding, as the SDK reads them. None
-    marks the end, and an error reading is handed to the server, which raises it"""
+    marks the end, and an error reading is handed to the server, which raises it.
+    ``read_all`` is set once no read is pending any more"""
     buffer = getattr(stdin, "buffer", None)
     item: str | Exception | None
     try:
@@ -355,6 +380,8 @@ def _read_lines(
         item = exc
     except RuntimeError:
         return  # the loop closed: the server stopped first
+    finally:
+        read_all.set()
     try:
         loop.call_soon_threadsafe(lines.put_nowait, item)
     except RuntimeError:

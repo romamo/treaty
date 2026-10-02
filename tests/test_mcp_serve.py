@@ -180,7 +180,10 @@ def test_a_handler_or_child_reading_stdin_reads_its_end_not_the_protocol(
 ) -> None:
     server.initialize()
     called = _result(server.request("tools/call", {"name": "read-stdin", "arguments": {}}))
-    assert called["structuredContent"]["data"] == {"handler": "", "child": ""}  # type: ignore[index]
+    body = called["structuredContent"]
+    assert isinstance(body, dict)
+    # On failure, the envelope (a child's timeout, say) and the server's stderr say why
+    assert body["data"] == {"handler": "", "child": ""}, (body, server.stderr())
     # The client's next request still reaches the server
     assert (
         _result(server.request("tools/call", {"name": "ping", "arguments": {}}))["isError"] is False
@@ -207,9 +210,15 @@ def test_the_client_closing_stdout_stops_the_server_cleanly(tmp_path: Path, proj
             },
         }
     )
-    assert started.wait() == 0
+    try:
+        code = started.wait()
+    except subprocess.TimeoutExpired:
+        started.proc.kill()
+        started.proc.wait(timeout=WAIT)
+        pytest.fail(f"the server did not stop; its stderr:\n{started.stderr()}")
+    assert code == 0, started.stderr()
     envelope = started.envelope()
-    assert envelope["data"] == {"stopped_by": "eof", "tool_calls": 0}
+    assert envelope["data"] == {"stopped_by": "eof", "tool_calls": 0}, started.stderr()
     assert "Traceback" not in started.stderr()
 
 
