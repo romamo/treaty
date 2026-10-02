@@ -255,3 +255,89 @@ def test_cleanup_removes_a_temp_path_sharing_only_a_name_prefix_with_an_output_p
     assert code == 0, envelope
     assert (tmp_path / "dash").exists()
     assert not (tmp_path / "dash-tmp").exists()
+
+
+def linked_project(tmp_path: Path) -> tuple[Path, Path]:
+    """A project whose ``tmp`` is a symlink to a scratch directory outside it (#227)"""
+    scratch = tmp_path / "scratch" / "tmp"
+    scratch.mkdir(parents=True)
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / ".cfproject").write_text("")
+    try:
+        (root / "tmp").symlink_to(scratch, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need privileges here")
+    (scratch / "dashboard").mkdir()
+    (scratch / "dashboard" / "index.html").write_text("<html></html>")
+    (scratch / "stale").write_text("x")
+    return root, scratch
+
+
+@pytest.mark.parametrize(
+    "output", [DASHBOARD, SideEffect("{project_root}/tm*/dashboard/", "output")]
+)
+def test_cleanup_keeps_an_output_path_whose_project_directory_links_outside(
+    tmp_path: Path, output: SideEffect
+) -> None:
+    # The output's match resolves outside the project, so cleanup never removes through
+    # it; it still keeps what another command's temp glob reaches by the resolved path
+    root, scratch = linked_project(tmp_path)
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "dashboard",
+        description="Build the dashboard under the project",
+        danger_level="safe",
+        exit_codes=(),
+        project_root=(".cfproject",),
+        filesystem_side_effects=[output],
+    )
+    def build(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    @app.command(
+        "scratch",
+        description="Use the scratch directory",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[SideEffect(f"{scratch.as_posix()}/*", "temp")],
+    )
+    def use(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["cleanup", "--scope", "all", "--confirm-destructive"], root)
+    assert code == 0, envelope
+    assert (scratch / "dashboard" / "index.html").read_text() == "<html></html>"
+    assert not (scratch / "stale").exists()
+    assert (root / "tmp").is_symlink()
+
+
+def test_cleanup_keeps_an_output_path_a_glob_spells_in_another_case(tmp_path: Path) -> None:
+    # On a case-insensitive filesystem /x/Scratch and /x/scratch are one directory
+    real = tmp_path / "scratch"
+    (real / "dash").mkdir(parents=True)
+    (real / "dash" / "index.html").write_text("<html></html>")
+    (real / "stale").write_text("x")
+    other = tmp_path / "SCRATCH"
+    if not other.exists():
+        pytest.skip("the filesystem here is case-sensitive")
+    app = App("cf", version="1.0.0")
+
+    @app.command(
+        "dash",
+        description="Build the dashboard",
+        danger_level="safe",
+        exit_codes=(),
+        filesystem_side_effects=[
+            SideEffect(f"{real.as_posix()}/dash/", "output"),
+            SideEffect(f"{other.as_posix()}/*", "temp"),
+        ],
+    )
+    def dash(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    code, envelope = run(app, ["cleanup", "--confirm-destructive"], tmp_path)
+    assert code == 0, envelope
+    assert (real / "dash" / "index.html").exists()
+    assert not (real / "stale").exists()
