@@ -295,11 +295,11 @@ class ImportAll(Common):
 )
 def import_all(args: ImportAll, ctx: Ctx, store: Store) -> Batch[Imported]:
     results: list[Outcome[Imported]] = []
-    took = 0.0
+    slowest = 0.0
     for n, url in enumerate(args.urls):
         left = ctx.remaining
-        if left is not None and left < took:
-            # Less time left than the last feed took: leave this one for a retry
+        if left is not None and left < 2 * slowest:
+            # Less time left than twice the slowest feed so far: leave this one for a retry
             not_started = ItemError("NOT_STARTED", "the time ran out before this feed", True)
             results.append(Outcome(url, error=not_started))
             continue
@@ -309,7 +309,7 @@ def import_all(args: ImportAll, ctx: Ctx, store: Store) -> Batch[Imported]:
             results.append(Outcome(url, import_items(Import(url=url, db=args.db), ctx, store)))
         except CliExit as failure:
             results.append(Outcome(url, error=failure))
-        took = time.monotonic() - started
+        slowest = max(slowest, time.monotonic() - started)
     return Batch(results)
 
 
