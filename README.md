@@ -1964,6 +1964,8 @@ The handler's module is followed however deep, and its other first-party modules
 deep: the handler's top-level package, or, when the app is a top-level module such as
 `mycli.py`, files under its directory. treaty, the standard library, and site-packages are
 never followed, nor are methods of objects or callbacks, which the report's `scope` says.
+The `declared-exits` rule also follows a method called on a parameter annotated with the
+args class or a resource class (`store.load()`), and the methods that one calls on `self`.
 
 ## Stability
 

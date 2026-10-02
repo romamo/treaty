@@ -167,8 +167,9 @@ code it calls, and its resources' `acquire`, and warns for each code the command
 declares nor gets without declaring, naming the line:
 `raises STORE_CORRUPT (todo.py:88), which exit_codes does not list`. It reads code, not
 runs, so a code on a branch that is never taken counts too; a declared code it never sees
-raised is fine. A method called on an object, such as `store.load()` on a resource, is
-not followed. An exit raised in the args class's `__post_init__` is reported whether
+raised is fine. A method called on a resource or on `args`, such as `store.load()`, is
+read too, and the methods it calls on `self`; one called on an object whose class the
+handler's annotations do not name is not. An exit raised in the args class's `__post_init__` is reported whether
 declared or not: there only a `ParseError` refuses the arguments, and an exit is a
 `HANDLER_CRASHED`.
 

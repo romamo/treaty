@@ -530,7 +530,11 @@ class Reached:
         return f"; found via {' -> '.join(self.via)}" if self.via else ""
 
 
-def reached_functions(fn: Callable[..., object]) -> tuple[Reached, ...]:
+Receivers = tuple[tuple[str, type], ...]
+"""Parameters whose class is known statically, by name: ``(("store", Store),)``"""
+
+
+def reached_functions(fn: Callable[..., object], receivers: Receivers = ()) -> tuple[Reached, ...]:
     """The handler and the first-party functions it calls, each once, the handler first
     and then by distance. A function of the handler's own module is followed however deep,
     as a fetch() beside the handler runs as part of it; one in another first-party module
@@ -543,40 +547,108 @@ def reached_functions(fn: Callable[..., object]) -> tuple[Reached, ...]:
     A call is followed by name (``fetch(...)``), through modules and classes
     (``helpers.enter(...)``, ``Store.load(...)``) read without running their code, and
     through a module the function imports itself; a decorated helper through the
-    ``__wrapped__`` its decorator set. Methods of objects, lambdas, ``functools.partial``,
-    and callbacks are not. Cached, since several rules ask for the same command; an
-    unhashable callable is followed each time"""
+    ``__wrapped__`` its decorator set. With ``receivers``, a method called on one of those
+    parameters (``store.load()``) is followed as ``Store.load``, and in a method reached so,
+    one called on its ``self``, through the class's own and inherited attributes (#218).
+    Methods of other objects, lambdas, ``functools.partial``, and callbacks are not.
+    Cached, since several rules ask for the same command; an unhashable callable is
+    followed each time"""
     try:
-        return _cached_reach(fn)
+        return _cached_reach(fn, receivers)
     except TypeError:
-        return _reach(fn)
+        return _reach(fn, receivers)
 
 
 @functools.lru_cache(maxsize=4096)
-def _cached_reach(fn: Callable[..., object]) -> tuple[Reached, ...]:
-    return _reach(fn)
+def _cached_reach(fn: Callable[..., object], receivers: Receivers) -> tuple[Reached, ...]:
+    return _reach(fn, receivers)
 
 
-def _reach(fn: Callable[..., object]) -> tuple[Reached, ...]:
+def _reach(fn: Callable[..., object], receivers: Receivers) -> tuple[Reached, ...]:
     module = getattr(fn, "__module__", None)
     home = _home(fn)
     found = [Reached(fn)]
-    seen = {id(fn)}
-    queue = collections.deque([(found[0], 0)])
+    # A method is read once per class it is called on: its self.calls resolve there
+    seen: set[tuple[int, type | None]] = {(id(fn), None)}
+    queue: collections.deque[tuple[Reached, int, dict[str, type]]] = collections.deque(
+        [(found[0], 0, dict(receivers))]
+    )
     while queue:
-        unit, depth = queue.popleft()
-        for target in _callees(unit.fn):
-            if id(target) in seen:
+        unit, depth, typed = queue.popleft()
+        callees: list[tuple[types.FunctionType, dict[str, type]]] = [
+            (t, {}) for t in _callees(unit.fn)
+        ]
+        callees += _method_callees(unit.fn, typed)
+        for target, bound in callees:
+            key = (id(target), next(iter(bound.values()), None))
+            if key in seen:
                 continue
             if target.__module__ != module and (
                 depth >= FOLLOW_DEPTH or home is None or not _first_party(target, home)
             ):
                 continue
-            seen.add(id(target))
+            seen.add(key)
             following = Reached(target, (*unit.via, _label(target, home)))
             found.append(following)
-            queue.append((following, depth + 1))
+            queue.append((following, depth + 1, bound))
     return tuple(found)
+
+
+def _method_callees(
+    fn: Callable[..., object], typed: Mapping[str, type]
+) -> list[tuple[types.FunctionType, dict[str, type]]]:
+    """The methods ``fn`` calls on a parameter of a known class, ``name.method(...)``, each
+    with its own first parameter bound to that class, as ``self`` is; a static or class
+    method binds nothing. A name the body binds again holds some other object there, so
+    a call on it is not followed"""
+    tree = None if not typed else source_tree(fn)
+    if tree is None:
+        return []
+    rebound = _rebound(tree)
+    typed = {name: cls for name, cls in typed.items() if name not in rebound}
+    found: list[tuple[types.FunctionType, dict[str, type]]] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in typed
+        ):
+            continue
+        cls = typed[node.func.value.id]
+        try:
+            attr = inspect.getattr_static(cls, node.func.attr)
+        except AttributeError:
+            continue
+        plain = not isinstance(attr, (staticmethod, classmethod))
+        target = _unwrapped(attr if plain else attr.__func__)
+        if not isinstance(target, types.FunctionType) or target.__name__ == "<lambda>":
+            continue
+        code = target.__code__
+        bound = {code.co_varnames[0]: cls} if plain and code.co_argcount else {}
+        found.append((target, bound))
+    return found
+
+
+def _rebound(tree: ast.Module) -> set[str]:
+    """The names a function binds in its body: an assignment, a loop, ``with``, or
+    ``except`` target, an import, or a parameter of a function or lambda nested in it"""
+    names: set[str] = set()
+    outermost = True
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if not outermost:
+                names.update(a.arg for a in ast.walk(node.args) if isinstance(a, ast.arg))
+                if not isinstance(node, ast.Lambda):
+                    names.add(node.name)
+            outermost = False
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+            names.add(node.name)
+        elif isinstance(node, ast.alias):
+            names.add((node.asname or node.name).split(".")[0])
+    return names
 
 
 @dataclass(frozen=True, slots=True)
