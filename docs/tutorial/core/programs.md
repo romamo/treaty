@@ -121,8 +121,8 @@ done = ctx.run(["ansible-playbook", "site.yml"], stream=True)
 An agent runs off a terminal without `--verbose`, so it sees none of those lines. When the
 child's log is the progress it waits on, `stream="always"` writes each line to stderr as
 plain text in any format and verbosity (`--quiet` still silences it). The command declares
-`child_log=True`, which its manifest description reports, so an agent expects a busy
-stderr:
+`child_log=True`, which its manifest entry reports as `stderr: "child_log"`, so an agent
+expects a busy stderr:
 
 ```python
 @app.command("deploy", description="Run the site playbook", danger_level="mutating",

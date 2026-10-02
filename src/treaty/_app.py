@@ -1004,7 +1004,7 @@ class App:
         user's locale for a command whose child output is meant for a person (REQ-F-066).
         ``child_log=True`` lets ``ctx.run(argv, stream="always")`` write the child's lines
         to stderr as plain text, redacted, in any ``--format`` and verbosity but
-        ``--quiet``, and says so in the command's manifest description; ``App.call`` and
+        ``--quiet``, and the manifest says ``stderr: child_log``; ``App.call`` and
         MCP drop the lines.
         ``cache=CachePolicy(ttl_seconds=3600)`` gives ``ctx.cache``, a store of bytes by
         key under ``$XDG_CACHE_HOME/<app>/<command>/``, with ``--no-cache`` and
@@ -1037,8 +1037,8 @@ class App:
         or ``-h`` after the path. Exec lines and ``App.call`` pass the tool's arguments as
         ``"argv": [...]``; MCP lists no passthrough command.
         ``idempotent=True`` says a repeat of the command with the same arguments leaves
-        the same state, so the ``retryable`` audit rule passes its retryable codes, and its
-        manifest description says so; it changes no run, and ``--idempotency-key`` still
+        the same state, so the ``retryable`` audit rule passes its retryable codes, and the
+        manifest says ``idempotent: true``; it changes no run, and ``--idempotency-key`` still
         replays the first result. Any danger level takes it; on a safe command it is
         redundant (REQ-C-002).
         """

@@ -1255,8 +1255,8 @@ with `INIT_FAILED` and `context.reason`: `permissions`, `network`, `disk`, or `i
 
 Every variable treaty reads carries the app's prefix (`DEPLOYCTL_FORMAT`,
 `DEPLOYCTL_MAX_OUTPUT_BYTES`, `DEPLOYCTL_STATE_DIR`, ...), and `--help` lists them under
-Environment; in the manifest, each global flag's description names its variable (the spec's
-manifest has no `environment` key yet). Unprefixed, treaty reads only shared conventions:
+Environment; in the manifest, a flag's `env_vars` names the variables it reads, the root
+`env_vars` the others, and the root `secret_env_vars` each secret setting's. Unprefixed, treaty reads only shared conventions:
 `CI`, `NO_COLOR`, `TERM`, `COLUMNS`, `HOME`, `XDG_*`, `GITHUB_ACTIONS`, `JENKINS_URL`, the
 proxy and CA bundle variables, and `TOOL_TRACE_ID`. The `env-prefix` audit rule flags handlers that read an unprefixed
 variable such as `DEBUG`.
