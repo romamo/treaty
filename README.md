@@ -604,7 +604,11 @@ gets a `THIRD_PARTY_STDOUT` warning with the text (first 4 KiB) and the byte cou
 of JSON go to stderr unreported. Under `App.main()` file descriptor 1 is a pipe to
 stderr, so a child process or a C extension cannot write ahead of the envelope and its
 text is in the warning too; on stderr that text is cleaned as a stray `print()` is, so
-only colors (where the run may color) of its terminal escapes stay. `App.run()` swaps
+only colors (where the run may color) of its terminal escapes stay. Both reach stderr a
+line at a time, redacted whole, so a secret split across two writes, and each line of a
+multi-line secret such as a PEM key, prints as `[REDACTED]`: a line without its end waits
+for its newline or carriage return, the next envelope, or the end of the run, so a
+`ctx.log` line written in between comes first. `App.run()` swaps
 only `sys.stdout`. A library that prints on import is caught when the entry module calls
 `treaty.intercept_stdout()` before importing the app, as the `entry.py` of `treaty init`
 does (REQ-F-060). Under

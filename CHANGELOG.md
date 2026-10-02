@@ -100,6 +100,13 @@ additive over rc21: see Breaking.
   two writes or two reads of the pipe is still caught, and passes on a line without its end
   when the next envelope is written or the run ends, while the run's secrets are still
   known; bytes that are not UTF-8 pass through unchanged around it (#254)
+- Printed text, from `print()` or `sys.stdout.write`, reaches stderr a line at a time,
+  redacted whole, as descriptor 1's text does: a declared secret split across two writes
+  went to stderr in the clear. A partial line now waits for its newline or carriage
+  return, the next envelope, or the run's end, so a `ctx.log` line written in between
+  comes first. Each line of a multi-line secret, such as a PEM key, at least 4 characters
+  long, is redacted on its own too, so the key written a line at a time by `print`,
+  `os.write(1, ...)`, or a child process no longer reaches stderr line by line (#256)
 
 ## [1.0.0rc21] - 2026-10-02
 
