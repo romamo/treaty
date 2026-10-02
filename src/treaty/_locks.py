@@ -83,7 +83,7 @@ class Locks:
     directory: Path | None
     """``<state dir>/locks``; None when there is no state directory"""
     deadline: float | None
-    """``time.monotonic()`` when the command times out; the default limit of a wait"""
+    """``time.monotonic()`` when ``ctx.remaining`` runs out; the default limit of a wait"""
 
     @contextmanager
     def hold(self, name: str, *, wait: float | None, retry_after_ms: int) -> Iterator[None]:

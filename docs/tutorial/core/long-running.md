@@ -89,6 +89,11 @@ the app's, as `import-all`'s is, also take `--timeout SECONDS` from the caller, 
 limit. When the limit passes, the run exits 10 with `TIMEOUT`, and every response carries
 the limit it ran under in `meta.timeout_ms`.
 
+The handler's own time ends a little sooner. `ctx.remaining` counts down to a reserve
+before the limit, a tenth of it, from 100 ms to 2 s, and `ctx.http` stops a request there:
+a feed still downloading fails with `TIMEOUT` as one item, and the reserve leaves the
+handler time to return the feeds it already has.
+
 **Check:** `import-all` runs under its own two minutes, `add` under the app's one minute
 
 <!-- check -->

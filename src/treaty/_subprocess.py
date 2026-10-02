@@ -178,8 +178,9 @@ def _argv(value: object) -> tuple[str, ...]:
 class Processes:
     """The children of one handler run: their environment, deadline, and tracking
 
-    ``env`` is the hardened base environment; ``deadline`` is the command's, on the
-    ``time.monotonic`` clock. ``terminate`` may run on another thread than the handler,
+    ``env`` is the hardened base environment; ``deadline`` is the handler's, where
+    ``ctx.remaining`` ends a reserve before the hard limit, on the ``time.monotonic``
+    clock. ``terminate`` may run on another thread than the handler,
     which is how a signal or a timeout reaches a child the handler waits on.
     """
 

@@ -290,7 +290,14 @@ from ._subprocess import (
 )
 from ._suggest import closest, hint
 from ._table import table
-from ._timeout import Heartbeat, Pending, Timeout, TimeoutExpired, call_with_timeout
+from ._timeout import (
+    DEADLINE_RESERVE,
+    Heartbeat,
+    Pending,
+    Timeout,
+    TimeoutExpired,
+    call_with_timeout,
+)
 from ._types import FlagType
 from ._update import UpdateCheck, available, check_allowed
 from ._values import (
@@ -3838,7 +3845,9 @@ class _Run:
         invocation: Invocation,
         page: PageRequest | None = None,
     ) -> Ctx:
-        deadline = None if timeout.seconds is None else time.monotonic() + timeout.seconds
+        # The handler's work ends a reserve before the hard limit, so it can still return
+        # what it has: ctx.remaining and every clamp below count down to this (#244)
+        deadline = DEADLINE_RESERVE.deadline(timeout, time.monotonic())
         trace("command started", command=command.path.value, timeout_ms=timeout.milliseconds)
         # Output is captured, so a child never colors; editors only for a person
         quiet = suppress_updates(self.env, interactive=self.interactive)

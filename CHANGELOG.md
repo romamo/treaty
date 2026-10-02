@@ -10,6 +10,24 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Changed
+
+- `ctx.remaining` ends a reserve before the command's hard limit: a tenth of the timeout,
+  at least 100 ms and at most 2 s, and never more than half of it. `ctx.http`, `ctx.run`,
+  `ctx.pipeline`, `ctx.lock`, `ctx.retry`, and an async handler's cancellation all stop at
+  that deadline too, so a handler that catches a call cut at its deadline still has time
+  to return its partial result before exit 10 `TIMEOUT`. `ctx.remaining` reads that much
+  less than before and `ctx.expired` turns true that much sooner; the hard limit and
+  `meta.timeout_ms` are unchanged
+
+### Fixed
+
+- A `ctx.http` request ends at the deadline as a whole, not only each socket read: a server
+  that sent its answer a little at a time kept a request running seconds past the time
+  left, so a handler watching `ctx.remaining` lost its partial result to `TIMEOUT`. The
+  connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
+  when a body without a length would have looked complete
+
 ## [1.0.0rc21] - 2026-10-02
 
 The 21th 1.0 release candidate: 1 fix.

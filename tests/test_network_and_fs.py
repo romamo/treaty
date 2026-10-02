@@ -26,10 +26,13 @@ import pytest
 
 from treaty import (
     App,
+    Batch,
+    CliExit,
     Ctx,
     Exit,
     Flag,
     HttpResponse,
+    Item,
     NetworkSettings,
     NoArgs,
     RegistrationError,
@@ -53,13 +56,17 @@ BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT
 
 class Origin(BaseHTTPRequestHandler):
     """``/status/N`` answers N, ``/slow`` waits 2 s, ``/flaky`` answers 503 once, as
-    ``/flaky-after`` does with ``Retry-After: 3``, and anything else 200 with the path in
-    JSON"""
+    ``/flaky-after`` does with ``Retry-After: 3``, ``/trickle`` and ``/trickle-open`` send
+    a 10 s body a byte at a time (the first with a ``Content-Length``, the second ending at
+    the connection's close), and anything else 200 with the path in JSON"""
 
     server: Recording
 
     def do_GET(self) -> None:
         self.server.seen.append((self.command, self.path, dict(self.headers)))
+        if self.path.startswith("/trickle"):
+            self.trickle(sized=self.path == "/trickle")
+            return
         if self.path == "/slow":
             time.sleep(2)
         status = 200
@@ -82,8 +89,25 @@ class Origin(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - the name http.server dispatches to
         self.do_GET()
 
+    def trickle(self, *, sized: bool) -> None:
+        """A byte every 50 ms: each read finishes well within any per-read timeout, so
+        only a limit on the whole request ends it before its 10 s (#244)"""
+        self.send_response(200)
+        if sized:
+            self.send_header("Content-Length", str(TRICKLE_BYTES))
+        self.end_headers()
+        # The client shuts the connection at its deadline; the writes then fail
+        with contextlib.suppress(OSError):
+            for _ in range(TRICKLE_BYTES):
+                self.wfile.write(b"x")
+                self.wfile.flush()
+                time.sleep(0.05)
+
     def log_message(self, format: str, *args: object) -> None:
         pass
+
+
+TRICKLE_BYTES = 200
 
 
 class Proxy(BaseHTTPRequestHandler):
@@ -486,6 +510,137 @@ def test_a_timeout_exits_10_with_network_context(origin: Recording) -> None:
         http.get(f"{origin.url}/slow")
     assert caught.value.name == ExitCodeName("TIMEOUT") and caught.value.code == "TIMEOUT"
     assert caught.value.network.url == f"{origin.url}/slow"
+
+
+def _round_trip(url: str) -> float:
+    """Seconds this runner takes for one quick request to ``url``: the tolerances below
+    grow with it, so a loaded runner's own delays do not fail them"""
+    started = time.monotonic()
+    Http(ProxyConfig(_tls_env()), deadline=None, retrier=None, declared=()).get(url)
+    return time.monotonic() - started
+
+
+def _tls_env() -> dict[str, str]:
+    return {"REQUESTS_CA_BUNDLE": str(CERT)}
+
+
+@pytest.mark.parametrize("path", ["/trickle", "/trickle-open"])
+@pytest.mark.parametrize("tls", [False, True], ids=["http", "https"])
+def test_a_request_that_keeps_receiving_still_ends_at_the_deadline(path: str, tls: bool) -> None:
+    """Issue #244: urllib's timeout bounds each socket operation, so a body sent a byte at
+    a time ran its whole 10 s under a limit of 0.5. The request now ends at the deadline
+    with TIMEOUT, also when the body has no length and a cut one would look complete"""
+    with serving(Origin, tls=tls) as server:
+        tolerance = 0.5 + 10 * _round_trip(f"{server.url}/quick")
+        limit = 0.5
+        http = Http(
+            ProxyConfig(_tls_env()),
+            deadline=time.monotonic() + limit,
+            retrier=None,
+            declared=(),
+        )
+        started = time.monotonic()
+        with pytest.raises(NetworkFailure) as caught:
+            http.get(f"{server.url}{path}")
+        took = time.monotonic() - started
+    assert caught.value.code == "TIMEOUT" and caught.value.name == ExitCodeName("TIMEOUT")
+    assert took < limit + tolerance, f"{took:.2f}s under a {limit}s limit"
+    # The trickle would have run TRICKLE_BYTES * 0.05 = 10 s
+    assert took < TRICKLE_BYTES * 0.05 / 2
+
+
+def test_a_request_within_its_deadline_is_untouched(origin: Recording) -> None:
+    """The deadline's watch ends with the request: a later request is not cut by it"""
+    http = Http(ProxyConfig({}), deadline=time.monotonic() + 30, retrier=None, declared=())
+    assert http.get(f"{origin.url}/a").json() == {"via": "origin", "path": "/a"}
+    assert http.get(f"{origin.url}/b").json() == {"via": "origin", "path": "/b"}
+
+
+@dataclass(frozen=True, slots=True)
+class Feeds:
+    quick: str = Flag(description="A URL that answers at once")
+    slow: str = Flag(description="A URL that answers after the limit")
+
+
+def batch_app() -> App:
+    """``fetch`` catches each request's failure and returns the feeds it got, as a
+    handler watching its deadline should; ``careless`` lets the failure end the run;
+    ``sleepy`` ignores the deadline altogether"""
+    app = App("feedctl", version="1.0.0")
+
+    @app.command(
+        "fetch",
+        description="Fetch feeds, one result each",
+        danger_level="safe",
+        exit_codes=(),
+        has_network_io=True,
+    )
+    def fetch(args: Feeds, ctx: Ctx) -> Batch[Got]:
+        results: list[Item[Got]] = []
+        for url in (args.quick, args.slow):
+            try:
+                response = ctx.http.get(url)
+                results.append(Item(url, Got(response.status, response.text())))
+            except CliExit as failure:
+                results.append(Item(url, error=failure))
+        return Batch(results)
+
+    @app.command(
+        "careless",
+        description="Fetch a feed, letting a failure through",
+        danger_level="safe",
+        exit_codes=(),
+        has_network_io=True,
+    )
+    def careless(args: Feeds, ctx: Ctx) -> Got:
+        response = ctx.http.get(args.slow)
+        return Got(response.status, response.text())
+
+    @app.command(
+        "sleepy",
+        description="Sleep past the limit",
+        danger_level="safe",
+        exit_codes=(),
+        timeout=0.3,
+    )
+    def sleepy(args: NoArgs, ctx: Ctx) -> None:
+        time.sleep(30)
+
+    return app
+
+
+def test_a_handler_that_catches_the_deadline_returns_its_partial_result(
+    origin: Recording,
+) -> None:
+    """Issue #244: a request cut at ``ctx.remaining`` leaves the reserve before the hard
+    limit, so the handler's batch gets out with its own exit code (3, one item failed)
+    instead of TIMEOUT dropping the feed it already had"""
+    limit = max(2.0, 20 * _round_trip(f"{origin.url}/quick"))
+    argv = ["fetch", "--quick", f"{origin.url}/a", "--slow", f"{origin.url}/trickle"]
+    code, envelope = run(batch_app(), [*argv, "--timeout", f"{limit:.3f}"])
+    assert code == 3, envelope
+    data = envelope["data"]
+    assert isinstance(data, dict)
+    first, second = data["results"]
+    assert first["ok"] is True and json.loads(first["body"])["path"] == "/a"
+    assert second["ok"] is False and second["error"]["code"] == "TIMEOUT"
+
+
+def test_a_handler_that_lets_the_deadline_through_exits_10(origin: Recording) -> None:
+    argv = ["careless", "--quick", "-", "--slow", f"{origin.url}/trickle", "--timeout", "0.5"]
+    code, envelope = run(batch_app(), argv)
+    assert code == 10 and error_of(envelope)["code"] == "TIMEOUT"
+
+
+def test_a_handler_that_ignores_the_deadline_still_times_out() -> None:
+    """The reserve moves only what the handler sees: the hard limit still ends a handler
+    that never looks, with TIMEOUT and the limit it was given"""
+    started = time.monotonic()
+    code, envelope = run(batch_app(), ["sleepy"])
+    assert code == 10 and error_of(envelope)["code"] == "TIMEOUT"
+    meta = envelope["meta"]
+    assert isinstance(meta, dict) and meta["timeout_ms"] == 300
+    assert time.monotonic() - started < 10  # the 30 s sleep was abandoned
 
 
 @pytest.mark.parametrize("status", [502, 503, 504])
