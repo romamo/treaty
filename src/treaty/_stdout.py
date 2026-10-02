@@ -10,6 +10,11 @@ last once ``intercept_stdout()`` runs before the app is imported.
 What reaches stderr is cleaned as printed text is (#105, #117): colors (SGR) stay where
 the run may color, every other escape goes, and other controls but tab, newline, and
 carriage return are shown as escapes. Bytes that are not UTF-8 pass through unchanged.
+
+It is redacted of every attached run's secrets as printed text is (#254), a line at a
+time: a secret split across two writes, or two reads of the pipe, is whole by the end of
+its line. What a line has without its end waits for the end, a carriage return too, for
+the next envelope, or for the run's end; past ``LINE_CAP`` it is passed on as it stands.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import os
 import sys
 import threading
 import uuid
+from collections.abc import Callable
 
 from ._envelope import open_escape, terminal_text
 from ._mode import color_allowed
@@ -29,6 +35,23 @@ TEXT_CAP = 4096
 """Bytes of captured text a ``THIRD_PARTY_STDOUT`` warning carries"""
 SYNC_SECONDS = 2.0
 """The longest an envelope waits for text still in the pipe"""
+LINE_CAP = 65536
+"""Characters of a line without its end held for redaction; past them it is passed on"""
+
+
+def _unchanged(text: str) -> str:
+    return text
+
+
+_redact: Callable[[str], str] = _unchanged
+"""The secrets of every attached run out of a line, as ``redact_with`` set it"""
+
+
+def redact_with(redact: Callable[[str], str]) -> None:
+    """What reaches stderr from descriptor 1 is redacted with ``redact`` from now on: the
+    app module sets it to its runs' redaction, which this module cannot import"""
+    global _redact
+    _redact = redact
 
 
 class Interceptor:
@@ -47,6 +70,10 @@ class Interceptor:
         self._decoder = codecs.getincrementaldecoder("utf-8")("surrogateescape")
         self._held = ""
         """The unfinished escape the last read ended with, until the next completes it"""
+        self._line = ""
+        """The cleaned text since the last line end, held to be redacted whole"""
+        self._line_bare = ""
+        """``_line`` without colors, where a color may split a secret"""
         read, write = os.pipe()
         os.dup2(write, 1)
         os.close(write)
@@ -70,14 +97,9 @@ class Interceptor:
         """The text (cut to ``TEXT_CAP`` bytes, Windows line endings as ``\\n``) and the byte
         count that reached descriptor 1 since the last call, once everything written before
         this call arrived"""
-        with self._switch:
-            with self._cond:
-                if self._closed or self._pipe is not None:
-                    return "", 0  # paused: a marker would reach stdout
-                target = self._synced + 1
-            os.write(1, self._marker)  # below PIPE_BUF, so no other write splits it
+        if not self.sync():
+            return "", 0
         with self._cond:
-            self._cond.wait_for(lambda: self._synced >= target, timeout=SYNC_SECONDS)
             text, count = bytes(self._text), self._bytes
             self._text.clear()
             self._bytes = 0
@@ -85,6 +107,20 @@ class Interceptor:
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         decoded = decoder.decode(text, final=count <= len(text))
         return decoded.replace("\r\n", "\n"), count
+
+    def sync(self) -> bool:
+        """Wait until everything written to descriptor 1 before this call reached stderr,
+        redacted, its unfinished line too: called as an envelope is written and before a
+        run detaches, while its secrets are still known. False when paused or closed"""
+        with self._switch:
+            with self._cond:
+                if self._closed or self._pipe is not None:
+                    return False  # paused: a marker would reach stdout
+                target = self._synced + 1
+            os.write(1, self._marker)  # below PIPE_BUF, so no other write splits it
+        with self._cond:
+            self._cond.wait_for(lambda: self._synced >= target, timeout=SYNC_SECONDS)
+        return True
 
     def pause(self) -> None:
         """Descriptor 1 is stdout until ``resume``: a passthrough command's delegated tool
@@ -159,19 +195,42 @@ class Interceptor:
             self._text += data[: max(TEXT_CAP - len(self._text), 0)]
 
     def _release(self, *, final: bool = False) -> None:
-        """An unfinished escape still held, cleaned as it stands; with ``final``, a
-        character the descriptor's last bytes left unfinished too"""
+        """An unfinished escape and line still held, cleaned and redacted as they stand;
+        with ``final``, a character the descriptor's last bytes left unfinished too"""
         held = self._held + self._decoder.decode(b"", final=final)
         self._held = ""
         self._show(held)
+        self._write(whole=True)
 
     def _show(self, text: str) -> None:
         if not text:
             return
         shown = terminal_text(text, color=self.color, keep="\r", rewrite=True)
+        bare = terminal_text(text, color=False, keep="\r", rewrite=True) if self.color else shown
+        self._line += shown
+        self._line_bare += bare
+        self._write(whole=len(self._line) > LINE_CAP)
+
+    def _write(self, *, whole: bool) -> None:
+        """The held text up to its last line end, or all of it with ``whole``, on stderr
+        redacted (#254). Redacted without colors when that finds a secret: one a color
+        splits, such as ``hun\\x1b[0mter2``, is whole once the colors are gone"""
+        line, bare = self._line, self._line_bare
+        cut, cut_bare = (len(line), len(bare)) if whole else (_line_end(line), _line_end(bare))
+        self._line, self._line_bare = line[cut:], bare[cut_bare:]
+        line, bare = line[:cut], bare[:cut_bare]
+        if not line and not bare:
+            return
+        redacted = _redact(bare)
+        shown = redacted if redacted != bare else _redact(line)
         view = memoryview(shown.encode("utf-8", "surrogateescape"))
         while view:
             view = view[os.write(2, view) :]
+
+
+def _line_end(text: str) -> int:
+    """Where the text after the last line end, a newline or a carriage return, starts"""
+    return max(text.rfind("\n"), text.rfind("\r")) + 1
 
 
 _active: Interceptor | None = None

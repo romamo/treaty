@@ -278,7 +278,7 @@ from ._settings import (
 from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
-from ._stdout import TEXT_CAP, intercept_stdout, prose
+from ._stdout import TEXT_CAP, intercept_stdout, prose, redact_with
 from ._stdout import active as active_interceptor
 from ._steps import Rollback, RollbackStatus, StepError, StepTracker
 from ._subprocess import (
@@ -2960,6 +2960,9 @@ class _Records(logging.Handler):
 
 
 _RECORDS = _Records()
+# #254: what reaches descriptor 1 is redacted on its way to stderr as printed text is. The
+# reader thread takes no lock: one that waited on the guard could hold up an envelope
+redact_with(_RECORDS.redact_late)
 
 
 class _LateStream:
@@ -4254,6 +4257,11 @@ class _Run:
         if not self._logging:
             return
         self._logging = False
+        below = active_interceptor()
+        if below is not None:
+            # #254: a line written to descriptor 1 without its end is redacted with this
+            # run's secrets, which are forgotten once it detaches
+            below.sync()
         _RECORDS.detach(self._log_record)
 
     def _redact_now(self, text: str) -> str:
