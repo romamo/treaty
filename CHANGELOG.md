@@ -10,6 +10,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc22] - 2026-10-02
+
+The 22th 1.0 release candidate: 2 additions, 3 changes, 1 fix, and 1 breaking change. Not
+additive over rc21: see Breaking.
+
 ### Added
 
 - `ctx.network.timeout(own)` and `ctx.network.fits(seconds)` hand a client of the
@@ -1627,7 +1632,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc21...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc22...HEAD
+[1.0.0rc22]: https://github.com/romamo/treaty/compare/v1.0.0rc21...v1.0.0rc22
 [1.0.0rc21]: https://github.com/romamo/treaty/compare/v1.0.0rc20...v1.0.0rc21
 [1.0.0rc20]: https://github.com/romamo/treaty/compare/v1.0.0rc19...v1.0.0rc20
 [1.0.0rc19]: https://github.com/romamo/treaty/compare/v1.0.0rc18...v1.0.0rc19
