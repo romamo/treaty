@@ -172,7 +172,23 @@ def test_a_line_ended_by_a_carriage_return_is_passed_on_at_once() -> None:
 
 def test_a_line_longer_than_the_cap_is_passed_on_without_its_end() -> None:
     body = "below._pass_on(b'x' * 70000)\nos.write(2, b'|')"
-    assert read(body) == b"x" * 70000 + b"|"
+    # All but the last LINE_TAIL characters, which wait for the next read or the end
+    assert read(body) == b"x" * (70000 - 4096) + b"|" + b"x" * 4096
+
+
+def test_a_secret_a_read_splits_past_the_cap_is_redacted() -> None:
+    # The first read takes the line past LINE_CAP: what it passes on keeps back the tail,
+    # where the start of a secret the next read finishes may be
+    first, second = b"x" * 65540 + SECRET[:5].encode(), SECRET[5:].encode() + b"\n"
+    err = read(f"below._pass_on({first!r})\nbelow._pass_on({second!r})")
+    assert err == b"x" * 65540 + b"[REDACTED]\n"
+
+
+def test_a_line_past_the_cap_keeps_its_colors_whole() -> None:
+    # The tail held back never starts inside a color, which would reach stderr as text
+    first = b"\x1b[31m" + b"x" * 61440 + b"\x1b[0m" + b"y" * 4094  # the cut is in [0m
+    body = f"below.color = True\nbelow._pass_on({first!r})\nos.write(2, b'|')"
+    assert read(body) == first[: 5 + 61440] + b"|" + first[5 + 61440 :]
 
 
 def test_a_secret_a_color_splits_is_redacted_with_the_colors_gone() -> None:

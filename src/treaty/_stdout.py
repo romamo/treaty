@@ -14,7 +14,8 @@ carriage return are shown as escapes. Bytes that are not UTF-8 pass through unch
 It is redacted of every attached run's secrets as printed text is (#254), a line at a
 time: a secret split across two writes, or two reads of the pipe, is whole by the end of
 its line. What a line has without its end waits for the end, a carriage return too, for
-the next envelope, or for the run's end; past ``LINE_CAP`` it is passed on as it stands.
+the next envelope, or for the run's end; past ``LINE_CAP`` it is passed on redacted but for
+its last ``LINE_TAIL`` characters.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ import threading
 import uuid
 from collections.abc import Callable
 
-from ._envelope import open_escape, terminal_text
+from ._envelope import open_escape, strip_escapes, terminal_text
 from ._mode import color_allowed
 
 TEXT_CAP = 4096
@@ -37,6 +38,9 @@ SYNC_SECONDS = 2.0
 """The longest an envelope waits for text still in the pipe"""
 LINE_CAP = 65536
 """Characters of a line without its end held for redaction; past them it is passed on"""
+LINE_TAIL = 4096
+"""Characters a line past ``LINE_CAP`` keeps back: a secret up to one more that the cut
+splits is still whole for the next read"""
 
 
 def _unchanged(text: str) -> str:
@@ -209,23 +213,41 @@ class Interceptor:
         bare = terminal_text(text, color=False, keep="\r", rewrite=True) if self.color else shown
         self._line += shown
         self._line_bare += bare
-        self._write(whole=len(self._line) > LINE_CAP)
+        self._write(whole=False)
+        if len(self._line) > LINE_CAP:
+            self._overflow()
 
     def _write(self, *, whole: bool) -> None:
         """The held text up to its last line end, or all of it with ``whole``, on stderr
-        redacted (#254). Redacted without colors when that finds a secret: one a color
-        splits, such as ``hun\\x1b[0mter2``, is whole once the colors are gone"""
+        redacted (#254)"""
         line, bare = self._line, self._line_bare
         cut, cut_bare = (len(line), len(bare)) if whole else (_line_end(line), _line_end(bare))
         self._line, self._line_bare = line[cut:], bare[cut_bare:]
-        line, bare = line[:cut], bare[:cut_bare]
-        if not line and not bare:
-            return
-        redacted = _redact(bare)
-        shown = redacted if redacted != bare else _redact(line)
+        self._emit(_redacted(line[:cut], bare[:cut_bare]))
+
+    def _overflow(self) -> None:
+        """A line past ``LINE_CAP`` passed on redacted but for its last ``LINE_TAIL``
+        characters, kept redacted for the next read: the start of a secret the next read
+        finishes is there, and a secret already whole is gone from it"""
+        shown = _redacted(self._line, self._line_bare)
+        cut = open_escape(shown[: len(shown) - LINE_TAIL])  # a color is never cut in two
+        self._line = shown[cut:]
+        self._line_bare = strip_escapes(self._line) if self.color else self._line
+        self._emit(shown[:cut])
+
+    def _emit(self, shown: str) -> None:
         view = memoryview(shown.encode("utf-8", "surrogateescape"))
         while view:
             view = view[os.write(2, view) :]
+
+
+def _redacted(line: str, bare: str) -> str:
+    """``line`` redacted, or ``bare``, its text without colors, when that finds a secret:
+    one a color splits, such as ``hun\\x1b[0mter2``, is whole once the colors are gone"""
+    if not line and not bare:
+        return ""
+    redacted = _redact(bare)
+    return redacted if redacted != bare else _redact(line)
 
 
 def _line_end(text: str) -> int:
