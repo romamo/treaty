@@ -56,7 +56,7 @@ from ._out import Out
 from ._redact import scrub
 from ._session import outputs
 from ._skills import render, skill_file
-from ._tools import tool_entries, tool_fields
+from ._tools import ToolEntry, tool_entries, tool_fields
 from ._values import CommandPath, ExitCodeName
 
 if TYPE_CHECKING:
@@ -712,6 +712,33 @@ class McpValidateArgs:
 
 
 @dataclass(frozen=True, slots=True)
+class McpValidateServeArgs(McpValidateArgs):
+    """``mcp-validate`` of an app whose ``mcp serve`` provides tools (#240)"""
+
+    serve_args: str = Flag(
+        default="{}",
+        description="mcp serve's startup arguments as one JSON object, field names with "
+        "underscores as in an exec line; the tools they provide are compared too",
+    )
+
+    def __post_init__(self) -> None:
+        try:
+            loaded = json.loads(self.serve_args)
+        except ValueError as exc:
+            raise ParseError(
+                f"--serve-args is not JSON: {exc}",
+                context={"flag": "serve-args"},
+                suggestion='pass an object such as {"project": "."}',
+            ) from None
+        if not isinstance(loaded, dict):
+            raise ParseError(
+                "--serve-args is a JSON object of mcp serve's startup arguments",
+                context={"flag": "serve-args"},
+                suggestion='pass an object such as {"project": "."}',
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class FieldDrift:
     command: str
     field: str | None
@@ -743,7 +770,10 @@ class McpValidation:
 
 
 def register_mcp_validate(app: App) -> CommandPath:
-    @app.command(
+    """``mcp-validate``; with ``--serve-args`` when ``McpServe(tools=)`` provides tools,
+    which only the server's startup arguments can list (#240)"""
+    providing = app.mcp is not None and app.mcp.tools is not None
+    declare = app.command(
         MCP_VALIDATE_PATH.value,
         description="Compare a saved MCP tool list with the current command schemas; drift "
         "exits 1 with SCHEMA_DRIFT_DETECTED and the diff in data",
@@ -756,42 +786,83 @@ def register_mcp_validate(app: App) -> CommandPath:
             )
         ],
     )
-    def mcp_validate(args: McpValidateArgs, ctx: Ctx) -> McpValidation:
-        listed = _read_tools(ctx.cwd / args.mcp_schema_file)
-        live = {e.name: e for e in tool_entries(app)}
-        drift = Drift([], [], [], [])
-        for name, entry in live.items():
-            tool = listed.get(name)
-            if tool is None:
-                drift.missing_from_mcp.append(entry.path.value)
-                continue
-            cli = tool_fields(
-                {"inputSchema": entry.input_schema, "outputSchema": entry.output_schema}
-            )
-            mcp = tool_fields(tool)
-            where = entry.path.value
-            drift.added.extend(FieldDrift(where, f) for f in sorted(set(cli) - set(mcp)))
-            drift.removed.extend(FieldDrift(where, f) for f in sorted(set(mcp) - set(cli)))
-            drift.changed.extend(
-                TypeDrift(where, f, cli[f], mcp[f])
-                for f in sorted(set(cli) & set(mcp))
-                if cli[f] != mcp[f]
-            )
-        drift.removed.extend(FieldDrift(name, None) for name in sorted(set(listed) - set(live)))
-        result = McpValidation(drift)
-        if drift.added or drift.removed or drift.changed or drift.missing_from_mcp:
-            raise CliExit(
-                ExitCodeName("GENERAL_ERROR"),
-                "the MCP tool list differs from the CLI's command schemas",
-                code=SCHEMA_DRIFT_DETECTED,
-                context={"mcp_schema_file": str(args.mcp_schema_file)},
-                fix_required=f"regenerate it: treaty-mcp <module>:app --list-tools > "
-                f"{args.mcp_schema_file}",
-                data=result,
-            )
-        return result
+    if providing:
 
+        def with_provided(args: McpValidateServeArgs, ctx: Ctx) -> McpValidation:
+            return _validate(app, args, ctx, _provided_entries(app, args.serve_args, ctx))
+
+        declare(with_provided)
+    else:
+
+        def mcp_validate(args: McpValidateArgs, ctx: Ctx) -> McpValidation:
+            return _validate(app, args, ctx, [])
+
+        declare(mcp_validate)
     return MCP_VALIDATE_PATH
+
+
+def _provided_entries(app: App, raw: str, ctx: Ctx) -> list[ToolEntry]:
+    """The tools ``mcp serve`` provides given ``raw``, its startup arguments as JSON: read
+    as an exec line's, and handed to ``McpServe(tools=)``; ``setup`` does not run"""
+    from ._mcp_serve import MCP_SERVE_PATH, provided_tools
+    from ._parse import build_from_mapping
+
+    assert app.mcp is not None
+    command = app.commands[MCP_SERVE_PATH]
+    try:
+        invocation = build_from_mapping(command, json.loads(raw), ctx.env)
+    except ParseError as exc:
+        raise ParseError(
+            f"--serve-args: {exc.message}",
+            context={"flag": "serve-args", **exc.context},
+            suggestion=exc.suggestion,
+        ) from None
+    return [p.entry() for p in provided_tools(app, app.mcp, invocation.args, ctx).values()]
+
+
+def _validate(
+    app: App, args: McpValidateArgs, ctx: Ctx, provided: Sequence[ToolEntry]
+) -> McpValidation:
+    listed = _read_tools(ctx.cwd / args.mcp_schema_file)
+    live = {e.name: e for e in (*tool_entries(app), *provided)}
+    drift = Drift([], [], [], [])
+    # A provided tool is no command: its drift is named by the tool
+    named = {e.name for e in provided}
+    for name, entry in live.items():
+        where = name if name in named else entry.path.value
+        tool = listed.get(name)
+        if tool is None:
+            drift.missing_from_mcp.append(where)
+            continue
+        cli = tool_fields({"inputSchema": entry.input_schema, "outputSchema": entry.output_schema})
+        mcp = tool_fields(tool)
+        drift.added.extend(FieldDrift(where, f) for f in sorted(set(cli) - set(mcp)))
+        drift.removed.extend(FieldDrift(where, f) for f in sorted(set(mcp) - set(cli)))
+        drift.changed.extend(
+            TypeDrift(where, f, cli[f], mcp[f])
+            for f in sorted(set(cli) & set(mcp))
+            if cli[f] != mcp[f]
+        )
+    drift.removed.extend(FieldDrift(name, None) for name in sorted(set(listed) - set(live)))
+    result = McpValidation(drift)
+    if drift.added or drift.removed or drift.changed or drift.missing_from_mcp:
+        raise CliExit(
+            ExitCodeName("GENERAL_ERROR"),
+            "the MCP tool list differs from the CLI's command schemas",
+            code=SCHEMA_DRIFT_DETECTED,
+            context={"mcp_schema_file": str(args.mcp_schema_file)},
+            fix_required=f"regenerate it: {_lister(app)} > {args.mcp_schema_file}",
+            data=result,
+        )
+    return result
+
+
+def _lister(app: App) -> str:
+    """What writes the tool list: the app's own ``mcp serve``, which lists provided tools
+    too, else ``treaty-mcp``"""
+    if app.mcp is not None:
+        return f"{app.name} mcp serve --list-tools"
+    return "treaty-mcp <module>:app --list-tools"
 
 
 def _read_tools(path: Path) -> dict[str, dict[str, object]]:

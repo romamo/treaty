@@ -1,19 +1,23 @@
 """An app with its own ``mcp serve`` (#239): startup flags, a setup that refuses a missing
-project, a resource it acquires, and a command that prints to stdout."""
+project, a resource it acquires, and a command that prints to stdout. With ``--catalog``,
+the operations a JSON file lists are served as tools of their own (#240)."""
 
+import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from treaty import App, Ctx, Exit, Flag, McpServe, NoArgs
+from treaty import App, Ctx, Exit, Flag, McpServe, McpTool, NoArgs
 
 
 @dataclass(frozen=True, slots=True)
 class ServeArgs:
     project: Path = Flag(description="Project directory the tools work in")
     token: str | None = Flag(default=None, description="Gateway token", secret=True)
+    catalog: Path | None = Flag(default=None, description="Operations catalog, a JSON file")
 
 
 class Project:
@@ -40,11 +44,77 @@ def setup(args: ServeArgs, ctx: Ctx, project: Project) -> None:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Decision:
+    operation: str
+    target: str
+    applied: bool
+
+
+def operation(name: str) -> Callable[[Mapping[str, object], Ctx], Decision]:
+    def preview(arguments: Mapping[str, object], ctx: Ctx) -> Decision:
+        print("previewing", name)  # a stray print: stderr, never the protocol
+        password = arguments.get("password")
+        if password is not None:
+            # A secret argument echoed every way: redacted wherever it lands
+            print("printed", password)
+            ctx.log(f"logged {password}")
+            ctx.debug(f"debugged {password}")
+        target = arguments["target"]
+        assert isinstance(target, str)
+        if target == "missing":
+            raise Exit.NOT_FOUND(f"no target {target}", context={"target": target})
+        return Decision(name, target, applied=False)
+
+    return preview
+
+
+def provide(args: ServeArgs, ctx: Ctx) -> list[McpTool]:
+    """One tool per operation the catalog lists: its name, description, and risk"""
+    if args.catalog is None:
+        return []
+    tools = []
+    for entry in json.loads(args.catalog.read_text(encoding="utf-8")):
+        risky = entry["risk"] == "destructive"
+        tools.append(
+            McpTool(
+                name=entry["name"],
+                description=entry["description"],
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "target": {"type": "string", "minLength": 1},
+                        "password": {"type": "string", "writeOnly": True},
+                    },
+                    "required": ["target"],
+                    "additionalProperties": False,
+                },
+                handler=operation(entry["name"]),
+                # Destructive: a call needs confirm_destructive. Its hints say read-only
+                # too, since a call only previews what a person approves later
+                danger_level="destructive" if risky else "safe",
+                read_only=True,
+                exit_codes=("NOT_FOUND",),
+            )
+        )
+    return tools
+
+
+def instructions(args: ServeArgs) -> str:
+    return f"Preview operations in {args.project.name}; a person approves them."
+
+
 app = App(
     "servectl",
     version="1.2.0",
     description="Serve control",
-    mcp=McpServe(args=ServeArgs, setup=setup, exit_codes=("PROJECT_INVALID",)),
+    mcp=McpServe(
+        args=ServeArgs,
+        setup=setup,
+        exit_codes=("PROJECT_INVALID",),
+        tools=provide,
+        instructions=instructions,
+    ),
 )
 app.exit_code("PROJECT_INVALID", 80, description="The project directory is missing",
               retryable=False, side_effects="none")  # fmt: skip

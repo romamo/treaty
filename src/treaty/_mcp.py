@@ -35,7 +35,7 @@ from ._app import App, _closed_pipe, _Run
 from ._context import Wire
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
-from ._mcp_serve import McpServed
+from ._mcp_serve import DEFAULT_INSTRUCTIONS, McpServed, Provided
 from ._prompt import NoPromptStdin
 from ._signals import Cancelled
 from ._subprocess import GRACE_SECONDS
@@ -136,13 +136,19 @@ def build_server(
     *,
     env: Mapping[str, str] | None = None,
     called: Callable[[], None] | None = None,
+    provided: Mapping[str, Provided] | None = None,
+    instructions: str | None = None,
 ) -> Any:
-    """A low-level ``mcp`` Server whose tools are the app's commands, called with ``env``
-    (the process's when None); ``called`` runs as each tool call is answered"""
+    """A low-level ``mcp`` Server whose tools are the app's commands and the ``provided``
+    tools (#240), called with ``env`` (the process's when None); ``called`` runs as each
+    tool call is answered"""
     from mcp import types
     from mcp.server.lowlevel.server import Server
 
+    extra = dict(provided or {})
     entries = {e.name: e for e in tool_entries(app)}
+    listed = [*entries.values(), *(p.entry() for p in extra.values())]
+    environ = env if env is not None else os.environ
     tools = [
         types.Tool(
             name=e.name,
@@ -156,7 +162,7 @@ def build_server(
                 open_world_hint=e.open_world,
             ),
         )
-        for e in entries.values()
+        for e in listed
     ]
 
     async def on_list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
@@ -164,7 +170,13 @@ def build_server(
 
     async def on_call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
         arguments = params.arguments or {}
-        envelope = await asyncio.to_thread(call_tool, app, entries, params.name, arguments, env=env)
+        tool = extra.get(params.name)
+        if tool is not None:
+            envelope = await asyncio.to_thread(app._call_provided, tool, arguments, env=environ)
+        else:
+            envelope = await asyncio.to_thread(
+                call_tool, app, entries, params.name, arguments, env=env
+            )
         if called is not None:
             called()
         return types.CallToolResult(
@@ -176,11 +188,9 @@ def build_server(
     return Server(
         app.name,
         version=app.version,
-        instructions=(
-            f"{app.description or app.name}. Every result is a CLI Agent Spec response "
-            "envelope: read ok, then data, else error.code and error.fix_required. "
-            "Field names use underscores. Call the manifest tool for the full contract."
-        ),
+        instructions=instructions
+        if instructions is not None
+        else DEFAULT_INSTRUCTIONS.format(description=app.description or app.name),
         on_list_tools=on_list_tools,
         on_call_tool=on_call_tool,
     )
@@ -239,14 +249,23 @@ class _Serving:
             self.calls += 1
 
 
-def serve_wire(app: App, wire: Wire, *, env: Mapping[str, str]) -> McpServed:
+def serve_wire(
+    app: App,
+    wire: Wire,
+    *,
+    env: Mapping[str, str],
+    provided: Mapping[str, Provided],
+    instructions: str,
+) -> McpServed:
     """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends, or until a
     signal raises ``Cancelled`` here, on the run's thread, which stops the server. The
     server runs on a thread of its own, so the run's thread only waits, where a signal
     can interrupt it without tearing the event loop."""
     assert wire.stdin is not None, "mcp serve refuses a closed stdin before serving"
     serving = _Serving()
-    server = build_server(app, env=env, called=serving.called)
+    server = build_server(
+        app, env=env, called=serving.called, provided=provided, instructions=instructions
+    )
     with _claimed_stdin(wire.stdin, serving.read_all) as stdin:
 
         def run() -> None:

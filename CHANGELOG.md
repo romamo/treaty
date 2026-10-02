@@ -40,6 +40,23 @@ additive over rc21: see Breaking.
   exit 0 and one audit log entry for the run. The manifest marks the
   command's stdout as a protocol in its description; `exec` and `App.call` refuse it with
   `NEEDS_STDIO`
+- `McpServe(tools=provide, instructions=...)` serves tools from runtime data beside the
+  command tools (#240): `provide(args, ctx)` runs once as serving starts and returns
+  `treaty.McpTool` values, each with a name, a description, an input JSON Schema that
+  every call's arguments are checked against, hints from `danger_level` or explicit
+  `read_only` and `destructive`, and a handler whose result is enveloped and checked
+  against its output schema like a command's. A tool advertised destructive
+  (`danger_level="destructive"` or `destructive=True`) runs only with
+  `confirm_destructive: true`, which its input schema gains; without it the call exits 2
+  with `CONFIRMATION_REQUIRED` and nothing runs. A property marked `writeOnly`,
+  `format: "password"`, or `x-secret` is a secret wherever the schema reaches it (nested
+  properties, array items, `additionalProperties`, `patternProperties`, a local `$ref`, or
+  a branch of `allOf`, `anyOf` and `oneOf`), redacted in the audit log, validation errors,
+  and whatever the call writes. A name clash, an invalid schema, or empty
+  instructions are refused before serving. `instructions=` takes text or a function of the
+  startup arguments.
+  `mcp serve --list-tools` prints the tool list, provided tools included, and
+  `mcp-validate --serve-args` compares them
 
 ### Changed
 

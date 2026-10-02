@@ -5,7 +5,7 @@ and no ``App`` import, so ``_builtins`` can compare an app against a saved tool 
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -149,9 +149,10 @@ def tool_entries(app: App) -> list[ToolEntry]:
     return entries
 
 
-def tool_list(app: App) -> dict[str, object]:
+def tool_list(app: App, *, extra: Sequence[ToolEntry] = ()) -> dict[str, object]:
     """``treaty-mcp module:app --list-tools``: the tools as MCP's ``tools/list`` names
-    them, with the CLI version, to commit and compare with ``mcp-validate`` (REQ-O-035)"""
+    them, with the CLI version, to commit and compare with ``mcp-validate`` (REQ-O-035);
+    ``extra`` are the tools ``mcp serve`` provides beside the commands (#240)"""
     return {
         "cli_version": app.version,
         "tools": [
@@ -167,7 +168,7 @@ def tool_list(app: App) -> dict[str, object]:
                     "openWorldHint": e.open_world,
                 },
             }
-            for e in tool_entries(app)
+            for e in (*tool_entries(app), *extra)
         ],
     }
 

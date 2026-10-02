@@ -171,7 +171,17 @@ from ._manifest import (
     global_flag_entries,
     implicit_exit_codes,
 )
-from ._mcp_serve import MCP_SERVE_PATH, McpServe, protocol_command, register_mcp_serve
+from ._mcp_serve import (
+    CONFIRM_KEY,
+    CONFIRMATION_REQUIRED,
+    MCP_SERVE_PATH,
+    McpServe,
+    Provided,
+    bound,
+    protocol_command,
+    register_mcp_serve,
+    unbound,
+)
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
     MACHINE,
@@ -2040,6 +2050,81 @@ class App:
         ``unmask=True`` is ``--unmask``: high-entropy values stay raw. Used by the MCP
         adapter, which never unmasks.
         """
+        return self._in_call(
+            path,
+            env,
+            unmask,
+            lambda run, environ: self._call(run, path, arguments, environ),
+        )
+
+    def _call_provided(
+        self, provided: Provided, arguments: Mapping[str, object], *, env: Mapping[str, str]
+    ) -> Envelope:
+        """One call of a tool ``McpServe(tools=)`` provided (#240), as ``call`` runs a
+        command: the arguments are checked against the tool's input schema, then its
+        handler runs as its synthetic command, with ``meta.tool`` naming it"""
+
+        def answer(run: _Run, environ: Mapping[str, str]) -> Envelope:
+            name = provided.tool.name
+            meta: dict[str, object] = {"tool": name}
+            command = provided.command
+            run.current = command
+            given = dict(arguments)
+            confirmed = given.pop(CONFIRM_KEY, False) if provided.gated else False
+            # Secret properties are redacted wherever the run writes, as a command's are
+            run.provided_secrets = provided.secret_values(given)
+            run.provided_call = (name, provided.masked(given), confirmed is True)
+            if not isinstance(confirmed, bool):
+                refused = ParseError(
+                    f"{CONFIRM_KEY} of tool {name} is true or false, not {confirmed!r}",
+                    context={"tool": name, "field": CONFIRM_KEY},
+                    suggestion=f"pass {CONFIRM_KEY}: true to apply",
+                )
+                return run.arg_error(refused, meta=meta)
+            problems = provided.problems(given, run._redactor(command, None))
+            if problems:
+                first = problems[0]
+                where = f" at {first['path']}" if first["path"] else ""
+                refused = ParseError(
+                    f"the arguments of tool {name} break its input schema{where}: "
+                    f"{first['message']}",
+                    context={"tool": name, "errors": problems},
+                    suggestion="correct the arguments to match the tool's inputSchema",
+                )
+                return run.arg_error(refused, meta=meta)
+            if provided.gated and not confirmed:
+                # Treaty cannot preview a provided tool's work: unconfirmed, nothing runs
+                entry = self.exits.framework(FrameworkCode.ARG_ERROR)
+                return run._envelope(
+                    entry.code.value,
+                    error=ErrorDetail(
+                        code=CONFIRMATION_REQUIRED,
+                        message=f"Tool {name} is destructive and was not run",
+                        retryable=False,
+                        context={"tool": name, "flag": "confirm-destructive"},
+                        phase="validation",
+                        fix_required=f"call it again with {CONFIRM_KEY}: true to apply",
+                    ),
+                    meta=meta,
+                )
+            invocation = build_from_mapping(command, {}, environ)
+            token = bound(given)
+            try:
+                return run.execute(command, invocation, Format.JSON, meta=meta)
+            finally:
+                unbound(token)
+
+        return self._in_call(MCP_SERVE_PATH.value, env, False, answer)
+
+    def _in_call(
+        self,
+        path: str,
+        env: Mapping[str, str] | None,
+        unmask: bool,
+        answer: Callable[[_Run, Mapping[str, str]], Envelope],
+    ) -> Envelope:
+        """``call``'s run around ``answer``: the settings, logging, the audit log, and
+        the byte cap"""
         environ = env if env is not None else os.environ
         self._check_fixes()
         # Tracebacks of crashed or late handlers go to the host process's stderr
@@ -2062,7 +2147,7 @@ class App:
             return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
         run.attach_logging(call=True)
         try:
-            envelope = run.settle(self._call(run, path, arguments, environ))
+            envelope = run.settle(answer(run, environ))
         finally:
             run.detach_logging()
         return cap_envelope(envelope, cap, Rerun(argv=None, app_name=self.name, page=run.page))
@@ -3613,6 +3698,11 @@ class _Run:
         """``--output`` of a passthrough command: where its envelope is written too"""
         self.wire: Wire | None = None
         """The process's stdout and stdin, when argv named ``mcp serve`` (#239)"""
+        self.provided_secrets: list[object] = []
+        """The values of a provided tool call's secret properties (#240)"""
+        self.provided_call: tuple[str, Mapping[str, object], bool] | None = None
+        """The tool name and arguments of a provided MCP tool's call (#240), which its
+        audit entry lists in place of the synthetic command's empty arguments"""
 
     @contextlib.contextmanager
     def guard_streams(self) -> Iterator[None]:
@@ -3810,6 +3900,13 @@ class _Run:
                     continue
                 value = to_jsonable(getattr(args, f.name), self.app.scalars, base=self.cwd)
                 parameters[f.name] = scrub(f.name, value, redact)
+        if self.provided_call is not None:
+            # A provided tool's arguments are plain JSON: redacted by name, as an
+            # exec_fallback line's are
+            tool, arguments, confirmed = self.provided_call
+            parameters = {"tool": tool, "arguments": scrub("arguments", dict(arguments), redact)}
+            if confirmed:
+                parameters["confirm_destructive"] = True
         if command is None and self.fallback is not None:
             redact = self._fallback_redactor(self.fallback)
             parameters = {
@@ -4626,9 +4723,10 @@ class _Run:
         """What every sink writes of a command's envelope: high-entropy values masked
         unless ``--unmask`` (REQ-F-058), then external content tagged unless
         ``--no-injection-protection`` (REQ-F-035, REQ-O-023); built-ins answer about the
-        tool itself, so only app commands pass through those. Then ``--fields`` keeps the
+        tool itself, so only app commands and the MCP tools an app provides (#240) pass
+        through those. Then ``--fields`` keeps the
         named keys (REQ-O-002); the token budget and the byte cap follow as it is written."""
-        if command.path not in self.app.builtins:
+        if command.path not in self.app.builtins or self.provided_call is not None:
             envelope = self._protected(command, envelope)
         if self.fields is not None and envelope.ok and envelope.data is not None:
             kept = self.fields
@@ -6130,6 +6228,7 @@ class _Run:
         settings': the value, its serialized form for a registered scalar, and the
         escaped form ``repr`` puts in messages"""
         secrets = [(getattr(args, f.name, None), f.default) for f in command.fields if f.secret]
+        secrets += [(value, None) for value in self.provided_secrets]
         return self._spellings(secrets)
 
     def _spellings(self, secrets: list[tuple[object, object]]) -> set[str]:

@@ -2010,6 +2010,54 @@ server run, and each tool call one as its command's. The manifest says in the co
 description that its stdout is a protocol, since the spec has no key for that yet. `exec`
 lines and `App.call` refuse it with `NEEDS_STDIO`.
 
+Tools can also come from data the server reads as it starts, such as an operations
+catalog. `McpServe(tools=provide)` calls `provide(args, ctx)` once, after `setup`, and
+serves each `McpTool` it returns beside the command tools:
+
+```python
+def provide(args: ServeArgs, ctx: Ctx) -> list[McpTool]:
+    return [
+        McpTool(name=op.name, description=op.summary, input_schema=op.schema,
+                handler=preview, read_only=True, destructive=op.risky)
+        for op in load_catalog(args.project)
+    ]
+
+app = App("deployctl", version="1.4.0", mcp=McpServe(
+    args=ServeArgs, tools=provide,
+    instructions=lambda args: f"Preview operations in {args.project}; a person approves."))
+```
+
+A call's arguments are checked against the tool's `input_schema` (a JSON Schema object
+schema, itself checked as serving starts) and exit `2` with every error in
+`error.context.errors` before the handler runs. `handler(arguments, ctx)` runs as a
+command's handler does, through `App.call`'s path: its result is enveloped and checked
+against the output schema its return annotation gives, an `Exit` it raises answers with
+its code (declared in `exit_codes=`), and `meta.tool` names the tool. Hints come from
+`danger_level`, or from `read_only` and `destructive` given explicitly, so a tool whose call
+only previews can still be flagged destructive. A tool advertised destructive
+(`danger_level="destructive"` or `destructive=True`) runs only with `confirm_destructive:
+true`, which treaty adds to its input schema: without it the call exits `2` with
+`CONFIRMATION_REQUIRED` and the handler never runs (treaty cannot preview a provided tool's
+work), and such a tool whose schema defines that property itself is refused as serving
+starts. A provided tool named like a command tool or another provided tool is refused with
+exit `4`, `MCP_TOOL_NAME_TAKEN`, before serving; an invalid schema is `MCP_TOOL_INVALID`.
+`instructions=` is the server's text, or a function of the startup arguments returning it;
+empty text is refused before serving with `MCP_INSTRUCTIONS_INVALID`.
+
+A property of the input schema marked `writeOnly: true`, `format: "password"`, or
+`"x-secret": true`, at any depth of `properties`, is a secret whatever its name: its value
+is `[REDACTED]` in the audit log, a validation error names only the rule it broke, and
+the value is taken out of what the call writes (error messages and context, a stray
+`print()`, log lines), as a command's secret flag's is. The audit log lists each call as
+`mcp.serve` with the `tool` and its `arguments`, secret properties and credential-named
+keys redacted.
+
+`deployctl mcp serve --project . --list-tools` prints the tool list (provided tools
+included, given the same startup flags) as `treaty-mcp --list-tools` does, and exits;
+`deployctl mcp-validate --mcp-schema-file mcp.json --serve-args '{"project": "."}'`
+compares the provided tools too, reading the startup arguments as an `exec` line would
+(`provide` runs there; `setup` does not).
+
 `treaty-mcp deployctl:app --list-tools` prints the tools as JSON with `cli_version`, no
 `mcp` package needed; commit it, and `deployctl mcp-validate --mcp-schema-file mcp.json`
 in CI exits `1` with `SCHEMA_DRIFT_DETECTED` when the commands drifted from it: `added`

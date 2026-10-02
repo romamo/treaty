@@ -57,6 +57,8 @@ review), **rename**, **remove**.
 | `Credentials`, `Expired` | keep | `App(credentials=)`, `refreshes_auth=` |
 | `Job`, `JobStore` | keep | `async_job=True`, `App(jobs=)` |
 | `McpServe` | added in 1.0 (#239) | `App(mcp=)`: the `mcp serve` built-in, its startup flags and `setup` |
+| `McpTool` | added in 1.0 (#240) | A tool `McpServe(tools=)` provides from runtime data |
+| `McpTool` | added in 1.0 (#240) | A tool `McpServe(tools=)` provides from runtime data |
 
 ### Results and values
 
