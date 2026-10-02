@@ -89,6 +89,9 @@ class Interceptor:
         self._closed = False
         self._pipe: int | None = None
         """The pipe's write end while ``pause`` gave descriptor 1 back to stdout"""
+        self._lingering: tuple[tuple[int, Callable[[str], str]], ...] = ()
+        """The redaction of a ``sync`` that gave up, with its marker's number: applied
+        until the reader passes that marker"""
         self._switch = threading.Lock()
         """Held while descriptor 1 changes, and while ``take`` writes its marker to it: a
         marker sent as ``pause`` or ``resume`` switches would reach stdout. The reader
@@ -97,11 +100,11 @@ class Interceptor:
         self._thread.start()
         atexit.register(self.close)
 
-    def take(self) -> tuple[str, int]:
+    def take(self, redact: Callable[[str], str] | None = None) -> tuple[str, int]:
         """The text (cut to ``TEXT_CAP`` bytes, Windows line endings as ``\\n``) and the byte
         count that reached descriptor 1 since the last call, once everything written before
-        this call arrived"""
-        if not self.sync():
+        this call arrived; ``redact`` as ``sync`` has it"""
+        if not self.sync(redact):
             return "", 0
         with self._cond:
             text, count = bytes(self._text), self._bytes
@@ -112,10 +115,13 @@ class Interceptor:
         decoded = decoder.decode(text, final=count <= len(text))
         return decoded.replace("\r\n", "\n"), count
 
-    def sync(self) -> bool:
+    def sync(self, redact: Callable[[str], str] | None = None) -> bool:
         """Wait until everything written to descriptor 1 before this call reached stderr,
         redacted, its unfinished line too: called as an envelope is written and before a
-        run detaches, while its secrets are still known. False when paused or closed"""
+        run detaches, while its secrets are still known. Past ``SYNC_SECONDS``, a reader
+        held up on a full stderr, what is still in the pipe from before is redacted with
+        ``redact`` too, the secrets the caller is about to forget. False when paused or
+        closed"""
         with self._switch:
             with self._cond:
                 if self._closed or self._pipe is not None:
@@ -123,7 +129,9 @@ class Interceptor:
                 target = self._synced + 1
             os.write(1, self._marker)  # below PIPE_BUF, so no other write splits it
         with self._cond:
-            self._cond.wait_for(lambda: self._synced >= target, timeout=SYNC_SECONDS)
+            synced = self._cond.wait_for(lambda: self._synced >= target, timeout=SYNC_SECONDS)
+            if not synced and redact is not None:
+                self._lingering = (*self._lingering, (target, redact))
         return True
 
     def pause(self) -> None:
@@ -170,6 +178,9 @@ class Interceptor:
                 pending = pending[at + len(marker) :]
                 with self._cond:
                     self._synced += 1
+                    self._lingering = tuple(
+                        held for held in self._lingering if held[0] > self._synced
+                    )
                     self._cond.notify_all()
             # Hold back what may be the start of a marker still arriving
             keep = next(
@@ -223,31 +234,39 @@ class Interceptor:
         line, bare = self._line, self._line_bare
         cut, cut_bare = (len(line), len(bare)) if whole else (_line_end(line), _line_end(bare))
         self._line, self._line_bare = line[cut:], bare[cut_bare:]
-        self._emit(_redacted(line[:cut], bare[:cut_bare]))
+        self._emit(self._redacted(line[:cut], bare[:cut_bare]))
 
     def _overflow(self) -> None:
         """A line past ``LINE_CAP`` passed on redacted but for its last ``LINE_TAIL``
         characters, kept redacted for the next read: the start of a secret the next read
         finishes is there, and a secret already whole is gone from it"""
-        shown = _redacted(self._line, self._line_bare)
+        shown = self._redacted(self._line, self._line_bare)
         cut = open_escape(shown[: len(shown) - LINE_TAIL])  # a color is never cut in two
         self._line = shown[cut:]
         self._line_bare = strip_escapes(self._line) if self.color else self._line
         self._emit(shown[:cut])
 
+    def _redacted(self, line: str, bare: str) -> str:
+        """``line`` redacted, or ``bare``, its text without colors, when that finds a
+        secret: one a color splits, such as ``hun\\x1b[0mter2``, is whole once the colors
+        are gone. The secrets of a ``sync`` that gave up too"""
+        if not line and not bare:
+            return ""
+        lingering = self._lingering
+
+        def redact(text: str) -> str:
+            text = _redact(text)
+            for _, more in lingering:
+                text = more(text)
+            return text
+
+        redacted = redact(bare)
+        return redacted if redacted != bare or line == bare else redact(line)
+
     def _emit(self, shown: str) -> None:
         view = memoryview(shown.encode("utf-8", "surrogateescape"))
         while view:
             view = view[os.write(2, view) :]
-
-
-def _redacted(line: str, bare: str) -> str:
-    """``line`` redacted, or ``bare``, its text without colors, when that finds a secret:
-    one a color splits, such as ``hun\\x1b[0mter2``, is whole once the colors are gone"""
-    if not line and not bare:
-        return ""
-    redacted = _redact(bare)
-    return redacted if redacted != bare else _redact(line)
 
 
 def _line_end(text: str) -> int:

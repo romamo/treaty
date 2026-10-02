@@ -191,6 +191,31 @@ def test_a_line_past_the_cap_keeps_its_colors_whole() -> None:
     assert read(body) == first[: 5 + 61440] + b"|" + first[5 + 61440 :]
 
 
+def test_a_secret_still_in_the_pipe_when_a_sync_gives_up_is_redacted() -> None:
+    # A reader that falls behind, here on a slow line, as one blocked on a full stderr
+    # does: the sync gives up after SYNC_SECONDS, and the run's secrets, forgotten as it
+    # detaches or the next exec line starts, are still applied to what it wrote before
+    body = f"""
+import time
+from treaty import _stdout
+
+def slow(text):
+    if text.startswith("slow"):
+        time.sleep(3)
+    return text
+
+_stdout.redact_with(slow)
+os.write(1, b"slow\\n")
+time.sleep(0.5)  # read on its own: the token waits in the pipe
+os.write(1, b"token={SECRET}\\n")
+before = time.monotonic()
+below.sync(lambda text: text.replace({SECRET!r}, "[REDACTED]"))
+assert time.monotonic() - before < 3
+os.write(1, b"after {SECRET}\\n")
+"""
+    assert read(body) == f"slow\ntoken=[REDACTED]\nafter {SECRET}\n".encode()
+
+
 def test_a_secret_a_color_splits_is_redacted_with_the_colors_gone() -> None:
     written = b"token=" + SECRET[:5].encode() + b"\x1b[31m" + SECRET[5:].encode() + b"\n"
     assert read(f"below.color = True\nbelow._pass_on({written!r})") == b"token=[REDACTED]\n"

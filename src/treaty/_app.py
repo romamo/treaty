@@ -3682,7 +3682,7 @@ class _Run:
         text, written = ("", 0) if self.stray is None else self.stray.take()
         below = active_interceptor()
         if below is not None:
-            caught, count = below.take()
+            caught, count = below.take(self._redaction_kept())
             if caught.strip():
                 # REQ-F-060: a child's or C code's write reached descriptor 1 directly
                 trace("stdout write", source="descriptor 1", text=caught.rstrip("\r\n"))
@@ -4261,7 +4261,7 @@ class _Run:
         if below is not None:
             # #254: a line written to descriptor 1 without its end is redacted with this
             # run's secrets, which are forgotten once it detaches
-            below.sync()
+            below.sync(self._redaction_kept())
         _RECORDS.detach(self._log_record)
 
     def _redact_now(self, text: str) -> str:
@@ -4275,6 +4275,15 @@ class _Run:
             # Built once per invocation, not on every printed line or log record
             cached = self._redaction = (key, self._redactor(current, self.args))
         return cached[1](text)
+
+    def _redaction_kept(self) -> Callable[[str], str] | None:
+        """The invocation running now's redaction as it stands, for the interceptor to keep
+        while text written before the next one starts, or the run detaches, is still in its
+        pipe (#254)"""
+        if self.current is None:
+            return None
+        self._redact_now("")  # built, or rebuilt for a new invocation
+        return None if self._redaction is None else self._redaction[1]
 
     def _held(
         self, redact: Callable[[str], str], keep: Callable[[Pending], None]
