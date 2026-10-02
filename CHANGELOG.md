@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc16] - 2026-10-02
+
+The sixteenth 1.0 release candidate: 1 fix.
+
 ### Fixed
 
 - Security: a handler's own `print()` or `sys.stderr` write during `App.call` no longer
@@ -1446,7 +1450,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc15...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc16...HEAD
+[1.0.0rc16]: https://github.com/romamo/treaty/compare/v1.0.0rc15...v1.0.0rc16
 [1.0.0rc15]: https://github.com/romamo/treaty/compare/v1.0.0rc14...v1.0.0rc15
 [1.0.0rc14]: https://github.com/romamo/treaty/compare/v1.0.0rc13...v1.0.0rc14
 [1.0.0rc13]: https://github.com/romamo/treaty/compare/v1.0.0rc12...v1.0.0rc13
