@@ -516,6 +516,30 @@ def test_a_group_counts_presence_as_the_other_rules_do() -> None:
     assert app.call("fetch", {"exact": True}, env={}).exit_code == 0
 
 
+@pytest.mark.parametrize("via", ["argv", "raw-payload"])
+def test_an_explicit_false_boolean_is_the_same_as_leaving_it_out(via: str) -> None:
+    """#241: --no-exact (or "exact": false) is "not this mode", never choosing exact"""
+    rules = [*LOOKUP_RULES, Excludes("exact", ("limit",))]
+
+    def code(given: dict[str, object]) -> int:
+        if via == "raw-payload":
+            return run(lookup_app(rules=rules), ["fetch", "--raw-payload", json.dumps(given)])[0]
+        argv = ["fetch"]
+        for key, value in given.items():
+            if value is True or value is False:
+                argv.append(f"--{key}" if value else f"--no-{key}")
+            else:
+                argv += [f"--{key}", str(value)]
+        return run(lookup_app(rules=rules), argv)[0]
+
+    # one_of: a false exact counts for neither side, so none is given, or only fuzzy is
+    assert code({"isin": "X", "exact": False}) == 2
+    assert code({"isin": "X", "exact": False, "fuzzy": True}) == 0
+    # Excludes: a false exact does not trigger its prohibition of --limit
+    assert code({"isin": "X", "exact": False, "fuzzy": True, "limit": 3}) == 0
+    assert code({"isin": "X", "exact": True, "limit": 3}) == 2
+
+
 def test_the_manifest_and_schema_list_a_group_as_a_conditional_rule() -> None:
     """ManifestResponse 3.2: any_of and one_of are ConditionalRule shapes (#234)"""
     groups = [{"any_of": ["isin", "figi", "symbol"]}, {"one_of": ["exact", "fuzzy"]}]

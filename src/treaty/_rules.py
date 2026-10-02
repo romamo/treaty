@@ -35,7 +35,9 @@ class RequiredWhen:
 
 @dataclass(frozen=True, slots=True)
 class Excludes:
-    """When ``--flag`` is given, no flag in ``prohibited`` may be"""
+    """When ``--flag`` is given, no flag in ``prohibited`` may be. A boolean counts as given
+    only when true: ``--no-flag`` (or ``false`` in a payload) is the same as leaving it out,
+    so it neither triggers the rule nor trips it as a prohibited flag"""
 
     flag: str
     prohibited: tuple[str, ...]
@@ -52,7 +54,8 @@ class DefaultWhenAbsent:
 
 @dataclass(frozen=True, slots=True)
 class RequiresAny:
-    """At least one flag in ``fields`` is required"""
+    """At least one flag in ``fields`` is required. A boolean counts only when true: an
+    explicit ``--no-flag`` (or ``false`` in a payload) is the same as leaving it out"""
 
     fields: tuple[str, ...]
 
@@ -60,7 +63,8 @@ class RequiresAny:
 @dataclass(frozen=True, slots=True)
 class RequiresOne:
     """Exactly one flag in ``fields`` is required: ``RequiresAny`` with the flags
-    mutually exclusive"""
+    mutually exclusive. A boolean counts only when true, so ``--no-exact`` means "not this
+    mode" and never chooses ``exact``"""
 
     fields: tuple[str, ...]
 
@@ -277,7 +281,12 @@ def _typed(field: FieldInfo, value: object, where: str) -> tuple[object, object]
 
 
 def _present(field: FieldInfo, values: Mapping[str, object]) -> bool:
-    """Given by the caller: a boolean only when true, anything else when not null"""
+    """Given by the caller: a boolean only when true, anything else when not null.
+
+    An explicit false (``--no-flag``, or ``false`` in ``--raw-payload``) is the same as
+    leaving the flag out: a caller reads it as "not this mode", and every rule stays one an
+    agent satisfies by omitting the flag (#241; REQ-C-026 does not say how a false counts)
+    """
     if field.name not in values or values[field.name] is None:
         return False
     return values[field.name] is True if field.flag_type is FlagType.BOOLEAN else True

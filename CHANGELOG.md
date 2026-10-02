@@ -47,6 +47,12 @@ Apps built on treaty keep their own, structured schema changelog with
 - Per-command `--schema` no longer has `requires_groups`: its `requires` lists a command's
   `RequiresAny` and `RequiresOne` rules as `{"any_of": [...]}` and `{"one_of": [...]}`
   among its other rules, as the manifest does, so a consumer reads `requires` alone
+### Changed
+
+- The README and the conditional rules' docstrings say a boolean flag counts toward
+  `RequiresAny`, `RequiresOne`, and `Excludes` only when true: an explicit `--no-x`, or
+  `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
+  unchanged, and a test pins it (#241)
 
 ## [1.0.0rc21] - 2026-10-02
 

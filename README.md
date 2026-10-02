@@ -89,7 +89,10 @@ A command that takes its subject by one of several identifiers declares
 `RequiresAny(("isin", "figi", "symbol"))`: with none of them given it exits `2` listing
 the three. `RequiresOne(("json", "yaml"))` also refuses two. A flag counts as given as for
 the other rules: any value, the default included, except null, and a boolean only when
-true. They appear in the manifest and `--schema` as `requires` entries, the
+true. An explicit false, `--no-exact` or `"exact": false` in `--raw-payload`, is the same as
+leaving the flag out: it reads as "not this mode", so it never chooses `exact` for a
+`RequiresOne`, never satisfies a `RequiresAny`, and neither triggers nor trips an
+`Excludes`. They appear in the manifest and `--schema` as `requires` entries, the
 `ConditionalRule` shapes `{"any_of": [...]}` and `{"one_of": [...]}`, and `--schema`
 also shows them as `anyOf`/`oneOf` of the `raw_payload_schema`; `--help` lists every
 rule under Rules, and an MCP tool's description ends with them. The audit suggests
