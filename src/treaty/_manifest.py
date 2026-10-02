@@ -578,12 +578,9 @@ def command_schema(
         entry["resumable"] = True
     if command.rollback is not None:
         entry["rollback_available"] = True
-    groups = [r for r in command.requires if r.group]
-    if groups:
-        # REQ-C-026: RequiresAny and RequiresOne, also in requires; not a ManifestResponse key
-        entry["requires_groups"] = [r.to_json() for r in groups]
     if command.supports_raw_payload:
         raw = payload_schema(command)
+        groups = [r for r in command.requires if r.group]
         if groups:
             constraints = [r.json_schema() for r in groups]
             raw.update(constraints[0] if len(constraints) == 1 else {"allOf": constraints})
