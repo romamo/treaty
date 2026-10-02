@@ -89,10 +89,11 @@ A command that takes its subject by one of several identifiers declares
 `RequiresAny(("isin", "figi", "symbol"))`: with none of them given it exits `2` listing
 the three. `RequiresOne(("json", "yaml"))` also refuses two. A flag counts as given as for
 the other rules: any value, the default included, except null, and a boolean only when
-true. The manifest's `ConditionalRule` has no shape for either, so they appear in
-`--schema` as `requires_groups` (`{"any_of": [...]}`, `{"one_of": [...]}`) and as
-`anyOf`/`oneOf` of the `raw_payload_schema`; `--help` lists every rule under Rules, and
-an MCP tool's description ends with them. The audit suggests `RequiresAny` for a
+true. They appear in the manifest and `--schema` as `requires` entries, the
+`ConditionalRule` shapes `{"any_of": [...]}` and `{"one_of": [...]}`, and `--schema`
+also shows them as `requires_groups` and as `anyOf`/`oneOf` of the
+`raw_payload_schema`; `--help` lists every rule under Rules, and an MCP tool's
+description ends with them. The audit suggests `RequiresAny` for a
 `__post_init__` that raises when none of several fields is set.
 
 A positional with a default is optional: `Arg(default=None, ...)` makes the manifest's

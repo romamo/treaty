@@ -516,14 +516,13 @@ def test_a_group_counts_presence_as_the_other_rules_do() -> None:
     assert app.call("fetch", {"exact": True}, env={}).exit_code == 0
 
 
-def test_the_schema_shows_a_group_outside_the_manifest_requires() -> None:
+def test_the_manifest_and_schema_list_a_group_as_a_conditional_rule() -> None:
+    """ManifestResponse 3.2: any_of and one_of are ConditionalRule shapes (#234)"""
+    groups = [{"any_of": ["isin", "figi", "symbol"]}, {"one_of": ["exact", "fuzzy"]}]
     code, envelope = run(lookup_app(), ["fetch", "--schema"])
     data = envelope["data"]
-    assert code == 0 and "requires" not in data
-    assert data["requires_groups"] == [
-        {"any_of": ["isin", "figi", "symbol"]},
-        {"one_of": ["exact", "fuzzy"]},
-    ]
+    assert code == 0 and data["requires"] == groups
+    assert data["requires_groups"] == groups
     assert data["raw_payload_schema"]["allOf"] == [
         {
             "anyOf": [
@@ -538,8 +537,23 @@ def test_the_schema_shows_a_group_outside_the_manifest_requires() -> None:
         },
     ]
     manifest = lookup_app().manifest()
-    assert "requires" not in manifest["commands"]["fetch"]
+    assert manifest["commands"]["fetch"]["requires"] == groups
     spec_validator("manifest-response").validate(manifest)
+
+
+def test_the_manifest_keeps_a_group_in_declaration_order_among_the_other_rules() -> None:
+    rules = [Excludes("figi", prohibited=("symbol",)), *LOOKUP_RULES, Excludes("exact", ("limit",))]
+    expected = [
+        {"if_flag": "figi", "prohibited": ["symbol"]},
+        {"any_of": ["isin", "figi", "symbol"]},
+        {"one_of": ["exact", "fuzzy"]},
+        {"if_flag": "exact", "prohibited": ["limit"]},
+    ]
+    manifest = lookup_app(rules=rules).manifest()
+    assert manifest["commands"]["fetch"]["requires"] == expected
+    spec_validator("manifest-response").validate(manifest)
+    schema = run(lookup_app(rules=rules), ["fetch", "--schema"])[1]["data"]
+    assert schema["requires"] == expected and schema["requires_groups"] == expected[1:3]
 
 
 def test_the_raw_payload_schema_decides_what_validation_decides() -> None:

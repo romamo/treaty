@@ -44,7 +44,7 @@ from ._types import FlagType
 from ._values import CommandPath, Etag
 
 SCHEMA_VERSION = "3.15"  # 3.1: CommandEntry.builtin (REQ-O-041)
-# 3.2: ConditionalRule any_of and one_of, which the manifest does not emit (--schema does)
+# 3.2: ConditionalRule any_of and one_of (REQ-C-026)
 # 3.3: CommandEntry.output_file (REQ-O-001)
 # 3.4: FlagEntry.env_vars; 3.5: the root env_vars of variables that back no flag (REQ-F-073)
 # 3.6: output_file handler and envelope; 3.7: object flags and output_file_base (REQ-O-001)
@@ -512,9 +512,8 @@ def command_entry(
         out["job_descriptor_schema"] = command.output_schema
     if command.config_write_scope is not None:
         out["config_write_scope"] = command.config_write_scope.value  # REQ-C-025
-    conditional = [r.to_json() for r in command.requires if not r.group]
-    if conditional:
-        out["requires"] = conditional  # REQ-C-026; a group has no ConditionalRule shape
+    if command.requires:
+        out["requires"] = [r.to_json() for r in command.requires]  # REQ-C-026
     if command.steps:
         out["steps"] = [s.value for s in command.steps]  # REQ-C-008
     if command.platform:
@@ -581,7 +580,7 @@ def command_schema(
         entry["rollback_available"] = True
     groups = [r for r in command.requires if r.group]
     if groups:
-        # REQ-C-026: RequiresAny and RequiresOne; not ConditionalRule shapes, so only here
+        # REQ-C-026: RequiresAny and RequiresOne, also in requires; not a ManifestResponse key
         entry["requires_groups"] = [r.to_json() for r in groups]
     if command.supports_raw_payload:
         raw = payload_schema(command)

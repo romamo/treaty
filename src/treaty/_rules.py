@@ -5,9 +5,10 @@
 phase 1 on the fields the caller supplied, before ``__post_init__`` runs, so a
 ``DefaultWhenAbsent`` default is what it sees.
 
-``RequiresAny`` and ``RequiresOne`` have no manifest ``ConditionalRule`` shape, so they
-appear in ``--schema`` as ``requires_groups`` and as ``anyOf``/``oneOf`` of the
-``raw_payload_schema``, in ``--help``, and in the MCP tool description.
+``RequiresAny`` and ``RequiresOne`` are the ``ConditionalRule`` ``any_of`` and ``one_of``
+(ManifestResponse 3.2): they appear in the manifest's and ``--schema``'s ``requires`` like
+the other rules, in ``--schema`` also as ``requires_groups`` and as ``anyOf``/``oneOf`` of
+the ``raw_payload_schema``, in ``--help``, and in the MCP tool description.
 """
 
 from __future__ import annotations
@@ -81,7 +82,7 @@ class BoundRule:
 
     @property
     def group(self) -> bool:
-        """A ``RequiresAny`` or ``RequiresOne``: no manifest ``ConditionalRule`` shape"""
+        """A ``RequiresAny`` or ``RequiresOne``: ``any_of`` or ``one_of``"""
         return isinstance(self.rule, (RequiresAny, RequiresOne))
 
     @property
@@ -115,8 +116,8 @@ class BoundRule:
         return [f"--{f.flag}" for f in self.flags]
 
     def to_json(self) -> dict[str, object]:
-        """The manifest ``ConditionalRule``, or for a group ``{"any_of": [...]}`` or
-        ``{"one_of": [...]}``, which only ``--schema`` shows"""
+        """The manifest ``ConditionalRule``; a group is ``{"any_of": [...]}`` or
+        ``{"one_of": [...]}``"""
         names = [f.flag for f in self.others]
         match self.rule:
             case RequiredWhen():
