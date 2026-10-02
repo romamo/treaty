@@ -167,15 +167,34 @@ def diff(old: Mapping[str, object] | None, new: Mapping[str, object]) -> Diff:
     or a required flag or argument appeared"""
     before, was_required = fields(old) if old is not None else ({}, set())
     after, now_required = fields(new)
+    # A passthrough entry lists no flags since ManifestResponse 3.9: the ones it takes go
+    # before its path (REQ-C-031), so none of an older snapshot's is gone
+    commands_now = new.get("commands", {})
+    assert isinstance(commands_now, dict)
+    passthrough = {p for p, e in commands_now.items() if e.get("arguments") == "passthrough"}
+    before = {k: v for k, v in before.items() if not _passthrough_flag(k, passthrough)}
     added = sorted(set(after) - set(before))
     removed = sorted(set(before) - set(after))
     changed = sorted(k for k in set(before) & set(after) if before[k] != after[k])
+    # ManifestResponse 3.7 types an object flag "object", the same JSON-text argv token a
+    # "string" took; a caller that passed it still does
+    retyped = [k for k in changed if (before[k], after[k]) != (_STRING, _OBJECT)]
     # A new command's required flags break no caller; a required flag on an old one does
     commands = {k for k, v in before.items() if v == "command"}
     newly_required = {k for k in now_required - was_required if _owner(k) in commands}
     return Diff(
-        tuple(added), tuple(removed), tuple(changed), bool(removed or changed or newly_required)
+        tuple(added), tuple(removed), tuple(changed), bool(removed or retyped or newly_required)
     )
+
+
+_STRING = _signature("string")
+_OBJECT = _signature("object")
+
+
+def _passthrough_flag(key: str, passthrough: set[str]) -> bool:
+    """A ``<path>.flags.<name>`` key of a command in ``passthrough``"""
+    path, kind, _ = key.partition(".flags.")
+    return bool(kind) and path in passthrough
 
 
 def _owner(key: str) -> str:
