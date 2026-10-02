@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc21] - 2026-10-02
+
+The 21th 1.0 release candidate: 1 fix.
+
 ### Fixed
 
 - The long-running work chapter's `import-all` starts a feed only when the time left is at
@@ -1572,7 +1576,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc20...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc21...HEAD
+[1.0.0rc21]: https://github.com/romamo/treaty/compare/v1.0.0rc20...v1.0.0rc21
 [1.0.0rc20]: https://github.com/romamo/treaty/compare/v1.0.0rc19...v1.0.0rc20
 [1.0.0rc19]: https://github.com/romamo/treaty/compare/v1.0.0rc18...v1.0.0rc19
 [1.0.0rc18]: https://github.com/romamo/treaty/compare/v1.0.0rc17...v1.0.0rc18
