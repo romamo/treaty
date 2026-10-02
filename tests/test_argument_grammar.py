@@ -516,14 +516,13 @@ def test_a_group_counts_presence_as_the_other_rules_do() -> None:
     assert app.call("fetch", {"exact": True}, env={}).exit_code == 0
 
 
-def test_the_schema_shows_a_group_outside_the_manifest_requires() -> None:
+def test_the_manifest_and_schema_list_a_group_as_a_conditional_rule() -> None:
+    """ManifestResponse 3.2: any_of and one_of are ConditionalRule shapes (#234)"""
+    groups = [{"any_of": ["isin", "figi", "symbol"]}, {"one_of": ["exact", "fuzzy"]}]
     code, envelope = run(lookup_app(), ["fetch", "--schema"])
     data = envelope["data"]
-    assert code == 0 and "requires" not in data
-    assert data["requires_groups"] == [
-        {"any_of": ["isin", "figi", "symbol"]},
-        {"one_of": ["exact", "fuzzy"]},
-    ]
+    assert code == 0 and data["requires"] == groups
+    assert data["requires_groups"] == groups
     assert data["raw_payload_schema"]["allOf"] == [
         {
             "anyOf": [
@@ -538,8 +537,23 @@ def test_the_schema_shows_a_group_outside_the_manifest_requires() -> None:
         },
     ]
     manifest = lookup_app().manifest()
-    assert "requires" not in manifest["commands"]["fetch"]
+    assert manifest["commands"]["fetch"]["requires"] == groups
     spec_validator("manifest-response").validate(manifest)
+
+
+def test_the_manifest_keeps_a_group_in_declaration_order_among_the_other_rules() -> None:
+    rules = [Excludes("figi", prohibited=("symbol",)), *LOOKUP_RULES, Excludes("exact", ("limit",))]
+    expected = [
+        {"if_flag": "figi", "prohibited": ["symbol"]},
+        {"any_of": ["isin", "figi", "symbol"]},
+        {"one_of": ["exact", "fuzzy"]},
+        {"if_flag": "exact", "prohibited": ["limit"]},
+    ]
+    manifest = lookup_app(rules=rules).manifest()
+    assert manifest["commands"]["fetch"]["requires"] == expected
+    spec_validator("manifest-response").validate(manifest)
+    schema = run(lookup_app(rules=rules), ["fetch", "--schema"])[1]["data"]
+    assert schema["requires"] == expected and schema["requires_groups"] == expected[1:3]
 
 
 def test_the_raw_payload_schema_decides_what_validation_decides() -> None:
@@ -643,6 +657,29 @@ def test_a_group_naming_too_few_unknown_or_repeated_flags_fails_registration(
 ) -> None:
     with pytest.raises(RegistrationError, match=match):
         lookup_app(rules=[rule])
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        [RequiresOne(("exact", "fuzzy")), Excludes("exact", ("fuzzy",))],
+        [Excludes("fuzzy", ("limit", "exact")), RequiresOne(("exact", "fuzzy"))],
+    ],
+)
+def test_an_excludes_inside_a_requires_one_fails_registration(rules: list[object]) -> None:
+    """REQ-C-026: a one_of replaces pairwise prohibited rules, so the manifest never lists
+    both and a call never gets the same refusal twice"""
+    with pytest.raises(RegistrationError, match="already forbids"):
+        lookup_app(rules=rules)
+
+
+def test_an_excludes_reaching_outside_a_requires_one_is_kept() -> None:
+    rules = [RequiresOne(("exact", "fuzzy")), Excludes("exact", ("limit",))]
+    requires = lookup_app(rules=rules).manifest()["commands"]["fetch"]["requires"]
+    assert requires == [
+        {"one_of": ["exact", "fuzzy"]},
+        {"if_flag": "exact", "prohibited": ["limit"]},
+    ]
 
 
 def test_a_group_naming_a_required_flag_fails_registration() -> None:

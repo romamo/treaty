@@ -959,7 +959,7 @@ class App:
         ``requires=[RequiredWhen("format", "csv", then=("separator",)), Excludes("output",
         prohibited=("stdout",))]`` declares cross-field rules, checked before the args
         ``__post_init__`` and listed in the manifest (REQ-C-026); ``RequiresAny(("id", "name"))``
-        needs at least one of its flags, ``RequiresOne`` exactly one, shown in ``--schema``.
+        needs at least one of its flags, ``RequiresOne`` exactly one, listed there too.
         ``option_placement="strict"`` is for a command that forwards the rest of argv to a
         child: options go before the first positional, and it and every token after it
         reach the positionals verbatim, the last a ``tuple[str, ...]`` (REQ-C-027).
