@@ -10,6 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Changed
+
+- A command's manifest `output_formats` lists every format it takes beyond `json`,
+  `jsonl`, `tsv`, `plain`, and `ndjson`: `id` where it has an `id_field`, the formats it
+  inherits from `app.format(...)`, then its own. An agent assumes no format the entry
+  leaves out, so a command of an app registering `csv` read as one that cannot write it.
+  The manifests and `--schema` of apps that register a format change: each entry gains
+  those names; other apps' manifests are unchanged. `<APP>_FORMAT=id` is passed over by a
+  command without an `id_field`, which answers in its default instead of exiting `2`, as
+  for another command's own format; `--format id` there still exits `2` (#216)
+
 ## [1.0.0rc14] - 2026-10-02
 
 The fourteenth 1.0 release candidate: 3 additions.
