@@ -129,7 +129,7 @@ def test_each_exec_line_redacts_what_it_wrote_to_descriptor_1(how: str) -> None:
 def test_app_call_under_an_interceptor_redacts_what_it_wrote_to_descriptor_1(how: str) -> None:
     out, err = leaky(["call"], how)
     assert out == b""
-    assert b"call ok True\n" in err
+    assert b"call ok True\n" in err.replace(b"\r\n", b"\n")  # print ends lines with \r\n on Windows
     assert_redacted(err)
 
 
@@ -148,8 +148,11 @@ below.close()
 def read(body: str) -> bytes:
     """What reaches stderr when the reader is fed ``body``'s reads directly, so a split falls
     between two reads every time"""
+    # The script goes in on stdin: a body past LINE_CAP is longer than Windows allows a
+    # command line to be
     proc = subprocess.run(
-        [sys.executable, "-c", READER.format(secret=SECRET, body=body)],
+        [sys.executable, "-"],
+        input=READER.format(secret=SECRET, body=body).encode(),
         capture_output=True,
         timeout=30,
         check=True,
