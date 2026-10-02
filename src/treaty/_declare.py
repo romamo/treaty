@@ -8,6 +8,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from ._errors import ParseError, RegistrationError
 from ._flags import FieldInfo
@@ -164,6 +165,10 @@ def supports(platform: Sequence[str], current: str) -> bool:
     return not platform or any(current.startswith(p) for p in platform)
 
 
+PROJECT_ROOT_PREFIX = "{project_root}/"
+"""Where a ``SideEffect`` path under the command's project starts"""
+
+
 class SideEffectType(StrEnum):
     CACHE = "cache"
     LOG = "log"
@@ -176,8 +181,11 @@ class SideEffectType(StrEnum):
 class SideEffect:
     """A filesystem location a command writes (REQ-C-011)
 
-    ``path`` is absolute or starts with ``~/``; ``{name}`` placeholders and ``*`` match any
-    one path segment, so ``"/tmp/tool-{session}/"`` covers every session. ``type`` is
+    ``path`` is absolute, starts with ``~/``, or starts with ``{project_root}/`` for a
+    path under the project the command's ``project_root=`` markers find, resolved from the
+    working directory when ``cleanup`` and ``status`` run; ``{name}`` placeholders and
+    ``*`` match any one path segment, so ``"/tmp/tool-{session}/"`` covers every session.
+    ``type`` is
     ``cache``, ``log``, ``temp``, ``credential``, or ``config``; ``cleanup`` removes the
     ``temp``, ``cache``, and ``log`` ones, and ``status`` lists them all.
     ``clearable_with`` is the invocation that removes it, such as ``"tool cache clear"``,
@@ -192,16 +200,24 @@ class SideEffect:
     def __post_init__(self) -> None:
         where = f"SideEffect({self.path!r})"
         if not isinstance(self.path, str) or not (
-            self.path.startswith(("/", "~/")) or re.match(r"[A-Za-z]:[\\/]", self.path)
+            self.path.startswith(("/", "~/", PROJECT_ROOT_PREFIX))
+            or re.match(r"[A-Za-z]:[\\/]", self.path)
         ):
-            raise RegistrationError(f"{where}: path is absolute or starts with ~/")
-        segments = re.split(r"[\\/]", re.sub(r"^(~/|/|[A-Za-z]:[\\/])", "", self.path))
+            raise RegistrationError(
+                f"{where}: path is absolute or starts with ~/ or {PROJECT_ROOT_PREFIX}"
+            )
+        rest = re.sub(
+            r"^(~/|/|[A-Za-z]:[\\/]|" + re.escape(PROJECT_ROOT_PREFIX) + ")", "", self.path
+        )
+        segments = re.split(r"[\\/]", rest)
         if any(s in (".", "..") for s in segments):
+            # {project_root}/../x would reach outside the project cleanup is confined to
             raise RegistrationError(f"{where}: path has no . or .. segments")
         if not re.sub(r"\{[^{}/]*\}|\*", "", segments[0]):
-            # cleanup would remove all of / or the home directory
+            # cleanup would remove all of /, the home directory, or the project
             raise RegistrationError(
-                f"{where}: path names a directory under / or ~/, not every entry of either"
+                f"{where}: path names a directory under /, ~/, or {PROJECT_ROOT_PREFIX}, not "
+                "every entry of one"
             )
         if self.type not in SideEffectType:
             kinds = ", ".join(t.value for t in SideEffectType)
@@ -226,8 +242,21 @@ class SideEffect:
             out["clearable_with"] = self.clearable_with
         return out
 
-    def pattern(self, home: str | None) -> str | None:
-        """The glob of every path it covers; None for ``~/`` without a home"""
+    @property
+    def in_project(self) -> bool:
+        """Whether the path starts with ``{project_root}/``, under the command's project"""
+        return self.path.startswith(PROJECT_ROOT_PREFIX)
+
+    def pattern(self, home: str | None, project: Path | None = None) -> str | None:
+        """The glob of every path it covers; None for ``~/`` without a home, and for a
+        ``{project_root}/`` path without the project directory"""
+        if self.in_project:
+            if project is None:
+                return None
+            # The placeholders of the declared part only: a { in the project's own path
+            # is a literal character
+            rest = re.sub(r"\{[^{}/]*\}", "*", self.path.removeprefix(PROJECT_ROOT_PREFIX))
+            return (project.as_posix().rstrip("/") + "/" + rest).rstrip("/")
         path = self.path
         if path.startswith("~/"):
             if not home:
@@ -236,12 +265,22 @@ class SideEffect:
         return re.sub(r"\{[^{}/]*\}", "*", path).rstrip("/") or "/"
 
 
-def check_side_effects(where: str, effects: Sequence[SideEffect]) -> tuple[SideEffect, ...]:
+def check_side_effects(
+    where: str, effects: Sequence[SideEffect], project_root: Sequence[str] = ()
+) -> tuple[SideEffect, ...]:
+    """The declarations as a tuple; a ``{project_root}/`` path needs the command's
+    ``project_root=`` markers, or ``cleanup`` could not tell which project it is under"""
     if isinstance(effects, (str, SideEffect)) or not all(
         isinstance(e, SideEffect) for e in effects
     ):
         raise RegistrationError(
             f"{where}: filesystem_side_effects is a list of treaty.SideEffect(path, type)"
+        )
+    unbased = [e.path for e in effects if e.in_project]
+    if unbased and not project_root:
+        raise RegistrationError(
+            f"{where}: SideEffect({unbased[0]!r}) is under the project, and the command "
+            "declares no project_root= markers to find it, such as project_root=('.git',)"
         )
     return tuple(effects)
 

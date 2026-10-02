@@ -803,6 +803,7 @@
       ],
       "kind": "class",
       "methods": [
+        "in_project",
         "kind",
         "pattern",
         "to_json"

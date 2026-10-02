@@ -13,7 +13,7 @@ import shutil
 import stat
 import time
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -49,6 +49,7 @@ from ._journal import (
     read_entries,
     resolve,
 )
+from ._meta import find_project_root
 from ._mode import Format
 from ._out import Out
 from ._redact import scrub
@@ -277,11 +278,13 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     files commands handed out, and the caches (REQ-C-011, REQ-F-043, REQ-O-018)"""
     found: dict[str, SideEffectType] = {}
     kept: list[Path] = []
-    for _, effect, _, matches in declared(app, ctx.env.get("HOME")):
-        if effect.kind in KEPT:
-            kept.extend(Path(m) for m in matches)
+    every = list(declared(app, ctx.env.get("HOME"), ctx.cwd))
+    _warn_unresolved(ctx, unresolved(app, every), "left in place; run cleanup inside it")
+    for item in every:
+        if item.effect.kind in KEPT:
+            kept.extend(Path(m) for m in item.matches)
         else:
-            found.update(dict.fromkeys(matches, effect.kind))
+            found.update(dict.fromkeys(item.matches, item.effect.kind))
     if ctx._session is not None:
         # REQ-F-043: ctx.output_file files; running sessions remove their own
         found.update(
@@ -302,20 +305,92 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     return sorted((p, kind) for p, kind in found.items() if p not in held)
 
 
-def declared(
-    app: App, home: str | None
-) -> Iterator[tuple[CommandPath, SideEffect, str, list[str]]]:
+@dataclass(frozen=True, slots=True)
+class Declared:
+    """A declared side effect as this run resolves it"""
+
+    command: CommandPath
+    effect: SideEffect
+    pattern: str | None
+    """The absolute glob; None for a ``{project_root}/`` path whose project was not found"""
+    matches: list[str]
+    """The paths it covers now, in native form"""
+
+
+@dataclass(frozen=True, slots=True)
+class Unresolved:
+    """A ``{project_root}/`` declaration whose project no marker locates from the cwd"""
+
+    command: CommandPath
+    path: str
+    markers: tuple[str, ...]
+
+    def to_json(self) -> dict[str, object]:
+        return {"command": self.command.value, "path": self.path, "markers": list(self.markers)}
+
+
+def declared(app: App, home: str | None, cwd: Path) -> Iterator[Declared]:
     """Each declared side effect with its absolute glob and the paths it matches now, in
     native form (declarations use ``/``, which Windows would leave mixed with ``\\``);
-    a ``~/`` one is left out without a home"""
+    a ``~/`` one is left out without a home. A ``{project_root}/`` one resolves against
+    the command's ``project_root=`` markers from ``cwd`` up, never the cwd itself: with no
+    marker found it has no pattern and no matches, nor with one found at ``/``, the home
+    directory, or above it (see ``_cleanable``), and a match whose directory resolves
+    outside the project, through a symlink, is left out"""
+    roots: dict[tuple[str, ...], Path | None] = {}
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         for effect in command.filesystem_side_effects:
-            pattern = effect.pattern(home)
-            if pattern is not None:
-                where = glob.escape(pattern).replace("[*]", "*")
-                found = glob.glob(where, include_hidden=True)
-                matches = (os.path.normpath(m) for m in found if not _linked(m, pattern))
-                yield path, effect, pattern, sorted(matches)
+            project: Path | None = None
+            if effect.in_project:
+                markers = command.project_root
+                if markers not in roots:
+                    roots[markers] = _cleanable(find_project_root(cwd, markers), home)
+                project = roots[markers]
+                if project is None:
+                    yield Declared(path, effect, None, [])
+                    continue
+            pattern = effect.pattern(home, project)
+            if pattern is None:
+                continue
+            where = glob.escape(pattern).replace("[*]", "*")
+            found = glob.glob(where, include_hidden=True)
+            matches = [os.path.normpath(m) for m in found if not _linked(m, pattern)]
+            if project is not None:
+                inside = project.resolve()
+                matches = [m for m in matches if Path(m).parent.resolve().is_relative_to(inside)]
+            yield Declared(path, effect, pattern, sorted(matches))
+
+
+def _cleanable(root: Path | None, home: str | None) -> Path | None:
+    """``root`` unless it is ``/``, the home directory, or a directory above it: a stray
+    marker there, such as a dotfiles repository's ``.git`` in ``~``, is no project, and
+    cleanup would remove the user's own ``~/tmp/...`` from any directory under it"""
+    if root is None:
+        return None
+    real = root.resolve()
+    if real == Path(real.anchor) or (home and Path(home).resolve().is_relative_to(real)):
+        return None
+    return root
+
+
+def unresolved(app: App, found: Sequence[Declared]) -> list[Unresolved]:
+    """The ``{project_root}/`` declarations no project was found for"""
+    return [
+        Unresolved(d.command, d.effect.path, app.commands[d.command].project_root)
+        for d in found
+        if d.pattern is None
+    ]
+
+
+def _warn_unresolved(ctx: Ctx, missing: Sequence[Unresolved], what: str) -> None:
+    if missing:
+        ctx.warn(
+            "PROJECT_ROOT_NOT_FOUND",
+            f"{len(missing)} declared paths are under a project no marker locates from "
+            f"{ctx.cwd} up (one at /, the home directory, or above it is not taken); {what}",
+            paths=[m.to_json() for m in missing],
+            cwd=str(ctx.cwd),
+        )
 
 
 def _linked(match: str, pattern: str) -> bool:
@@ -405,17 +480,18 @@ def register_status(app: App) -> CommandPath:
 def _side_effects(app: App, ctx: Ctx) -> list[dict[str, object]]:
     """``status --show-side-effects`` (REQ-C-011, REQ-O-028)"""
     entries: list[dict[str, object]] = []
-    for command_path, effect, pattern, matches in declared(app, ctx.env.get("HOME")):
-        paths = [{"path": str(Path(m).resolve()), "bytes": _bytes(Path(m))} for m in matches]
-        entry: dict[str, object] = {
-            "command": command_path.value,
-            "type": effect.type,
-            "pattern": str(Path(pattern).resolve()),
-            "paths": paths,
-            "bytes": sum(int(p["bytes"]) for p in paths),  # type: ignore[call-overload]
-        }
-        if effect.clearable_with is not None:
-            entry["clearable_with"] = effect.clearable_with
+    every = list(declared(app, ctx.env.get("HOME"), ctx.cwd))
+    _warn_unresolved(ctx, unresolved(app, every), "they are listed with no paths")
+    for item in every:
+        paths = [{"path": str(Path(m).resolve()), "bytes": _bytes(Path(m))} for m in item.matches]
+        entry: dict[str, object] = {"command": item.command.value, "type": item.effect.type}
+        if item.pattern is not None:
+            # An unresolved project path has no absolute pattern to show (REQ-O-028)
+            entry["pattern"] = str(Path(item.pattern).resolve())
+        entry["paths"] = paths
+        entry["bytes"] = sum(int(p["bytes"]) for p in paths)  # type: ignore[call-overload]
+        if item.effect.clearable_with is not None:
+            entry["clearable_with"] = item.effect.clearable_with
         entries.append(entry)
     return entries
 
@@ -429,10 +505,10 @@ def _state_files(app: App, ctx: Ctx) -> list[dict[str, object]]:
     ]
     # Only while the log is on, as in meta.audit_log_path (REQ-O-030)
     wanted.append(("audit log", resolve(app.audit_log, app.name, ctx.env).path))
-    for command_path, effect, _, matches in declared(app, ctx.env.get("HOME")):
-        if effect.kind in (SideEffectType.CREDENTIAL, SideEffectType.CONFIG):
-            purpose = f"{effect.type} of {command_path.value}"
-            wanted += [(purpose, Path(m)) for m in matches]
+    for item in declared(app, ctx.env.get("HOME"), ctx.cwd):
+        if item.effect.kind in (SideEffectType.CREDENTIAL, SideEffectType.CONFIG):
+            purpose = f"{item.effect.type} of {item.command.value}"
+            wanted += [(purpose, Path(m)) for m in item.matches]
     files: list[dict[str, object]] = []
     for purpose, where in wanted:
         if where is None:
