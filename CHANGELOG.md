@@ -59,8 +59,9 @@ Apps built on treaty keep their own, structured schema changelog with
   command's, and a `setup(args, ctx, *resources)` that runs once before serving. A failure
   before serving answers with the usual envelope and exit code on stderr, with nothing on
   stdout; once serving, stdout and stdin carry only the protocol, and a stray `print()` or
-  write to descriptor 1 still goes to stderr. Closing stdin, `SIGINT`, or `SIGTERM` stops
-  the server with exit 0 and one audit log entry for the run. The manifest marks the
+  write to descriptor 1 still goes to stderr, and a handler or child reading stdin reads
+  the null device. Closing stdin or stdout, `SIGINT`, or `SIGTERM` stops the server with
+  exit 0 and one audit log entry for the run. The manifest marks the
   command's stdout as a protocol in its description; `exec` and `App.call` refuse it with
   `NEEDS_STDIO`
 

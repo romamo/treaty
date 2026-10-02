@@ -20,16 +20,18 @@ everything else is plain data so it can be inspected and tested without the SDK.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import io
 import json
+import os
 import sys
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import IO, Any, Literal, TextIO, cast
 
-from ._app import App, _Run
+from ._app import App, _closed_pipe, _Run
 from ._context import Wire
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
@@ -239,34 +241,59 @@ def serve_wire(app: App, wire: Wire, *, env: Mapping[str, str]) -> McpServed:
     signal raises ``Cancelled`` here, on the run's thread, which stops the server. The
     server runs on a thread of its own, so the run's thread only waits, where a signal
     can interrupt it without tearing the event loop."""
-    stdin = wire.stdin
-    assert stdin is not None, "mcp serve refuses a closed stdin before serving"
+    assert wire.stdin is not None, "mcp serve refuses a closed stdin before serving"
     serving = _Serving()
     server = build_server(app, env=env, called=serving.called)
+    with _claimed_stdin(wire.stdin) as stdin:
 
-    def run() -> None:
+        def run() -> None:
+            try:
+                asyncio.run(_serve_wire(server, wire.out, stdin, serving))
+            except BaseException as exc:  # noqa: BLE001 - re-raised on the run's thread below
+                serving.error = exc
+
+        thread = threading.Thread(target=run, name="treaty-mcp", daemon=True)
+        thread.start()
         try:
-            asyncio.run(_serve_wire(server, wire.out, stdin, serving))
-        except BaseException as exc:  # noqa: BLE001 - re-raised on the run's thread below
-            serving.error = exc
-
-    thread = threading.Thread(target=run, name="treaty-mcp", daemon=True)
-    thread.start()
-    try:
-        while thread.is_alive():
-            thread.join(JOIN_SECONDS)
-    except Cancelled as exc:
-        serving.stop()
-        thread.join(GRACE_SECONDS)
-        return McpServed(_signal_name(exc.signal.name), serving.calls)
-    except KeyboardInterrupt:
-        # No treaty handler on this thread (a run started off the main thread)
-        serving.stop()
-        thread.join(GRACE_SECONDS)
-        return McpServed("SIGINT", serving.calls)
+            while thread.is_alive():
+                thread.join(JOIN_SECONDS)
+        except Cancelled as exc:
+            serving.stop()
+            thread.join(GRACE_SECONDS)
+            return McpServed(_signal_name(exc.signal.name), serving.calls)
+        except KeyboardInterrupt:
+            # No treaty handler on this thread (a run started off the main thread)
+            serving.stop()
+            thread.join(GRACE_SECONDS)
+            return McpServed("SIGINT", serving.calls)
     if serving.error is not None:
         raise serving.error
     return McpServed("eof", serving.calls)
+
+
+@contextlib.contextmanager
+def _claimed_stdin(stdin: IO[str]) -> Iterator[IO[str] | IO[bytes]]:
+    """The protocol's stdin, read from a private copy of its descriptor while the
+    descriptor itself reads the null device: a handler reading ``sys.stdin``, or a child
+    that inherited the descriptor, reads its end at once, as under ``treaty-mcp``, instead
+    of blocking on or taking the client's requests. A stream with no descriptor, as in a
+    test, is read as it is. The copy stays open while the reader thread may still read it."""
+    try:
+        fd = stdin.fileno()
+    except AttributeError, OSError, ValueError:  # io.UnsupportedOperation: no descriptor
+        yield stdin
+        return
+    private = os.dup(fd)
+    source = os.fdopen(private, "rb")
+    null = os.open(os.devnull, os.O_RDONLY)
+    try:
+        os.dup2(null, fd)
+    finally:
+        os.close(null)
+    try:
+        yield source
+    finally:
+        os.dup2(private, fd)
 
 
 def _signal_name(name: str) -> Literal["SIGINT", "SIGTERM"]:
@@ -277,7 +304,9 @@ def _signal_name(name: str) -> Literal["SIGINT", "SIGTERM"]:
     raise ValueError(f"no server stop for {name}")
 
 
-async def _serve_wire(server: Any, out: IO[str], stdin: IO[str], serving: _Serving) -> None:
+async def _serve_wire(
+    server: Any, out: IO[str], stdin: IO[str] | IO[bytes], serving: _Serving
+) -> None:
     import anyio
     from mcp.server.stdio import stdio_server
 
@@ -292,7 +321,7 @@ async def _serve_wire(server: Any, out: IO[str], stdin: IO[str], serving: _Servi
         # Explicit streams: the SDK claims no descriptor, and the protocol goes to the copy
         # of the original stdout, not descriptor 1, which leads to stderr
         async with stdio_server(
-            stdin=cast(Any, _Lines(lines)), stdout=cast(Any, _WireOut(out))
+            stdin=cast(Any, _Lines(lines)), stdout=cast(Any, _WireOut(out, serving.stop))
         ) as (read, write):
             await server.run(read, write, server.create_initialization_options())
 
@@ -305,7 +334,7 @@ def _call_soon(loop: asyncio.AbstractEventLoop, fn: Callable[[], object]) -> Non
 
 
 def _read_lines(
-    stdin: IO[str],
+    stdin: IO[str] | IO[bytes],
     loop: asyncio.AbstractEventLoop,
     lines: asyncio.Queue[str | Exception | None],
 ) -> None:
@@ -351,14 +380,21 @@ class _Lines:
 
 
 class _WireOut:
-    """What the SDK's transport writes each message to: UTF-8 bytes on the run's stdout,
-    whatever the platform's encoding, as the SDK writes them; text on a stream without
-    bytes, as in a test. Writes run on a worker thread, so a client that stops reading
-    blocks no shutdown."""
+    """What the SDK's transport writes each message to: UTF-8 bytes on the run's stdout's
+    descriptor, whatever the platform's encoding, as the SDK writes them, and unbuffered,
+    so nothing is left for the run's last flush; text on a stream without one, as in a
+    test. Writes run on a worker thread, so a client that stops reading blocks no
+    shutdown. A client that closed stdout left: ``gone`` stops the server, as the end of
+    stdin does, and what is left to write is dropped."""
 
-    def __init__(self, out: IO[str]) -> None:
+    def __init__(self, out: IO[str], gone: Callable[[], None]) -> None:
         self._out = out
-        self._buffer: IO[bytes] | None = getattr(out, "buffer", None)
+        self._gone = gone
+        self._closed = False
+        try:
+            self._fd: int | None = out.fileno()
+        except AttributeError, OSError, ValueError:  # io.UnsupportedOperation: none
+            self._fd = None
 
     async def write(self, text: str) -> None:
         import anyio
@@ -371,17 +407,25 @@ class _WireOut:
         await anyio.to_thread.run_sync(self._flush, abandon_on_cancel=True)
 
     def _write(self, text: str) -> None:
-        if self._buffer is None:
-            self._out.write(text)
+        if self._closed:
             return
-        self._out.flush()
-        self._buffer.write(text.encode("utf-8"))
+        try:
+            if self._fd is None:
+                self._out.write(text)
+                return
+            self._out.flush()
+            view = memoryview(text.encode("utf-8"))
+            while view:
+                view = view[os.write(self._fd, view) :]
+        except OSError as exc:
+            if not _closed_pipe(exc):
+                raise
+            self._closed = True
+            self._gone()
 
     def _flush(self) -> None:
-        if self._buffer is None:
+        if self._fd is None and not self._closed:
             self._out.flush()
-            return
-        self._buffer.flush()
 
 
 def main(argv: list[str] | None = None) -> int:

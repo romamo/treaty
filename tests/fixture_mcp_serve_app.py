@@ -2,6 +2,7 @@
 project, a resource it acquires, and a command that prints to stdout."""
 
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,15 @@ def echo(args: EchoArgs, ctx: Ctx) -> dict[str, str]:
 @app.command("ping", description="Answer pong", danger_level="safe", exit_codes=())
 def ping(args: NoArgs, ctx: Ctx) -> dict[str, str]:
     return {"pong": "pong"}
+
+
+@app.command("read-stdin", description="Read stdin, in the handler and in a child",
+             danger_level="safe", exit_codes=())  # fmt: skip
+def read_stdin(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+    # Neither may block on, or take, the client's requests: both read the null device
+    child = [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"]
+    done = subprocess.run(child, capture_output=True, timeout=5, check=True)
+    return {"handler": sys.stdin.read(), "child": done.stdout.decode()}
 
 
 if __name__ == "__main__":

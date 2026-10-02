@@ -29,7 +29,13 @@ class Server:
     """``servectl mcp serve`` in a subprocess: JSON-RPC lines in on stdin, out on stdout,
     each stdout line kept for the check that nothing else ever reaches it"""
 
-    def __init__(self, args: list[str], tmp: Path, env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        args: list[str],
+        tmp: Path,
+        env: dict[str, str] | None = None,
+        stdout: int = subprocess.PIPE,
+    ) -> None:
         self.stderr_path = tmp / "stderr.txt"
         self.audit = tmp / "audit.jsonl"
         environ = {k: v for k, v in os.environ.items() if not k.startswith("SERVECTL_")}
@@ -39,14 +45,15 @@ class Server:
         self.proc = subprocess.Popen(
             [sys.executable, str(SERVECTL), "mcp", "serve", *args],
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
+            stdout=stdout,
             stderr=self._err,
             cwd=HERE,
             env=environ,
         )
         self.lines: list[bytes] = []
         self._queue: queue.Queue[bytes | None] = queue.Queue()
-        threading.Thread(target=self._pump, daemon=True).start()
+        if self.proc.stdout is not None:
+            threading.Thread(target=self._pump, daemon=True).start()
         self._id = 0
 
     def _pump(self) -> None:
@@ -166,6 +173,44 @@ def test_serves_the_commands_and_only_the_protocol_reaches_stdout(server: Server
     errors = server.stderr()
     assert "released proj" in errors  # setup's resource was released as the run ended
     assert TOKEN not in errors
+
+
+def test_a_handler_or_child_reading_stdin_reads_its_end_not_the_protocol(
+    server: Server,
+) -> None:
+    server.initialize()
+    called = _result(server.request("tools/call", {"name": "read-stdin", "arguments": {}}))
+    assert called["structuredContent"]["data"] == {"handler": "", "child": ""}  # type: ignore[index]
+    # The client's next request still reaches the server
+    assert (
+        _result(server.request("tools/call", {"name": "ping", "arguments": {}}))["isError"] is False
+    )
+    assert server.close() == 0
+
+
+def test_the_client_closing_stdout_stops_the_server_cleanly(tmp_path: Path, project: Path) -> None:
+    read, write = os.pipe()
+    os.close(read)  # the client stops reading: the first answer meets a closed pipe
+    try:
+        started = Server(["--project", str(project)], tmp_path, stdout=write)
+    finally:
+        os.close(write)
+    started.send(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1.0"},
+            },
+        }
+    )
+    assert started.wait() == 0
+    envelope = started.envelope()
+    assert envelope["data"] == {"stopped_by": "eof", "tool_calls": 0}
+    assert "Traceback" not in started.stderr()
 
 
 def test_one_audit_entry_per_server_run_with_the_secret_redacted(server: Server) -> None:

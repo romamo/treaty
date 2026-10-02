@@ -77,9 +77,10 @@ class McpServe:
 
 @dataclass(frozen=True, slots=True)
 class McpServed:
-    """How a server run ended: stdin closed, or a signal stopped it"""
+    """How a server run ended: the client left, or a signal stopped it"""
 
     stopped_by: Literal["eof", "SIGINT", "SIGTERM"]
+    """``eof`` when the client left: stdin ended, or stdout was closed"""
     tool_calls: int
     """Tool calls answered during the run"""
 
