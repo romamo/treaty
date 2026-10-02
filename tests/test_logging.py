@@ -10,7 +10,7 @@ import stat
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,7 +31,7 @@ from treaty import (
     NoArgs,
     RegistrationError,
 )
-from treaty._app import _RECORDS
+from treaty._app import _RECORDS, _LateStream
 from treaty._atomic import exclusive
 from treaty._audit import audit
 from treaty._cli import cli
@@ -878,6 +878,60 @@ def test_an_app_call_in_a_run_handler_leaves_stdout_to_the_run(timeout: float | 
     assert last == "0 ['_StrayStdout'] True True", proc.stdout
     assert TOKEN not in proc.stdout and TOKEN not in proc.stderr, proc.stderr
     assert "err [REDACTED]" in proc.stderr.splitlines(), proc.stderr
+
+
+class _PausingThread(threading.Thread):
+    """A thread that, once armed, pauses in its own first hash, the one a stream write
+    takes to look itself up, until released"""
+
+    def __init__(self, target: Callable[[], None]) -> None:
+        super().__init__(target=target, daemon=True)
+        self.armed = threading.Event()
+        self.paused = threading.Event()
+        self.release = threading.Event()
+
+    def __hash__(self) -> int:
+        if threading.current_thread() is self and self.armed.is_set():
+            self.armed.clear()
+            self.paused.set()
+            assert self.release.wait(10)
+        return id(self) >> 4
+
+
+def test_a_write_racing_its_calls_detach_stays_redacted() -> None:
+    """A handler thread writing as its ``App.call`` detaches leaves the call threads and
+    joins the late ones in one step: a write that looked itself up in the late threads
+    before the detach and in the call threads after it found itself in neither, and
+    passed through raw, as on free-threaded CPython (#141)"""
+    inner = io.StringIO()
+    stream = _LateStream(inner, stdout=False)
+
+    def write(_: logging.LogRecord) -> None:
+        return None
+
+    def redact(text: str) -> str:
+        return text.replace(TOKEN, "[REDACTED]")
+
+    go = threading.Event()
+
+    def handler() -> None:
+        assert go.wait(10)
+        stream.write(TOKEN + "\n")
+
+    worker = _PausingThread(handler)
+    _RECORDS.attach(write, redact, None, threading.current_thread())
+    try:
+        worker.start()
+        _RECORDS.hold(worker, redact, write)
+        worker.armed.set()
+        go.set()
+        assert worker.paused.wait(10)
+    finally:
+        _RECORDS.detach(write)
+    worker.release.set()
+    worker.join(10)
+    _RECORDS.forget(worker)
+    assert inner.getvalue() == "[REDACTED]\n"
 
 
 @pytest.mark.parametrize("before_first_event", [True, False])

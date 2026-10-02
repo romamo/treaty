@@ -2762,13 +2762,15 @@ class _Records(logging.Handler):
         the thread ends"""
         self._callers: dict[Callable[[logging.LogRecord], None], threading.Thread] = {}
         """The thread of each attached ``App.call`` run, by the run's writer"""
-        self.late: frozenset[threading.Thread] = frozenset()
-        """The live handler threads whose run is no longer attached, rebuilt on a change;
-        read without the guard, by every write to the standard streams while it is not
-        empty"""
-        self.calls: frozenset[threading.Thread] = frozenset()
-        """The threads of the attached ``App.call`` runs, each calling thread and its live
-        handler threads, rebuilt on a change and read as ``late`` is"""
+        self.threads: tuple[frozenset[threading.Thread], frozenset[threading.Thread]] = (
+            frozenset(),
+            frozenset(),
+        )
+        """The late threads, live handler threads whose run is no longer attached, and the
+        call threads, each attached ``App.call`` run's calling thread and live handler
+        threads: rebuilt on a change and replaced as one, so a write to a standard stream,
+        which reads it without the guard, never finds a thread its call just detached in
+        neither (#141)"""
         self._redactors: tuple[Callable[[str], str], ...] = ()
         """The attached runs' and live handler threads' redactors, rebuilt on a change"""
         self._guard = threading.Lock()
@@ -2783,7 +2785,7 @@ class _Records(logging.Handler):
         """Route records to ``write`` until ``detach``, the root lowered to ``lowest``, the
         least level the run shows, when it stands above it. ``caller`` is the thread of an
         ``App.call`` run: until ``detach``, it and the handler threads held for the run are
-        in ``calls``"""
+        among the call threads of ``threads``"""
         root = logging.getLogger()
         with self._guard:
             if not self._runs:
@@ -2913,15 +2915,16 @@ class _Records(logging.Handler):
         self._workers = [held for held in self._workers if held[0].is_alive()]
         self._redactors = (*(r for _, r, _ in self._runs), *(r for _, r, _ in self._workers))
         attached = [w for w, _, _ in self._runs]
-        # ``late`` first: a thread whose call detached is in both a moment, never in
-        # neither, so its writes stay redacted as they move from its call's stream to stderr
-        self.late = frozenset(w for w, _, owner in self._workers if owner not in attached)
-        self.calls = frozenset(
+        late = frozenset(w for w, _, owner in self._workers if owner not in attached)
+        calls = frozenset(
             (
                 *self._callers.values(),
                 *(w for w, _, owner in self._workers if owner in self._callers),
             )
         )
+        # One store: a thread whose call detached moves from ``calls`` to ``late`` at once,
+        # so its writes stay redacted as they move from its call's stream to stderr
+        self.threads = (late, calls)
 
 
 _RECORDS = _Records()
@@ -2943,12 +2946,13 @@ class _LateStream:
 
     def write(self, text: str, /) -> int:
         thread = threading.current_thread()
+        late, calls = _RECORDS.threads
         target: TextIO | None
-        if thread in _RECORDS.late:
+        if thread in late:
             target = sys.stderr if self._stdout else self.inner
             if isinstance(target, _LateStream):
                 target = target.inner
-        elif thread in _RECORDS.calls:
+        elif thread in calls:
             target = self.inner
         else:
             return self.inner.write(text)
@@ -2986,7 +2990,7 @@ def _settle_streams_locked() -> None:
     stream the host replaced in between is its own: it is left as it is, and a wrapper
     the host kept passes every write through. The caller holds ``_guard_lock``."""
     global _late_out, _late_err
-    if _RECORDS.late or _RECORDS.calls:
+    if any(_RECORDS.threads):
         if _late_err is None and sys.stderr is not None:
             _late_err = _LateStream(sys.stderr, stdout=False)
             sys.stderr = cast(TextIO, _late_err)
