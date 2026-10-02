@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc13] - 2026-10-02
+
+The thirteenth 1.0 release candidate: 2 additions and 3 fixes.
+
 ### Added
 
 - A mutating command can preview unless its own confirmation flag is passed:
@@ -1371,7 +1375,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc12...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc13...HEAD
+[1.0.0rc13]: https://github.com/romamo/treaty/compare/v1.0.0rc12...v1.0.0rc13
 [1.0.0rc12]: https://github.com/romamo/treaty/compare/v1.0.0rc11...v1.0.0rc12
 [1.0.0rc11]: https://github.com/romamo/treaty/compare/v1.0.0rc10...v1.0.0rc11
 [1.0.0rc10]: https://github.com/romamo/treaty/compare/v1.0.0rc9...v1.0.0rc10
