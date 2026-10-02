@@ -97,10 +97,11 @@ def redacted(value: object, redact: Callable[[str], str]) -> object:
 
 
 def _number(value: object, redact: Callable[[str], str]) -> object:
-    """``[REDACTED]`` for a number whose decimal spelling is a whole secret spelling, as an
+    """``[REDACTED]`` for a number whose decimal spelling holds a secret spelling, as an
     ``int`` secret flag's is once it is at least the minimum length; any other value as it
-    is. Equal numbers match: 987654.0 is the secret 987654. A bool is no number here:
-    ``True`` is not the secret 1"""
+    is. Equal numbers match: 987654.0 is the secret 987654. So does a number the secret's
+    text is part of, as it is in a string: -987654 and 9876540 hand out the secret 987654.
+    A bool is no number here: ``True`` is not the secret 1"""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return value
     spellings = {str(value)}
@@ -108,7 +109,7 @@ def _number(value: object, redact: Callable[[str], str]) -> object:
         spellings.add(str(int(value)))
     elif isinstance(value, int) and abs(value) <= _EXACT_FLOAT:
         spellings.add(str(float(value)))
-    if any(redact(spelling) == REDACTED for spelling in spellings):
+    if any(redact(spelling) != spelling for spelling in spellings):
         return REDACTED
     return value
 

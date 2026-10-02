@@ -159,3 +159,27 @@ def test_exec_fallback_data_and_audit_log(tmp_path: Path, password: float) -> No
     assert data["echo"] == "[REDACTED]" and sorted(map(str, data["items"])) == ["3", "[REDACTED]"]
     entry = json.loads(log.read_text())
     assert entry["args"] == {"password": "[REDACTED]", "copy": "[REDACTED]"}
+
+
+@pytest.mark.parametrize("echoed", [-PIN, PIN * 10 + 1, PIN + 0.5])
+def test_a_number_spelling_the_secret_inside_it_is_redacted(echoed: float) -> None:
+    """A number whose spelling holds the secret, such as its negation, reads
+    ``[REDACTED]``, as the same text inside a string does: ``-987654`` hands out the PIN"""
+    app = App("probe", version="1.0.0")
+
+    @app.command("echo", description="Echo", danger_level="safe", exit_codes=())
+    def echo(args: PinArgs, ctx: Ctx) -> dict[str, bool]:
+        ctx.warn("SEEN", "a number was seen", value=echoed)
+        return {"ok": True}
+
+    out = io.StringIO()
+    app.run(
+        ["echo", "--pin-from-env", "PROBE_PIN"],
+        stdin=io.StringIO(""),
+        stdout=out,
+        stderr=io.StringIO(),
+        env=ENV,
+        isatty=False,
+    )
+    assert str(PIN) not in out.getvalue()
+    assert json.loads(out.getvalue())["warnings"][0]["context"]["value"] == "[REDACTED]"
