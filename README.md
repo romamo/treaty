@@ -629,7 +629,12 @@ returned is written to `sys.stderr` as `lastResort` would, its secrets redacted,
 all when the host's own handler takes the record. While such a thread lives, `sys.stdout`
 and `sys.stderr` are wrapped: what that thread prints or writes is redacted and goes to
 stderr, every other thread's writes pass through, and the streams are put back once it
-ends, unless the host replaced one meanwhile.
+ends, unless the host replaced one meanwhile. The same wrapping stands while an `App.call`
+runs: what its handler prints or writes to `sys.stderr`, on the calling thread or on the
+worker a timeout runs it on, is redacted and stays on the stream it was written to, and
+the host's own threads write through untouched; a handler that outlives its timeout goes
+over to stderr as its call returns. Under `app.run`, `sys.stdout` stays the run's own
+stand-in. Bytes written through `.buffer` pass through as they are.
 
 The three flags are exclusive (two exit `2`). Stray `print()` text off a terminal is
 dropped, and still reported in `THIRD_PARTY_STDOUT`. The `log-not-print` audit rule flags

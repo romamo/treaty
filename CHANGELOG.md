@@ -10,6 +10,20 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- Security: a handler's own `print()` or `sys.stderr` write during `App.call` no longer
+  reaches the host's streams with its secrets in it, on the calling thread, on the worker
+  a timeout runs it on, or in the window between its timeout and the call's return. While
+  an `App.call` runs, `sys.stdout` and `sys.stderr` redact what the call's threads write of
+  every live run's and handler thread's secrets, and keep it on the stream it was written
+  to; `App.call`'s envelope is unchanged. Other threads' writes, and bytes written through
+  `.buffer`, pass through untouched, `app.run`'s own stand-in keeps `sys.stdout`, and the
+  streams are restored as the call returns, unless the host replaced one meanwhile. A
+  worker that outlives its timeout hands over to the late wrapping of #135. Under
+  `treaty-mcp`, whose `sys.stdout` is stderr, a handler's print is now redacted there
+  (#141)
+
 ## [1.0.0rc15] - 2026-10-02
 
 The fifteenth 1.0 release candidate: 1 change and 1 fix.

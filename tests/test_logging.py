@@ -10,7 +10,7 @@ import stat
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,7 +31,7 @@ from treaty import (
     NoArgs,
     RegistrationError,
 )
-from treaty._app import _RECORDS
+from treaty._app import _RECORDS, _LateStream
 from treaty._atomic import exclusive
 from treaty._audit import audit
 from treaty._cli import cli
@@ -674,6 +674,264 @@ def test_a_handler_that_prints_after_app_main_returned_leaks_no_secret() -> None
     assert ["out [REDACTED]", "err [REDACTED]"] == [
         line for line in proc.stderr.splitlines() if line.startswith(("out ", "err "))
     ], proc.stderr
+
+
+def run_script(script: str) -> subprocess.CompletedProcess[str]:
+    """``script`` in a fresh interpreter, whose standard streams pytest does not capture"""
+    env = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+CALL_PRINT_SCRIPT = """\
+import io, sys, threading
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description='API token', secret=True)
+app = App('libctl', version='1.0.0')
+before = (sys.stdout, sys.stderr)
+mine = io.StringIO()
+def other(token: str) -> None:
+    print('other', token)  # a thread no call runs: raw, in its place
+    if {host_swaps!r}:
+        sys.stdout = mine
+@app.command('show', description='Print', timeout={timeout!r}, danger_level='safe',
+             exit_codes=())
+def show(args: Login, ctx: Ctx) -> dict[str, bool]:
+    print('out', args.api_token)
+    thread = threading.Thread(target=other, args=(args.api_token,))
+    thread.start()
+    thread.join()
+    sys.stdout.writelines(['lines ', args.api_token, '\\n'])
+    sys.stderr.write('err ' + args.api_token + '\\n')
+    print('esc', args.api_token[:5] + '\\x1b[0m' + args.api_token[5:], file=sys.stderr)
+    return {{'ok': True}}
+env = {{'LIBCTL_API_TOKEN': {token!r}, 'LIBCTL_AUDIT_LOG': '0'}}
+envelope = app.call('show', {{}}, env=env)
+kept = sys.stdout is mine if {host_swaps!r} else sys.stdout is before[0]
+sys.stdout = before[0]
+print(envelope.ok, envelope.warnings, kept, sys.stderr is before[1])
+"""
+
+
+@pytest.mark.parametrize(
+    ("timeout", "host_swaps"), [(None, False), (30.0, False), (None, True), (30.0, True)]
+)
+def test_a_handler_that_prints_during_app_call_leaks_no_secret(
+    timeout: float | None, host_swaps: bool
+) -> None:
+    """A handler that prints and writes to stderr during ``App.call``, on the calling
+    thread or, under a timeout, on a worker: its text is redacted on the stream it was
+    written to, a secret an escape splits too, and the envelope carries no warning. A
+    thread no call runs writes raw and in order; the streams are restored once the call
+    returns, unless the host replaced one meanwhile, which it keeps (#141). A subprocess,
+    since pytest captures the standard streams"""
+    proc = run_script(CALL_PRINT_SCRIPT.format(token=TOKEN, timeout=timeout, host_swaps=host_swaps))
+    assert proc.returncode == 0, proc.stderr
+    printed = ["out [REDACTED]", f"other {TOKEN}"]
+    if not host_swaps:
+        printed.append("lines [REDACTED]")
+    assert proc.stdout.splitlines() == [*printed, "True () True True"], proc.stdout
+    assert proc.stderr.splitlines() == ["err [REDACTED]", "esc [REDACTED]"], proc.stderr
+
+
+CALL_TIMEOUT_SCRIPT = """\
+import sys, threading, time
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description='API token', secret=True)
+app = App('libctl', version='1.0.0')
+before = (sys.stdout, sys.stderr)
+returned, workers = threading.Event(), []
+@app.command('slow', description='Print on', timeout=0.05, danger_level='safe',
+             exit_codes=())
+def slow(args: Login, ctx: Ctx) -> dict[str, bool]:
+    workers.append(threading.current_thread())
+    while not returned.is_set():
+        sys.stdout.write('tick ' + args.api_token + '\\n')
+        time.sleep(0.001)
+    sys.stdout.write('tick ' + args.api_token + '\\n')
+    return {{'ok': True}}
+env = {{'LIBCTL_API_TOKEN': {token!r}, 'LIBCTL_AUDIT_LOG': '0'}}
+code = app.call('slow', {{}}, env=env).error.code
+returned.set()
+workers[0].join(timeout=10)
+assert not workers[0].is_alive()
+print(code, sys.stdout is before[0], sys.stderr is before[1])
+"""
+
+
+def test_a_handler_printing_through_its_timeout_leaks_no_secret() -> None:
+    """A handler that prints on and on through its timeout, while ``App.call`` answers
+    ``TIMEOUT``, then after it returned: every line is redacted, on stdout while its run is
+    attached, the window between the timeout and the run's detach too, and on stderr once
+    the run detached, with no raw line at the handover (#141, #135)"""
+    proc = run_script(CALL_TIMEOUT_SCRIPT.format(token=TOKEN))
+    assert proc.returncode == 0, proc.stderr
+    *ticks, last = proc.stdout.splitlines()
+    assert last == "TIMEOUT True True", proc.stdout
+    assert ticks and set(ticks) == {"tick [REDACTED]"}, proc.stdout
+    late = proc.stderr.splitlines()
+    assert late and set(late) == {"tick [REDACTED]"}, proc.stderr
+
+
+CONCURRENT_CALLS_SCRIPT = """\
+import sys, threading
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description='API token', secret=True)
+app = App('libctl', version='1.0.0')
+before = (sys.stdout, sys.stderr)
+both, printed = threading.Barrier(3, timeout=10), threading.Barrier(3, timeout=10)
+tokens = {{'a': {token!r} + 'a', 'b': {token!r} + 'b'}}
+@app.command('show', description='Print', timeout={timeout!r}, danger_level='safe',
+             exit_codes=())
+def show(args: Login, ctx: Ctx) -> dict[str, bool]:
+    both.wait()  # both calls attached
+    name = 'a' if args.api_token == tokens['a'] else 'b'
+    other = tokens['b' if name == 'a' else 'a']
+    sys.stdout.write(f'{{name}} {{args.api_token}} {{other}}\\n')
+    printed.wait()
+    return {{'ok': True}}
+def call(name: str) -> None:
+    env = {{'LIBCTL_API_TOKEN': tokens[name], 'LIBCTL_AUDIT_LOG': '0'}}
+    assert app.call('show', {{}}, env=env).ok
+callers = [threading.Thread(target=call, args=(n,)) for n in 'ab']
+for caller in callers:
+    caller.start()
+both.wait()
+sys.stdout.write('host ' + tokens['a'] + '\\n')  # the host, while both calls run
+printed.wait()
+for caller in callers:
+    caller.join(timeout=10)
+print(sys.stdout is before[0], sys.stderr is before[1])
+"""
+
+
+@pytest.mark.parametrize("timeout", [None, 30.0])
+def test_concurrent_app_calls_redact_each_others_secrets_in_place(timeout: float | None) -> None:
+    """Two ``App.call``s on two threads at once: each handler's line is redacted of both
+    calls' secrets on stdout, the host's own write in between stays raw, and the streams
+    are restored once the last call returns (#141)"""
+    proc = run_script(CONCURRENT_CALLS_SCRIPT.format(token=TOKEN, timeout=timeout))
+    assert proc.returncode == 0, proc.stderr
+    *lines, last = proc.stdout.splitlines()
+    assert last == "True True", proc.stdout
+    assert sorted(lines) == [
+        "a [REDACTED] [REDACTED]",
+        "b [REDACTED] [REDACTED]",
+        f"host {TOKEN}a",
+    ], proc.stdout
+    assert proc.stderr == "", proc.stderr
+
+
+NESTED_CALL_SCRIPT = """\
+import json, sys
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag, NoArgs
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description='API token', secret=True)
+app = App('libctl', version='1.0.0')
+before = (sys.stdout, sys.stderr)
+seen = []
+@app.command('inner', description='Print', danger_level='safe', exit_codes=())
+def inner(args: Login, ctx: Ctx) -> dict[str, bool]:
+    seen.append(type(sys.stdout).__name__)
+    print('out', args.api_token)
+    sys.stderr.write('err ' + args.api_token + '\\n')
+    return {{'ok': True}}
+@app.command('outer', description='Call', timeout={timeout!r}, danger_level='safe',
+             exit_codes=())
+def outer(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
+    env = {{'LIBCTL_API_TOKEN': {token!r}, 'LIBCTL_AUDIT_LOG': '0'}}
+    return {{'ok': app.call('inner', {{}}, env=env).ok}}
+code = app.run(['outer', '--format', 'json'], env={{'LIBCTL_AUDIT_LOG': '0'}})
+print(code, seen, sys.stdout is before[0], sys.stderr is before[1])
+"""
+
+
+@pytest.mark.parametrize("timeout", [None, 30.0])
+def test_an_app_call_in_a_run_handler_leaves_stdout_to_the_run(timeout: float | None) -> None:
+    """An ``App.call`` inside an ``app.run`` handler: ``sys.stdout`` stays the run's
+    stand-in, which takes the inner handler's print as ever, redacted and reported as
+    ``THIRD_PARTY_STDOUT``; its stderr write is redacted in place, and both streams are
+    restored once the run returns (#141)"""
+    proc = run_script(NESTED_CALL_SCRIPT.format(token=TOKEN, timeout=timeout))
+    assert proc.returncode == 0, proc.stderr
+    first, last = proc.stdout.splitlines()
+    envelope = json.loads(first)
+    assert envelope["data"] == {"ok": True}, first
+    assert [w["code"] for w in envelope["warnings"]] == ["THIRD_PARTY_STDOUT"], first
+    assert last == "0 ['_StrayStdout'] True True", proc.stdout
+    assert TOKEN not in proc.stdout and TOKEN not in proc.stderr, proc.stderr
+    assert "err [REDACTED]" in proc.stderr.splitlines(), proc.stderr
+
+
+class _PausingThread(threading.Thread):
+    """A thread that, once armed, pauses in its own first hash, the one a stream write
+    takes to look itself up, until released"""
+
+    def __init__(self, target: Callable[[], None]) -> None:
+        super().__init__(target=target, daemon=True)
+        self.armed = threading.Event()
+        self.paused = threading.Event()
+        self.release = threading.Event()
+
+    def __hash__(self) -> int:
+        if threading.current_thread() is self and self.armed.is_set():
+            self.armed.clear()
+            self.paused.set()
+            assert self.release.wait(10)
+        return id(self) >> 4
+
+
+def test_a_write_racing_its_calls_detach_stays_redacted() -> None:
+    """A handler thread writing as its ``App.call`` detaches leaves the call threads and
+    joins the late ones in one step: a write that looked itself up in the late threads
+    before the detach and in the call threads after it found itself in neither, and
+    passed through raw, as on free-threaded CPython (#141)"""
+    inner = io.StringIO()
+    stream = _LateStream(inner, stdout=False)
+
+    def write(_: logging.LogRecord) -> None:
+        return None
+
+    def redact(text: str) -> str:
+        return text.replace(TOKEN, "[REDACTED]")
+
+    go = threading.Event()
+
+    def handler() -> None:
+        assert go.wait(10)
+        stream.write(TOKEN + "\n")
+
+    worker = _PausingThread(handler)
+    _RECORDS.attach(write, redact, None, threading.current_thread())
+    try:
+        worker.start()
+        _RECORDS.hold(worker, redact, write)
+        worker.armed.set()
+        go.set()
+        assert worker.paused.wait(10)
+    finally:
+        _RECORDS.detach(write)
+    worker.release.set()
+    worker.join(10)
+    _RECORDS.forget(worker)
+    assert inner.getvalue() == "[REDACTED]\n"
 
 
 @pytest.mark.parametrize("before_first_event", [True, False])
