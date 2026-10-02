@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc19] - 2026-10-02
+
+The nineteenth 1.0 release candidate: 1 change and 1 fix.
+
 ### Changed
 
 - The manifest is ManifestResponse 3.15, the version CI's spec pin defines, and states in
@@ -1543,7 +1547,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc18...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc19...HEAD
+[1.0.0rc19]: https://github.com/romamo/treaty/compare/v1.0.0rc18...v1.0.0rc19
 [1.0.0rc18]: https://github.com/romamo/treaty/compare/v1.0.0rc17...v1.0.0rc18
 [1.0.0rc17]: https://github.com/romamo/treaty/compare/v1.0.0rc16...v1.0.0rc17
 [1.0.0rc16]: https://github.com/romamo/treaty/compare/v1.0.0rc15...v1.0.0rc16
