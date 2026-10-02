@@ -10,33 +10,8 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
-- A numeric secret, such as an `int` secret flag, is redacted by value, not only inside
-  strings: echoed as a number in `Exit` context, a warning's context, a `ctx.log` field,
-  the audit log's arguments, or an `exec_fallback` line's data, it came back raw, and now
-  reads `[REDACTED]`. An equal number matches (987654.0 is the secret 987654), and so does
-  one whose spelling holds it, as a string's does (-987654, 9876540); a number
-  spelled in fewer than 4 characters stays, as a short string secret does, and a bool is
-  never one
-
-## [1.0.0rc22] - 2026-10-02
-
-The 22th 1.0 release candidate: 2 additions, 3 changes, 1 fix, and 1 breaking change. Not
-additive over rc21: see Breaking.
-
 ### Added
 
-- `ctx.network.timeout(own)` and `ctx.network.fits(seconds)` hand a client of the
-  handler's own, such as a library's `requests.Session`, the command's deadline:
-  `timeout=ctx.network.timeout(30)` is `min(30, ctx.remaining)`, exiting 10 `TIMEOUT`
-  when no time is left, and `fits` says whether one more attempt, its backoff included,
-  still ends in time, so a retry budget stops and the handler answers with the failure
-  it got instead of `TIMEOUT`. Both take seconds or a `treaty.Timeout`. The README shows
-  the recipe for `requests`, `httpx`, and a urllib3 `Retry` (#237)
-- The `network-timeout` audit rule advises on a `has_network_io=True` command whose
-  handler reaches none of `ctx.http`, `ctx.remaining`, `ctx.timeout`,
-  `ctx.network.timeout()`, `ctx.network.fits()`, and `ctx.run`: a client of its own may
-  wait longer than `--timeout` allows, with the fix `timeout=ctx.network.timeout(30)` per
-  call (#237)
 - `App(mcp=McpServe(args=ServeArgs, setup=..., exit_codes=...))` adds the `mcp serve`
   built-in (#239): an app serves its commands as MCP tools over stdio as one of its own
   commands, with startup flags parsed, validated, and listed in `--schema` like any
@@ -48,6 +23,7 @@ additive over rc21: see Breaking.
   exit 0 and one audit log entry for the run. The manifest marks the
   command's stdout as a protocol in its description; `exec` and `App.call` refuse it with
   `NEEDS_STDIO`
+
 - `McpServe(tools=provide, instructions=...)` serves tools from runtime data beside the
   command tools (#240): `provide(args, ctx)` runs once as serving starts and returns
   `treaty.McpTool` values, each with a name, a description, an input JSON Schema that
@@ -66,6 +42,52 @@ additive over rc21: see Breaking.
   `mcp serve --list-tools` prints the tool list, provided tools included, and
   `mcp-validate --serve-args` compares them
 
+### Fixed
+
+- A numeric secret, such as an `int` secret flag, is redacted by value, not only inside
+  strings: echoed as a number in `Exit` context, a warning's context, a `ctx.log` field,
+  the audit log's arguments, or an `exec_fallback` line's data, it came back raw, and now
+  reads `[REDACTED]`. An equal number matches (987654.0 is the secret 987654), and so does
+  one whose spelling holds it, as a string's does (-987654, 9876540); a number
+  spelled in fewer than 4 characters stays, as a short string secret does, and a bool is
+  never one
+
+- Printed text, from `print()` or `sys.stdout.write`, reaches stderr a line at a time,
+  redacted whole, as descriptor 1's text does: a declared secret split across two writes
+  went to stderr in the clear. A partial line now waits for its newline or carriage
+  return, the next envelope, or the run's end, so a `ctx.log` line written in between
+  comes first. Each line of a multi-line secret, such as a PEM key, with at least 4
+  characters besides its indentation, is redacted on its own too, so the key written a
+  line at a time by `print`, `os.write(1, ...)`, or a child process no longer reaches
+  stderr line by line (#256)
+
+## [1.0.0rc22] - 2026-10-02
+
+The 22th 1.0 release candidate: 2 additions, 3 changes, 1 fix, and 1 breaking change. Not
+additive over rc21: see Breaking.
+
+### Breaking
+
+- Per-command `--schema` no longer has `requires_groups`: its `requires` lists a command's
+  `RequiresAny` and `RequiresOne` rules as `{"any_of": [...]}` and `{"one_of": [...]}`
+  among its other rules, as the manifest does, so a consumer reads `requires` alone
+
+### Added
+
+- `ctx.network.timeout(own)` and `ctx.network.fits(seconds)` hand a client of the
+  handler's own, such as a library's `requests.Session`, the command's deadline:
+  `timeout=ctx.network.timeout(30)` is `min(30, ctx.remaining)`, exiting 10 `TIMEOUT`
+  when no time is left, and `fits` says whether one more attempt, its backoff included,
+  still ends in time, so a retry budget stops and the handler answers with the failure
+  it got instead of `TIMEOUT`. Both take seconds or a `treaty.Timeout`. The README shows
+  the recipe for `requests`, `httpx`, and a urllib3 `Retry` (#237)
+
+- The `network-timeout` audit rule advises on a `has_network_io=True` command whose
+  handler reaches none of `ctx.http`, `ctx.remaining`, `ctx.timeout`,
+  `ctx.network.timeout()`, `ctx.network.fits()`, and `ctx.run`: a client of its own may
+  wait longer than `--timeout` allows, with the fix `timeout=ctx.network.timeout(30)` per
+  call (#237)
+
 ### Changed
 
 - `ctx.remaining` ends a reserve before the command's hard limit: a tenth of the timeout,
@@ -75,6 +97,7 @@ additive over rc21: see Breaking.
   to return its partial result before exit 10 `TIMEOUT`. `ctx.remaining` reads that much
   less than before and `ctx.expired` turns true that much sooner; the hard limit and
   `meta.timeout_ms` are unchanged
+
 - The README and the conditional rules' docstrings say a boolean flag counts toward
   `RequiresAny`, `RequiresOne`, and `Excludes` only when true: an explicit `--no-x`, or
   `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
@@ -88,26 +111,12 @@ additive over rc21: see Breaking.
   connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
   when a body without a length would have looked complete
 
-### Breaking
-
-- Per-command `--schema` no longer has `requires_groups`: its `requires` lists a command's
-  `RequiresAny` and `RequiresOne` rules as `{"any_of": [...]}` and `{"one_of": [...]}`
-  among its other rules, as the manifest does, so a consumer reads `requires` alone
-
 - A declared secret written straight to descriptor 1, by C code, `os.write(1, ...)`, or a
   child process that inherited it, reaches stderr redacted, as printed text does; it went
   there in the clear. The interceptor redacts a line at a time, so a secret split across
   two writes or two reads of the pipe is still caught, and passes on a line without its end
   when the next envelope is written or the run ends, while the run's secrets are still
   known; bytes that are not UTF-8 pass through unchanged around it (#254)
-- Printed text, from `print()` or `sys.stdout.write`, reaches stderr a line at a time,
-  redacted whole, as descriptor 1's text does: a declared secret split across two writes
-  went to stderr in the clear. A partial line now waits for its newline or carriage
-  return, the next envelope, or the run's end, so a `ctx.log` line written in between
-  comes first. Each line of a multi-line secret, such as a PEM key, with at least 4
-  characters besides its indentation, is redacted on its own too, so the key written a
-  line at a time by `print`, `os.write(1, ...)`, or a child process no longer reaches
-  stderr line by line (#256)
 
 ## [1.0.0rc21] - 2026-10-02
 
