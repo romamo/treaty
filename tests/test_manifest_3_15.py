@@ -157,7 +157,7 @@ def make_app(**kw: Any) -> App:
 
     @app.command("migrate", description="Apply migrations", danger_level="mutating", exit_codes=())
     def migrate(args: MigrateArgs, ctx: Ctx) -> dict[str, str]:
-        return {"effect": "would_update" if ctx.dry_run else "updated"}
+        return {"effect": "updated" if args.yes else "would_update"}
 
     @app.command(
         "observe", description="Rewrite the snapshots", danger_level="mutating", exit_codes=(),
@@ -326,6 +326,12 @@ def test_3_14_confirm_flag(manifest: dict[str, Any]) -> None:
     assert migrate["confirm_flag"] == "yes"
     assert migrate["flags"]["yes"]["description"] == "Apply the migrations"
     assert all("confirm_flag" not in c for p, c in manifest["commands"].items() if p != "migrate")
+    # A call without the named flag previews, as the key promises
+    out = io.StringIO()
+    code = make_app().run(["migrate"], stdout=out, stderr=io.StringIO(), env={})
+    envelope = json.loads(out.getvalue())
+    assert code == 0 and envelope["meta"]["dry_run"] is True
+    assert envelope["data"]["effect"] == "would_update"
 
 
 def test_3_15_idempotent(manifest: dict[str, Any]) -> None:
