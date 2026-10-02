@@ -85,14 +85,37 @@ NAME_CONTEXT = frozenset(
 
 
 def redacted(value: object, redact: Callable[[str], str]) -> object:
-    """Every string of a JSON value with the run's secret values replaced"""
+    """A JSON value with the run's secret values replaced: in every string, and a number
+    equal to a numeric secret (#258)"""
     if isinstance(value, str):
         return redact(value)
     if isinstance(value, dict):
         return {k: redacted(v, redact) for k, v in value.items()}
     if isinstance(value, list):
         return [redacted(v, redact) for v in value]
+    return _number(value, redact)
+
+
+def _number(value: object, redact: Callable[[str], str]) -> object:
+    """``[REDACTED]`` for a number whose decimal spelling holds a secret spelling, as an
+    ``int`` secret flag's is once it is at least the minimum length; any other value as it
+    is. Equal numbers match: 987654.0 is the secret 987654. So does a number the secret's
+    text is part of, as it is in a string: -987654 and 9876540 hand out the secret 987654.
+    A bool is no number here: ``True`` is not the secret 1"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    spellings = {str(value)}
+    if isinstance(value, float) and value.is_integer():
+        spellings.add(str(int(value)))
+    elif isinstance(value, int) and abs(value) <= _EXACT_FLOAT:
+        spellings.add(str(float(value)))
+    if any(redact(spelling) != spelling for spelling in spellings):
+        return REDACTED
     return value
+
+
+_EXACT_FLOAT = 2**53
+"""The largest integer every float spells exactly"""
 
 
 def _unchanged(text: str) -> str:
@@ -101,7 +124,7 @@ def _unchanged(text: str) -> str:
 
 def scrub(key: str, value: object, redact: Callable[[str], str] = _unchanged) -> object:
     """A JSON value on its way to a log or stderr: ``[REDACTED]`` under a secret name at
-    any depth, and ``redact`` applied to every other string. The single entry point the
+    any depth, and ``redact`` applied to every other string and number. The single entry point the
     audit log (REQ-O-030) must call."""
     if secret_name(key):
         return REDACTED
@@ -111,7 +134,7 @@ def scrub(key: str, value: object, redact: Callable[[str], str] = _unchanged) ->
         return [scrub("", v, redact) for v in value]
     if isinstance(value, str):
         return redact(value)
-    return value
+    return _number(value, redact)
 
 
 class StreamRedactor:

@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+- A numeric secret, such as an `int` secret flag, is redacted by value, not only inside
+  strings: echoed as a number in `Exit` context, a warning's context, a `ctx.log` field,
+  the audit log's arguments, or an `exec_fallback` line's data, it came back raw, and now
+  reads `[REDACTED]`. An equal number matches (987654.0 is the secret 987654), and so does
+  one whose spelling holds it, as a string's does (-987654, 9876540); a number
+  spelled in fewer than 4 characters stays, as a short string secret does, and a bool is
+  never one
+
 ## [1.0.0rc22] - 2026-10-02
 
 The 22th 1.0 release candidate: 2 additions, 3 changes, 1 fix, and 1 breaking change. Not
