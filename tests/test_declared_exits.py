@@ -12,6 +12,8 @@ from treaty import Exit as Bail
 from treaty._audit import Finding, audit
 from treaty._values import ExitCodeName
 
+from examples.tutorial import todo_exit_codes
+
 HERE = Path(__file__).name
 
 
@@ -196,3 +198,106 @@ def test_an_unregistered_code_is_registered_then_declared() -> None:
         'app.exit_code("STALE", <79-125>, description="<what failed>", retryable=False, '
         'side_effects="none"), then add "STALE" to exit_codes='
     )
+
+
+# Methods called on a parameter whose class is known (#218)
+
+
+def test_a_method_on_a_resource_is_followed_as_the_tutorial_calls_it() -> None:
+    """The tutorial's list handler reads its items through store.load(), which names
+    STORE_CORRUPT: registered without declaring it, the audit finds it there"""
+    probe = App("todo", version="1.0.0")
+    probe.exit_code("STORE_CORRUPT", 79, description="c", retryable=False, side_effects="none")
+    probe.command("list", description="List items", danger_level="safe", exit_codes=())(
+        todo_exit_codes.list_items
+    )
+    [found] = findings(probe)
+    assert found.fix == 'add "STORE_CORRUPT" to exit_codes='
+    assert "(examples/tutorial/todo_exit_codes.py:64)" in found.message
+    assert "found via examples.tutorial.todo_exit_codes.Store.load" in found.message
+
+
+def test_the_tutorial_declares_every_code_its_store_raises() -> None:
+    assert findings(todo_exit_codes.app) == []
+
+
+class Ledger:
+    @classmethod
+    def acquire(cls, args: object, ctx: Ctx) -> Ledger:
+        return cls()
+
+    def post(self) -> None:
+        self.ping()
+        self._check()
+
+    def _check(self) -> None:
+        raise Exit.LEDGER_LOCKED("the ledger is locked")  # ledger
+
+    # Methods that call each other: the audit reads each once and stops
+    def ping(self) -> None:
+        self.pong()
+
+    def pong(self) -> None:
+        self.ping()
+
+
+class Archive(Ledger):
+    def _check(self) -> None:
+        raise Exit.ARCHIVE_SEALED("the archive is sealed")  # archive
+
+
+@dataclass(frozen=True, slots=True)
+class Batch:
+    size: int = Flag(default=1, description="Items per batch")
+
+    def checked(self) -> int:
+        if self.size > 100:
+            raise Exit.BATCH_TOO_LARGE("at most 100 items")  # batch
+        return self.size
+
+
+def ledger_app() -> App:
+    app = App("ledgerctl", version="1.0.0")
+    for name, code in (("LEDGER_LOCKED", 79), ("ARCHIVE_SEALED", 80), ("BATCH_TOO_LARGE", 81)):
+        app.exit_code(name, code, description=name.lower(), retryable=False, side_effects="none")
+    return app
+
+
+def test_self_calls_in_a_reached_method_are_followed_through_cycles() -> None:
+    app = ledger_app()
+
+    @app.command("post", description="Post", danger_level="mutating", exit_codes=())
+    def post(args: Batch, ctx: Ctx, ledger: Ledger) -> dict[str, int]:
+        ledger.post()
+        return {"size": args.checked()}
+
+    found = {f.message.split()[1]: f.message for f in findings(app)}
+    assert sorted(found) == ["BATCH_TOO_LARGE", "LEDGER_LOCKED"]
+    assert f"({HERE}:{line_of('# ledger')})" in found["LEDGER_LOCKED"]
+    assert "Ledger.post" in found["LEDGER_LOCKED"]
+    assert f"({HERE}:{line_of('# batch')})" in found["BATCH_TOO_LARGE"]
+
+
+def test_self_resolves_on_the_class_the_parameter_names() -> None:
+    """An inherited method's self call reaches the subclass's override"""
+    app = ledger_app()
+
+    @app.command("seal", description="Seal", danger_level="mutating", exit_codes=())
+    def seal(args: NoArgs, ctx: Ctx, archive: Archive) -> dict[str, str]:
+        archive.post()
+        return {}
+
+    [found] = findings(app)
+    assert f"({HERE}:{line_of('# archive')})" in found.message
+
+
+def test_a_method_on_an_object_of_unknown_class_is_not_followed() -> None:
+    app = ledger_app()
+
+    @app.command("post", description="Post", danger_level="mutating", exit_codes=())
+    def post(args: NoArgs, ctx: Ctx, ledger: Ledger) -> dict[str, str]:
+        alias = ledger
+        alias.post()
+        return {}
+
+    assert findings(app) == []
