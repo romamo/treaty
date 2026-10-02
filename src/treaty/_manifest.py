@@ -12,6 +12,7 @@ from ._command import (
     ARGV_KEY,
     CHILD_LOG_NOTE,
     DEFAULT_HEARTBEAT_MS,
+    IDEMPOTENT_NOTE,
     PASSTHROUGH_NOTE,
     Command,
     DangerLevel,
@@ -364,6 +365,9 @@ def command_entry(
     if command.child_log:
         # #173: no CommandEntry key says stderr is busy; an agent reads it here
         description = f"{description}. {CHILD_LOG_NOTE}"
+    if command.idempotent:
+        # #210: no CommandEntry key says a mutating command is safe to repeat
+        description = f"{description}. {IDEMPOTENT_NOTE}"
     out: dict[str, object] = {
         "description": description,
         "danger_level": command.danger_level.value,
