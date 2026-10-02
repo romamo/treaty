@@ -1922,7 +1922,8 @@ uv run treaty audit myapp.cli:app
 
 Ordered rules (`treaty rules` lists them) check the registry and print the next steps with a
 fix using your own names: missing examples, danger levels that contradict command names,
-mutating commands without their own exit codes, retryable codes on non-idempotent commands,
+mutating commands without their own exit codes, exit codes a handler raises but does not
+declare, retryable codes on non-idempotent commands,
 untyped outputs, undeclared network I/O, path-like fields not typed `Path`, wide mutating
 commands without `--raw-payload`, missing cleanup hooks, blanket scopes, login commands
 without `auth=`, commands that start work without returning a job, config writes without a

@@ -32,16 +32,19 @@ from ._deps import Endpoint
 from ._env import AUDIT_LOG, FORMAT, UNPREFIXED, app_var
 from ._errors import Exit
 from ._exit import ExitCodeRegistry, FrameworkCode
+from ._manifest import implicit_exit_codes
 from ._out import can_sort_by, out_spec
 from ._redact import secret_field
 from ._retry import budget_ms
 from ._scan import (
     FOLLOW_DEPTH,
+    ExitRaise,
     Reached,
     absolute_module,
     clear_caches,
     ctx_calls,
     direct_subprocess_calls,
+    exit_raises,
     first_party,
     raw_child_context,
     reached_functions,
@@ -400,6 +403,58 @@ def _exit_codes(app: App) -> Iterator[Finding]:
 
 
 FRAMEWORK_NAMES = frozenset(c.name for c in FrameworkCode)
+
+
+def _declared_exits(app: App) -> Iterator[Finding]:
+    for c in user_commands(app):
+        # What the run allows without UNDECLARED_EXIT_CODE: the declared codes and the
+        # implicit ones; any other framework code (NOT_FOUND, ...) is declared like an app's
+        allowed = {n.value for n in c.exit_codes} | {code.name for code in implicit_exit_codes(c)}
+        post_init = getattr(
+            c.args_model.model if c.args_model else c.args_type, "__post_init__", None
+        )
+        if inspect.isfunction(post_init):
+            # Only a ParseError or InvalidValue there refuses the arguments: any exit,
+            # declared or not, is ArgsCrashed, so declaring it would not help
+            crashes: dict[str, tuple[ExitRaise, Reached]] = {}
+            for unit in reached_functions(post_init):
+                for raised in exit_raises(unit.fn):
+                    crashes.setdefault(raised.name.value, (raised, unit))
+            for name, (raised, unit) in sorted(crashes.items()):
+                yield Finding(
+                    "declared-exits",
+                    Severity.WARNING,
+                    c.path.value,
+                    f"its args __post_init__ raises {name} ({raised.where}); the run exits 1 "
+                    f"with HANDLER_CRASHED instead, declared or not{unit.where}",
+                    f"raise treaty.ParseError there instead of Exit.{name}, which exits 2 "
+                    "before anything runs",
+                )
+        code: list[Callable[..., object]] = [
+            c.handler,
+            *(spec.acquire for spec in c.resource_graph.values()),
+        ]
+        first: dict[str, tuple[ExitRaise, Reached]] = {}
+        for fn in code:
+            for unit in reached_functions(fn):
+                for raised in exit_raises(unit.fn):
+                    if raised.name.value not in allowed:
+                        first.setdefault(raised.name.value, (raised, unit))
+        for name, (raised, unit) in sorted(first.items()):
+            fix = f'add "{name}" to exit_codes='
+            if raised.name not in app.exits:
+                fix = (
+                    f'app.exit_code("{name}", <79-125>, description="<what failed>", '
+                    f'retryable=False, side_effects="none"), then {fix}'
+                )
+            yield Finding(
+                "declared-exits",
+                Severity.WARNING,
+                c.path.value,
+                f"raises {name} ({raised.where}), which exit_codes does not list; the run "
+                f"exits 1 with UNDECLARED_EXIT_CODE instead{unit.where}",
+                fix,
+            )
 
 
 def _retryable(app: App) -> Iterator[Finding]:
@@ -2845,6 +2900,12 @@ RULES: tuple[Rule, ...] = (
         "Non-safe commands declare their own exit codes",
         Severity.WARNING,
         _exit_codes,
+    ),
+    Rule(
+        "declared-exits",
+        "Every exit code a handler raises is declared",
+        Severity.WARNING,
+        _declared_exits,
     ),
     Rule("retryable", "Retryable codes only on idempotent commands", Severity.WARNING, _retryable),
     Rule(

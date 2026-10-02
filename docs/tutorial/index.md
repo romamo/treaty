@@ -220,6 +220,7 @@ follow the finding's suggested fix:
 | `describe` | an example invocation on every command | [Describe every command](core/describe.md) |
 | `danger-level` | danger levels that match what command names imply | [Choose each command's danger level](core/danger-level.md) |
 | `exit-codes` | command-specific exit codes on every non-safe command | [Declare exit codes](core/exit-codes.md) |
+| `declared-exits` | every exit code a handler raises listed in `exit_codes=` | [Declare exit codes](core/exit-codes.md) |
 | `retryable` | retryable codes only on idempotent commands | [Declare exit codes](core/exit-codes.md) |
 | `delete-not-found` | a command that deletes (a `deleted` effect or a delete verb) answers `noop` for an id already gone, and does not declare `NOT_FOUND` | [Choose each command's danger level](core/danger-level.md#deleting-what-is-already-gone) |
 | `typed-output` | typed return values, so `output_schema` is informative | [Type every command's output](core/typed-output.md) |
