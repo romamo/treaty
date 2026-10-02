@@ -39,6 +39,7 @@ from ._command import Command, DangerLevel, build_command
 from ._context import Ctx
 from ._errors import CliExit, RegistrationError
 from ._flags import Flag
+from ._framework import CONFIRM_FLAG
 from ._resources import dependency_params
 from ._types import is_dataclass_type, type_hints
 from ._values import CommandPath, ExitCodeName
@@ -55,6 +56,8 @@ STDIN_CLOSED = "STDIN_CLOSED"
 MCP_TOOL_INVALID = "MCP_TOOL_INVALID"
 MCP_TOOL_NAME_TAKEN = "MCP_TOOL_NAME_TAKEN"
 LIST_TOOLS = "list_tools"
+CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
+CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
 
 DESCRIPTION = (
     "Serve the app's commands as MCP tools over stdio until stdin ends or SIGINT or "
@@ -210,15 +213,38 @@ class Provided:
     validator: Any
     """The ``jsonschema`` validator of its input schema"""
 
+    @property
+    def gated(self) -> bool:
+        """A destructive tool runs only with ``confirm_destructive: true``, as a destructive
+        command does over MCP (REQ-C-004)"""
+        return self.tool.level is DangerLevel.DESTRUCTIVE
+
     def entry(self) -> ToolEntry:
         from ._tools import ToolEntry, output_schema
 
         tool = self.tool
+        schema = dict(tool.input_schema)
+        description = tool.description
+        if self.gated:
+            properties = schema.get("properties")
+            schema["properties"] = {
+                **(properties if isinstance(properties, Mapping) else {}),
+                CONFIRM_KEY: {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Required to apply; without it the call is refused with "
+                    "CONFIRMATION_REQUIRED",
+                },
+            }
+            description += (
+                f" Destructive: without {CONFIRM_KEY}=true the call is refused with "
+                "CONFIRMATION_REQUIRED and nothing runs."
+            )
         return ToolEntry(
             name=tool.name,
             path=MCP_SERVE_PATH,
-            description=tool.description,
-            input_schema=dict(tool.input_schema),
+            description=description,
+            input_schema=schema,
             output_schema=output_schema(self.command),
             read_only=tool.read_only_hint,
             destructive=tool.destructive_hint,
@@ -318,6 +344,16 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
                 code=MCP_TOOL_NAME_TAKEN,
                 context={"tool": tool.name},
                 fix_required="rename the provided tool; tool names are unique",
+            )
+        properties = tool.input_schema.get("properties")
+        if (
+            tool.level is DangerLevel.DESTRUCTIVE
+            and isinstance(properties, Mapping)
+            and CONFIRM_KEY in properties
+        ):
+            raise _invalid(
+                tool.name,
+                f"defines {CONFIRM_KEY}, which treaty adds to a destructive tool's input schema",
             )
         validator_class = validator_for(tool.input_schema, default=Draft202012Validator)
         try:

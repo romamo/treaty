@@ -172,6 +172,8 @@ from ._manifest import (
     implicit_exit_codes,
 )
 from ._mcp_serve import (
+    CONFIRM_KEY,
+    CONFIRMATION_REQUIRED,
     MCP_SERVE_PATH,
     McpServe,
     Provided,
@@ -2067,8 +2069,17 @@ class App:
             meta: dict[str, object] = {"tool": name}
             command = provided.command
             run.current = command
-            run.provided_call = (name, arguments)
-            problems = provided.problems(arguments)
+            given = dict(arguments)
+            confirmed = given.pop(CONFIRM_KEY, False) if provided.gated else False
+            run.provided_call = (name, given, confirmed is True)
+            if not isinstance(confirmed, bool):
+                refused = ParseError(
+                    f"{CONFIRM_KEY} of tool {name} is true or false, not {confirmed!r}",
+                    context={"tool": name, "field": CONFIRM_KEY},
+                    suggestion=f"pass {CONFIRM_KEY}: true to apply",
+                )
+                return run.arg_error(refused, meta=meta)
+            problems = provided.problems(given)
             if problems:
                 first = problems[0]
                 where = f" at {first['path']}" if first["path"] else ""
@@ -2079,8 +2090,23 @@ class App:
                     suggestion="correct the arguments to match the tool's inputSchema",
                 )
                 return run.arg_error(refused, meta=meta)
+            if provided.gated and not confirmed:
+                # Treaty cannot preview a provided tool's work: unconfirmed, nothing runs
+                entry = self.exits.framework(FrameworkCode.ARG_ERROR)
+                return run._envelope(
+                    entry.code.value,
+                    error=ErrorDetail(
+                        code=CONFIRMATION_REQUIRED,
+                        message=f"Tool {name} is destructive and was not run",
+                        retryable=False,
+                        context={"tool": name, "flag": "confirm-destructive"},
+                        phase="validation",
+                        fix_required=f"call it again with {CONFIRM_KEY}: true to apply",
+                    ),
+                    meta=meta,
+                )
             invocation = build_from_mapping(command, {}, environ)
-            token = bound(arguments)
+            token = bound(given)
             try:
                 return run.execute(command, invocation, Format.JSON, meta=meta)
             finally:
@@ -3667,7 +3693,7 @@ class _Run:
         """``--output`` of a passthrough command: where its envelope is written too"""
         self.wire: Wire | None = None
         """The process's stdout and stdin, when argv named ``mcp serve`` (#239)"""
-        self.provided_call: tuple[str, Mapping[str, object]] | None = None
+        self.provided_call: tuple[str, Mapping[str, object], bool] | None = None
         """The tool name and arguments of a provided MCP tool's call (#240), which its
         audit entry lists in place of the synthetic command's empty arguments"""
 
@@ -3870,8 +3896,10 @@ class _Run:
         if self.provided_call is not None:
             # A provided tool's arguments are plain JSON: redacted by name, as an
             # exec_fallback line's are
-            tool, arguments = self.provided_call
+            tool, arguments, confirmed = self.provided_call
             parameters = {"tool": tool, "arguments": scrub("arguments", dict(arguments), redact)}
+            if confirmed:
+                parameters["confirm_destructive"] = True
         if command is None and self.fallback is not None:
             redact = self._fallback_redactor(self.fallback)
             parameters = {

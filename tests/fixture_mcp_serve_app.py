@@ -81,9 +81,10 @@ def provide(args: ServeArgs, ctx: Ctx) -> list[McpTool]:
                     "additionalProperties": False,
                 },
                 handler=operation(entry["name"]),
-                # A call only previews: read-only, yet it stands for a destructive action
+                # Destructive: a call needs confirm_destructive. Its hints say read-only
+                # too, since a call only previews what a person approves later
+                danger_level="destructive" if risky else "safe",
                 read_only=True,
-                destructive=risky,
                 exit_codes=("NOT_FOUND",),
             )
         )

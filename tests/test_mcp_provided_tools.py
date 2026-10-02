@@ -64,6 +64,9 @@ def test_provided_tools_are_listed_beside_the_commands_with_their_hints(
     assert drop["annotations"]["destructiveHint"] is True
     assert tools["restart-web"]["annotations"]["destructiveHint"] is False
     assert drop["inputSchema"]["required"] == ["target"]
+    # The destructive tool's schema gains the confirmation treaty requires
+    assert drop["inputSchema"]["properties"]["confirm_destructive"]["type"] == "boolean"
+    assert "confirm_destructive" not in tools["restart-web"]["inputSchema"]["properties"]
     data = drop["outputSchema"]["else"]["then"]["properties"]["data"]["anyOf"][0]
     assert set(data["properties"]) == {"operation", "target", "applied"}
     assert server.close() == 0
@@ -73,16 +76,18 @@ def test_a_provided_tool_call_is_enveloped_and_its_print_misses_the_protocol(
     server: Server,
 ) -> None:
     server.initialize()
-    called = _result(
-        server.request("tools/call", {"name": "drop-db", "arguments": {"target": "db1"}})
-    )
+    confirmed = {"target": "db1", "confirm_destructive": True}
+    called = _result(server.request("tools/call", {"name": "drop-db", "arguments": confirmed}))
     assert called["isError"] is False
     body = called["structuredContent"]
     assert isinstance(body, dict)
     assert body["data"] == {"operation": "drop-db", "target": "db1", "applied": False}
     assert body["meta"]["tool"] == "drop-db"
     missing = _result(
-        server.request("tools/call", {"name": "drop-db", "arguments": {"target": "missing"}})
+        server.request(
+            "tools/call",
+            {"name": "drop-db", "arguments": {"target": "missing", "confirm_destructive": True}},
+        )
     )
     assert missing["isError"] is True
     assert missing["structuredContent"]["error"]["code"] == "NOT_FOUND"  # type: ignore[index]
@@ -93,9 +98,28 @@ def test_a_provided_tool_call_is_enveloped_and_its_print_misses_the_protocol(
     entries = [e for e in server.audit_entries() if e["command"] == "mcp.serve"]
     calls = [e["args"] for e in entries if "tool" in e["args"]]  # type: ignore[operator]
     assert calls == [
-        {"tool": "drop-db", "arguments": {"target": "db1"}},
-        {"tool": "drop-db", "arguments": {"target": "missing"}},
+        {"tool": "drop-db", "arguments": {"target": "db1"}, "confirm_destructive": True},
+        {"tool": "drop-db", "arguments": {"target": "missing"}, "confirm_destructive": True},
     ]
+
+
+@pytest.mark.parametrize("confirm", [None, False])
+def test_an_unconfirmed_destructive_tool_is_refused_and_never_runs(
+    server: Server, confirm: bool | None
+) -> None:
+    server.initialize()
+    arguments: dict[str, object] = {"target": "db1"}
+    if confirm is not None:
+        arguments["confirm_destructive"] = confirm
+    called = _result(server.request("tools/call", {"name": "drop-db", "arguments": arguments}))
+    assert called["isError"] is True
+    body = called["structuredContent"]
+    assert isinstance(body, dict)
+    assert body["error"]["code"] == "CONFIRMATION_REQUIRED"
+    assert body["meta"]["exit_code"] == 2
+    assert body["error"]["context"] == {"tool": "drop-db", "flag": "confirm-destructive"}
+    assert server.close() == 0
+    assert "previewing" not in server.stderr()  # the handler never ran
 
 
 @pytest.mark.parametrize(
@@ -185,6 +209,40 @@ def test_an_invalid_input_schema_is_refused_before_serving() -> None:
     code, out, envelope = _serve(_app([broken]))
     assert code == 4 and out == ""
     assert envelope["error"]["code"] == "MCP_TOOL_INVALID"  # type: ignore[index]
+
+
+def test_a_destructive_tool_defining_confirm_destructive_is_refused() -> None:
+    schema = {"type": "object", "properties": {"confirm_destructive": {"type": "boolean"}}}
+    clash = _tool("wipe", danger_level="destructive", input_schema=schema)
+    code, out, envelope = _serve(_app([clash]))
+    assert code == 4 and out == ""
+    assert envelope["error"]["code"] == "MCP_TOOL_INVALID"  # type: ignore[index]
+    assert "confirm_destructive" in envelope["error"]["message"]  # type: ignore[index]
+    # A safe tool may name its own field so
+    assert _serve(_app([_tool("keep", input_schema=schema)]), ["--list-tools"])[0] == 0
+
+
+def test_a_destructive_call_needs_a_boolean_confirmation() -> None:
+    from treaty._mcp_serve import provided_tools
+
+    app = _app([_tool("wipe", danger_level="destructive")])
+    ctxs: list[Ctx] = []
+
+    @app.command("grab", description="Grab the ctx", danger_level="safe", exit_codes=())
+    def grab(args: Start, ctx: Ctx) -> dict[str, int]:
+        ctxs.append(ctx)
+        return {}
+
+    app.call("grab", {})
+    assert app.mcp is not None
+    wipe = provided_tools(app, app.mcp, Start(), ctxs[0])["wipe"]
+    loose = app._call_provided(wipe, {"text": "a", "confirm_destructive": "yes"}, env={})
+    assert loose.exit_code == 2 and loose.error is not None
+    assert loose.error.context["field"] == "confirm_destructive"
+    refused = app._call_provided(wipe, {"text": "a"}, env={})
+    assert refused.error is not None and refused.error.code == "CONFIRMATION_REQUIRED"
+    applied = app._call_provided(wipe, {"text": "a", "confirm_destructive": True}, env={})
+    assert applied.ok and applied.data == {"said": "a"}
 
 
 def test_two_provided_tools_of_one_name_are_refused() -> None:
