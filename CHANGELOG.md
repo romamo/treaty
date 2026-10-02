@@ -21,6 +21,14 @@ Apps built on treaty keep their own, structured schema changelog with
   command without an `id_field`, which answers in its default instead of exiting `2`, as
   for another command's own format; `--format id` there still exits `2`, and neither its
   `--help` nor its shell completion offers it (#216)
+### Fixed
+
+- The `declared-exits` audit rule follows a method called on a parameter annotated with
+  the args class or a resource class, such as `store.load()`, and the methods it calls on
+  its own `self`, so the tutorial's `STORE_CORRUPT`, raised in `Store.load`, is found when
+  a command does not declare it, instead of failing only at run time as
+  `UNDECLARED_EXIT_CODE`. A method on an object of unknown class is still not followed
+  (#218)
 
 ## [1.0.0rc14] - 2026-10-02
 

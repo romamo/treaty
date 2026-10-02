@@ -3323,8 +3323,9 @@ def _scope(app: App) -> str:
     return (
         "source rules read each handler, the functions of its module it calls, and those "
         f"of its other first-party modules{named} {FOLLOW_DEPTH} calls deep; calls on "
-        "objects, callbacks, and other distributions are not followed, so a pass here is "
-        f"not a runtime check{skipped}"
+        "objects (but for declared-exits, the args' and resources' methods), callbacks, "
+        "and other distributions are not followed, so a pass here is not a runtime "
+        f"check{skipped}"
     )
 
 

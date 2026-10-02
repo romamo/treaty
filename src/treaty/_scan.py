@@ -570,10 +570,15 @@ def _reach(fn: Callable[..., object], receivers: Receivers) -> tuple[Reached, ..
     found = [Reached(fn)]
     # A method is read once per class it is called on: its self.calls resolve there
     seen: set[tuple[int, type | None]] = {(id(fn), None)}
-    queue = collections.deque([(found[0], 0, dict(receivers))])
+    queue: collections.deque[tuple[Reached, int, dict[str, type]]] = collections.deque(
+        [(found[0], 0, dict(receivers))]
+    )
     while queue:
         unit, depth, typed = queue.popleft()
-        callees = [(t, {}) for t in _callees(unit.fn)] + _method_callees(unit.fn, typed)
+        callees: list[tuple[types.FunctionType, dict[str, type]]] = [
+            (t, {}) for t in _callees(unit.fn)
+        ]
+        callees += _method_callees(unit.fn, typed)
         for target, bound in callees:
             key = (id(target), next(iter(bound.values()), None))
             if key in seen:

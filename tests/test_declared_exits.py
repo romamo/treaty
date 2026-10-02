@@ -7,12 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import treaty
+from examples.tutorial import todo_exit_codes
 from treaty import App, CliExit, Ctx, Exit, Flag, NoArgs
 from treaty import Exit as Bail
 from treaty._audit import Finding, audit
 from treaty._values import ExitCodeName
-
-from examples.tutorial import todo_exit_codes
 
 HERE = Path(__file__).name
 
