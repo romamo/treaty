@@ -45,7 +45,9 @@ Apps built on treaty keep their own, structured schema changelog with
   `output_file=` is `output_file: "envelope"` in the manifest, as its `--output` file holds
   the envelope, not `"formatted"`. `treaty changelog-add` no longer records an upgrade to
   this manifest as breaking for a passthrough command's flags, now listed before its path,
-  or an object flag's new `object` type, which takes the same argv token (#231)
+  or an object flag's new `object` type, which takes the same argv token. A secret field
+  that shares a secret setting's `<APP>_<NAME>` no longer repeats it in the command's
+  `secret_env_vars`, as the root `secret_env_vars` lists it (#231)
 
 ## [1.0.0rc18] - 2026-10-02
 

@@ -731,6 +731,16 @@ def build_manifest(
                     *effects,
                     {"path": audit_log_path, "type": "log"},
                 ]
+    # ManifestResponse 3.13: a command's secrets are the root ones plus its own, so a name
+    # the root lists, such as a secret setting's that a secret field shares, is not repeated
+    for entry in entries.values():
+        own = entry.get("secret_env_vars")
+        if isinstance(own, list) and secret_env_vars:
+            kept = [name for name in own if name not in secret_env_vars]
+            if kept:
+                entry["secret_env_vars"] = kept
+            else:
+                del entry["secret_env_vars"]
     # Everything an agent caches: a new global flag or shared code must change the etag
     shape: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,

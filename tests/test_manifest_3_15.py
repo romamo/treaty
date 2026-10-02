@@ -295,6 +295,27 @@ def test_3_13_tool_wide_secrets_and_ecosystem_names(manifest: dict[str, Any]) ->
     assert not secrets & set(manifest["secret_env_vars"])
 
 
+@dataclass(frozen=True, slots=True)
+class KeyArgs:
+    api_key: str = Flag(default="", description="API key for this call", secret=True)
+    token: str = Flag(default="", description="Upload token", secret=True)
+
+
+def test_3_13_a_root_secret_is_in_no_commands_secret_env_vars() -> None:
+    """A secret field named as a secret setting reads the same <APP>_<NAME>, which the root
+    already lists for every command"""
+    app = App("ledger", version="1.0.0", settings=Settings)
+
+    @app.command("push", description="Push", danger_level="safe", exit_codes=())
+    def push(args: KeyArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    built = app.manifest()
+    spec_validator("manifest-response").validate(built)
+    assert built["secret_env_vars"] == ["LEDGER_API_KEY", "LEDGER_KEY"]
+    assert built["commands"]["push"]["secret_env_vars"] == ["LEDGER_TOKEN"]
+
+
 def test_3_13_an_app_without_a_secret_setting_has_no_root_secrets() -> None:
     app = App("plain", version="1.0.0")
     assert "secret_env_vars" not in app.manifest()
