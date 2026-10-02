@@ -37,6 +37,14 @@ Apps built on treaty keep their own, structured schema changelog with
   command, and an `app.format` or `FormatRenderer` media type for `plain` or `tsv` other
   than the spec's, are now a `RegistrationError` (#231)
 
+### Fixed
+
+- A `stdin_records=` command ends its input at REQ-O-004's `{"_summary": true, ...}` line
+  after bare records, as the manifest's `stdin` mode `records` tells an agent to feed it,
+  instead of failing that line with `RECORD_INVALID`. A passthrough command that also sets
+  `output_file=` is `output_file: "envelope"` in the manifest, as its `--output` file holds
+  the envelope, not `"formatted"` (#231)
+
 ## [1.0.0rc18] - 2026-10-02
 
 The eighteenth 1.0 release candidate: 1 change and 1 fix.
