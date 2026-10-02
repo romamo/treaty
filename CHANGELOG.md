@@ -10,6 +10,19 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `SideEffect(path, "output")` declares a location a command writes as its product, such
+  as a rendered dashboard under `{project_root}/tmp/dashboard/`, including its default when
+  `--output` is absent; a per-call `--output` path stays declared by `output_file=`. The
+  manifest emits `type: "output"` (ManifestResponse 3.10), `status --show-side-effects`
+  lists it with its size, and `cleanup` never removes it under any `--scope`: nor a
+  `temp`, `cache`, or `log` path, or a handed-out output file, that is the output path,
+  holds it, or lies inside it (`CLEANUP_KEPT`). `ttl_seconds` or `clearable_with` on an
+  `output` side effect is a `RegistrationError`. A `safe` command whose only writes are
+  `cache`, `log`, `temp`, or `output` paths stays `safe` and passes the `fs-side-effects`
+  audit rule, whose fix now names the `output` kind too (#184)
+
 ## [1.0.0rc16] - 2026-10-02
 
 The sixteenth 1.0 release candidate: 1 fix.

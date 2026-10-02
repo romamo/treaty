@@ -175,6 +175,7 @@ class SideEffectType(StrEnum):
     TEMP = "temp"
     CREDENTIAL = "credential"
     CONFIG = "config"
+    OUTPUT = "output"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,8 +187,12 @@ class SideEffect:
     working directory when ``cleanup`` and ``status`` run; ``{name}`` placeholders and
     ``*`` match any one path segment, so ``"/tmp/tool-{session}/"`` covers every session.
     ``type`` is
-    ``cache``, ``log``, ``temp``, ``credential``, or ``config``; ``cleanup`` removes the
-    ``temp``, ``cache``, and ``log`` ones, and ``status`` lists them all.
+    ``cache``, ``log``, ``temp``, ``credential``, ``config``, or ``output``; ``cleanup``
+    removes the ``temp``, ``cache``, and ``log`` ones, and ``status`` lists them all.
+    ``output`` is a location the command writes as its product, such as a rendered
+    dashboard, including its default when ``--output`` is absent: ``cleanup`` never
+    removes it, and it takes no ``ttl_seconds`` or ``clearable_with``. A per-call
+    ``--output`` path is declared by ``output_file=``, not here.
     ``clearable_with`` is the invocation that removes it, such as ``"tool cache clear"``,
     checked to name a command when the manifest is built.
     """
@@ -229,6 +234,14 @@ class SideEffect:
             isinstance(self.clearable_with, str) and self.clearable_with.strip()
         ):
             raise RegistrationError(f"{where}: clearable_with is an invocation of this tool")
+        if self.type == SideEffectType.OUTPUT and (
+            self.ttl_seconds is not None or self.clearable_with is not None
+        ):
+            # A product neither goes stale nor is the framework's to clear (REQ-C-011)
+            raise RegistrationError(
+                f"{where}: an output side effect is the command's product, which cleanup "
+                "never removes, so it takes no ttl_seconds or clearable_with"
+            )
 
     @property
     def kind(self) -> SideEffectType:

@@ -23,7 +23,7 @@ concurrency:
 
 env:
   # The spec commit treaty is verified against; tests find it as the sibling checkout
-  SPEC_REF: 2939540811fd92ee64ea4c43ecfc1657e84cbcb0
+  SPEC_REF: 930a1111303c1ff320bf19438c02d803069b39f0
 
 jobs:
   lint:

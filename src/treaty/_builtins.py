@@ -173,8 +173,9 @@ SCOPES: dict[str, frozenset[SideEffectType]] = {
     "cache": frozenset({SideEffectType.CACHE}),
     "logs": frozenset({SideEffectType.LOG}),
 }
-"""What ``cleanup --scope`` removes; ``credential`` and ``config`` paths never (REQ-O-027)"""
-KEPT = frozenset({SideEffectType.CREDENTIAL, SideEffectType.CONFIG})
+"""What ``cleanup --scope`` removes; ``credential``, ``config``, and ``output`` paths never
+(REQ-O-027)"""
+KEPT = frozenset({SideEffectType.CREDENTIAL, SideEffectType.CONFIG, SideEffectType.OUTPUT})
 """Paths ``cleanup`` never removes, even when a wider glob or a directory covers them"""
 
 
@@ -278,11 +279,17 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
     files commands handed out, and the caches (REQ-C-011, REQ-F-043, REQ-O-018)"""
     found: dict[str, SideEffectType] = {}
     kept: list[Path] = []
+    products: list[Path] = []
     every = list(declared(app, ctx.env.get("HOME"), ctx.cwd))
     _warn_unresolved(ctx, unresolved(app, every), "left in place; run cleanup inside it")
     for item in every:
         if item.effect.kind in KEPT:
-            kept.extend(Path(m) for m in item.matches)
+            # Both where it is and, through a symlink, what it is: two spellings of one
+            # directory, such as /tmp and /private/tmp on macOS, must not slip past
+            spots = [s for m in item.matches for s in (_located(m), Path(m).resolve())]
+            kept.extend(spots)
+            if item.effect.kind is SideEffectType.OUTPUT:
+                products.extend(spots)
         else:
             found.update(dict.fromkeys(item.matches, item.effect.kind))
     if ctx._session is not None:
@@ -294,15 +301,28 @@ def inventory(app: App, ctx: Ctx) -> list[tuple[str, SideEffectType]]:
         where = None if command.cache is None else cache_dir(app.name, command_path.value, ctx.env)
         if where is not None and where.exists():
             found[str(where)] = SideEffectType.CACHE  # wherever XDG_CACHE_HOME put it
-    # REQ-O-027: a path another glob also declares, or a directory holding one, stays
-    held = sorted(p for p in found if any(k.is_relative_to(p) for k in kept))
+    # REQ-O-027: a path another glob also declares, or a directory holding one, stays;
+    # so does anything inside an output path, which is part of the command's product
+    held = sorted(
+        p
+        for p in found
+        if any(k.is_relative_to(_located(p)) for k in kept)
+        or any(_located(p).is_relative_to(k) for k in products)
+    )
     if held:
         ctx.warn(
             "CLEANUP_KEPT",
-            f"{len(held)} paths are or hold a credential or config path; left in place",
+            f"{len(held)} paths are or hold a credential, config, or output path; left in place",
             paths=held,
         )
     return sorted((p, kind) for p, kind in found.items() if p not in held)
+
+
+def _located(path: str) -> Path:
+    """Where ``path`` is, its directory resolved and the last segment kept: what cleanup
+    removes, a symlink as the link itself"""
+    where = Path(path)
+    return where.parent.resolve() / where.name
 
 
 @dataclass(frozen=True, slots=True)
