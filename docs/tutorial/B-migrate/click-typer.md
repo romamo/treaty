@@ -822,7 +822,7 @@ Delete the shim and `exec_fallback` once every command is on treaty.
 | `nargs=-1` | `list[str]` argument | `tuple[str, ...] = Arg(...)` |
 | `"-a", "--all"` | `typer.Option("--all", "-a")` | `Flag(short="a", ...)` |
 | `help=` | `help=` | `description=`, required on every command and field |
-| `envvar="TODO_X"` | `envvar="TODO_X"` | a field of `App(settings=...)`, read from `TODO_X` and config files |
+| `envvar="TODO_X"` | `envvar="TODO_X"` | a field of `App(settings=...)`, read from `TODO_X` and config files; a name outside the prefix, such as `envvar="FEED_URL"`, stays read with `Flag(env=("FEED_URL",))` on the field or on one command's flag, after `TODO_<NAME>` ([Settings](../../../README.md#settings)) |
 | `hide_input=True`, `password_option` | `hide_input=True` | `secret=True`: `--x-from-env`, `--x-from-file`, or `TODO_X` |
 | `@click.pass_obj`, `ctx.obj` | `@app.callback()`, `ctx.obj` | a `kw_only` base dataclass, read by a resource |
 | `@click.version_option` | a `--version` callback | built in, from `App(version=...)` |
@@ -845,6 +845,9 @@ It keeps typer's signatures, so the table above applies; these rows cover what i
 
 | agentyper | treaty | Note |
 | --- | --- | --- |
+| `Option(..., envvar="BEANCOUNT_FILE")` | a settings field, `file: Path \| None = Flag(default=None, description=..., env=("BEANCOUNT_FILE",))` | `bean` reads `BEAN_FILE` first, then `BEANCOUNT_FILE`, so users keep the variable they set, and `--show-config` reports `env:BEANCOUNT_FILE`; a flag of one command takes the same `env=`, and `EnvName("BEANCOUNT_FILE", deprecated=Deprecated("1.4.0"))` keeps reading it with a warning to move to `BEAN_FILE` ([Settings](../../../README.md#settings), [Secrets](../../../README.md#secrets)) |
+| `--format table` (rich) | `--format plain`, the default at a terminal | a list of flat objects, such as a `list[Row]` result, prints as an aligned table with numbers right-aligned, and `Out(table=False)` leaves a field out of it; a single object, or a list whose objects nest a value, stays `key: value` lines. `--format table` exits 2 unless `app.format("table", render=...)` registers it ([Output formats](../../../README.md#output-formats)) |
+| JSON-string options (`--postings '[...]'`) | `postings: tuple[Posting, ...] = Flag(default=(), description=...)`, with `Posting` a frozen dataclass | on argv each `--postings` takes one JSON object, repeated for a list, and a JSON array in one value exits 2; `exec` lines, `--raw-payload`, `app.call(...)`, and MCP carry the array, as in `{"_cmd": "add", "postings": [{"account": "cash", "number": "12.30"}]}`. Each field is checked like a flag, and an error names its place, such as `postings[1].number` ([Object arguments](../../../README.md#object-arguments)) |
 | `--fields` implemented by the app | built in (`--fields` is reserved) | delete the app's code; the output matches |
 | `exec` with `_cmd` and `_opts` | the built-in `exec` | the same line shape, so existing JSONL plans keep working; `App(exec_fallback=)` runs the lines of commands not yet migrated |
 | `@app.command(mutating=True)` | `danger_level="mutating"`, and an `effect` in the output | |
@@ -865,6 +868,9 @@ Migration is a breaking change for callers. Put this list in your release notes:
   every field that takes free text, such as a body or a message, `multiline=True`
 - A command that read a file or `-` for stdin takes the file as `--input-file PATH` and
   otherwise reads its stdin
+- An option taking a list of objects as one JSON array, such as `--postings '[...]'`, is
+  repeated instead, one JSON object per flag; `exec` lines, `--raw-payload`, and MCP still
+  take the array
 - A config file of the CLI's own moves to the one treaty reads
   ([Read settings and secrets](../core/config.md#a-command-that-writes-the-config-file))
 - Output is JSON whenever stdout is not a terminal; scripts that grepped the old text should
