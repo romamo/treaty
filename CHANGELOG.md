@@ -10,6 +10,18 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- `--debug` with a `logging.handlers.QueueListener` whose handler writes to `sys.stdout`
+  no longer floods stderr (#268): the listener's thread wrote each `stdout write` trace
+  record back to stdout, which traced it again, tens of thousands of lines a second. A
+  write made while a handler emits one of treaty's own trace records now goes to stderr
+  as written, on any thread; the record's own text is still traced once, redacted
+- As the process exits with a handler thread abandoned at its timeout still alive, the
+  last flush of `sys.stdout` no longer risks blocking the exit (#268): descriptor 1 is
+  then a pipe whose reader stops as the interpreter finalizes, and on Windows its 4 KiB
+  buffer could not hold the flush. The pipe now holds 1 MiB on Windows and Linux
+
 ## [1.0.0rc24] - 2026-10-03
 
 The 24th 1.0 release candidate: 4 fixes.
