@@ -258,6 +258,7 @@ from ._redact import (
     line_fragments,
     redacted,
     scrub,
+    scrub_fields,
     secret_name,
 )
 from ._resources import Resolver, refuse_async
@@ -3916,10 +3917,7 @@ class _Run:
                 parameters["confirm_destructive"] = True
         if command is None and self.fallback is not None:
             redact = self._fallback_redactor(self.fallback)
-            parameters = {
-                key: scrub(key, value, redact)
-                for key, value in _fallback_payload(self.fallback).items()
-            }
+            parameters = scrub_fields(_fallback_payload(self.fallback), redact)
         if command is not None and command.passthrough:
             # Raw argv, which treaty cannot tell secrets in, is never logged (#35)
             parameters[ARGV_KEY] = OMITTED
@@ -4355,7 +4353,7 @@ class _Run:
     ) -> None:
         """A JSON object in JSON and NDJSON mode, ``message key=value`` otherwise, with the
         trace"""
-        safe = {k: scrub(k, json_safe(v), redact) for k, v in fields.items()}
+        safe = scrub_fields({k: json_safe(v) for k, v in fields.items()}, redact)
         if mode in MACHINE:
             record = {"level": level.value, "message": redact(message), "fields": safe}
             if self.trace_id is not None:
@@ -4517,8 +4515,8 @@ class _Run:
     def _shown_warnings(self) -> tuple[WarningDetail, ...]:
         """``warnings`` as every envelope carries them: each ``message`` and context
         string redacted of the secret values of every attached run and live handler
-        thread, as ``error.message`` is (#162). Keys stay: stdout is not redacted by
-        field name (REQ-F-034)"""
+        thread, as ``error.message`` is (#162), and so is a key holding one (#262). A key
+        is never masked for its name: stdout is not redacted by field name (REQ-F-034)"""
         source = self.warnings
         key = (source, self.current, self.args, self.token, self.settings)
         cached = self._shown
@@ -6317,7 +6315,7 @@ class _Run:
             # a cancellation cancels
             result = user_code(lambda: fallback(cmd, payload), passing=_HANDLER_SIGNALS)
         except ParseError as exc:
-            context = {k: scrub(k, v, redact) for k, v in exc.context.items()}
+            context = scrub_fields(exc.context, redact)
             refused = ParseError(
                 redact(exc.message), context=context, suggestion=exc.suggestion, code=exc.code
             )
@@ -6327,7 +6325,7 @@ class _Run:
         except KeyboardInterrupt:
             return self._cancelled(request.path, CancelSignal("SIGINT", 130), started, meta)
         except InputRequired as exc:
-            context = {k: scrub(k, v, redact) for k, v in exc.context.items()}
+            context = scrub_fields(exc.context, redact)
             needed = InputRequired(
                 exc.code,
                 redact(exc.message),
