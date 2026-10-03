@@ -39,6 +39,17 @@ Apps built on treaty keep their own, structured schema changelog with
   neither a resource nor the settings fails naming the parameter: `RegistrationError`
   for the provider when the `App` is built, `MCP_TOOL_INVALID` for a handler before
   serving. Providers and handlers needing nothing after `ctx` run as before (#302)
+- `App(config_root_flag=, config_root_env=)` puts the project config file in a project
+  directory instead of the working directory, for an app whose commands take one (#303).
+  A command with a `Path` argument of the `config_root_flag` name, such as `"project"`,
+  reads `<project>/.<app>.toml` when it is given: `--project`, an exec line's or MCP
+  call's `project`, an `McpServe(bind=)` value, or the argument's `Flag(env=)`. Else the
+  directory the `config_root_env` variable names, such as `CLOUDFALL_PROJECT`, else the
+  cwd as before. A relative directory resolves against the cwd, and a relative `Path`
+  setting in the relocated file against its directory; one that does not exist exits 2.
+  `meta.config_sources`, `--show-config`, `status`, and `config_write_scope="local"`
+  writes use the file actually read; `--config` and `<APP>_CONFIG` still replace it, and
+  `--show-config`, answering before any command's arguments, follows only the variable
 
 ## [1.0.0rc32] - 2026-10-03
 

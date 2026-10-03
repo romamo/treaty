@@ -52,6 +52,7 @@ from ._auth import (
     Expired,
     expired,
     insufficient,
+    is_env_var_name,
     names,
     not_logged_in,
     scope_set,
@@ -138,8 +139,8 @@ from ._errors import (
 )
 from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy, SideEffects
 from ._fix import command_problem, fix_problem
-from ._flags import Arg, Flag
-from ._framework import framework_collisions
+from ._flags import Arg, FieldInfo, Flag
+from ._framework import RESERVED_GLOBAL, framework_collisions
 from ._help import declared_env_rows, env_readers, global_rows, render_command, render_root
 from ._http import Http, NetworkFailure, ProxyConfig
 from ._idempotency import (
@@ -286,6 +287,7 @@ from ._settings import (
     ConfigOptions,
     Resolved,
     SettingsSpec,
+    config_root,
     plain_settings_env,
     settings_env_taken,
 )
@@ -457,6 +459,37 @@ def _no_id(command: Command) -> ParseError:
     )
 
 
+_FLAG_NAME = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
+
+
+def _config_root(app_name: str, flag: str | None, var: str | None) -> tuple[str | None, str | None]:
+    """``App(config_root_flag=, config_root_env=)`` checked: the flag in its ``--`` spelling,
+    which a field ``project_dir`` has as ``project-dir`` (#303)"""
+    if flag is not None:
+        spelled = flag.replace("_", "-") if isinstance(flag, str) else ""
+        if not _FLAG_NAME.fullmatch(spelled):
+            raise RegistrationError(
+                f"App {app_name}: config_root_flag is the name of a command's Path argument, "
+                f"such as 'project', not {flag!r}"
+            )
+        if spelled in RESERVED_GLOBAL:
+            raise RegistrationError(
+                f"App {app_name}: config_root_flag {flag!r} is treaty's own --{spelled}"
+            )
+        flag = spelled
+    if var is not None:
+        if not isinstance(var, str) or not is_env_var_name(var):
+            raise RegistrationError(
+                f"App {app_name}: config_root_env is an environment variable name, such as "
+                f"'CLOUDFALL_PROJECT', not {var!r}"
+            )
+        if var in {app_var(app_name, v.key) for v in KNOWN}:
+            raise RegistrationError(
+                f"App {app_name}: config_root_env {var} is a variable treaty reads itself"
+            )
+    return flag, var
+
+
 class App:
     def __init__(
         self,
@@ -483,6 +516,8 @@ class App:
         schema_changelog: str | Path | None = None,
         exec_fallback: ExecFallback | None = None,
         mcp: McpServe | None = None,
+        config_root_flag: str | None = None,
+        config_root_env: str | None = None,
     ) -> None:
         """``version`` is semver, or a PEP 440 release such as ``importlib.metadata.version``
         returns, ``a``, ``b``, ``rc``, ``.post``, and ``.dev`` parts included; ``--version``
@@ -521,7 +556,17 @@ class App:
         from a handler, any other exception exit 1 ``FALLBACK_FAILED``; without it, such a
         line is ``UNKNOWN_COMMAND``. ``mcp``, a ``treaty.McpServe``, adds the ``mcp
         serve`` built-in: the app's commands as MCP tools over stdio, with startup flags
-        of the app's own (#239).
+        of the app's own (#239). ``config_root_flag`` and ``config_root_env`` move the
+        project config file ``.<app>.toml`` from the working directory to a project
+        directory, for an app whose commands take one (#303): a command with a ``Path``
+        argument of the ``config_root_flag`` name, such as ``"project"``, reads
+        ``<project>/.<app>.toml`` when it is given (``--project``, an exec line's or MCP
+        call's ``project``, an ``McpServe(bind=)`` value, or its ``Flag(env=)``); else the
+        directory the ``config_root_env`` variable names, such as ``"CLOUDFALL_PROJECT"``;
+        else the cwd. A relative directory resolves against the cwd, one that does not
+        exist exits 2, and ``--config`` still replaces the files. ``--show-config`` answers
+        before a command's arguments are read, so it shows the variable's directory or the
+        cwd's.
 
         ``doctor``, ``cleanup``, ``status``, ``changelog``, ``generate-skills``,
         ``mcp-validate``, ``audit-log``, and ``completion`` are built-ins that yield: an app
@@ -596,6 +641,9 @@ class App:
         if mcp is not None and not isinstance(mcp, McpServe):
             raise RegistrationError(f"App {name}: mcp is a treaty.McpServe, or None")
         self.mcp = mcp
+        self.config_root_flag, self.config_root_env = _config_root(
+            name, config_root_flag, config_root_env
+        )
         self.changelog = (
             () if self.schema_changelog is None else load_changelog(self.schema_changelog, name)
         )
@@ -1461,7 +1509,31 @@ class App:
             problems = self._named_commands(command)
             if problems:
                 raise RegistrationError(f"{path}: {problems[0]}")
+            root = self._config_root_field(command)
+            if root is not None and not (root.classified.path and root.classified.item is None):
+                raise RegistrationError(
+                    f"{path}: --{root.flag} names the project directory "
+                    f"(App(config_root_flag={self.config_root_flag!r})), so it is a Path"
+                )
+        var = self.config_root_env
+        if var is not None and self.settings is not None:
+            for f in self.settings.fields:
+                if var in (app_var(self.name, f.name), *(n.name for n in f.env)):
+                    raise RegistrationError(
+                        f"App {self.name}: config_root_env {var} is read for setting {f.name}"
+                    )
         self._fixes_checked = True
+
+    def _names_config_root(self, path: str) -> bool:
+        """Whether the command at ``path`` has the ``App(config_root_flag=)`` argument"""
+        command = next((c for p, c in self._commands.items() if p.value == path), None)
+        return command is not None and self._config_root_field(command) is not None
+
+    def _config_root_field(self, command: Command) -> FieldInfo | None:
+        """The command's argument naming the project directory its config file is in,
+        ``App(config_root_flag=)``, if it has one (#303)"""
+        flag = self.config_root_flag
+        return None if flag is None else command.field_by_flag(flag)
 
     def _declare_serve_exits(self, names: Sequence[str]) -> None:
         """``McpServe(exit_codes=)`` names app codes, which ``app.exit_code`` registers after
@@ -1996,8 +2068,9 @@ class App:
 
     def _settings_env_vars(self) -> list[dict[str, object]]:
         """Root ``env_vars`` entries of the settings (ManifestResponse 3.5): each plain
-        setting's ``<APP>_<NAME>``, then the names it declares. A secret setting is left
-        out, since root ``env_vars`` holds no secret: the root ``secret_env_vars`` lists it"""
+        setting's ``<APP>_<NAME>``, then the names it declares, then
+        ``App(config_root_env=)``. A secret setting is left out, since root ``env_vars``
+        holds no secret: the root ``secret_env_vars`` lists it"""
         entries: list[dict[str, object]] = []
         for f in () if self.settings is None else self.settings.fields:
             if f.secret:
@@ -2012,6 +2085,8 @@ class App:
                 if n.deprecated is not None:
                     entry["deprecated"] = True
                 entries.append(entry)
+        if self.config_root_env is not None:
+            entries.append({"name": self.config_root_env, "description": self._config_root_text})
         return entries
 
     def _settings_secret_env_vars(self) -> list[str]:
@@ -2035,6 +2110,8 @@ class App:
                 own = app_var(self.name, f.name)
                 rows.append((own, f"Setting {f.name}, over the config files"))
                 rows += [(n.name, declared_text(n, f"Setting {f.name}", own, own)) for n in f.env]
+        if self.config_root_env is not None:
+            rows.append((self.config_root_env, self._config_root_text))
         commands = sorted(self._commands.items(), key=lambda kv: kv[0].value)
         readers = env_readers(self._commands, self._builtins)
         secrets = {
@@ -2047,7 +2124,14 @@ class App:
         for _, c in commands:
             for var, _, text in declared_env_rows(c, readers):
                 secrets.setdefault(var, text)  # flags of several commands may share one
-        return rows + sorted(secrets.items())
+        # The project argument's own variable may be App(config_root_env=): listed once
+        root = self.config_root_env
+        return rows + sorted((var, text) for var, text in secrets.items() if var != root)
+
+    @property
+    def _config_root_text(self) -> str:
+        """What ``App(config_root_env=)`` sets, for the manifest and help (#303)"""
+        return f"Project directory whose .{self.name}.toml is the project config file"
 
     def _effective_timeout(self, command: Command, override: Timeout | None) -> Timeout:
         if override is not None:
@@ -2189,6 +2273,9 @@ class App:
                 run.load_settings(config_options(self.name, environ))
             except ParseError as exc:
                 deferred = exc
+                # A command naming its project directory reads another file (#303)
+                if self._names_config_root(path):
+                    run.config_pending, deferred = exc, None
         if deferred is not None and not _answers_over(deferred, path):
             return run.settle(run.arg_error(deferred, meta={"_cmd": path}))
         run.attach_logging(call=True)
@@ -2229,6 +2316,7 @@ class App:
         run.current = command
         try:
             invocation = build_from_mapping(command, arguments, environ, bound=bound)
+            run.relocate(command, invocation)
         except ParseError as exc:
             return run.arg_error(exc, meta={**meta, **_mode_meta(command)})
         except ArgsCrashed as exc:
@@ -2406,6 +2494,7 @@ class App:
         # REQ-F-068: help, version, and the schema answer even over a bad TOOL_TRACE_ID or
         # an invalid config layer, which only what runs a command reports
         config_error = run.env_error
+        settings_error = False
         if config_error is None:
             try:
                 run.load_settings(
@@ -2419,7 +2508,7 @@ class App:
                     )
                 )
             except ParseError as exc:
-                config_error = exc
+                config_error, settings_error = exc, True
         run.check_update(mode, skip=globals_.no_update_check)
         if globals_.show_config:
             if config_error is not None:
@@ -2480,7 +2569,11 @@ class App:
         if run.delegating and not command.passthrough:
             run.wire = Wire(run.out, None if run.payload_stdin is None else run.stdin)
         if config_error is not None and not _answers_over(config_error, command.path.value):
-            return run.emit(mode, run.arg_error(config_error, meta=_mode_meta(command)))
+            if not settings_error or self._config_root_field(command) is None:
+                return run.emit(mode, run.arg_error(config_error, meta=_mode_meta(command)))
+            # Reported once the arguments are read, unless they name another project
+            # directory, whose file is read instead (#303)
+            run.config_pending = config_error
         # Installed before the arguments are read: --flag - waits on stdin (REQ-O-006)
         with cancellation_handlers(out) as cancellation:
             run.cancellation = cancellation
@@ -2508,6 +2601,7 @@ class App:
                 return run.emit(Format.JSON, run.arg_error(refused, meta=_mode_meta(command)))
             try:
                 invocation = run.based(command, run.rooted(command, invocation))
+                run.relocate(command, invocation)
             except ParseError as exc:
                 return run.emit(mode, run.arg_error(exc, meta=_mode_meta(command)))
             except ArgsCrashed as exc:
@@ -3844,7 +3938,15 @@ class _Run:
         self.config_file: ConfigFile | None = None
         """The config file the command that runs now may write"""
         self.settings: Resolved = EMPTY_SETTINGS
-        """The run's settings and their sources, read once before routing (REQ-F-028)"""
+        """The run's settings and their sources, read once before routing (REQ-F-028),
+        and again for a command naming another project directory (#303)"""
+        self.config_base: ConfigOptions | None = None
+        """The options read before routing, before a command's project directory"""
+        self.relocated = False
+        """The settings are a command's project directory's, not the run's own"""
+        self.config_pending: ParseError | None = None
+        """Why the settings read before routing failed, for a command that may name
+        another project directory: ``relocate`` raises it unless it does (#303)"""
         self.timestamp = utc_timestamp()
         self.cwd = logical_cwd(env)
         self.trace_id: str | None = None
@@ -4313,6 +4415,7 @@ class _Run:
             page=page,
             token=invocation.token,
             _config_file=self.config_file if command.config_write_scope is not None else None,
+            _project_config=self.project_config(),
             trace_id=self.trace_id,
             project_root=self.project_root(command),
             _retrier=self.retrier,
@@ -4494,8 +4597,10 @@ class _Run:
     def load_settings(self, options: ConfigOptions) -> None:
         """Read the settings layers once for the run; ``CONFIG_INVALID`` stops it"""
         app = self.app
+        if self.config_base is None:
+            self.config_base = options
         self.settings = resolve_settings(
-            app.settings, app.name, options, self.env, self.cwd, app.scalars
+            app.settings, app.name, self._rooted_options(options), self.env, self.cwd, app.scalars
         )
         trace(
             "config resolved",
@@ -4504,6 +4609,56 @@ class _Run:
             context=self.settings.context,
             sources=dict(self.settings.sources),
         )
+
+    def _rooted_options(self, options: ConfigOptions) -> ConfigOptions:
+        """``options`` with the project directory ``App(config_root_env=)`` names, when
+        no command argument named one (#303)"""
+        var = self.app.config_root_env
+        if options.root is not None or var is None or not (raw := self.env.get(var)):
+            return options
+        return dataclasses.replace(options, root=config_root(raw, var, self.cwd))
+
+    def project_config(self) -> Path:
+        """The run's project file: ``.<app>.toml`` in the cwd, or in the project directory
+        ``App(config_root_flag=, config_root_env=)`` named (#303)"""
+        root = self.settings.options.root
+        return local_config(self.app.name, self.cwd if root is None else root)
+
+    def relocate(self, command: Command, invocation: Invocation) -> None:
+        """Read the settings again when the command's ``App(config_root_flag=)`` argument,
+        given, names another project directory than they were read for; an exec line
+        without one returns to the run's own (#303)"""
+        pending, self.config_pending = self.config_pending, None
+        base = self.config_base
+        root = self._named_root(command, invocation)
+        if base is not None and root is not None:
+            self.relocated = True
+            options = dataclasses.replace(base, root=root)
+            if self._rooted_options(options) != self.settings.options:
+                self.load_settings(options)
+        elif pending is not None:
+            raise pending
+        else:
+            self.restore_settings()
+
+    def restore_settings(self) -> None:
+        """Return to the run's own settings after a command's project directory's: each
+        exec line starts from them, so a line that fails before its arguments are read,
+        or names no command, reports no other line's project file (#303)"""
+        if self.relocated and self.config_base is not None:
+            self.relocated = False
+            self.load_settings(self.config_base)
+
+    def _named_root(self, command: Command, invocation: Invocation) -> Path | None:
+        """The project directory the command's ``App(config_root_flag=)`` argument names,
+        when given on the command line, in the payload, or by its ``Flag(env=)``"""
+        field = self.app._config_root_field(command)
+        if field is None or not ({field.name} & (invocation.given | invocation.env_sources.keys())):
+            return None
+        value = getattr(invocation.args, field.name)
+        if not isinstance(value, Path):
+            return None
+        return config_root(str(value), f"--{field.flag}", self.cwd)
 
     def provided(self) -> dict[type, object]:
         """What a handler may ask for by type without a resource: the settings"""
@@ -5247,7 +5402,7 @@ class _Run:
             # REQ-O-024: --config is the one file this run reads and writes
             return ConfigFile(self.cwd / chosen.config, False, self._warn)
         if not invocation.global_config:
-            return ConfigFile(local_config(self.app.name, self.cwd), False, self._warn)
+            return ConfigFile(self.project_config(), False, self._warn)
         path = user_config(self.app.name, self.env, chosen.instance_id)
         if path is None:
             return self._state_error(
@@ -7451,6 +7606,7 @@ class _Run:
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:
+                self.restore_settings()  # the previous line's project directory's (#303)
                 request = parse_dispatch_line(line, line_no)
             except ParseError as exc:
                 yield (
@@ -7534,4 +7690,6 @@ class _Run:
                     context={"line": line_no, "_cmd": command.path.value},
                 )
             mapping[switch.name] = True
-        return self.rooted(command, build_from_mapping(command, mapping, self.env))
+        invocation = self.rooted(command, build_from_mapping(command, mapping, self.env))
+        self.relocate(command, invocation)
+        return invocation
