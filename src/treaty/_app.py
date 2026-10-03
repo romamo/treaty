@@ -293,10 +293,12 @@ from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
 from ._stdout import (
     TEXT_CAP,
+    TEXT_HELD,
     LineBuffer,
     hold_open_while,
     intercept_stdout,
     prose,
+    quote,
     redact_with,
 )
 from ._stdout import active as active_interceptor
@@ -2726,6 +2728,8 @@ class _StrayStdout(io.TextIOBase):
         """Colors (SGR) stay on stderr, as on a ``ctx.log`` line; every other escape goes"""
         self._bytes = 0
         self._text = ""
+        self._cut = False
+        """``_text`` is what ``TEXT_HELD`` kept of more"""
         self._held = ""
         """The unfinished escape the last write ended with, until the next completes it"""
         self._held_at = ""
@@ -2782,9 +2786,12 @@ class _StrayStdout(io.TextIOBase):
             self._bytes += len(text.encode("utf-8", "surrogatepass"))
             # As printed: the envelope cleans the warning's copy as it cleans its other
             # text, and redacts it whole. Redacted as it arrives too: the text may be
-            # another run's, whose secrets are only known while that run is attached
-            if len(self._text) < TEXT_CAP:
-                self._text += self._redact(text)[: TEXT_CAP - len(self._text)]
+            # another run's, whose secrets are only known while that run is attached. Kept
+            # past TEXT_CAP, to be redacted whole before the warning cuts it (#274)
+            room = TEXT_HELD - len(self._text)
+            shown = self._redact(text) if room > 0 else text
+            self._cut = self._cut or len(shown) > room
+            self._text += shown[: max(room, 0)]
             where = self._held_at or f"{caller.f_code.co_filename}:{caller.f_lineno}"
             text = self._held + text
             cut = open_escape(text)
@@ -2847,12 +2854,12 @@ class _StrayStdout(io.TextIOBase):
             return
         self._err.flush()
 
-    def take(self) -> tuple[str, int]:
-        """The text, cut to ``TEXT_CAP`` characters, and the bytes written since the last
-        call"""
+    def take(self) -> tuple[str, int, bool]:
+        """The text, cut to ``TEXT_HELD`` characters, the bytes written since the last
+        call, and whether the text was cut"""
         self.release()
-        taken = (self._text, self._bytes)
-        self._text, self._bytes = "", 0
+        taken = (self._text, self._bytes, self._cut)
+        self._text, self._bytes, self._cut = "", 0, False
         return taken
 
 
@@ -3936,20 +3943,22 @@ class _Run:
     def _reported_stray(self, envelope: Envelope) -> Envelope:
         """``envelope`` with a ``THIRD_PARTY_STDOUT`` warning holding what was printed to
         stdout since the last envelope, when anything was"""
-        text, written = ("", 0) if self.stray is None else self.stray.take()
+        redact = self._redact_everywhere
+        printed, written, cut = ("", 0, False) if self.stray is None else self.stray.take()
+        # REQ-F-060: JSON printed by mistake is not reported, so it is never seen twice.
+        # Each text redacted whole before the cap cuts it, which may split a secret (#274)
+        shown = quote(prose(printed), redact, cut=cut)
         below = active_interceptor()
         if below is not None:
             caught, count = below.take(self._redaction_kept())
+            cut = count > TEXT_HELD
             if caught.strip():
                 # REQ-F-060: a child's or C code's write reached descriptor 1 directly
-                trace("stdout write", source="descriptor 1", text=caught.rstrip("\r\n"))
-            text, written = (text + caught)[:TEXT_CAP], written + count
-        # REQ-F-060: JSON printed by mistake is not reported, so it is never seen twice
-        text = prose(text)
-        if written and text.strip():
-            # Redacted as printed, and again clean, as the envelope has it: a secret an
-            # escape splits is whole then (#105)
-            shown = self._redact_everywhere(str(clean(self._redact_everywhere(text))))
+                traced = quote(caught, redact, cut=cut)
+                trace("stdout write", source="descriptor 1", text=traced.rstrip("\r\n"))
+            shown, written = shown + quote(prose(caught), redact, cut=cut), written + count
+        shown = shown[:TEXT_CAP]
+        if written and shown.strip():
             warning = WarningDetail(
                 "THIRD_PARTY_STDOUT",
                 "Third-party code wrote to stdout; the text is in this warning instead",
