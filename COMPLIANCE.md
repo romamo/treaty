@@ -17,7 +17,9 @@ The spec has no tagged release yet: this assessment is against the spec commit C
 as `SPEC_REF` (`019247f`, the merge of the spec's PR #21 after its 1.9.0 release), and the
 1.0 tag will name the spec release it conforms to. The manifest rows, the passthrough and
 `--output` departures, and the requirement list were re-checked against `930a111`
-(ManifestResponse 3.15), which retires REQ-F-026 into REQ-O-030 and adds REQ-C-031.
+(ManifestResponse 3.15), which retires REQ-F-026 into REQ-O-030 and adds REQ-C-031, and
+CI now pins `b0fc1f3`, the merge of the spec's PR #52: a boolean given as false is not
+present in REQ-C-026's rules, while `if_value: false` matches it.
 1.0 claims Level 2; the Level 3 score below is published, not claimed (15-D3).
 
 Each requirement was checked against its acceptance criteria by reading the source and

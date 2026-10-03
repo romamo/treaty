@@ -26,7 +26,9 @@ from ._types import FlagType
 
 @dataclass(frozen=True, slots=True)
 class RequiredWhen:
-    """When ``--flag`` has ``value``, every flag in ``then`` is required"""
+    """When ``--flag`` has ``value``, every flag in ``then`` is required. The caller's
+    value is compared, so a boolean ``value=False`` matches an explicit ``--no-flag`` (or
+    ``false`` in a payload) and not a flag left out"""
 
     flag: str
     value: object
@@ -94,15 +96,21 @@ class BoundRule:
         """Every field the rule names, the first one first"""
         return (self.field, *self.others)
 
+    @property
+    def when(self) -> str:
+        """A ``RequiredWhen`` trigger as argv spells it: ``--layout csv``, ``--x``, ``--no-x``"""
+        if self.json_value is True:  # a boolean switch takes no value on argv
+            return f"--{self.field.flag}"
+        if self.json_value is False:  # an explicit false is the negated switch
+            return f"--no-{self.field.flag}"
+        return f"--{self.field.flag} {_spelled(self.json_value)}"
+
     def describe(self) -> str:
         """The rule as a sentence, for ``--help`` and the MCP tool description"""
         names = [f"--{f.flag}" for f in self.others]
         match self.rule:
             case RequiredWhen():
-                when = f"--{self.field.flag}"
-                if self.json_value is not True:  # a boolean switch takes no value on argv
-                    when += f" {_spelled(self.json_value)}"
-                return f"{when} requires {_listed(names, 'and')}"
+                return f"{self.when} requires {_listed(names, 'and')}"
             case Excludes():
                 return f"--{self.field.flag} excludes {_listed(names, 'and')}"
             case DefaultWhenAbsent():
@@ -292,6 +300,13 @@ def _present(field: FieldInfo, values: Mapping[str, object]) -> bool:
     return values[field.name] is True if field.flag_type is FlagType.BOOLEAN else True
 
 
+def _supplied(field: FieldInfo, values: Mapping[str, object]) -> bool:
+    """Given by the caller with a value, an explicit false included: ``if_value`` compares
+    what was supplied, so ``RequiredWhen("x", False, ...)`` matches ``--no-x`` (or
+    ``"x": false``) and not a flag left out (cli-agent-spec#52)"""
+    return field.name in values and values[field.name] is not None
+
+
 def check_rules(
     rules: Sequence[BoundRule], values: dict[str, object], failed: set[str]
 ) -> list[ParseError]:
@@ -307,13 +322,13 @@ def check_rules(
             continue
         match rule:
             case RequiredWhen():
-                if not _present(field, values) or values[field.name] != bound.value:
+                if not _supplied(field, values) or values[field.name] != bound.value:
                     continue
                 for other in bound.others:
                     if not _present(other, values) and other.flag not in failed:
                         errors.append(
                             ParseError(
-                                f"--{field.flag} {bound.json_value} requires --{other.flag}",
+                                f"{bound.when} requires --{other.flag}",
                                 context={"flag": other.flag, "rule": bound.to_json()},
                                 suggestion=f"add --{other.flag}, or change --{field.flag}",
                             )

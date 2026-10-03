@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- A `RequiredWhen` rule on a boolean with `False`, the manifest's `if_value: false`, now
+  fires on an explicit false (#241): `--no-x`, or `"x": false` in `--raw-payload`, `exec`,
+  and `App.call`. It compared the value only once the flag was present, and a boolean is
+  present only when true, so the rule never fired. A left-out flag still does not trigger
+  it, as cli-agent-spec#52 settles. Its error and `--help` line read `--no-x requires
+  --y`, and CI pins the spec at that change
+
 ## [1.0.0rc27] - 2026-10-03
 
 The 27th 1.0 release candidate: 1 fix.
