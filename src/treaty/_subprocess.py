@@ -157,7 +157,8 @@ def shell_string_prohibited(value: object) -> CliExit:
         ExitCodeName("GENERAL_ERROR"),
         "A program was given as one shell string; treaty never runs a shell",
         code="SHELL_STRING_PROHIBITED",
-        context={"argv": str(value)[:200]},
+        # Whole: the envelope redacts it, and a cut first could split a secret (#274)
+        context={"argv": str(value)},
         fix_required="pass an argument list such as ['git', 'log', '-1'] (REQ-F-062)",
     )
 

@@ -917,7 +917,7 @@ def test_a_stdout_stand_in_that_outlives_its_run_still_works() -> None:
     flushed = first.flushes
     old.flush()
     assert first.flushes == flushed + 1  # an open stderr is still flushed
-    assert old.take() == ("late\nlater\n", len("late\nlater\n"))  # still counted
+    assert old.take() == ("late\nlater\n", len("late\nlater\n"), False)  # still counted
     first.close()
     old.flush()  # its stderr is gone: nothing to flush into, and no error
     old.close()

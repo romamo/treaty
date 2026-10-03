@@ -18,6 +18,15 @@ Apps built on treaty keep their own, structured schema changelog with
   a spool file and passes what reaches it on to stderr, redacted, as the last held thread
   ends or at the interpreter's last flush; once no held thread lives, descriptor 1 is
   stdout again. It never leads to stdout while one does
+### Fixed
+
+- A declared secret that the `THIRD_PARTY_STDOUT` warning's 4096-character cut split no
+  longer leaves its first part in the warning, its `-vv` trace, or stderr (#274): the
+  printed text was cut before it was redacted, so the secret was no longer whole. The
+  text is now kept past the cut, redacted whole, and only then cut; where even that text
+  was cut, its end, which may hold the start of a secret, goes first.
+  `SHELL_STRING_PROHIBITED` quotes the shell string whole in `context.argv`, rather than
+  its first 200 characters, for the same reason
 
 ## [1.0.0rc25] - 2026-10-03
 

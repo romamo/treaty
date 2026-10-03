@@ -37,11 +37,11 @@ import threading
 import uuid
 from collections.abc import Callable
 
-from ._envelope import open_escape, strip_escapes, terminal_text
+from ._envelope import clean, open_escape, strip_escapes, terminal_text
 from ._mode import color_allowed
 
 TEXT_CAP = 4096
-"""Bytes of captured text a ``THIRD_PARTY_STDOUT`` warning carries"""
+"""Characters of captured text a ``THIRD_PARTY_STDOUT`` warning carries"""
 SYNC_SECONDS = 2.0
 """The longest an envelope waits for text still in the pipe"""
 LINE_CAP = 65536
@@ -49,6 +49,10 @@ LINE_CAP = 65536
 LINE_TAIL = 4096
 """Characters a line past ``LINE_CAP`` keeps back: a secret up to one more that the cut
 splits is still whole for the next read"""
+TEXT_HELD = 4 * (TEXT_CAP + LINE_TAIL)
+"""Bytes, or characters, of captured text kept for a ``THIRD_PARTY_STDOUT`` warning: it is
+redacted before it is cut to ``TEXT_CAP`` (#274), so a secret up to ``LINE_TAIL``
+characters the cap splits is whole when redacted, even in four-byte characters"""
 PIPE_BYTES = 1 << 20
 """The pipe's buffer where it can be set, Windows and Linux. As the interpreter finalizes,
 the reader, a daemon thread, stops for good while a held thread keeps descriptor 1 a pipe
@@ -174,7 +178,7 @@ class Interceptor:
         self._thread.start()
 
     def take(self, redact: Callable[[str], str] | None = None) -> tuple[str, int]:
-        """The text (cut to ``TEXT_CAP`` bytes, Windows line endings as ``\\n``) and the byte
+        """The text (cut to ``TEXT_HELD`` bytes, Windows line endings as ``\\n``) and the byte
         count that reached descriptor 1 since the last call, once everything written before
         this call arrived; ``redact`` as ``sync`` has it"""
         if not self.sync(redact):
@@ -183,7 +187,7 @@ class Interceptor:
             text, count = bytes(self._text), self._bytes
             self._text.clear()
             self._bytes = 0
-        # Cut at TEXT_CAP bytes, the last character may be split: dropped, not replaced
+        # Cut at TEXT_HELD bytes, the last character may be split: dropped, not replaced
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         decoded = decoder.decode(text, final=count <= len(text))
         return decoded.replace("\r\n", "\n"), count
@@ -368,7 +372,7 @@ class Interceptor:
         self._show(text[:cut])
         with self._cond:
             self._bytes += len(data)
-            self._text += data[: max(TEXT_CAP - len(self._text), 0)]
+            self._text += data[: max(TEXT_HELD - len(self._text), 0)]
 
     def _release(self, *, final: bool = False) -> None:
         """An unfinished escape and line still held, cleaned and redacted as they stand;
@@ -554,6 +558,22 @@ def active() -> Interceptor | None:
     """The installed interceptor, while it is"""
     found = _active
     return None if found is None or found._closed else found
+
+
+def quote(text: str, redact: Callable[[str], str], *, cut: bool) -> str:
+    """Captured ``text`` as a ``THIRD_PARTY_STDOUT`` warning quotes it, redacted, then clean,
+    and redacted again, as the envelope has it: a secret an escape splits is whole then
+    (#105). Redacted before any cut to ``TEXT_CAP`` (#274), so a secret the cap splits is
+    whole when redacted. With ``cut``, ``text`` is what ``TEXT_HELD`` kept of more, and may
+    end in part of a secret, which no redaction finds: the end it shares with ``text``, up
+    to ``LINE_TAIL`` characters, goes, rather than reach the cap as redactions before it
+    shrink the text"""
+    shown = redact(str(clean(redact(text))))
+    if not cut:
+        return shown
+    plain = str(clean(text))
+    same = os.path.commonprefix([shown[-LINE_TAIL:][::-1], plain[-LINE_TAIL:][::-1]])
+    return shown[: len(shown) - len(same)]
 
 
 def prose(text: str) -> str:
