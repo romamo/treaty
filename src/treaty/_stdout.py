@@ -16,6 +16,12 @@ time: a secret split across two writes, or two reads of the pipe, is whole by th
 its line. What a line has without its end waits for the end, a carriage return too, for
 the next envelope, or for the run's end; past ``LINE_CAP`` it is passed on redacted but for
 its last ``LINE_TAIL`` characters.
+
+As the process exits with a handler thread abandoned at its timeout still alive,
+descriptor 1 stays off stdout, for that thread may still write a secret (#263). The reader
+is a daemon thread and stops for good as the interpreter finalizes, so treaty's exit hook
+turns descriptor 1 to a spool file and drains it itself (#271): as the last such thread
+ends, when descriptor 1 is stdout again, or at the interpreter's last flush.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ import contextlib
 import json
 import os
 import sys
+import tempfile
 import threading
 import uuid
 from collections.abc import Callable
@@ -69,6 +76,23 @@ def _pipe() -> tuple[int, int]:
         with contextlib.suppress(PermissionError):
             fcntl.fcntl(write, fcntl.F_SETPIPE_SZ, PIPE_BYTES)
     return read, write
+
+
+def _spool() -> tuple[int, int]:
+    """A file that stands in for the pipe once the reader stops at exit (#271): its write
+    descriptor, appending, and a read descriptor of its own, so reading it never moves
+    where a write lands. Unlike a pipe, a write to it never blocks for want of a reader.
+    It is gone from the disk once both are closed, at the latest as the process exits"""
+    made, path = tempfile.mkstemp(prefix="treaty-stdout-")
+    os.close(made)
+    # Windows: deleted as the last handle closes, each open sharing the delete
+    gone = getattr(os, "O_TEMPORARY", 0)
+    binary = getattr(os, "O_BINARY", 0)
+    write = os.open(path, os.O_WRONLY | os.O_APPEND | gone | binary)
+    read = os.open(path, os.O_RDONLY | gone | binary)
+    if not gone:
+        os.unlink(path)
+    return write, read
 
 
 def _unchanged(text: str) -> str:
@@ -140,9 +164,14 @@ class Interceptor:
         """Held while descriptor 1 changes, and while ``take`` writes its marker to it: a
         marker sent as ``pause`` or ``resume`` switches would reach stdout. The reader
         never takes it, so a marker blocked on a full pipe cannot deadlock"""
+        self._order = threading.Lock()
+        """Held while what was read is passed on, by the reader a read at a time and by a
+        ``drain`` of the spool: one line buffer, one decoder"""
+        self._spool: int | None = None
+        """The read descriptor of the file descriptor 1 writes to once ``retire`` stopped
+        the reader at exit, a held handler thread still alive (#271)"""
         self._thread = threading.Thread(target=self._pump, name="treaty-stdout", daemon=True)
         self._thread.start()
-        atexit.register(self.close)
 
     def take(self, redact: Callable[[str], str] | None = None) -> tuple[str, int]:
         """The text (cut to ``TEXT_CAP`` bytes, Windows line endings as ``\\n``) and the byte
@@ -170,8 +199,17 @@ class Interceptor:
             with self._cond:
                 if self._closed or self._pipe is not None:
                     return False  # paused: a marker would reach stdout
+                spooled = self._spool is not None
+                if spooled and redact is not None:
+                    # Retired at exit: kept until the process is gone, for what is still
+                    # on its way, in a stuck reader's pipe or in a write to the spool
+                    self._lingering = (*self._lingering, (sys.maxsize, redact))
                 target = self._synced + 1
-            os.write(1, self._marker)  # below PIPE_BUF, so no other write splits it
+            if not spooled:
+                os.write(1, self._marker)  # below PIPE_BUF, so no other write splits it
+        if spooled:
+            self._drain()
+            return True
         with self._cond:
             synced = self._cond.wait_for(lambda: self._synced >= target, timeout=SYNC_SECONDS)
             if not synced and redact is not None:
@@ -219,39 +257,99 @@ class Interceptor:
             if not _held():
                 settle()
             return
-        os.dup2(self.saved, 1)  # the pipe's last write end: the reader sees its end
-        self._thread.join(SYNC_SECONDS)
+        # The pipe's last write end, the reader sees its end; or the spool's, once retired
+        os.dup2(self.saved, 1)
+        if self._spool is not None:
+            # Retired: the reader is gone, what the spool holds goes out here
+            self._drain(final=True, close=True)
+        else:
+            self._thread.join(SYNC_SECONDS)
         os.close(self.saved)
+
+    def retire(self) -> None:
+        """At exit, a held handler thread still alive (#271): descriptor 1 turns from the
+        pipe to a spool file, so what is written to it no longer needs the reader, a
+        daemon thread that stops for good as the interpreter finalizes and would lose what
+        it had not passed on. The reader passes on what the pipe still holds and ends;
+        what reaches the spool after is passed on, redacted, by ``drain``: as a held
+        thread ends, at ``close`` once the last one did, and at ``finish``, the
+        interpreter's last flush. Descriptor 1 never leads to stdout while a held thread
+        lives"""
+        with self._switch:
+            with self._cond:
+                if self._closed or self._spool is not None or self._pipe is not None:
+                    return
+            write, read = _spool()
+            with self._cond:
+                self._spool = read
+            os.dup2(write, 1)  # the pipe's last write end: the reader sees its end
+            os.close(write)
+        self._thread.join(SYNC_SECONDS)
+
+    def finish(self) -> None:
+        """What reached the spool since ``retire``, ``sys.__stdout__``'s buffer too, passed
+        on to stderr redacted: called as the interpreter flushes the standard streams one
+        last time, after every atexit hook, when no held thread can run Python any more"""
+        with self._cond:
+            if self._closed or self._spool is None:
+                return
+        dunder = sys.__stdout__
+        if dunder is not None and not dunder.closed:
+            dunder.flush()
+        self._drain(final=True)
+
+    def _drain(self, *, final: bool = False, close: bool = False) -> None:
+        """What the spool holds, read to its end and passed on as the reader would, its
+        unfinished line too; with ``close``, the spool is closed after. Past
+        ``SYNC_SECONDS`` waiting for a reader that still passes on what the pipe held,
+        stuck on a full stderr, it gives up: the exit is never blocked for it"""
+        if not self._order.acquire(timeout=SYNC_SECONDS):
+            return
+        try:
+            spool = self._spool
+            if spool is None:
+                return
+            while chunk := os.read(spool, 65536):
+                self._pass_on(chunk)
+            self._release(final=final)
+            if close:
+                self._spool = None
+                os.close(spool)
+        finally:
+            self._order.release()
 
     def _pump(self) -> None:
         pending = b""
-        marker = self._marker
         while chunk := os.read(self._read, 65536):
-            pending += chunk
-            while (at := pending.find(marker)) >= 0:
-                self._pass_on(pending[:at])
-                self._release()  # what was written before the envelope is out whole
-                pending = pending[at + len(marker) :]
-                with self._cond:
-                    self._synced += 1
-                    self._lingering = tuple(
-                        held for held in self._lingering if held[0] > self._synced
-                    )
-                    self._cond.notify_all()
-            # Hold back what may be the start of a marker still arriving
-            keep = next(
-                (
-                    n
-                    for n in range(min(len(marker) - 1, len(pending)), 0, -1)
-                    if marker.startswith(pending[-n:])
-                ),
-                0,
-            )
-            self._pass_on(pending[: len(pending) - keep])
-            pending = pending[len(pending) - keep :]
-        self._pass_on(pending)
-        self._release(final=True)
+            with self._order:
+                pending = self._pump_chunk(pending + chunk)
+        with self._order:
+            self._pass_on(pending)
+            self._release(final=True)
         os.close(self._read)
+
+    def _pump_chunk(self, pending: bytes) -> bytes:
+        """``pending`` passed on up to each marker, each marker counted; returns what may
+        be the start of a marker still arriving, held back"""
+        marker = self._marker
+        while (at := pending.find(marker)) >= 0:
+            self._pass_on(pending[:at])
+            self._release()  # what was written before the envelope is out whole
+            pending = pending[at + len(marker) :]
+            with self._cond:
+                self._synced += 1
+                self._lingering = tuple(held for held in self._lingering if held[0] > self._synced)
+                self._cond.notify_all()
+        keep = next(
+            (
+                n
+                for n in range(min(len(marker) - 1, len(pending)), 0, -1)
+                if marker.startswith(pending[-n:])
+            ),
+            0,
+        )
+        self._pass_on(pending[: len(pending) - keep])
+        return pending[len(pending) - keep :]
 
     def _pass_on(self, data: bytes) -> None:
         if not data:
@@ -417,6 +515,32 @@ def settle() -> None:
             return
         found.deferred = False
     found.close()
+
+
+def finish() -> None:
+    """The interpreter's last flush of the standard streams, past every atexit hook: what
+    descriptor 1 wrote since a held handler thread kept it from stdout at exit reaches
+    stderr, redacted, rather than nowhere (#271). A ``sys.stdout`` or ``sys.stderr``
+    stand-in calls it from its ``flush`` once the interpreter is finalizing"""
+    found = _active
+    if found is not None:
+        found.finish()
+
+
+def _at_exit() -> None:
+    """Treaty's exit hook. Registered as this module is imported, it runs after every exit
+    hook registered once treaty was imported, a host's before ``App.main()`` too:
+    descriptor 1 is stdout again, or while a held handler thread lives, a spool the
+    reader is not needed for (#271)"""
+    found = active()
+    if found is None:
+        return
+    found.close()
+    if found.deferred:
+        found.retire()
+
+
+atexit.register(_at_exit)
 
 
 def active() -> Interceptor | None:

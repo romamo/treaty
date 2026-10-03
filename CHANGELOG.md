@@ -25,6 +25,14 @@ The 25th 1.0 release candidate: 2 fixes.
   last flush of `sys.stdout` no longer risks blocking the exit (#268): descriptor 1 is
   then a pipe whose reader stops as the interpreter finalizes, and on Windows its 4 KiB
   buffer could not hold the flush. The pipe now holds 1 MiB on Windows and Linux
+- What reaches descriptor 1 as the process exits, a handler thread abandoned at its
+  timeout still alive, is no longer lost (#271): a host's exit hook that runs after
+  treaty's, or the interpreter's last flush of `sys.__stdout__`, wrote to the pipe after
+  its reader had stopped with the interpreter. Treaty's exit hook, now registered as
+  treaty is imported so it runs after every hook registered later, turns descriptor 1 to
+  a spool file and passes what reaches it on to stderr, redacted, as the last held thread
+  ends or at the interpreter's last flush; once no held thread lives, descriptor 1 is
+  stdout again. It never leads to stdout while one does
 
 ## [1.0.0rc24] - 2026-10-03
 

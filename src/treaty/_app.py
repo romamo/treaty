@@ -300,6 +300,7 @@ from ._stdout import (
     redact_with,
 )
 from ._stdout import active as active_interceptor
+from ._stdout import finish as finish_stdout
 from ._stdout import settle as settle_stdout
 from ._steps import Rollback, RollbackStatus, StepError, StepTracker
 from ._subprocess import (
@@ -3234,6 +3235,14 @@ class _LateStream:
     def writelines(self, lines: Iterable[str], /) -> None:
         for line in lines:
             self.write(line)
+
+    def flush(self) -> None:
+        self.inner.flush()
+        if sys.is_finalizing():
+            # #271: the interpreter's last flush, past every atexit hook, a held handler
+            # thread still alive, as it stands while one is: what descriptor 1 wrote since
+            # treaty's exit hook goes out redacted, the reader it had being stopped for good
+            finish_stdout()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
