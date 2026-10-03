@@ -260,6 +260,12 @@ class FieldInfo:
             return self.spec.secret
         item = self.classified.item
         public = (FlagType.BOOLEAN, FlagType.ENUM, FlagType.OBJECT)
+        if self.classified.is_map:
+            # A mapping's values carry no names of their own, so its name speaks for them,
+            # as a tuple's does: api_keys: dict[str, str] holds secrets (#299)
+            if all(v.flag_type in public for v in self.classified.values):
+                return False
+            return secret_name(self.name)
         if self.flag_type in public or (item is not None and item.flag_type in public):
             return False  # an object's own fields say which of them hold a secret
         return secret_name(self.name)

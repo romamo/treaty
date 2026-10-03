@@ -356,3 +356,34 @@ def test_a_secret_mapping_setting_is_redacted_value_by_value(tmp_path: Path) -> 
     text = out.getvalue()
     assert "sk-live-0123456789" not in text
     assert json.loads(text)["data"]["effective_config"]["api_keys"] == "[REDACTED]"
+
+
+def test_a_mapping_named_as_a_secret_is_refused_on_argv() -> None:
+    """A mapping's name speaks for its values, as a tuple's does: api_keys as a flag or an
+    object's field would carry secrets on argv, so it is refused unless secret=False"""
+
+    @dataclass(frozen=True, slots=True)
+    class Top:
+        api_keys: dict[str, str] | None = Flag(default=None, description="Keys")
+
+    with pytest.raises(RegistrationError, match="inferred a secret from its name"):
+        register(Top)
+
+    @dataclass(frozen=True, slots=True)
+    class Leg:
+        account: str
+        tokens: dict[str, str] | None = None
+
+    @dataclass(frozen=True, slots=True)
+    class Inside:
+        leg: Leg = Flag(description="Leg")
+
+    with pytest.raises(RegistrationError, match=r"leg\.tokens would be a secret inside"):
+        register(Inside)
+
+    @dataclass(frozen=True, slots=True)
+    class Public:
+        api_keys: dict[str, str] | None = Flag(default=None, description="Ids", secret=False)
+        tokens: dict[str, bool] | None = Flag(default=None, description="Switches")
+
+    register(Public)
