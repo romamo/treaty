@@ -1,4 +1,4 @@
-<!-- cli-version: 1.0.0-rc.28 -->
+<!-- cli-version: 1.0.0-rc.29 -->
 # AGENTS.md
 
 ## Installation

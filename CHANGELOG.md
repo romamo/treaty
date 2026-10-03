@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc29] - 2026-10-03
+
+The 29th 1.0 release candidate: 1 addition.
+
 ### Added
 
 - `McpServe(bind=bind)` fixes arguments of the command tools `mcp serve` serves for the
@@ -1822,7 +1826,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc28...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc29...HEAD
+[1.0.0rc29]: https://github.com/romamo/treaty/compare/v1.0.0rc28...v1.0.0rc29
 [1.0.0rc28]: https://github.com/romamo/treaty/compare/v1.0.0rc27...v1.0.0rc28
 [1.0.0rc27]: https://github.com/romamo/treaty/compare/v1.0.0rc26...v1.0.0rc27
 [1.0.0rc26]: https://github.com/romamo/treaty/compare/v1.0.0rc25...v1.0.0rc26
