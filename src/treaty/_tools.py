@@ -45,7 +45,10 @@ def tool_name(path: CommandPath) -> str:
     return path.value.replace(".", "_")
 
 
-def tool_description(command: Command) -> str:
+def tool_description(command: Command, bound: Collection[str] = ()) -> str:
+    """The command's description with what an MCP client should know; a rule naming a
+    field ``McpServe(bind=)`` fixed is left out, since the call cannot pass that field,
+    though the rule still applies to the bound value (#285)"""
     text = command.description
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         text += (
@@ -61,9 +64,10 @@ def tool_description(command: Command) -> str:
         text += f" Mutating; pass {IDEMPOTENCY_KEY} to make retries safe."
     if command.streaming:
         text += " Streams on the CLI; here every event is returned in data."
-    if command.requires:
+    described = [r for r in command.requires if all(f.key not in bound for f in r.flags)]
+    if described:
         # REQ-C-026: inputSchema has no top-level anyOf, which some MCP clients reject
-        rules = "; ".join(r.describe() for r in command.requires)
+        rules = "; ".join(r.describe() for r in described)
         text += f" Rules: {rules}."
     return text
 
@@ -141,7 +145,8 @@ def tool_entries(
     commands, whose arguments and stdout belong to another tool that no input or output
     schema describes (#35), and a command registered ``mcp=False`` (#281), in path order.
     ``served``, what ``McpServe(commands=)`` selected, keeps only those paths; None keeps
-    every one. A field ``bindings`` fixes leaves the tool's input schema (#285)"""
+    every one. A field ``bindings`` fixes leaves the tool's input schema, and a rule
+    naming it its description (#285)"""
     entries: list[ToolEntry] = []
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         if path == EXEC_PATH or (
@@ -152,12 +157,13 @@ def tool_entries(
             continue
         if served is not None and path not in served:
             continue
+        bound = bindings.for_command(command)
         entries.append(
             ToolEntry(
                 name=tool_name(path),
                 path=path,
-                description=tool_description(command),
-                input_schema=input_schema(command, bindings.for_command(command)),
+                description=tool_description(command, bound),
+                input_schema=input_schema(command, bound),
                 output_schema=output_schema(command),
                 read_only=command.danger_level is DangerLevel.SAFE,
                 destructive=command.danger_level is DangerLevel.DESTRUCTIVE,

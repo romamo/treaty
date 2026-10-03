@@ -2082,7 +2082,11 @@ variable. A name no served command tool has is refused before serving with exit 
 `MCP_BIND_UNKNOWN`; a secret field, a value its field refuses, or a value that is not
 JSON with `MCP_BIND_INVALID`. A secret is never bound: treaty reads one only from a
 variable or a file, and the server's own environment already fixes it for every call.
-Provided tools are not affected; their handlers already see the startup arguments.
+Provided tools are not affected; their handlers already see the startup arguments. A
+`requires=` rule naming a bound field is left out of the tool's description, since the call
+cannot pass the field, and still applies to the bound value. `treaty-mcp deployctl:app`
+has no startup arguments to bind from, so it refuses an app that binds with exit `4`,
+`MCP_BIND_NEEDS_SERVE`, `--list-tools` included: serve it with `deployctl mcp serve`.
 
 `deployctl mcp serve --project . --list-tools` prints the tool list (provided tools
 included, given the same startup flags) as `treaty-mcp --list-tools` does, and exits;

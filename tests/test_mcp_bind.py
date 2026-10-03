@@ -6,6 +6,7 @@ serving."""
 
 import io
 import json
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -226,6 +227,40 @@ def _run(app: App, argv: list[str]) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     code = app.run(argv, stdout=out, stderr=err, stdin=io.StringIO(), env={})
     return code, out.getvalue(), err.getvalue()
+
+
+def test_a_rule_naming_a_bound_field_leaves_the_description() -> None:
+    def audit_description(mode: str) -> str:
+        code, out, _ = _run(_bindctl(), ["mcp", "serve", "--mode", mode, "--list-tools"])
+        assert code == 0
+        tools = {t["name"]: t for t in json.loads(out)["tools"]}
+        description = tools["audit"]["description"]
+        assert isinstance(description, str)
+        return description
+
+    # Policy left to the call: the rule tells the agent what a strict audit needs
+    assert "Rules: --policy strict requires --reason." in audit_description("fleet")
+    # Policy bound: the call cannot pass it, so the rule is not described, though a call
+    # without a reason is still refused (test_a_rule_naming_a_bound_field_sees_...)
+    assert "Rules:" not in audit_description("strict")
+
+
+@pytest.mark.parametrize("extra", [[], ["--list-tools"]])
+def test_treaty_mcp_refuses_an_app_that_binds(extra: list[str]) -> None:
+    # treaty-mcp has no startup arguments to bind from: serving or listing would leave
+    # every bound field free for the call
+    done = subprocess.run(
+        [sys.executable, "-m", "treaty._mcp", "fixture_mcp_bind_app:app", *extra],
+        cwd=HERE,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 4
+    assert done.stdout == b""
+    stderr = done.stderr.decode("utf-8")
+    assert "MCP_BIND_NEEDS_SERVE" in stderr and "bindctl mcp serve" in stderr
 
 
 def test_list_tools_and_mcp_validate_show_the_bound_schemas(tmp_path: Path) -> None:

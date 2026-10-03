@@ -35,7 +35,14 @@ from ._app import App, _closed_pipe, _Run
 from ._context import Wire
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
-from ._mcp_serve import DEFAULT_INSTRUCTIONS, NO_BINDINGS, Bindings, McpServed, Provided
+from ._mcp_serve import (
+    DEFAULT_INSTRUCTIONS,
+    MCP_BIND_NEEDS_SERVE,
+    NO_BINDINGS,
+    Bindings,
+    McpServed,
+    Provided,
+)
 from ._prompt import NoPromptStdin
 from ._signals import Cancelled
 from ._subprocess import GRACE_SECONDS
@@ -502,7 +509,9 @@ class _WireOut:
 
 def main(argv: list[str] | None = None) -> int:
     """``treaty-mcp module:app``: serve that app's commands as MCP tools over stdio;
-    ``--list-tools`` prints them as JSON and exits, for ``mcp-validate`` (REQ-O-035)"""
+    ``--list-tools`` prints them as JSON and exits, for ``mcp-validate`` (REQ-O-035). An
+    app whose ``McpServe`` binds arguments is refused with exit 4, both ways: only its own
+    ``mcp serve`` has the startup arguments to bind (#285)"""
     from ._cli import load_app
 
     args = sys.argv[1:] if argv is None else argv
@@ -515,6 +524,15 @@ def main(argv: list[str] | None = None) -> int:
     except CliExit as exc:
         sys.stderr.write(f"treaty-mcp: {exc.code}: {exc.message}\n")
         return 2
+    if app.mcp is not None and app.mcp.bind is not None:
+        # treaty-mcp has no startup arguments to bind from: serving would leave the bound
+        # fields free for every call (#285)
+        sys.stderr.write(
+            f"treaty-mcp: {MCP_BIND_NEEDS_SERVE}: {app.name} binds arguments with "
+            f"McpServe(bind=), which only its own server applies; run {app.name} mcp serve "
+            "instead\n"
+        )
+        return 4
     if listing:
         sys.stdout.write(json.dumps(tool_list(app), indent=2, sort_keys=True) + "\n")
         return 0
