@@ -15,6 +15,7 @@ after 24 hours; an expired lock file is removed only while nobody holds it.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import hashlib
 import json
 import os
@@ -111,6 +112,8 @@ def _canonical(value: object, scalars: ScalarRegistry, depth: int) -> object:
         return _canonical(value.value, scalars, depth + 1)
     if isinstance(value, (Path, Decimal)):
         return str(value)
+    if isinstance(value, (dt.date, dt.time)):
+        return value.isoformat()  # a datetime keeps its offset: 09:00Z is not 09:00+02:00
     if isinstance(value, (list, tuple)):
         return [_canonical(v, scalars, depth + 1) for v in value]
     if isinstance(value, (set, frozenset)):

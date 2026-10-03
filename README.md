@@ -1375,6 +1375,24 @@ lost digits; send a string. The argument's schema is `{"type": "string", "patter
 taken as an argument would be, so `Decimal("-0")` is `0`. An app that registers
 `app.scalar(Decimal, ...)` gets its own parsing and schema instead.
 
+## Dates and times
+
+A field annotated `datetime.date` (or `date | None`, `tuple[date, ...]`, or a field of an
+object flag) reaches the handler as a `date` parsed from RFC 3339 `YYYY-MM-DD` text:
+`--since 2024-01-31`. `2024-1-31`, `20240131`, `2024-W05-3`, and a date-time exit `2`
+naming the flag, as does `2024-02-30`. A `datetime.datetime` field takes RFC 3339 text with
+an offset, `2024-01-31T09:30:00Z` or `2024-01-31T09:30:00.5+02:00`, so the handler always
+gets an aware value: a naive `2024-01-31T09:30:00`, a space for `T`, a lower-case `z`, and
+more than six fraction digits exit `2`. `exec` lines, `--raw-payload`, and MCP take the
+same text as a string; `app.call(...)` also takes a `date` or an aware `datetime`, and a
+settings file a TOML date or offset date-time (a TOML local date-time is refused). The
+argument's schema is `{"type": "string", "format": "date", "pattern":
+"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}` (`format: date-time` with its own pattern for a
+datetime), an output field's the same without `pattern`, and the manifest lists the flag as
+a `string` with that `pattern`. An app that registers `app.scalar(datetime.date, ...)` gets
+its own parsing and argument schema instead; its output schema stays `format: date`, unlike
+a `Decimal` scalar's.
+
 ## Custom scalars
 
 A domain class can annotate a field or an output attribute once the app knows how to parse

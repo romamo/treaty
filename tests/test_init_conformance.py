@@ -306,7 +306,7 @@ def test_an_app_whose_output_type_has_no_schema_fails_to_import_not_crash(tmp_pa
         "app = App('b', version='1.0.0')\n"
         "@dataclass(frozen=True, slots=True)\n"
         "class A:\n"
-        "    since: datetime.date | None = Flag(default=None, description='Since')\n"
+        "    since: datetime.timedelta | None = Flag(default=None, description='Since')\n"
         "@app.command('go', description='Go', danger_level='safe', exit_codes=())\n"
         "def go(args: A, ctx: Ctx) -> dict[str, str]:\n"
         "    return {}\n"

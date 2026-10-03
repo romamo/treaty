@@ -498,7 +498,7 @@ def test_decimal_default_must_be_finite() -> None:
         amount: Decimal = Flag(default=Decimal("NaN"), description="Amount")
 
     app = App("payctl", version="1.0.0")
-    with pytest.raises(RegistrationError, match="not a finite decimal"):
+    with pytest.raises(RegistrationError, match="not a fixed-point decimal"):
 
         @app.command("pay", description="Pay", danger_level="safe", exit_codes=())
         def pay_bad(args: Bad, ctx: Ctx) -> None: ...

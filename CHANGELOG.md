@@ -20,6 +20,16 @@ Apps built on treaty keep their own, structured schema changelog with
   same program still runs the version check. The `required-tools` audit advice names
   this form too, and a name listed twice is refused at registration. Mappings of names
   to versions work unchanged (#296)
+- `datetime.date` and `datetime.datetime` are built-in argument types, as `Decimal` is:
+  `--since 2024-01-31` reaches the handler as a `date`, and `--at 2024-01-31T09:30:00Z` as
+  an aware `datetime`, with `| None`, `tuple[...]`, and object-flag fields too. A date is
+  RFC 3339 `YYYY-MM-DD` only, so `2024-1-31`, `20240131`, and `2024-02-30` exit 2 naming
+  the flag; a datetime needs an offset, so a naive value exits 2, as a naive datetime in
+  output already fails. `exec`, `--raw-payload`, and MCP take the same text, `app.call`
+  also takes the objects, and a settings file a TOML date or offset date-time. The
+  argument schema says `format: date` or `date-time` with a `pattern` the parser holds the
+  text to; output schemas are unchanged. An app's own `app.scalar(datetime.date, ...)`
+  replaces the built-in for arguments (#297)
 
 ## [1.0.0rc32] - 2026-10-03
 

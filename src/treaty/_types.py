@@ -13,12 +13,11 @@ import types
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from decimal import Decimal
 from enum import Enum, StrEnum
 from pathlib import Path
 
 from ._errors import RegistrationError, SchemaError
-from ._scalars import DECIMAL, ScalarRegistry, ScalarSpec
+from ._scalars import BUILT_IN, ScalarRegistry, ScalarSpec
 
 if typing.TYPE_CHECKING:
     from ._flags import FieldInfo
@@ -174,9 +173,10 @@ def classify(tp: object, scalars: ScalarRegistry, objects: ObjectHook | None = N
             return Classified(_SCALARS[spec.base], optional, base, scalar=spec)
         if objects is not None and dataclasses.is_dataclass(base):
             return replace(objects(base), optional=optional)
-        if base is Decimal:
-            # Built in as fixed-point text; an app's own app.scalar(Decimal) above wins
-            return Classified(FlagType.STRING, optional, base, scalar=DECIMAL)
+        if (built := _BUILT_IN.get(base)) is not None:
+            # Decimal, date, and datetime, built in as text; an app's own app.scalar above
+            # wins. Keyed by exact class: a datetime is a date, but not a date argument
+            return Classified(FlagType.STRING, optional, base, scalar=built)
         if issubclass(base, Enum):
             members = list(base)
             if not all(isinstance(m.value, str) for m in members):
@@ -189,6 +189,9 @@ def classify(tp: object, scalars: ScalarRegistry, objects: ObjectHook | None = N
                 enum_cls=base,
             )
     raise SchemaError(f"unsupported annotation {tp!r}; register a class with app.scalar(...)")
+
+
+_BUILT_IN: dict[type, ScalarSpec] = {spec.cls: spec for spec in BUILT_IN}
 
 
 def is_dataclass_type(tp: object) -> bool:
