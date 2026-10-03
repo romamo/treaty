@@ -30,7 +30,7 @@ from typing import Any
 
 from ._adapters import OutputAdapters, branch
 from ._errors import RegistrationError
-from ._out import data_path, is_binary, out_spec
+from ._out import arrange, data_path, is_binary, out_spec, sorted_indices
 from ._redact import public_key_name, secret_field
 from ._refs import defs_of
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
@@ -122,6 +122,62 @@ def protect_batch(
     return Protected(out, tuple(walk.masked), walk.external)
 
 
+@dataclass(frozen=True, slots=True)
+class Shape:
+    """The type of a value no declaration covers, such as an exit's ``data`` (#322): the
+    declared types found in it, by the key of an object or the position of an array.
+    Anything else in it is ``object``, protected by its name and its shape."""
+
+    of: Mapping[str | int, object]
+
+
+def shape_of(value: object, adapters: OutputAdapters) -> object:
+    """What ``protect`` walks ``value``'s JSON form as: a dataclass or an output adapter's
+    type is its own; an array or an object holding one is a ``Shape``; else ``object``"""
+    kind = type(value)
+    if dataclasses.is_dataclass(kind) or adapters.for_type(kind) is not None:
+        return kind
+    pairs: list[tuple[str | int, object]]
+    if isinstance(value, (list, tuple)):
+        pairs = list(enumerate(value))
+    elif isinstance(value, Mapping):
+        # A key that is not text has no single JSON spelling to find it by
+        pairs = [(k, v) for k, v in value.items() if isinstance(k, str)]
+    else:
+        return object
+    of = {k: t for k, v in pairs if (t := shape_of(v, adapters)) is not object}
+    return Shape(of) if of else object
+
+
+def arrange_shaped(
+    value: object, tp: object, *, adapters: OutputAdapters, stable: bool
+) -> tuple[object, object]:
+    """``arrange`` ``value``, the JSON form of a value ``shape_of`` gave ``tp``, and
+    ``tp`` with its array positions following the sort: a ``Shape`` finds a dataclass
+    by its position, and sorting an undeclared array moves it (#322)"""
+    if not isinstance(tp, Shape):
+        return arrange(value, tp, adapters=adapters, stable=stable), tp
+    if isinstance(value, list):
+        pairs = [
+            arrange_shaped(v, tp.of.get(i, object), adapters=adapters, stable=stable)
+            for i, v in enumerate(value)
+        ]
+        items = [v for v, _ in pairs]
+        order = sorted_indices(items)
+        moved: dict[str | int, object] = {
+            j: pairs[i][1] for j, i in enumerate(order) if pairs[i][1] is not object
+        }
+        return [items[i] for i in order], Shape(moved) if moved else object
+    if isinstance(value, dict) and not is_binary(value):
+        arranged = {
+            k: arrange_shaped(v, tp.of.get(k, object), adapters=adapters, stable=stable)
+            for k, v in value.items()
+        }
+        of = {k: t for k, (_, t) in arranged.items() if t is not object}
+        return {k: v for k, (v, _) in arranged.items()}, Shape(of) if of else object
+    return arrange(value, object, adapters=adapters, stable=stable), object
+
+
 def tagged(data: object) -> object:
     """Trust tags at the top of ``data``, or of each object item of an array"""
     if isinstance(data, dict):
@@ -167,6 +223,18 @@ class _Walk:
         self, value: object, tp: object, path: tuple[str | int, ...], secret: bool | None
     ) -> object:
         """``secret``: True masks every string below, False none, None by shape and name"""
+        if isinstance(tp, Shape):
+            if isinstance(value, list):
+                return [
+                    self.value(v, tp.of.get(i, object), (*path, i), secret)
+                    for i, v in enumerate(value)
+                ]
+            if isinstance(value, dict):
+                return {
+                    k: self.value(v, tp.of.get(k, object), (*path, k), _by_name(k, v, secret))
+                    for k, v in value.items()
+                }
+            return self.value(value, object, path, secret)
         base, _ = strip_optional(resolve_alias(tp))
         if self.adapters.for_type(base) is not None:
             assert isinstance(base, type)

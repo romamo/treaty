@@ -444,6 +444,10 @@ class Envelope:
     _tagged: bool = field(default=False, repr=False, compare=False)
     """``data`` carries the trust tags of external content, which plain output prints as
     one line instead (#198); not part of the envelope"""
+    _data_type: object = field(default=object, repr=False, compare=False)
+    """What a failure's ``data`` is an instance of, for its ``Out`` declarations to
+    protect it (#322): the shape of an exit's data, or the output type of a preview; a
+    success's is the command's output type. Not part of the envelope"""
 
     def __post_init__(self) -> None:
         if (self.exit_code == 0) != (self.error is None):
