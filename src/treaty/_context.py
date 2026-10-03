@@ -104,6 +104,8 @@ class Ctx:
     first set variable of ``token_env_vars``; redacted from logs and tracebacks"""
     _config_file: ConfigFile | None = field(default=None, repr=False, compare=False)
     """What ``write_config`` writes; read the app's settings through ``App(settings=)``"""
+    _project_config: Path | None = field(default=None, repr=False, compare=False)
+    """The run's project config file, for ``status`` (#303)"""
     trace_id: str | None = None
     """``TOOL_TRACE_ID`` of the run, when set; children inherit it (REQ-F-025)"""
     project_root: Path | None = None

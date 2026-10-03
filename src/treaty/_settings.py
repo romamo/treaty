@@ -6,7 +6,10 @@ value found, highest precedence first:
 
 1. ``<APP>_<FIELD>`` in the environment, then the field's ``Flag(env=(...))`` names in order
 2. The config files: ``--config PATH`` alone, or else the project file ``./.<app>.toml``
-   and then the user file (``$XDG_CONFIG_HOME/<app>/config.toml``)
+   and then the user file (``$XDG_CONFIG_HOME/<app>/config.toml``). With
+   ``App(config_root_flag=, config_root_env=)`` the project file is ``.<app>.toml`` in the
+   project directory they name, and a relative path in it resolves against that directory
+   (#303)
 3. The field's default
 
 Files are TOML, or JSON for a ``--config`` path ending in ``.json``. A file may hold
@@ -218,6 +221,8 @@ class ConfigOptions:
     context: str | None = None
     no_config: bool = False
     instance_id: InstanceId | None = None
+    root: Path | None = None
+    """The absolute project directory holding the project file; None is the cwd (#303)"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +320,22 @@ def options(
     )
 
 
+def config_root(raw: str, source: str, cwd: Path) -> Path:
+    """The project directory ``raw`` names, from the flag or variable ``source``: relative
+    to the cwd, and an existing directory, else exit 2 rather than reading nothing (#303)"""
+    path = check_path(raw, source)
+    if not path.is_absolute():
+        path = cwd / path
+    if not path.is_dir():
+        what = "does not exist" if not path.exists() else "is not a directory"
+        raise ParseError(
+            f"{source} {raw!r} {what}, so its config file cannot be read",
+            context={"source": source, "value": raw, "path": str(path)},
+            suggestion=f"point {source} at an existing project directory",
+        )
+    return path
+
+
 def resolve(
     spec: SettingsSpec | None,
     app_name: str,
@@ -324,12 +345,13 @@ def resolve(
     scalars: ScalarRegistry,
 ) -> Resolved:
     """Read the layers once; a ``ParseError`` with ``CONFIG_INVALID`` names what is wrong"""
+    project = local_config(app_name, cwd if opts.root is None else opts.root)
     if opts.config is not None:
         path = opts.config if opts.config.is_absolute() else cwd / opts.config
         candidates: tuple[Path, ...] = (path,)
     else:
         user = user_config(app_name, env, opts.instance_id)
-        candidates = (local_config(app_name, cwd), *([] if user is None else [user]))
+        candidates = (project, *([] if user is None else [user]))
     if opts.no_config or spec is None:
         candidates = ()
     # A --config file that does not exist yet reads as empty: a fresh session's file,
@@ -377,15 +399,20 @@ def resolve(
         path, raw = found
         values[s.name] = _from_file(s, raw, path)
         sources[s.name] = f"file:{path}"
+    # A relative Path setting means the run's directory, --cwd included, as a flag does;
+    # one in a project file of App(config_root_flag=, config_root_env=) means its
+    # directory, which is the cwd unless they named another (#303)
+    relocated = None if opts.root is None or opts.config is not None else f"file:{project}"
     for s in spec.fields:
-        # A relative Path setting means the run's directory, --cwd included, as a flag does
         value = values[s.name]
+        base = opts.root if relocated is not None and sources[s.name] == relocated else cwd
+        assert base is not None
         if s.classified.path and isinstance(value, Path) and not value.is_absolute():
-            values[s.name] = cwd / value
+            values[s.name] = base / value
         item = s.classified.item
         if item is not None and item.path and isinstance(value, tuple):
             values[s.name] = tuple(
-                cwd / v if isinstance(v, Path) and not v.is_absolute() else v for v in value
+                base / v if isinstance(v, Path) and not v.is_absolute() else v for v in value
             )
     secrets = frozenset(s.name for s in spec.fields if s.secret)
     try:

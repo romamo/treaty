@@ -573,7 +573,8 @@ def _side_effects(app: App, ctx: Ctx) -> list[dict[str, object]]:
 def _state_files(app: App, ctx: Ctx) -> list[dict[str, object]]:
     """``status --show-state-files``: where the tool keeps state, never what it holds"""
     wanted: list[tuple[str, Path | None]] = [
-        ("project config", local_config(app.name, ctx.cwd)),
+        # Where App(config_root_flag=, config_root_env=) put it, else the cwd (#303)
+        ("project config", ctx._project_config or local_config(app.name, ctx.cwd)),
         ("user config", user_config(app.name, ctx.env)),
         ("idempotency records", state_dir(app.name, app.state_dir, ctx.env)),
     ]

@@ -1298,6 +1298,16 @@ the declared name `Deprecated(replacement=)` gives. A name is refused at registr
 is not a variable name, repeats, is the field's own `<APP>_<FIELD>`, or is read for another
 field or a framework option.
 
+An app whose commands take a project directory can keep the project file there:
+`App("cloudfall", ..., config_root_flag="project", config_root_env="CLOUDFALL_PROJECT")`.
+A command with a `Path` argument named `project` reads `<project>/.cloudfall.toml` when it
+is given (`--project`, an exec line's or MCP call's `project`, an `McpServe(bind=)` value,
+or its `Flag(env=)`), else the directory `CLOUDFALL_PROJECT` names, else the working
+directory. A relative directory resolves against the working directory, a relative `Path`
+setting in that file against the project, and a directory that does not exist exits `2`.
+`--config` still replaces the files, and `--show-config`, which answers before a command's
+arguments are read, follows only the variable.
+
 Every response carries `meta.config_sources` (the files read, highest first; `[]` when
 none) and `meta.effective_config_hash` (12 hex of the merged settings), plus
 `meta.context` and `meta.instance_id` when set. `tool --show-config` answers with

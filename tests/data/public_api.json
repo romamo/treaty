@@ -969,7 +969,9 @@
       "audit_log",
       "schema_changelog",
       "exec_fallback",
-      "mcp"
+      "mcp",
+      "config_root_flag",
+      "config_root_env"
     ],
     "App.command": [
       "path",
