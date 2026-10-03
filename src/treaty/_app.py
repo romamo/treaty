@@ -3343,25 +3343,27 @@ def _drain_late(threads: Sequence[threading.Thread]) -> None:
         stream.drain(threads)
 
 
-def _settle_streams() -> None:
+def _settle_streams(*, call: bool = False) -> None:
     with _guard_lock:
-        _settle_streams_locked()
+        _settle_streams_locked(call=call)
     settle_stdout()
 
 
-def _settle_streams_locked() -> None:
+def _settle_streams_locked(*, call: bool = False) -> None:
     """Wrap ``sys.stdout`` and ``sys.stderr`` in a ``_LateStream`` while an ``App.call``
     runs or a handler thread whose run detached lives, and unwrap them once neither does.
-    ``sys.stdout`` waits while a run's guard holds it, whose stand-in redacts already. A
-    stream the host replaced in between is its own: it is left as it is, and a wrapper
-    the host kept passes every write through. The caller holds ``_guard_lock``."""
+    ``sys.stdout`` waits while a run's guard holds it, whose stand-in redacts already.
+    ``call``, as an ``App.call`` starts: a stream the host put in place while a wrapper
+    stood is wrapped in turn, since the call's threads print to it (#300). A stream the
+    host replaced in between is otherwise its own: it is left as it is, and a wrapper the
+    host kept passes every write through. The caller holds ``_guard_lock``."""
     global _late_out, _late_err
     if any(_RECORDS.threads):
-        if _late_err is None and sys.stderr is not None:
-            _late_err = _LateStream(sys.stderr, stdout=False)
+        if (_late_err is None or call) and sys.stderr is not None:
+            _late_err = _late_over(sys.stderr, stdout=False)
             sys.stderr = cast(TextIO, _late_err)
-        if _late_out is None and not _guarded and sys.stdout is not None:
-            _late_out = _LateStream(sys.stdout, stdout=True)
+        if (_late_out is None or call) and not _guarded and sys.stdout is not None:
+            _late_out = _late_over(sys.stdout, stdout=True)
             sys.stdout = cast(TextIO, _late_out)
         return
     if _late_err is not None:
@@ -3372,6 +3374,14 @@ def _settle_streams_locked() -> None:
         if sys.stdout is cast(TextIO, _late_out):
             sys.stdout = _late_out.inner
         _late_out = None
+
+
+def _late_over(stream: TextIO, *, stdout: bool) -> _LateStream:
+    """``stream`` when it is a late stream already, or a new one over it: a stream the host
+    put in place while a handler thread whose run detached lived, such as a capture"""
+    if isinstance(stream, _LateStream) and stream._stdout == stdout:
+        return stream
+    return _LateStream(stream, stdout=stdout)
 
 
 def _on_descriptor_1(stream: TextIO) -> bool:
@@ -4596,7 +4606,7 @@ class _Run:
         caller = threading.current_thread() if call else None
         _RECORDS.attach(self._log_record, self._redact_now, lowest, caller)
         if call:
-            _settle_streams()
+            _settle_streams(call=True)
 
     def detach_logging(self) -> None:
         if not self._logging:

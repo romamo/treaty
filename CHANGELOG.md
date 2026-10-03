@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- An `App.call` made while a handler abandoned at its timeout still lives redacts what it
+  prints into a `sys.stdout` or `sys.stderr` the host put in place since the first call,
+  such as a capture (#300). The wrapper the first call left standing no longer keeps the
+  next call from wrapping the host's stream, so a secret the call's handler printed went
+  out to it in clear
+
 ## [1.0.0rc30] - 2026-10-03
 
 The 30th 1.0 release candidate: 2 fixes.

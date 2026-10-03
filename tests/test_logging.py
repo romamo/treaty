@@ -623,6 +623,63 @@ def test_a_handler_that_prints_after_its_run_returned_leaks_no_secret(
     assert f"other {TOKEN}" in proc.stderr.splitlines(), proc.stderr
 
 
+SWAPPED_CALL_SCRIPT = """\
+import io, sys, threading
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description='API token', secret=True)
+finish = threading.Event()
+workers = []
+app = App('libctl', version='1.0.0')
+@app.command('slow', description='Outlive its timeout', timeout=0.05, danger_level='safe',
+             exit_codes=())
+def slow(args: Login, ctx: Ctx) -> dict[str, bool]:
+    workers.append(threading.current_thread())
+    finish.wait(timeout=10)
+    return {{'ok': True}}
+@app.command('leak', description='Print the token', danger_level='safe', exit_codes=())
+def leak(args: Login, ctx: Ctx) -> dict[str, bool]:
+    print('out', args.api_token)
+    sys.stderr.write('err ' + args.api_token + '\\n')
+    return {{'ok': True}}
+env = {{'LIBCTL_API_TOKEN': {token!r}, 'LIBCTL_AUDIT_LOG': '0'}}
+before = (sys.stdout, sys.stderr)
+print(app.call('slow', {{}}, env=env).error.code)
+out, err = io.StringIO(), io.StringIO()
+sys.stdout, sys.stderr = out, err  # a capture, put in place while the handler lives
+print(app.call('leak', {{}}, env=env).ok, file=before[0])
+finish.set()
+workers[0].join(timeout=10)
+sys.stdout, sys.stderr = before
+print(repr(out.getvalue()), repr(err.getvalue()))
+"""
+
+
+def test_a_call_after_a_timed_out_one_redacts_a_stream_the_host_put_in_place() -> None:
+    """While a handler abandoned at its timeout lives, the host replaces ``sys.stdout`` and
+    ``sys.stderr``, as a capture does: the next call's prints into them are redacted, not
+    passed through because a wrapper from the first call still stands (#300). A
+    subprocess, since pytest captures the standard streams"""
+    script = SWAPPED_CALL_SCRIPT.format(token=TOKEN)
+    env = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == [
+        "TIMEOUT",
+        "True",
+        "'out [REDACTED]\\n' 'err [REDACTED]\\n'",
+    ], proc.stdout
+
+
 LATE_MAIN_SCRIPT = """\
 import atexit, sys, threading
 from dataclasses import dataclass
