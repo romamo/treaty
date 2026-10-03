@@ -4637,9 +4637,16 @@ class _Run:
                 self.load_settings(options)
         elif pending is not None:
             raise pending
-        elif self.relocated and base is not None:
+        else:
+            self.restore_settings()
+
+    def restore_settings(self) -> None:
+        """Return to the run's own settings after a command's project directory's: each
+        exec line starts from them, so a line that fails before its arguments are read,
+        or names no command, reports no other line's project file (#303)"""
+        if self.relocated and self.config_base is not None:
             self.relocated = False
-            self.load_settings(base)
+            self.load_settings(self.config_base)
 
     def _named_root(self, command: Command, invocation: Invocation) -> Path | None:
         """The project directory the command's ``App(config_root_flag=)`` argument names,
@@ -7598,6 +7605,7 @@ class _Run:
             started = time.perf_counter()
             meta: dict[str, object] = {"_line": line_no}
             try:
+                self.restore_settings()  # the previous line's project directory's (#303)
                 request = parse_dispatch_line(line, line_no)
             except ParseError as exc:
                 yield (

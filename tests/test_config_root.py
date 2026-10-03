@@ -273,6 +273,21 @@ def test_each_exec_line_reads_its_own_project(tree: tuple[Path, Path], tmp_path:
     assert regions == ["fleet", "cwd", "other", "cwd", 2]
 
 
+def test_a_line_naming_no_command_reports_no_other_lines_project(
+    tree: tuple[Path, Path],
+) -> None:
+    """A line that fails before its arguments are read starts from the run's own file"""
+    cwd, fleet = tree
+    lines = [{"_cmd": "audit", "project": str(fleet)}, {"_cmd": "nope"}]
+    stdin = io.StringIO("".join(json.dumps(line) + "\n" for line in lines))
+    out = io.StringIO()
+    app = make_app(**ROOT)
+    app.run(["--cwd", str(cwd), "exec"], stdin=stdin, stdout=out, stderr=io.StringIO(), env={})
+    first, second = (json.loads(line) for line in out.getvalue().splitlines())
+    assert first["meta"]["config_sources"] == [str(fleet / ".fleet.toml")]
+    assert not second["ok"] and second["meta"]["config_sources"] == [str(cwd / ".fleet.toml")]
+
+
 def test_the_variable_is_listed_with_the_apps_environment() -> None:
     app = make_app(**ROOT)
     assert "FLEET_PROJECT" in dict(app.environment())
