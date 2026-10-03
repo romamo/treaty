@@ -82,10 +82,9 @@ Apps built on treaty keep their own, structured schema changelog with
   `dict`; a default is read-only, such as `types.MappingProxyType(...)`. A setting may be
   one too: a TOML table, or a JSON object in its variable, a secret one redacted value by
   value. A flag or object field named as a secret, such as `api_keys: dict[str, str]`, is
-  refused as a tuple is, since it would travel on argv, unless `secret=False`. Null values, nested mappings, non-`str` keys, and a bare `dict` are refused at
-  registration with the supported shape, rather than a suggestion of `app.scalar(...)`
-
-### Fixed
+  refused as a tuple is, since it would travel on argv, unless `secret=False`. Null
+  values, nested mappings, non-`str` keys, and a bare `dict` are refused at registration
+  with the supported shape, rather than a suggestion of `app.scalar(...)`
 
 - SIGINT or SIGTERM cancels an async handler, and any handler under a timeout, within
   50 ms of reaching the process, where it could be held until the handler ended: or
@@ -104,8 +103,6 @@ Apps built on treaty keep their own, structured schema changelog with
   command's output. Error data was masked only by field name and shape, so a field
   declared `Out(high_entropy=True)` reached the error envelope unmasked. Data no
   dataclass covers is masked by name and shape, as before (#322)
-
-### Fixed
 
 - `mcp serve` stops with exit 0 and `stopped_by` naming the signal when SIGINT or SIGTERM
   lands while it is still starting its server thread. On a loaded machine that start can
