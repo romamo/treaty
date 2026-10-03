@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import atexit
 import codecs
+import contextlib
 import json
 import os
 import sys
@@ -41,6 +42,33 @@ LINE_CAP = 65536
 LINE_TAIL = 4096
 """Characters a line past ``LINE_CAP`` keeps back: a secret up to one more that the cut
 splits is still whole for the next read"""
+PIPE_BYTES = 1 << 20
+"""The pipe's buffer where it can be set, Windows and Linux. As the interpreter finalizes,
+the reader, a daemon thread, stops for good while a held thread keeps descriptor 1 a pipe
+(#263); ``sys.stdout``'s last flush, up to ``io.DEFAULT_BUFFER_SIZE``, then fits in the
+pipe rather than blocking the exit forever on a full one: Windows' default is 4 KiB (#268)"""
+
+
+def _pipe() -> tuple[int, int]:
+    """A pipe, its read and write descriptors, holding ``PIPE_BYTES`` where it can"""
+    if sys.platform == "win32":
+        import _winapi
+        import msvcrt
+
+        read, write = _winapi.CreatePipe(None, PIPE_BYTES)  # handles not inherited
+        return (
+            msvcrt.open_osfhandle(read, os.O_RDONLY | os.O_NOINHERIT),
+            msvcrt.open_osfhandle(write, os.O_WRONLY | os.O_NOINHERIT),
+        )
+    read, write = os.pipe()
+    if sys.platform == "linux":
+        import fcntl
+
+        # Unprivileged up to /proc/sys/fs/pipe-max-size, 1 MiB unless lowered; the default
+        # 64 KiB pipe and the reader's last read still hold a 128 KiB flush when it was
+        with contextlib.suppress(PermissionError):
+            fcntl.fcntl(write, fcntl.F_SETPIPE_SZ, PIPE_BYTES)
+    return read, write
 
 
 def _unchanged(text: str) -> str:
@@ -92,7 +120,7 @@ class Interceptor:
         """The unfinished escape the last read ended with, until the next completes it"""
         self._lines = LineBuffer()
         """What was read since the last line end, held to be redacted whole"""
-        read, write = os.pipe()
+        read, write = _pipe()
         os.dup2(write, 1)
         os.close(write)
         self._read = read

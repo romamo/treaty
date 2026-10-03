@@ -2693,6 +2693,19 @@ _tracing = threading.local()
 """``write`` is True on a thread while a ``_StrayStdout`` traces a write under ``--debug``"""
 
 
+def _emitting_trace(frame: types.FrameType | None) -> bool:
+    """Whether a log handler up the stack from ``frame`` is emitting one of treaty's own
+    trace records, which ``trace`` marks with ``TRACE_FIELDS``. Logging's handlers hold
+    the record they format and write as ``record``, a ``QueueListener``'s on its own
+    thread too, and a ``QueueHandler``'s copy keeps the mark (#268)"""
+    while frame is not None:
+        record = frame.f_locals.get("record")
+        if isinstance(record, logging.LogRecord) and hasattr(record, TRACE_FIELDS):
+            return True
+        frame = frame.f_back
+    return False
+
+
 class _StrayStdout(io.TextIOBase):
     """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
     to stderr, and the next envelope reports how much (REQ-F-006).
@@ -2793,12 +2806,17 @@ class _StrayStdout(io.TextIOBase):
     def _pass_on(self, shown: str, where: str) -> None:
         if not shown:
             return
-        if self._err.verbosity >= Verbosity.DEBUG and not getattr(_tracing, "write", False):
+        if (
+            self._err.verbosity >= Verbosity.DEBUG
+            and not getattr(_tracing, "write", False)
+            and not _emitting_trace(sys._getframe(1))
+        ):
             if shown.strip():
                 # REQ-F-060: under --debug, the line that printed it. A log handler that
                 # writes to this stand-in, such as StreamHandler(sys.stdout), writes the
                 # trace record back here: that write goes out as it is, not traced again,
-                # or each trace would log the next (#263)
+                # or each trace would log the next (#263). On the tracing thread the flag
+                # says so; on another, a QueueListener's, the record being emitted (#268)
                 _tracing.write = True
                 try:
                     trace("stdout write", source=where, text=shown.rstrip("\r\n"))
