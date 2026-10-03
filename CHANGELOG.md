@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc27] - 2026-10-03
+
+The 27th 1.0 release candidate: 1 fix.
+
 ### Fixed
 
 - A declared secret split by a terminal escape, such as `hunte\x1b[0mr2`, no longer
@@ -1772,7 +1776,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc26...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc27...HEAD
+[1.0.0rc27]: https://github.com/romamo/treaty/compare/v1.0.0rc26...v1.0.0rc27
 [1.0.0rc26]: https://github.com/romamo/treaty/compare/v1.0.0rc25...v1.0.0rc26
 [1.0.0rc25]: https://github.com/romamo/treaty/compare/v1.0.0rc24...v1.0.0rc25
 [1.0.0rc24]: https://github.com/romamo/treaty/compare/v1.0.0rc23...v1.0.0rc24
