@@ -6,7 +6,7 @@ entry that supersedes it, never by editing an old one.
 
 ## D-1: --format is the representation flag
 
-- Decided: 2026-09-25, in romamo/treaty#0
+- Decided: 2026-09-25, in romamo/treaty#317
 - Rule: Output representation is chosen with --format (and TREATY_FORMAT); no global --output or alias selects it, since --output PATH names the file a command writes its data to
 - Why: --output usually names a destination, and reserving it globally for representation would take that name from every command built on treaty, even though the CLI Agent Spec's checks use --output json
 - Applies to: src/treaty/_app.py, src/treaty/_flags.py, global options, CLI flags
@@ -14,7 +14,7 @@ entry that supersedes it, never by editing an old one.
 
 ## D-2: Broad catches only where user code runs
 
-- Decided: 2026-09-25, in romamo/treaty#0
+- Decided: 2026-09-25, in romamo/treaty#317
 - Rule: except Exception or BaseException appears only around user code (the handler, __post_init__, a scalar's parse= or serialize=, renderers, hooks) or to re-raise on another thread, each marked '# noqa: BLE001 - <reason>'; a handler crash becomes a HANDLER_CRASHED envelope with exit 1, and framework failures raise specific types
 - Why: The README promises a response envelope on every exit, so a handler bug can't crash the process; everywhere else the project fails fast
 - Applies to: src/treaty/*.py, error handling
