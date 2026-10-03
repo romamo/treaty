@@ -270,7 +270,8 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
     here. Phase 1 only: no handler, no idempotency store, the audit log off, and an empty
     stdin. What depends on the caller's world is stood in for or left out: a secret's
     variable or file reads a dummy value, ``--cwd``, ``--input-file``, and ``--config`` are
-    dropped, and a pipeline or redirect is not judged. Only the spelling is checked"""
+    dropped, and a pipeline or redirect is not judged. Only the spelling is checked; of a
+    passthrough command, only treaty's part: the options before the path, and the path"""
     example = example.replace("\\\n", " ")  # a backslash-newline continues the line
     for placeholder in _PLACEHOLDER.finditer(_without_comment(example)):
         # <id> would read as a redirect below; it is a value the agent cannot use as is.
@@ -337,6 +338,10 @@ def _example_problem(app: App, command: Command, example: str) -> str | None:
     at = next((n + len(parts) for n in range(len(head)) if head[n : n + len(parts)] == parts), None)
     if at is None or not _only_flags(head[: at - len(parts)]):
         return None
+    if command.passthrough:
+        # The words after the path are its tool's, verbatim: the flag goes before the path,
+        # where treaty reads it, and the handler does not run (#306)
+        at -= len(parts)
     argv[at:at] = ["--validate-only"]
     out, err = io.StringIO(), io.StringIO()
     code = app.run(argv, stdout=out, stderr=err, stdin=io.StringIO(""), env=env)
