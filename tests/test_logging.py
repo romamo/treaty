@@ -1000,7 +1000,13 @@ def test_a_stream_abandoned_at_its_timeout_closes_on_its_worker_and_leaks_no_sec
     its ``finally`` is redacted, rather than closed at garbage collection once the worker
     was forgotten and ``_Records`` had left the root, which wrote it raw through
     ``logging.lastResort`` (#128). A subprocess, since pytest's own capture handlers sit
-    on the root logger"""
+    on the root logger.
+
+    The 0.05 s timeout can run out before the worker reaches the wait it is meant to cut
+    short, as on a loaded free-threaded runner: before the generator's body began, when
+    it never started and has no ``finally`` to run, or before its first event. The call
+    is repeated, once every handler worker ended, until the timeout caught the generator
+    in that wait, rather than trusting 0.05 s to be enough (#308)"""
     script = (
         "import logging, threading\n"
         "from collections.abc import Iterator\n"
@@ -1010,7 +1016,8 @@ def test_a_stream_abandoned_at_its_timeout_closes_on_its_worker_and_leaks_no_sec
         "@dataclass(frozen=True, slots=True)\n"
         "class Login:\n"
         "    api_token: str = Flag(description='API token', secret=True)\n"
-        "go, closed, workers, closers = threading.Event(), threading.Event(), [], []\n"
+        "go, closed, waiting = threading.Event(), threading.Event(), threading.Event()\n"
+        "workers, closers = [], []\n"
         "app = App('libctl', version='1.0.0')\n"
         "@app.command('tail', description='Stream', timeout=0.05, danger_level='safe',\n"
         "             exit_codes=(), streaming=True)\n"
@@ -1019,6 +1026,7 @@ def test_a_stream_abandoned_at_its_timeout_closes_on_its_worker_and_leaks_no_sec
         f"        if not {before_first_event!r}:\n"
         "            yield {'n': 0}\n"
         "        workers.append(threading.current_thread())\n"
+        "        waiting.set()\n"
         "        go.wait(timeout=10)  # released only after the call answered TIMEOUT\n"
         "        yield {'n': 1}\n"
         "        yield {'n': 2}\n"
@@ -1027,8 +1035,20 @@ def test_a_stream_abandoned_at_its_timeout_closes_on_its_worker_and_leaks_no_sec
         "        logging.getLogger('somelib').warning('closing for %s', args.api_token)\n"
         "        closed.set()\n"
         f"env = {{'LIBCTL_API_TOKEN': {TOKEN!r}, 'LIBCTL_AUDIT_LOG': '0'}}\n"
-        "print(app.call('tail', {}, env=env).error.code)\n"
-        "go.set()\n"
+        "for _ in range(100):\n"
+        "    for event in (go, closed, waiting):\n"
+        "        event.clear()\n"
+        "    workers.clear()\n"
+        "    closers.clear()\n"
+        "    code = app.call('tail', {}, env=env).error.code\n"
+        "    go.set()\n"
+        "    for thread in threading.enumerate():\n"
+        "        if thread.name == 'treaty-handler':\n"
+        "            thread.join(timeout=10)\n"
+        "    if waiting.is_set():\n"
+        "        break\n"
+        "print(code)\n"
+        "assert waiting.is_set(), 'the timeout ran out before the wait on every call'\n"
         "assert closed.wait(timeout=10)\n"
         "workers[-1].join(timeout=10)\n"
         "assert not workers[-1].is_alive()\n"
@@ -1047,7 +1067,10 @@ def test_a_stream_abandoned_at_its_timeout_closes_on_its_worker_and_leaks_no_sec
     assert proc.returncode == 0, proc.stderr
     assert TOKEN not in proc.stderr and TOKEN not in proc.stdout
     assert proc.stdout.splitlines() == ["TIMEOUT", "True False"], proc.stdout
-    assert proc.stderr.splitlines() == ["closing for [REDACTED]"], proc.stderr
+    # A repeated call's generator, closed before its first event, logged redacted too
+    lines = proc.stderr.splitlines()
+    assert lines[-1] == "closing for [REDACTED]", proc.stderr
+    assert all("closing for [REDACTED]" in line for line in lines), proc.stderr
 
 
 def test_a_handler_that_ends_at_once_under_a_timeout_leaves_the_root_logger() -> None:
