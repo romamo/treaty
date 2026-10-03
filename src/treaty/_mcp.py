@@ -27,7 +27,7 @@ import json
 import os
 import sys
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import IO, Any, Literal, TextIO, cast
 
@@ -92,11 +92,14 @@ def call_tool(
     *,
     env: Mapping[str, str] | None = None,
     bindings: Bindings = NO_BINDINGS,
+    available: Sequence[str] | None = None,
 ) -> Envelope:
-    """Dispatch one tool call; an unknown tool name is an ``UNKNOWN_TOOL`` envelope. Only
-    ``entries`` run: a command left off the server answers as an unknown tool, and an old
-    name answers ``REDIRECTED`` only when the tool it names is among them (#281). A field
-    ``bindings`` fixes runs with its bound value, and the call may not pass it (#285)"""
+    """Dispatch one tool call; an unknown tool name is an ``UNKNOWN_TOOL`` envelope whose
+    ``available`` is ``available``, the names ``tools/list`` answers in its order, or the
+    ``entries`` names when None (#289). Only ``entries`` run: a command left off the server
+    answers as an unknown tool, and an old name answers ``REDIRECTED`` only when the tool
+    it names is among them (#281). A field ``bindings`` fixes runs with its bound value,
+    and the call may not pass it (#285)"""
     entry = entries.get(name)
     served = {e.path for e in entries.values()}
     moved = next(
@@ -114,7 +117,11 @@ def call_tool(
         run = _Run(app, io.StringIO(), io.StringIO(), env if env is not None else {})
         return run.arg_error(
             ParseError(
-                f"unknown tool {name!r}", context={"tool": name, "available": sorted(entries)}
+                f"unknown tool {name!r}",
+                context={
+                    "tool": name,
+                    "available": list(entries if available is None else available),
+                },
             ),
             code="UNKNOWN_TOOL",
             meta={"_cmd": name},
@@ -171,6 +178,8 @@ def build_server(
     extra = dict(provided or {})
     entries = {e.name: e for e in tool_entries(app, served, bindings)}
     listed = [*entries.values(), *(p.entry() for p in extra.values())]
+    # An unknown tool's answer lists what tools/list lists, in its order (#289)
+    available = tuple(e.name for e in listed)
     environ = env if env is not None else os.environ
     tools = [
         types.Tool(
@@ -198,7 +207,14 @@ def build_server(
             envelope = await asyncio.to_thread(app._call_provided, tool, arguments, env=environ)
         else:
             envelope = await asyncio.to_thread(
-                call_tool, app, entries, params.name, arguments, env=env, bindings=bindings
+                call_tool,
+                app,
+                entries,
+                params.name,
+                arguments,
+                env=env,
+                bindings=bindings,
+                available=available,
             )
         if called is not None:
             called()

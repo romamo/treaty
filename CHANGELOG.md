@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- An MCP call to an unknown tool answers `UNKNOWN_TOOL` with `error.context.available`
+  listing exactly what `tools/list` lists, in its order (#289): the served command tools
+  and the tools `McpServe(tools=)` provides, which were missing. A command registered
+  `mcp=False` or left out by `McpServe(commands=)` stays off it, under `mcp serve` and
+  `treaty-mcp module:app` alike
+
 ## [1.0.0rc29] - 2026-10-03
 
 The 29th 1.0 release candidate: 1 addition.

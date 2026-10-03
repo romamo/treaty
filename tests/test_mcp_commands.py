@@ -144,6 +144,33 @@ def test_an_empty_selection_serves_only_the_provided_tools(
     assert _ran(tmp_path / "ran.txt") == ["preview"]
 
 
+def _available(result: dict[str, object]) -> object:
+    content = result["structuredContent"]
+    assert isinstance(content, dict)
+    error = content["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "UNKNOWN_TOOL"
+    context = error["context"]
+    assert isinstance(context, dict)
+    return context["available"]
+
+
+def test_an_unknown_tool_names_what_tools_list_lists_in_its_order(
+    tmp_path: Path, started: list[Server]
+) -> None:
+    server = _serve(started, tmp_path, "--mode", "mixed")
+    server.initialize()
+    tools = _result(server.request("tools/list"))["tools"]
+    assert isinstance(tools, list)
+    names = [t["name"] for t in tools]
+    # The served commands and the provided tool; never the mcp=False approval select named
+    assert names == ["fleet", "observe_logs", "preview"]
+    for name in ("approve", "deploy", "nope"):
+        assert _available(_call(server, name, {})) == names, name
+    assert server.close() == 0
+    assert _ran(tmp_path / "ran.txt") == []
+
+
 @pytest.mark.parametrize(
     ("mode", "code", "context"),
     [
@@ -171,7 +198,7 @@ def test_treaty_mcp_leaves_the_mcp_false_commands_off(tmp_path: Path) -> None:
 
     marker = tmp_path / "ran.txt"
 
-    async def scenario() -> tuple[list[str], list[object]]:
+    async def scenario() -> tuple[list[str], list[object], list[object]]:
         params = StdioServerParameters(
             command=sys.executable,
             args=["-m", "treaty._mcp", "fixture_mcp_select_app:app"],
@@ -182,18 +209,22 @@ def test_treaty_mcp_leaves_the_mcp_false_commands_off(tmp_path: Path) -> None:
             await session.initialize()
             tools = await session.list_tools()
             codes = []
+            available = []
             for name in ("approve", "Approve", "ok", "cleanup", "audit-log"):
                 called = await session.call_tool(name, {})
                 assert called.is_error is True, name
                 content = called.structured_content
                 assert isinstance(content, dict)
                 codes.append(content["error"]["code"])
-            return sorted(t.name for t in tools.tools), codes
+                available.append(content["error"]["context"]["available"])
+            return [t.name for t in tools.tools], codes, available
 
-    names, codes = asyncio.run(scenario())
+    names, codes, available = asyncio.run(scenario())
     assert "deploy" in names and "fleet" in names
     assert {"approve", "cleanup", "generate-skills", "audit-log"}.isdisjoint(names)
     assert codes == ["UNKNOWN_TOOL"] * 5
+    # An unknown tool's answer lists what tools/list lists, in its order (#289)
+    assert available == [names] * 5
     assert _ran(marker) == []
 
 
