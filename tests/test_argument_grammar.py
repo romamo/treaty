@@ -540,6 +540,53 @@ def test_an_explicit_false_boolean_is_the_same_as_leaving_it_out(via: str) -> No
     assert code({"isin": "X", "exact": True, "limit": 3}) == 2
 
 
+@pytest.mark.parametrize("via", ["argv", "raw-payload", "exec", "call"])
+def test_if_value_false_matches_an_explicit_false_and_not_an_absent_flag(via: str) -> None:
+    """#241, cli-agent-spec#52: if_value compares what the caller supplied, so
+    ``if_value: false`` fires on --no-fuzzy (or "fuzzy": false), never on a left-out flag"""
+    rules = [RequiredWhen("fuzzy", False, then=("isin",))]
+
+    def code(given: dict[str, object]) -> int:
+        app = lookup_app(rules=rules)
+        if via == "call":
+            return app.call("fetch", given, env={}).exit_code
+        if via == "exec":
+            out = io.StringIO()
+            line = json.dumps({"_cmd": "fetch", **given}) + "\n"
+            app.run(["exec"], stdin=io.StringIO(line), stdout=out, stderr=io.StringIO(), env={})
+            [envelope] = [json.loads(x) for x in out.getvalue().splitlines()]
+            spec_validator("response-envelope").validate(envelope)
+            if envelope["ok"]:
+                return 0
+            return 2 if envelope["error"]["phase"] == "validation" else 1
+        if via == "raw-payload":
+            return run(app, ["fetch", "--raw-payload", json.dumps(given)])[0]
+        argv = ["fetch"]
+        for key, value in given.items():
+            if value is True or value is False:
+                argv.append(f"--{key}" if value else f"--no-{key}")
+            else:
+                argv += [f"--{key}", str(value)]
+        return run(app, argv)[0]
+
+    assert code({"fuzzy": False}) == 2
+    assert code({"fuzzy": False, "isin": "X"}) == 0
+    assert code({}) == 0
+    assert code({"fuzzy": True}) == 0
+
+
+def test_an_if_value_false_rule_reads_as_the_negated_switch() -> None:
+    app = lookup_app(rules=[RequiredWhen("fuzzy", False, then=("isin",))])
+    code, envelope = run(app, ["fetch", "--no-fuzzy"])
+    assert code == 2 and envelope["error"]["message"] == "--no-fuzzy requires --isin"
+    assert envelope["error"]["context"]["rule"] == {
+        "if_flag": "fuzzy",
+        "if_value": False,
+        "then_required": ["isin"],
+    }
+    spec_validator("manifest-response").validate(app.manifest())
+
+
 def test_the_manifest_and_schema_list_a_group_as_a_conditional_rule() -> None:
     """ManifestResponse 3.2: any_of and one_of are ConditionalRule shapes (#234)"""
     groups = [{"any_of": ["isin", "figi", "symbol"]}, {"one_of": ["exact", "fuzzy"]}]
