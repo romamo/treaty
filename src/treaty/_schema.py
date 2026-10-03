@@ -112,13 +112,17 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
             return {"type": "number"}
         if base is str or base is Path:
             return {"type": "string"}
+        if output and base in _TEMPORAL:
+            # Before an app's own scalar of the class, as it always was, so no schema lock
+            # of a date output drifts; unlike Decimal, whose output an app scalar replaces
+            return {"type": "string", "format": _TEMPORAL[base]}
         if (spec := scalars.get(base)) is not None:
-            # Before the built-ins it may replace, such as Decimal and date, as
-            # serialization is
+            # Before the built-ins it may replace, such as Decimal and an argument's date,
+            # as serialization and parsing are
             return spec.json_schema()
         if base in _TEMPORAL:
             temporal: JsonSchema = {"type": "string", "format": _TEMPORAL[base]}
-            if output or base not in _TEMPORAL_ARGUMENT:
+            if base not in _TEMPORAL_ARGUMENT:
                 return temporal
             # An argument also carries the pattern its parser holds the text to
             return {**temporal, "pattern": _TEMPORAL_ARGUMENT[base]}

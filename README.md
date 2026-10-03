@@ -1390,7 +1390,8 @@ argument's schema is `{"type": "string", "format": "date", "pattern":
 "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}` (`format: date-time` with its own pattern for a
 datetime), an output field's the same without `pattern`, and the manifest lists the flag as
 a `string` with that `pattern`. An app that registers `app.scalar(datetime.date, ...)` gets
-its own parsing and schema instead, for output schemas too.
+its own parsing and argument schema instead; its output schema stays `format: date`, unlike
+a `Decimal` scalar's.
 
 ## Custom scalars
 

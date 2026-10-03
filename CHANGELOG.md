@@ -29,8 +29,7 @@ Apps built on treaty keep their own, structured schema changelog with
   also takes the objects, and a settings file a TOML date or offset date-time. The
   argument schema says `format: date` or `date-time` with a `pattern` the parser holds the
   text to; output schemas are unchanged. An app's own `app.scalar(datetime.date, ...)`
-  replaces the built-in, for output schemas too, where its schema used to read
-  `format: date` whatever its `serialize=` wrote (#297)
+  replaces the built-in for arguments (#297)
 
 ## [1.0.0rc32] - 2026-10-03
 

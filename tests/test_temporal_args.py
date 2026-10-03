@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, Ctx, Flag, NoArgs, RegistrationError
+from treaty import App, Arg, Ctx, Flag, NoArgs, Out, RegistrationError
 from treaty._mcp import call_tool, tool_entries
 
 UTC = dt.UTC
@@ -352,10 +352,48 @@ def test_an_app_registered_date_replaces_the_built_in() -> None:
     assert json.loads(out.getvalue())["data"] == {"day": "29.02.2024"}
     command = app.manifest()["commands"]["go"]
     assert command["flags"]["day"]["pattern"] == r"^(?:[0-9]{2}\.[0-9]{2}\.[0-9]{4})$"
-    # The output schema is the app's scalar, as its serialize= writes it
-    assert command["output_schema"]["properties"]["day"]["pattern"] == (
-        r"^(?:[0-9]{2}\.[0-9]{2}\.[0-9]{4})$"
+    # Arguments only: the output schema stays what it was before #297
+    assert command["output_schema"]["properties"]["day"] == {"type": "string", "format": "date"}
+
+
+def test_an_app_registered_date_keeps_its_output_schema_as_before() -> None:
+    """An app that registered app.scalar(datetime.date, ...) before the built-in, as
+    beancount-cli does, sees no drift in its output schema or a schema lock of it"""
+    app = App("ledger", version="1.0.0")
+    app.scalar(
+        dt.date,
+        parse=dt.date.fromisoformat,
+        pattern=r"\d{4}-\d{2}-\d{2}",
+        serialize=dt.date.isoformat,
     )
+
+    @dataclass(frozen=True, slots=True)
+    class Args:
+        since: dt.date | None = Flag(default=None, description="Since")
+
+    @dataclass(frozen=True, slots=True)
+    class Entry:
+        day: dt.date
+        due: dt.date | None
+        days: list[dt.date] = Out(ordered=True)
+        at: dt.datetime | None = None
+
+    @app.command("entries", description="Entries", danger_level="safe", exit_codes=())
+    def entries(args: Args, ctx: Ctx) -> Entry:
+        return Entry(dt.date(2024, 1, 1), None, [])
+
+    output = app.manifest()["commands"]["entries"]["output_schema"]
+    date = {"type": "string", "format": "date"}
+    # The schema main wrote before #297, key for key
+    assert output["properties"] == {
+        "day": date,
+        "due": {"anyOf": [date, {"type": "null"}]},
+        "days": {"type": "array", "items": date, "x-ordered": True},
+        "at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+    }
+    # The argument is the app's own scalar
+    flag = app.manifest()["commands"]["entries"]["flags"]["since"]
+    assert flag["pattern"] == r"^(?:\d{4}-\d{2}-\d{2})$"
 
 
 def test_an_idempotency_fingerprint_of_date_arguments_is_stable() -> None:
