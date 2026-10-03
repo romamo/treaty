@@ -289,21 +289,28 @@ class Interceptor:
     def finish(self) -> None:
         """What reached the spool since ``retire``, ``sys.__stdout__``'s buffer too, passed
         on to stderr redacted: called as the interpreter flushes the standard streams one
-        last time, after every atexit hook, when no held thread can run Python any more"""
-        with self._cond:
+        last time, after every atexit hook, when no held thread can run Python any more.
+        Every other thread is stopped for good then, the reader too: a lock one holds is
+        never released, so none is waited for, and what the spool holds stays unread"""
+        if not self._cond.acquire(blocking=False):
+            return
+        try:
             if self._closed or self._spool is None:
                 return
+        finally:
+            self._cond.release()
         dunder = sys.__stdout__
         if dunder is not None and not dunder.closed:
             dunder.flush()
-        self._drain(final=True)
+        self._drain(final=True, wait=False)
 
-    def _drain(self, *, final: bool = False, close: bool = False) -> None:
+    def _drain(self, *, final: bool = False, close: bool = False, wait: bool = True) -> None:
         """What the spool holds, read to its end and passed on as the reader would, its
         unfinished line too; with ``close``, the spool is closed after. Past
         ``SYNC_SECONDS`` waiting for a reader that still passes on what the pipe held,
-        stuck on a full stderr, it gives up: the exit is never blocked for it"""
-        if not self._order.acquire(timeout=SYNC_SECONDS):
+        stuck on a full stderr, it gives up: the exit is never blocked for it. Without
+        ``wait``, it gives up at once"""
+        if not self._order.acquire(timeout=SYNC_SECONDS if wait else 0):
             return
         try:
             spool = self._spool

@@ -113,3 +113,46 @@ def test_while_a_held_thread_lives_descriptor_1_never_leads_to_stdout_at_exit() 
     assert out.splitlines()[1:] == ["host print", "last print"], (out, err)
     for line in ("host fd1", "host dunder", "last fd1", "last dunder"):
         assert line in err.splitlines(), (line, err)
+
+
+STOPPED = """
+import os, sys, threading, time
+from treaty import _stdout
+
+_stdout.hold_open_while(lambda: True)
+found = _stdout.intercept_stdout()
+found.close()  # put off: a held handler thread lives
+found.retire()
+os.write(1, b"spooled\\n")
+held, stop = threading.Event(), threading.Event()
+
+
+def frozen(lock):
+    # A daemon thread stopped for good at finalization while holding the lock
+    with lock:
+        held.set()
+        stop.wait()
+
+
+threading.Thread(target=frozen, args=(getattr(found, sys.argv[1]),), daemon=True).start()
+held.wait()
+start = time.monotonic()
+found.finish()  # stdout's last flush, then stderr's
+found.finish()
+os.write(2, b"%.2f\\n" % (time.monotonic() - start))
+os._exit(0)  # the lock is never released: past the exit hooks, as the last flush is
+"""
+
+
+@pytest.mark.parametrize("lock", ["_order", "_cond"])
+def test_the_last_flush_waits_for_no_lock_a_stopped_thread_holds(lock: str) -> None:
+    # At the interpreter's last flush every other thread is stopped for good, the reader
+    # and held handler threads too: a lock one holds is never released, so waiting for it
+    # only holds up the exit, by SYNC_SECONDS a flush, or for ever for the condition
+    proc = subprocess.run(
+        [sys.executable, "-c", STOPPED, lock],
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    assert float(proc.stderr.decode().splitlines()[-1]) < 1, proc.stderr
