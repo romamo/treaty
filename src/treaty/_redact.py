@@ -124,10 +124,18 @@ def _keyed(
 ) -> dict[object, object]:
     """A mapping's entries with their keys redacted as values are (#262): a secret used as
     a key is no less handed out. Two keys that redact to the same text both stay, the
-    later one as ``[REDACTED]#2``, ``#3``, and so on, never one overwriting the other"""
+    later one as ``[REDACTED]#2``, ``#3``, and so on, never one overwriting the other. A
+    key of another type, such as a tuple, is read by its ``str``, the text it is printed
+    as once made JSON, and replaced by that text redacted if it holds a secret"""
     shown: dict[object, object] = {}
     for key, value in items:
-        new = redact(key) if isinstance(key, str) else _number(key, redact)
+        if isinstance(key, str):
+            new: object = redact(key)
+        elif isinstance(key, (int, float)):
+            new = _number(key, redact)
+        else:
+            text = str(key)
+            new = key if redact(text) == text else redact(text)
         if new in shown:
             n = 2
             while f"{new}#{n}" in shown:

@@ -7,8 +7,9 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
-from treaty import App, Ctx, Envelope, Exit, Flag
+from treaty import App, Ctx, Envelope, Exit, Flag, ParseError
 from treaty._redact import redacted, scrub, scrub_fields
 
 PIN = 987654
@@ -150,3 +151,32 @@ def test_a_key_named_like_a_secret_still_hides_its_value() -> None:
         "[REDACTED]_token": "[REDACTED]",
         "n": 1,
     }
+
+
+class TupleKeyed:
+    """An exec_fallback refusing with a context keyed by a tuple that holds the secret"""
+
+    def __call__(self, cmd: str, payload: Mapping[str, object]) -> object:
+        context: dict[object, object] = {(WORD, 1): "t", "nested": {(WORD,): 1}, ("ok",): 2}
+        raise ParseError("bad", context=cast(dict[str, object], context))
+
+
+def test_a_tuple_key_holding_a_secret_is_redacted() -> None:
+    """A key that is neither text nor a number is read as the text JSON prints it as"""
+    out = io.StringIO()
+    line = {"_cmd": "old", "password": WORD}
+    App("bean", version="1.0.0", exec_fallback=TupleKeyed()).run(
+        ["exec"],
+        stdin=io.StringIO(json.dumps(line) + "\n"),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    assert WORD not in out.getvalue()
+    assert json.loads(out.getvalue())["error"]["context"] == {
+        "([REDACTED], 1)": "t",  # the quoted spelling is replaced whole
+        "nested": {"([REDACTED],)": 1},
+        "('ok',)": 2,
+    }
+    assert redacted({(WORD,): 1, ("ok",): 2}, redact) == {"('[REDACTED]',)": 1, ("ok",): 2}
