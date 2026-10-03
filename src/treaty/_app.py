@@ -296,10 +296,12 @@ from ._stdout import (
     TEXT_CAP,
     TEXT_HELD,
     LineBuffer,
+    check_reconfigure,
     hold_open_while,
     intercept_stdout,
     prose,
     quote,
+    reconfigure_wrapped,
     redact_with,
 )
 from ._stdout import active as active_interceptor
@@ -2795,6 +2797,21 @@ class _StrayStdout(io.TextIOBase):
     def encoding(self) -> Any:  # type: ignore[override]  # read-only, like a real stream's
         return getattr(self._target(), "encoding", None) or "utf-8"
 
+    def reconfigure(
+        self,
+        *,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+        line_buffering: bool | None = None,
+        write_through: bool | None = None,
+    ) -> None:
+        """Takes ``TextIOWrapper.reconfigure``'s keywords and changes nothing (#288): what is
+        printed here is text, redacted a line at a time before it reaches stderr or a
+        delegated tool's stdout, so no keyword may change where it goes, its encoding, or
+        how a secret in it is found. Neither stream is reconfigured: they are the run's"""
+        check_reconfigure(encoding, errors, newline, line_buffering, write_through)
+
     def isatty(self) -> bool:
         """A delegated tool sees whether stdout is a terminal; anything else, that it is not"""
         return self._through is not None and self._through.isatty()
@@ -3275,6 +3292,27 @@ class _LateStream:
     def writelines(self, lines: Iterable[str], /) -> None:
         for line in lines:
             self.write(line)
+
+    def reconfigure(
+        self,
+        *,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+        line_buffering: bool | None = None,
+        write_through: bool | None = None,
+    ) -> None:
+        """The wrapped stream's ``reconfigure``, as the host's own stream would take it, and
+        nothing where it has none, as an ``io.StringIO`` (#288). Text reaches it redacted
+        already, so a keyword such as ``errors`` changes only how redacted text is encoded"""
+        reconfigure_wrapped(
+            self.inner,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+            line_buffering=line_buffering,
+            write_through=write_through,
+        )
 
     def flush(self) -> None:
         self.inner.flush()

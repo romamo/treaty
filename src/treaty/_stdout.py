@@ -29,6 +29,7 @@ from __future__ import annotations
 import atexit
 import codecs
 import contextlib
+import io
 import json
 import os
 import sys
@@ -36,6 +37,7 @@ import tempfile
 import threading
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from ._envelope import clean, open_escape, strip_escapes, terminal_text
 from ._mode import color_allowed
@@ -58,6 +60,51 @@ PIPE_BYTES = 1 << 20
 the reader, a daemon thread, stops for good while a held thread keeps descriptor 1 a pipe
 (#263); ``sys.stdout``'s last flush, up to ``io.DEFAULT_BUFFER_SIZE``, then fits in the
 pipe rather than blocking the exit forever on a full one: Windows' default is 4 KiB (#268)"""
+
+
+def check_reconfigure(
+    encoding: object, errors: object, newline: object, line_buffering: object, write_through: object
+) -> None:
+    """The arguments of a stand-in's ``reconfigure``, refused as ``TextIOWrapper.reconfigure``
+    refuses them (#288): libraries such as ansible-core call it on ``sys.stdout`` and
+    ``sys.stdin``, so each of treaty's stand-ins takes the same keywords. A throwaway
+    stream checks them, so ``encoding="locale"`` passes and ``"rot13"`` is refused, as
+    the real stream has it"""
+    given: dict[str, Any] = {
+        "encoding": encoding,
+        "errors": errors,
+        "newline": newline,
+        "line_buffering": line_buffering,
+        "write_through": write_through,
+    }
+    probe = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    probe.reconfigure(**{name: value for name, value in given.items() if value is not None})
+
+
+def reconfigure_wrapped(
+    stream: object,
+    *,
+    encoding: str | None,
+    errors: str | None,
+    newline: str | None,
+    line_buffering: bool | None,
+    write_through: bool | None,
+) -> None:
+    """A wrapper's ``reconfigure``: checked as ``check_reconfigure`` checks it, then the
+    keywords given passed to the wrapped stream's own, if it has one, as a real stream
+    has; one that has none, such as an ``io.StringIO``, is left as it is (#288)"""
+    check_reconfigure(encoding, errors, newline, line_buffering, write_through)
+    apply = getattr(stream, "reconfigure", None)
+    if apply is None:
+        return
+    given: dict[str, Any] = {
+        "encoding": encoding,
+        "errors": errors,
+        "newline": newline,
+        "line_buffering": line_buffering,
+        "write_through": write_through,
+    }
+    apply(**{name: value for name, value in given.items() if value is not None})
 
 
 def _pipe() -> tuple[int, int]:

@@ -17,6 +17,13 @@ Apps built on treaty keep their own, structured schema changelog with
   and the tools `McpServe(tools=)` provides, which were missing. A command registered
   `mcp=False` or left out by `McpServe(commands=)` stays off it, under `mcp serve` and
   `treaty-mcp module:app` alike
+- Every stand-in treaty puts on `sys.stdout`, `sys.stderr`, or `sys.stdin` during a run
+  has `reconfigure()` (#288), taking `TextIOWrapper.reconfigure`'s keywords and refusing
+  any other with the real stream's `TypeError`. A library that calls it unguarded, such as
+  ansible-core's `Display`, no longer fails or warns on every run. The stdout stand-in
+  changes nothing: what a handler prints is still redacted a line at a time on stderr,
+  whatever `encoding` or `errors` it asks for. The `App.call` and no-prompt stdin
+  stand-ins pass the keywords on to the stream they wrap, where it has `reconfigure`
 
 ## [1.0.0rc29] - 2026-10-03
 
