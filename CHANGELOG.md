@@ -19,6 +19,14 @@ Apps built on treaty keep their own, structured schema changelog with
   another type, such as a tuple, is read by the text JSON prints it as. Two keys
   that redact to the same text both stay, the later one as `[REDACTED]#2`, `#3`, and so
   on. Command `data` is still not redacted (REQ-F-034)
+- `--debug` with a log handler that writes to `sys.stdout`, such as
+  `logging.StreamHandler(sys.stdout)` added in a handler, no longer recurses until
+  `RecursionError` (#263): the handler's copy of a `stdout write` trace record goes to
+  stderr once, redacted, instead of being traced again
+- What a handler thread abandoned at its timeout writes to descriptor 1 as the process
+  exits, after `App.main()` has written its envelope, reaches stderr redacted instead of
+  stdout in the clear (#263): descriptor 1 stays a pipe to stderr until the last such
+  thread ends, and what the thread wrote is passed on before its secrets are forgotten
 
 ## [1.0.0rc23] - 2026-10-02
 

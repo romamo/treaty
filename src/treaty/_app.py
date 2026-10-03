@@ -290,8 +290,16 @@ from ._settings import (
 from ._settings import options as config_options
 from ._settings import resolve as resolve_settings
 from ._signals import Cancellation, Cancelled, CancelSignal, cancellation_handlers
-from ._stdout import TEXT_CAP, LineBuffer, intercept_stdout, prose, redact_with
+from ._stdout import (
+    TEXT_CAP,
+    LineBuffer,
+    hold_open_while,
+    intercept_stdout,
+    prose,
+    redact_with,
+)
 from ._stdout import active as active_interceptor
+from ._stdout import settle as settle_stdout
 from ._steps import Rollback, RollbackStatus, StepError, StepTracker
 from ._subprocess import (
     BROWSER_OPEN,
@@ -2252,7 +2260,19 @@ class App:
         try:
             code = self.run(sys.argv[1:], env=started_env)
         finally:
-            _restore_stdout(envelopes, stdout)
+            restored = stdout
+            if _late_threads():
+                # #263: descriptor 1 stays a pipe to stderr while a handler thread whose
+                # run detached lives, so what it writes there is still redacted; the
+                # host's own sys.stdout writes reach stdout through a copy of the original
+                restored = open(  # noqa: SIM115 - sys.stdout until the process exits
+                    os.dup(interceptor.saved),
+                    "w",
+                    encoding=stdout.encoding,
+                    errors=stdout.errors,
+                    buffering=1,
+                )
+            _restore_stdout(envelopes, restored)
             envelopes.flush()
             envelopes.close()
             interceptor.close()
@@ -2667,6 +2687,10 @@ _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
 MIN_REDACTED = 4
 
 
+_tracing = threading.local()
+"""``write`` is True on a thread while a ``_StrayStdout`` traces a write under ``--debug``"""
+
+
 class _StrayStdout(io.TextIOBase):
     """Stands in for ``sys.stdout`` during a run: what a handler or a library prints goes
     to stderr, and the next envelope reports how much (REQ-F-006).
@@ -2767,10 +2791,17 @@ class _StrayStdout(io.TextIOBase):
     def _pass_on(self, shown: str, where: str) -> None:
         if not shown:
             return
-        if self._err.verbosity >= Verbosity.DEBUG:
+        if self._err.verbosity >= Verbosity.DEBUG and not getattr(_tracing, "write", False):
             if shown.strip():
-                # REQ-F-060: under --debug, the line that printed it
-                trace("stdout write", source=where, text=shown.rstrip("\r\n"))
+                # REQ-F-060: under --debug, the line that printed it. A log handler that
+                # writes to this stand-in, such as StreamHandler(sys.stdout), writes the
+                # trace record back here: that write goes out as it is, not traced again,
+                # or each trace would log the next (#263)
+                _tracing.write = True
+                try:
+                    trace("stdout write", source=where, text=shown.rstrip("\r\n"))
+                finally:
+                    _tracing.write = False
         else:
             self._err.write(shown, Level.INFO)  # 11-D5: off a terminal, dropped
 
@@ -2992,6 +3023,14 @@ class _Records(logging.Handler):
     def forget(self, worker: threading.Thread) -> None:
         """Forget ``worker``, called on it as its handler ends, and leave the root logger
         once no run is attached and no other held thread lives"""
+        below = active_interceptor()
+        if below is not None and worker in self.threads[0]:
+            # #263: what a thread whose run detached wrote to descriptor 1 is still on its
+            # way through the pipe; it reaches stderr before the thread's secrets go, or,
+            # past the sync's wait, the reader keeps them until it passes the marker
+            with self._guard:
+                kept = next((r for w, r, _ in self._workers if w is worker), None)
+            below.sync(kept)
         with self._guard:
             self._workers = [held for held in self._workers if held[0] is not worker]
             self._changed()
@@ -3094,6 +3133,16 @@ _RECORDS = _Records()
 redact_with(_RECORDS.redact_late)
 
 
+def _late_threads() -> bool:
+    """Whether a handler thread whose run detached still lives"""
+    return bool(_RECORDS.threads[0])
+
+
+# #263: App.main's close leaves descriptor 1 a pipe to stderr while one does, so what it
+# writes as the process exits is still redacted rather than reaching stdout
+hold_open_while(_late_threads)
+
+
 class _LateStream:
     """Stands in for ``sys.stdout`` or ``sys.stderr`` while an ``App.call`` runs (#141), or
     a handler thread whose run detached still lives, as after a host's ``App.call`` that
@@ -3145,6 +3194,7 @@ _late_err: _LateStream | None = None
 def _settle_streams() -> None:
     with _guard_lock:
         _settle_streams_locked()
+    settle_stdout()
 
 
 def _settle_streams_locked() -> None:

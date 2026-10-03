@@ -58,6 +58,22 @@ def redact_with(redact: Callable[[str], str]) -> None:
     _redact = redact
 
 
+def _never() -> bool:
+    return False
+
+
+_held: Callable[[], bool] = _never
+"""Whether a handler thread whose run detached still lives, as ``hold_open_while`` set it"""
+
+
+def hold_open_while(held: Callable[[], bool]) -> None:
+    """``close`` leaves descriptor 1 a pipe to stderr while ``held()``: a handler thread
+    abandoned at its timeout may still write to it as the process exits, and only the
+    reader redacts what it writes (#263). The app module sets it, as ``redact_with``"""
+    global _held
+    _held = held
+
+
 class Interceptor:
     """Descriptor 1 as a pipe to stderr, read by a daemon thread; ``saved`` is the
     original stdout, where envelopes go"""
@@ -90,6 +106,8 @@ class Interceptor:
         self._lingering: tuple[tuple[int, Callable[[str], str]], ...] = ()
         """The redaction of a ``sync`` that gave up, with its marker's number: applied
         until the reader passes that marker"""
+        self.deferred = False
+        """``close`` was called while a held handler thread lived; ``settle`` finishes it"""
         self._switch = threading.Lock()
         """Held while descriptor 1 changes, and while ``take`` writes its marker to it: a
         marker sent as ``pause`` or ``resume`` switches would reach stdout. The reader
@@ -153,12 +171,19 @@ class Interceptor:
             os.close(pipe)
 
     def close(self) -> None:
-        """Descriptor 1 is stdout again; the reader passes on what is left and stops"""
+        """Descriptor 1 is stdout again; the reader passes on what is left and stops. While
+        a held handler thread lives, it stays a pipe to stderr instead, the redaction still
+        installed: ``settle`` closes it once the last such thread ends, or the reader
+        redacts until the process is gone (#263)"""
         self.resume()
         with self._cond:
             if self._closed:
                 return
+            if _held():
+                self.deferred = True
+                return
             self._closed = True
+            self.deferred = False
         if sys.__stdout__ is not None:
             sys.__stdout__.flush()  # an import-time print still in Python's buffer
         os.dup2(self.saved, 1)  # the pipe's last write end: the reader sees its end
@@ -317,7 +342,19 @@ def intercept_stdout() -> Interceptor:
     with _active_lock:
         if _active is None or _active._closed:
             _active = Interceptor()
+        _active.deferred = False  # adopted again: a run owns it until its own close
         return _active
+
+
+def settle() -> None:
+    """Finish the ``close`` that a held handler thread put off, once no such thread
+    lives: called as one ends"""
+    with _active_lock:
+        found = _active
+        if found is None or not found.deferred or _held():
+            return
+        found.deferred = False
+    found.close()
 
 
 def active() -> Interceptor | None:
