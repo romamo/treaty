@@ -104,6 +104,13 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
         key, value = typing.get_args(base)
         if key is not str:
             raise SchemaError(f"dict keys must be str: {base!r}")
+        value = resolve_alias(value)
+        if typing.get_origin(value) in (types.UnionType, typing.Union) and (
+            types.NoneType not in typing.get_args(value)
+        ):
+            # dict[str, str | int]: a value of any of the scalars (#299)
+            branches = [schema_for(v, scalars, output=output) for v in typing.get_args(value)]
+            return {"type": "object", "additionalProperties": {"anyOf": branches}}
         return {"type": "object", "additionalProperties": schema_for(value, scalars, output=output)}
     if base is bytes or base is Binary:
         return dict(BINARY_SCHEMA)

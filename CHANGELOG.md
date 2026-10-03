@@ -71,6 +71,18 @@ Apps built on treaty keep their own, structured schema changelog with
   itself, fails the run with `INVALID_OUTPUT` naming the cause, before any data is
   written; such a value used to crash the handler with a `RecursionError`. A recursive
   argument type is still a registration error
+- `dict[str, V]` arguments: an object argument's field, or a flag of its own, may be a
+  mapping of free string keys to a scalar type (`str`, `int`, `float`, `bool`, `Decimal`,
+  `Path`, an enum, a `Literal`, or an `app.scalar` class) or a union of them, such as
+  `meta: dict[str, str | int] | None = None` (#299). argv takes it as one JSON object,
+  and `exec`, `--raw-payload`, `app.call(...)`, and MCP carry it as is; its schema is
+  `{"type": "object", "additionalProperties": ...}`, `anyOf` the scalars for a union.
+  Each value is checked as its type is, the first type of a union that takes it winning,
+  and every error is at its key, such as `postings[0].meta.ref`. The handler gets a
+  `dict`; a default is read-only, such as `types.MappingProxyType(...)`. A setting may be
+  one too: a TOML table, or a JSON object in its variable, a secret one redacted value by
+  value. Null values, nested mappings, non-`str` keys, and a bare `dict` are refused at
+  registration with the supported shape, rather than a suggestion of `app.scalar(...)`
 
 ## [1.0.0rc32] - 2026-10-03
 

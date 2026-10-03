@@ -34,7 +34,8 @@ from ._env import CONFIG, CONTEXT, INSTANCE_ID, KNOWN, app_var
 from ._envnames import EnvName, check_env_names, read_env
 from ._errors import ParseError, RegistrationError, SchemaError, UserCodeError, user_code
 from ._flags import FLAG_META, apply_scalar, coerce_text
-from ._parse import check_json_base
+from ._json5 import loads_forgiving
+from ._parse import check_json_base, check_object
 from ._paths import check_path
 from ._redact import REDACTED, replacer, secret_name
 from ._scalars import ScalarRegistry
@@ -435,12 +436,22 @@ def resolve(
     raise ParseError(f"settings are invalid: {why}", code=INVALID, context={"sources": sources})
 
 
+def secret_items(value: object) -> tuple[object, ...]:
+    """The secrets a secret setting holds: each item of a tuple, each value of a mapping
+    (#299), or the value itself"""
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, Mapping):
+        return tuple(value.values())
+    return (value,)
+
+
 def _spellings(value: object, scalars: ScalarRegistry) -> set[str]:
     """A secret setting's value, or each item of a tuple, as text; a registered scalar by
     its serialized form too, the text its instance was parsed from. Replaced as the run's
     secrets are, the longest first and one an escape splits too (#277)"""
     found: set[str] = set()
-    for item in value if isinstance(value, tuple) else (value,):
+    for item in secret_items(value):
         spec = scalars.for_value(item)
         for form in (item,) if spec is None else (spec.serialize(item), item):
             if form is not None and str(form):
@@ -502,6 +513,13 @@ def _from_text(setting: Setting, raw: str, var: str) -> object:
             return tuple(
                 coerce_text(target.item, v, var, secret=setting.secret) for v in raw.split(",")
             )
+        if target.is_map:
+            # A mapping is its JSON object text, as a flag's variable carries one (#299)
+            try:
+                decoded = loads_forgiving(raw)
+            except ValueError:
+                raise ParseError(f"{setting.name!r} expects a JSON object") from None
+            return check_object(target, decoded, setting.name)
         return coerce_text(target, raw, var, secret=setting.secret)
     except ParseError as exc:
         raise ParseError(

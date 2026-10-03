@@ -21,7 +21,7 @@ from ._declare import shell_safe
 from ._dispatch import invalid_json
 from ._envnames import read_env
 from ._errors import ArgsCrashed, ArgsRefused, ParseError
-from ._flags import FieldInfo, apply_scalar
+from ._flags import FieldInfo, apply_scalar, object_shape, refuse_line_breaks
 from ._framework import (
     NO_INJECTION_FLAG,
     RAW_PAYLOAD_FLAG,
@@ -1198,6 +1198,8 @@ def check_object(target: Classified, value: object, where: str) -> object:
             f"{where!r} expects a JSON object",
             context={"field": where, "type": _json_type(value)},
         )
+    if target.is_map:
+        return _check_map(target, value, where)
     members = {m.name: m for m in target.members}
     kwargs: dict[str, object] = {}
     errors: list[ParseError] = []
@@ -1234,6 +1236,57 @@ def check_object(target: Classified, value: object, where: str) -> object:
         raise ParseError(str(exc), context={"field": where}) from None
     except Exception as exc:  # noqa: BLE001 - __post_init__ is user code
         raise ArgsCrashed(exc, kwargs) from exc
+
+
+def _check_map(target: Classified, value: dict[object, object], where: str) -> dict[str, object]:
+    """A JSON object as ``dict[str, V]``: each key a single-line string, each value parsed
+    as V, every error collected at its key, such as ``postings[0].meta.rate``"""
+    out: dict[str, object] = {}
+    errors: list[ParseError] = []
+    for key, given in value.items():
+        if not isinstance(key, str):
+            errors.append(
+                ParseError(
+                    f"{where!r} takes string keys",
+                    context={"field": where, "type": _json_type(key)},
+                )
+            )
+            continue
+        at = f"{where}.{key}"
+        try:
+            refuse_line_breaks(at, key)
+            out[key] = _map_value(target.values, given, at)
+        except ParseError as exc:
+            errors.extend(exc.errors or (exc,))
+    if errors:
+        raise ParseError.combine(errors)
+    return out
+
+
+def _map_value(branches: tuple[Classified, ...], value: object, at: str) -> object:
+    """One value of a mapping as the first of its types that takes it, in declaration
+    order: JSON's own types keep a boolean, an integer, and a string apart. A line break
+    in text is refused whichever type would take it"""
+    if isinstance(value, str):
+        refuse_line_breaks(at, value)
+    failures: list[ParseError] = []
+    for branch in branches:
+        try:
+            base = check_json_base(branch, value, at)
+            if isinstance(base, str) and not isinstance(value, str):
+                refuse_line_breaks(at, base)  # a Decimal sent as a number, as text
+            if branch.scalar is None:
+                return base
+            return apply_scalar(branch.scalar, base, at, secret=False)
+        except ParseError as exc:
+            failures.append(exc)
+    if len(failures) == 1:
+        raise failures[0]
+    allowed = [object_shape(b) for b in branches]
+    raise ParseError(
+        f"{at!r} expects {' or '.join(allowed)}",
+        context={"field": at, "value": value, "allowed": allowed},
+    )
 
 
 def _located(exc: ParseError, where: str) -> ParseError:

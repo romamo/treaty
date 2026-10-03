@@ -11,7 +11,7 @@ import dataclasses
 import inspect
 import types
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum, StrEnum
 from pathlib import Path
@@ -58,6 +58,14 @@ class Classified:
     """A registered custom scalar: parsed through its spec after the base type"""
     members: tuple[FieldInfo, ...] = ()
     """An object's fields, in declaration order: what its JSON object's keys hold"""
+    values: tuple[Classified, ...] = ()
+    """A mapping's value types, ``dict[str, V]``: one, or each scalar of a union, tried in
+    declaration order; empty for anything but a mapping"""
+
+    @property
+    def is_map(self) -> bool:
+        """A ``dict[str, V]``: a JSON object of any string keys, each value a V"""
+        return bool(self.values)
 
     @property
     def object_cls(self) -> type:
@@ -164,6 +172,10 @@ def classify(tp: object, scalars: ScalarRegistry, objects: ObjectHook | None = N
         if item.flag_type in (FlagType.ARRAY, FlagType.BOOLEAN) or item.optional:
             raise SchemaError(f"array items must be scalars: {base!r}")
         return Classified(FlagType.ARRAY, optional, base, item=item)
+    if origin is dict:
+        return Classified(FlagType.OBJECT, optional, base, values=_map_values(base, scalars))
+    if base is dict or origin is Mapping or base is Mapping:
+        raise SchemaError(f"unsupported mapping {tp!r}; {MAP_SHAPE}")
     if isinstance(base, type):
         if base in _SCALARS:
             return Classified(_SCALARS[base], optional, base)
@@ -192,6 +204,38 @@ def classify(tp: object, scalars: ScalarRegistry, objects: ObjectHook | None = N
 
 
 _BUILT_IN: dict[type, ScalarSpec] = {spec.cls: spec for spec in BUILT_IN}
+
+
+MAP_SHAPE = (
+    "a mapping is dict[str, V], V one of str, int, float, bool, Decimal, Path, an enum, a "
+    "Literal, or a class registered with app.scalar(...), or a union of them, such as "
+    "dict[str, str | int]"
+)
+
+
+def _map_values(tp: object, scalars: ScalarRegistry) -> tuple[Classified, ...]:
+    """The value types of ``dict[str, V]``: V, or each member of a union of scalars"""
+    args = typing.get_args(tp)
+    if len(args) != 2 or resolve_alias(args[0]) is not str:
+        raise SchemaError(f"unsupported mapping {tp!r}; {MAP_SHAPE}")
+    value = resolve_alias(args[1])
+    union = typing.get_origin(value) in (types.UnionType, typing.Union)
+    members = typing.get_args(value) if union else (value,)
+    if types.NoneType in members:
+        raise SchemaError(
+            f"unsupported mapping {tp!r}: a value cannot be null; leave the key out, and "
+            f"make the whole mapping optional with | None if it may be absent; {MAP_SHAPE}"
+        )
+    out: list[Classified] = []
+    for member in members:
+        try:
+            classified = classify(member, scalars)
+        except SchemaError:
+            raise SchemaError(f"unsupported mapping {tp!r}; {MAP_SHAPE}") from None
+        if classified.flag_type in (FlagType.ARRAY, FlagType.OBJECT):
+            raise SchemaError(f"unsupported mapping {tp!r}; {MAP_SHAPE}")
+        out.append(classified)
+    return tuple(out)
 
 
 def is_dataclass_type(tp: object) -> bool:

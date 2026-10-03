@@ -1462,6 +1462,18 @@ make it a top-level flag, read from `--x-from-env` or `--x-from-file`, or declar
 setting, and a value class meant to travel as one string, such as an id, still needs
 `app.scalar(...)`: an unregistered frozen dataclass on a flag is an object.
 
+A mapping of free keys is `dict[str, V]`, as an object's field or a flag of its own, where
+`V` is a scalar argument type (`str`, `int`, `float`, `bool`, `Decimal`, `Path`, an enum, a
+`Literal`, or an `app.scalar` class) or a union of them, such as `meta: dict[str, str |
+int] | None = None`. It travels as a JSON object, its schema is `{"type": "object",
+"additionalProperties": ...}`, and each value is checked as its type is, at its key, such
+as `postings[0].meta.ref`; in a union the first type that takes the JSON value wins, so a
+boolean is never an integer. The handler gets a `dict`. A value cannot be null, and nested
+mappings, non-`str` keys, and a bare `dict` are refused at registration. A default is
+read-only, such as `types.MappingProxyType({"draft": False})`, or `default_factory=dict`
+on an object's field. A setting may be a mapping too: a TOML table, or a JSON object in
+its variable.
+
 ## Output adapters
 
 A handler may return a class treaty does not know, such as a pydantic model, once the app

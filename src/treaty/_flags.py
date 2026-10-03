@@ -6,7 +6,7 @@ import dataclasses
 import keyword
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -110,7 +110,10 @@ class FlagSpec:
 def _field(spec: FlagSpec, default: object) -> Any:
     """The dataclass field carrying ``spec``, with ``default`` when one is given"""
     if isinstance(default, (list, dict, set)):
-        raise RegistrationError("mutable defaults are not allowed; use a tuple")
+        raise RegistrationError(
+            "mutable defaults are not allowed; use a tuple, or types.MappingProxyType(...) "
+            "for a mapping"
+        )
     if default is MISSING:
         return field(metadata={_META: spec})
     return field(default=default, metadata={_META: spec})
@@ -314,13 +317,7 @@ class FieldInfo:
         self.check_size(raw)
         if self.secret:
             return
-        for char, name in _CONTROL_CHARS.items():
-            if char in raw and not (self.spec.multiline and char in "\n\r"):
-                raise ParseError(
-                    f"value for {self.flag!r} contains a {name.replace('_', ' ')}",
-                    context={"flag": self.flag, "value": raw, "rejected_pattern": name},
-                    suggestion=f"pass --{self.flag} as a single line",
-                )
+        refuse_line_breaks(self.flag, raw, multiline=self.spec.multiline)
 
     def check_size(self, raw: str) -> None:
         """``Flag(max_bytes=)``: the error names the sizes, never the value (REQ-F-064)"""
@@ -474,6 +471,8 @@ _PRESET_HINTS = {
 def object_shape(target: Classified) -> str:
     """An object's keys and their types for help and the manifest, as in
     ``{account: string, number: decimal, memo?: string}``; ``?`` marks an optional key"""
+    if target.is_map:
+        return "{<key>: " + "|".join(object_shape(v) for v in target.values) + "}"
     if target.flag_type is FlagType.OBJECT:
         keys = (
             f"{m.name}{'' if m.required else '?'}: {object_shape(m.classified)}"
@@ -498,11 +497,23 @@ def jsonable_value(value: object, target: Classified) -> object:
     if target.flag_type is FlagType.ARRAY and target.item is not None:
         assert isinstance(value, tuple)
         return [jsonable_value(v, target.item) for v in value]
+    if target.is_map:
+        assert isinstance(value, Mapping)
+        return {k: jsonable_value(v, map_branch(target, v)) for k, v in value.items()}
     if target.flag_type is FlagType.OBJECT:
         return {
             m.name: jsonable_value(getattr(value, m.name), m.classified) for m in target.members
         }
     return jsonable_default(value, target.scalar)
+
+
+def map_branch(target: Classified, value: object) -> Classified:
+    """The value type of a mapping that a parsed value belongs to: a registered scalar by
+    its class, else the first, since the others serialize by the value's own type"""
+    for branch in target.values:
+        if branch.scalar is not None and isinstance(value, branch.scalar.cls):
+            return branch
+    return target.values[0]
 
 
 def jsonable_default(value: object, scalar: ScalarSpec | None) -> object:
@@ -623,6 +634,18 @@ def _coerce_base(target: Classified, raw: str, flag: str) -> object:
             raise ParseError(f"{flag!r} expects a JSON object", context={"flag": flag})
 
 
+def refuse_line_breaks(flag: str, raw: str, *, multiline: bool = False) -> None:
+    """REQ-F-044's check of one text value at ``flag``: no null byte, and no line break
+    unless ``multiline``"""
+    for char, name in _CONTROL_CHARS.items():
+        if char in raw and not (multiline and char in "\n\r"):
+            raise ParseError(
+                f"value for {flag!r} contains a {name.replace('_', ' ')}",
+                context={"flag": flag, "value": raw, "rejected_pattern": name},
+                suggestion=f"pass --{flag} as a single line",
+            )
+
+
 def _check_secret_field(cls: type, info: FieldInfo) -> None:
     """REQ-C-016: a secret is a named scalar that arrives via env var or file, never argv"""
     where = f"{cls.__qualname__}.{info.name}"
@@ -663,6 +686,8 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
                 raise RegistrationError(f"{where}: default {default!r} is not {what}")
             return target.scalar.parse(text)
         return default
+    if target.is_map:
+        return _checked_map_default(target, default, where)
     match target.flag_type:
         case FlagType.OBJECT:
             if not isinstance(default, target.object_cls):
@@ -697,6 +722,33 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
             f"{where}: default {default!r} does not match the field's type "
             f"({target.flag_type.value})"
         )
+    return default
+
+
+def _checked_map_default(target: Classified, default: object, where: str) -> object:
+    """A mapping's default, each value of one of its types. It is kept as given: a
+    dataclass refuses a ``dict`` default, so it is read-only, such as a
+    ``types.MappingProxyType``, and sharing it between runs is safe"""
+    if not isinstance(default, Mapping):
+        raise RegistrationError(f"{where}: default {default!r} is not a mapping")
+    for key, value in default.items():
+        if not isinstance(key, str):
+            raise RegistrationError(f"{where}: default key {key!r} is not a str")
+        errors: list[RegistrationError] = []
+        for branch in target.values:
+            try:
+                _checked_default(branch, value, f"{where}.{key}")
+            except RegistrationError as exc:
+                errors.append(exc)
+                continue
+            break
+        else:
+            if len(errors) == 1:
+                raise errors[0]
+            raise RegistrationError(
+                f"{where}.{key}: default {value!r} matches none of the value types "
+                f"({object_shape(target)})"
+            )
     return default
 
 
@@ -884,6 +936,7 @@ def _inspect_object(cls: type, scalars: ScalarRegistry, outer: tuple[type, ...])
 def _check_value_spec(where: str, spec: FlagSpec, classified: Classified, *, secret: bool) -> None:
     """The value options an object's field allows by its type, as an argument's do"""
     item = classified.item
+    _check_map_spec(where, spec, classified)
     if spec.pattern is not None and (classified.path or (item is not None and item.path)):
         raise RegistrationError(
             f"{where}: Path fields get the filepath preset; pattern= is not allowed on them "
@@ -910,6 +963,15 @@ def _check_value_spec(where: str, spec: FlagSpec, classified: Classified, *, sec
     ):
         raise RegistrationError(
             f"{where}: max_bytes is for str fields that are not secrets or paths"
+        )
+
+
+def _check_map_spec(where: str, spec: FlagSpec, classified: Classified) -> None:
+    """A mapping's values are checked by their types alone: pattern= has nothing to match"""
+    if spec.pattern is not None and classified.is_map:
+        raise RegistrationError(
+            f"{where}: pattern= is for str fields; a mapping's values are checked by their "
+            "type, so register a class with app.scalar(...) to constrain them"
         )
 
 
@@ -955,6 +1017,7 @@ def inspect_fields(cls: type, scalars: ScalarRegistry) -> tuple[FieldInfo, ...]:
                 "Flag(...) to take a JSON object per value, or register a class with "
                 "app.scalar(...) to take it from one text value"
             )
+        _check_map_spec(f"{cls.__qualname__}.{f.name}", spec, classified)
         if spec.pattern is not None and (classified.path or (item is not None and item.path)):
             raise RegistrationError(
                 f"{cls.__qualname__}.{f.name}: Path fields get the filepath preset; "
