@@ -226,12 +226,14 @@ DATE_TEXT = r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
 ``date.fromisoformat``, which also takes ``20240101`` and ``2024-W01-1``"""
 DATE_HINT = "pass a date as YYYY-MM-DD, such as 2024-01-31"
 DATETIME_TEXT = (
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?"
-    r"(Z|[+-][0-9]{2}:[0-9]{2})"
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?"
+    r"(Z|[+-][0-9]{2}:[0-5][0-9])"
 )
 """RFC 3339 date-time with an offset, an upper-case ``T`` and ``Z``, and at most
 microseconds: what ``datetime.fromisoformat`` reads without dropping digits. A naive value
-names no instant, so it does not match"""
+names no instant, so it does not match. The hour stops at 23 and an offset's minute at 59,
+which RFC 3339 requires and ``fromisoformat`` does not: it reads ``24:00`` as the next
+day's midnight and ``+05:60`` as ``+06:00``"""
 DATETIME_HINT = (
     "pass a date-time with an offset, such as 2024-01-31T09:30:00Z or 2024-01-31T09:30:00+02:00"
 )

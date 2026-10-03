@@ -127,6 +127,9 @@ def test_a_date_argument_refuses_anything_but_a_calendar_yyyy_mm_dd(value: str) 
         "2024-01-01T10:00:00.1234567Z",
         "2024-01-01T25:00:00Z",
         "20240101T100000Z",
+        # RFC 3339 has no hour 24 or offset minute 60; fromisoformat rolls both over
+        "2024-01-01T24:00:00Z",
+        "2024-01-01T10:00:00+05:60",
     ],
 )
 def test_a_datetime_argument_refuses_naive_and_non_rfc3339_text(value: str) -> None:
@@ -214,6 +217,9 @@ def test_argument_schema_says_format_and_pattern_and_output_is_unchanged() -> No
         ("2024-01-01T10:00:00", False),
         ("2024-01-01t10:00:00z", False),
         ("2024-01-01T10:00:00.1234567Z", False),
+        ("2024-01-01T24:00:00Z", False),
+        ("2024-01-01T10:00:00+05:60", False),
+        ("2024-01-01T23:59:59-23:59", True),
     ],
 )
 def test_the_published_pattern_matches_what_the_parser_accepts(value: str, ok: bool) -> None:
