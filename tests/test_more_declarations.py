@@ -591,6 +591,8 @@ def test_the_manifest_lists_a_tool_needed_at_any_version_as_a_star() -> None:
         ((3,), "is not a program name"),
         (("git", "git"), "names 'git' twice"),
         ("git", "or to None for any version"),
+        ("", "or to None for any version"),
+        (b"", "or to None for any version"),
         ({"git": "latest"}, "not dotted numbers"),
     ],
 )

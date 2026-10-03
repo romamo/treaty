@@ -875,7 +875,9 @@ def build_command(
         subprocess=child,
         shell_checked=() if declared_child is None else declared_child.user_controlled_args,
         platform=check_platform(str(path), platform),
-        required_tools=check_required_tools(str(path), required_tools or {}),
+        required_tools=check_required_tools(
+            str(path), {} if required_tools is None else required_tools
+        ),
         filesystem_side_effects=check_side_effects(
             str(path), filesystem_side_effects, project_root
         ),
