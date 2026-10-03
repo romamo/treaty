@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- `treaty audit`'s `describe` rule checks an example of a `passthrough=True` command by
+  putting `--validate-only` before the command path, where treaty reads it (#306). It went
+  after the path, into the delegated tool's argv, so the handler ran during the audit and
+  a tool that refuses unknown options failed a valid example with `DELEGATED_EXIT`. Only
+  treaty's part is judged: the options before the path, and the path
+
 ## [1.0.0rc31] - 2026-10-03
 
 The 31th 1.0 release candidate: 1 fix.

@@ -2072,3 +2072,41 @@ def test_timeout_budget_flags_a_heartbeat_on_the_default_timeout() -> None:
     assert command == "restart" and "heartbeat=True" in message and "60 s" in message
     assert "timeout=None" in fix
     assert _timeout_app(heartbeat=True, timeout=3600)["timeout-budget"] == []
+
+
+def test_the_example_check_of_a_passthrough_command_judges_treatys_part_only() -> None:
+    """#306: the words after the path are the tool's; --validate-only goes before the path,
+    so the tool never sees it and the handler never runs"""
+    import argparse
+
+    from treaty import App, Ctx, NoArgs
+
+    app = App("probe", version="0.1.0")
+    ran: list[tuple[str, ...]] = []
+
+    @app.command(
+        "ingest",
+        description="Hand argv to argparse",
+        danger_level="mutating",
+        exit_codes=(),
+        examples=[
+            ("Extract a statement", "probe ingest extract statement.csv"),
+            ("A bad timeout", "probe --timeout soon ingest extract statement.csv"),
+        ],
+        passthrough=True,
+    )
+    def ingest(args: NoArgs, ctx: Ctx) -> int:
+        ran.append(ctx.argv_rest)
+        parser = argparse.ArgumentParser(prog="probe ingest")
+        parser.add_argument("action", choices=["extract"])
+        parser.add_argument("src")
+        parser.parse_args(list(ctx.argv_rest))
+        return 0
+
+    errors = [
+        f for r in audit(app, "x:app", limit=3).rules if r.id == "describe" for f in r.findings
+    ]
+    assert [f.message.split(" does not parse")[0] for f in errors] == [
+        "the example 'probe --timeout soon ingest extract statement.csv'"
+    ]
+    assert ran == []
