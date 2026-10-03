@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc30] - 2026-10-03
+
+The 30th 1.0 release candidate: 2 fixes.
+
 ### Fixed
 
 - An MCP call to an unknown tool answers `UNKNOWN_TOOL` with `error.context.available`
@@ -1841,7 +1845,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc29...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc30...HEAD
+[1.0.0rc30]: https://github.com/romamo/treaty/compare/v1.0.0rc29...v1.0.0rc30
 [1.0.0rc29]: https://github.com/romamo/treaty/compare/v1.0.0rc28...v1.0.0rc29
 [1.0.0rc28]: https://github.com/romamo/treaty/compare/v1.0.0rc27...v1.0.0rc28
 [1.0.0rc27]: https://github.com/romamo/treaty/compare/v1.0.0rc26...v1.0.0rc27
