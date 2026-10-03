@@ -943,3 +943,39 @@ def test_a_secret_scalar_setting_is_redacted_from_a_refusal_quoting_its_text() -
     assert code == 2
     assert "7654321" not in out.getvalue()
     assert "[REDACTED] is revoked" in json.loads(out.getvalue())["error"]["message"]
+
+
+@dataclass(frozen=True, slots=True)
+class PairSettings:
+    api_token: str | None = None
+    api_token_prefix: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.api_token is not None:
+            token = self.api_token
+            raise ValueError(f"token {token[:5]}\x1b[0m{token[5:]} or {token} is revoked")
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_secret_settings_are_redacted_from_a_refusal_as_the_run_redacts(seed: int) -> None:
+    """The run's redaction (#277): a secret a terminal escape splits is whole once the
+    envelope is cleaned, and the longest secret goes first, so a shorter one it begins
+    with leaves none of its tail, whichever setting is read first"""
+    token = f"hunter2-s3cr3t-qzx9-{seed}"
+    app = App("pairctl", version="1.0.0", settings=PairSettings)
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx, settings: PairSettings) -> dict[str, object]:
+        return {}
+
+    out = io.StringIO()
+    env = {
+        "PAIRCTL_AUDIT_LOG": "0",
+        "PAIRCTL_API_TOKEN": token,
+        "PAIRCTL_API_TOKEN_PREFIX": token[:9],
+    }
+    code = app.run(["show", "--no-config"], stdout=out, stderr=io.StringIO(), env=env)
+    assert code == 2
+    message = json.loads(out.getvalue())["error"]["message"]
+    assert "qzx9" not in message and "hunt" not in message, message
+    assert "[REDACTED] or [REDACTED] is revoked" in message

@@ -48,7 +48,14 @@ def json_safe(value: object, depth: int = 0) -> object:
 # dot, a slash, an underscore, or a digit marks a program, a path, or an identifier, which
 # keeps its case (``ansible-playbook``, ``out.json``, ``sort_key``)
 _WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)*[,:;]?")
-_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]?")
+# Of the escapes: OSC and the DCS, SOS, PM, and APC strings, whose text a terminal hides
+# up to the terminator; CSI; and an ESC with its intermediates and final byte, such as the
+# charset reset \x1b(B that ``tput sgr0`` writes, or \x1b7. Taking only the ESC out would
+# leave (B or 7 as text where the terminal shows none, and a secret one splits whole on a
+# terminal but not here (#277)
+_ESCAPES = re.compile(
+    r"\x1b[\]PX^_][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[ -/]*[0-~]?"
+)
 # REQ-F-016: a null byte or a lone surrogate is not valid UTF-8 text
 _INVALID = re.compile(r"[\x00\ud800-\udfff]")
 # The 8-bit forms of the escapes, which some terminals obey: \x9d opens an OSC and \x9b a
@@ -67,6 +74,12 @@ _CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]
 def strip_escapes(text: str) -> str:
     """``text`` without terminal escapes, 7-bit or C1 (REQ-F-007)"""
     return _C1.sub("", _ESCAPES.sub("", text))
+
+
+def strip_7bit_escapes(text: str) -> str:
+    """``text`` without its 7-bit terminal escapes, as ``clean`` takes them out; the C1
+    forms stay"""
+    return _ESCAPES.sub("", text)
 
 
 def visible(text: str, keep: str = "", *, rewrite: bool = False) -> str:
@@ -105,10 +118,11 @@ def terminal_text(text: str, *, color: bool, keep: str = "", rewrite: bool = Fal
 
 # An escape a write ends inside of, 7-bit or C1: print() may write one in two parts, and a
 # child's output may arrive split across reads; the second part, cleaned on its own, would
-# reach stderr as text (#105, #117). An OSC is held only within its line: a stray \x9d, as
-# in mojibake, would otherwise take the next lines
+# reach stderr as text (#105, #117). An OSC or a DCS-like string is held only within its
+# line: a stray \x9d, as in mojibake, would otherwise take the next lines
 _OPEN_ESCAPE = re.compile(
-    r"(?:\x1b(?:\][^\x07\x1b\n]*\x1b?|\[[0-?]*[ -/]*)?|\x9d[^\x07\x1b\x9c\n]*\x1b?"
+    r"(?:\x1b(?:[\]PX^_][^\x07\x1b\n]*\x1b?|\[[0-?]*[ -/]*|[ -/]+)?"
+    r"|\x9d[^\x07\x1b\x9c\n]*\x1b?"
     r"|\x9b[0-?]*[ -/]*)\Z"
 )
 HELD_CAP = 4096

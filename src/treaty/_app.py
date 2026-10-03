@@ -258,6 +258,7 @@ from ._redact import (
     REDACTED,
     line_fragments,
     redacted,
+    replacer,
     scrub,
     scrub_fields,
     secret_name,
@@ -2879,9 +2880,11 @@ def _rendered(render: Renderer, data: object) -> str:
     return text
 
 
-def _traceback(exc: BaseException) -> str:
-    """For stderr: an exception's message may carry a value with terminal escapes"""
-    return visible("".join(traceback.format_exception(exc)))
+def _traceback(exc: BaseException, redact: Callable[[str], str]) -> str:
+    """For stderr: an exception's message may carry a value with terminal escapes. Redacted
+    before ``visible`` writes them out, while a secret one splits is still found, and
+    again after (#277)"""
+    return redact(visible(redact("".join(traceback.format_exception(exc)))))
 
 
 def _closed_pipe(exc: OSError) -> bool:
@@ -3973,7 +3976,7 @@ class _Run:
         try:
             return budget.apply(envelope)
         except UserCodeError as err:
-            self.err.write(self._redact_now(_traceback(err.cause)))
+            self.err.write(_traceback(err.cause, self._redact_now))
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
             name = budget.tokenizer.name
             error = ErrorDetail(
@@ -4450,7 +4453,7 @@ class _Run:
         ``CLEANUP_FAILED`` warning naming the hook; the exit code stays (REQ-C-017)"""
 
         def failed(hook: str, exc: Exception) -> None:
-            self.err.write(self._redactor(command, args)(_traceback(exc)))
+            self.err.write(_traceback(exc, self._redactor(command, args)))
             self._warn(
                 CLEANUP_FAILED,
                 f"{hook} raised {type(exc).__name__}; stderr has the traceback",
@@ -4467,8 +4470,11 @@ class _Run:
         def write(level: Level, message: str, fields: Mapping[str, object]) -> None:
             if level is Level.PROGRESS:
                 # The status --heartbeat-interval repeats (REQ-O-012), one plain line
-                status = self._redactor(command, args)(message)
-                self.status = visible(" ".join(str(clean(status)).split()))[:STATUS_CHARS]
+                # Redacted, clean, and redacted again before the cut: a secret an escape
+                # or a run of spaces split is whole then (#277)
+                redact = self._redactor(command, args)
+                status = visible(" ".join(str(clean(redact(message))).split()))
+                self.status = redact(status)[:STATUS_CHARS]
             if self.err.shows(level):
                 # Built per call, inside the handler: a secret scalar's serialize= is user code
                 self._log_line(level, message, fields, self._redactor(command, args), mode)
@@ -5492,7 +5498,7 @@ class _Run:
     def _rollback_error(self, command: Command, args: object, exc: Exception) -> dict[str, str]:
         """``data.rollback_error``: the code and message; the traceback goes to stderr"""
         redact = self._redactor(command, args)
-        self.err.write(redact(_traceback(exc)))
+        self.err.write(_traceback(exc, redact))
         code = exc.code if isinstance(exc, CliExit) else "ROLLBACK_FAILED"
         if not isinstance(code, str) or not _ERROR_CODE.fullmatch(code):
             code = "ROLLBACK_FAILED"
@@ -6062,7 +6068,7 @@ class _Run:
         try:
             events.close()
         except Exception as exc:  # noqa: BLE001 - the handler's finally is user code
-            self.err.write(redact(_traceback(exc)))
+            self.err.write(_traceback(exc, redact))
 
     def _grace(self, running: Sequence[Pending]) -> None:
         """Past its timeout, a handler with something to tear down gets the children's
@@ -6324,7 +6330,7 @@ class _Run:
         where = f"{command.path} finished after its response was written"
         if outcome.exc is not None:
             self.err.write(f"{where}, but failed:\n")
-            self.err.write(redact(_traceback(outcome.exc)))
+            self.err.write(_traceback(outcome.exc, redact))
             return
         # Serialized as the response would have been, so the replay matches it
         batch_problem: str | None = None
@@ -6341,7 +6347,7 @@ class _Run:
             return
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is user code
             self.err.write(f"{where}; serializing its result failed:\n")
-            self.err.write(redact(_traceback(exc)))
+            self.err.write(_traceback(exc, redact))
             return
         problem = batch_problem or effect_problem(data, preview=False)
         if problem is not None:
@@ -6358,15 +6364,8 @@ class _Run:
             self.err.write(f"{where}; recorded, but pruning expired records failed: {exc}\n")
 
     def _redactor(self, command: Command, args: object) -> Callable[[str], str]:
-        """Replace every spelling of the run's secret values"""
-        ordered = sorted(self._secret_spellings(command, args), key=len, reverse=True)
-
-        def redact(text: str) -> str:
-            for spelling in ordered:
-                text = text.replace(spelling, REDACTED)
-            return text
-
-        return redact
+        """Replace every spelling of the run's secret values, one an escape splits too"""
+        return replacer(self._secret_spellings(command, args))
 
     def _secret_spellings(self, command: Command, args: object) -> set[str]:
         """Every spelling of the run's secret values, the secret arguments' and
@@ -6412,14 +6411,7 @@ class _Run:
         secrets: list[tuple[object, object]] = [
             (value, None) for value in _named_secrets(_fallback_payload(request))
         ]
-        ordered = sorted(self._spellings(secrets), key=len, reverse=True)
-
-        def redact(text: str) -> str:
-            for spelling in ordered:
-                text = text.replace(spelling, REDACTED)
-            return text
-
-        return redact
+        return replacer(self._spellings(secrets))
 
     def _fallback(
         self,
@@ -6527,7 +6519,7 @@ class _Run:
     ) -> Envelope:
         """Exit 1 ``FALLBACK_FAILED``: the old dispatcher raised; its traceback goes to
         stderr, redacted"""
-        self.err.write(redact(_traceback(exc)))
+        self.err.write(_traceback(exc, redact))
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
         name = type(exc).__name__
         return self._envelope(
@@ -6615,7 +6607,7 @@ class _Run:
         redact = self._redactor(command, args)
         if self.trace_id is not None:
             self.err.write(f"{self.app.name}: {command.path} crashed{self._trace_suffix()}\n")
-        self.err.write(redact(_traceback(exc)))
+        self.err.write(_traceback(exc, redact))
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
         return self._envelope(
             entry.code.value,
@@ -6700,7 +6692,7 @@ class _Run:
                 else:
                     text = render_plain(data, layout)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
-                self.err.write(self._redact_now(_traceback(exc)))
+                self.err.write(_traceback(exc, self._redact_now))
                 return self._file_error(
                     envelope, "RENDER_FAILED", f"the {name} renderer failed", path
                 )
@@ -6875,7 +6867,7 @@ class _Run:
             try:
                 text = _rendered(render, data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
-                self.err.write(self._redact_now(_traceback(exc)))
+                self.err.write(_traceback(exc, self._redact_now))
                 self.err.write(f"{self.app.name}: HANDLER_CRASHED: the {mode} renderer failed\n")
                 code = FrameworkCode.GENERAL_ERROR.value
             else:

@@ -33,7 +33,7 @@ from ._errors import ParseError, RegistrationError, SchemaError, UserCodeError, 
 from ._flags import FLAG_META, apply_scalar, coerce_text
 from ._parse import check_json_base
 from ._paths import check_path
-from ._redact import REDACTED, secret_name
+from ._redact import REDACTED, replacer, secret_name
 from ._scalars import ScalarRegistry
 from ._schema import to_jsonable
 from ._types import Classified, FlagType, classify, type_hints
@@ -403,20 +403,22 @@ def resolve(
         effective = {k: to_jsonable(v, scalars, base=cwd) for k, v in values.items()}
         files = tuple(p for p, _ in loaded)
         return Resolved(value, effective, sources, files, candidates, context, opts, secrets)
-    for name in secrets:
-        why = _without(why, values[name], scalars)
+    spellings = {form for name in secrets for form in _spellings(values[name], scalars)}
+    why = replacer(spellings)(why)
     raise ParseError(f"settings are invalid: {why}", code=INVALID, context={"sources": sources})
 
 
-def _without(text: str, value: object, scalars: ScalarRegistry) -> str:
-    """``text`` with a secret setting's value, or each item of a tuple, redacted; a
-    registered scalar by its serialized form too, the text its instance was parsed from"""
+def _spellings(value: object, scalars: ScalarRegistry) -> set[str]:
+    """A secret setting's value, or each item of a tuple, as text; a registered scalar by
+    its serialized form too, the text its instance was parsed from. Replaced as the run's
+    secrets are, the longest first and one an escape splits too (#277)"""
+    found: set[str] = set()
     for item in value if isinstance(value, tuple) else (value,):
         spec = scalars.for_value(item)
         for form in (item,) if spec is None else (spec.serialize(item), item):
             if form is not None and str(form):
-                text = text.replace(str(form), REDACTED)
-    return text
+                found.add(str(form))
+    return found
 
 
 def _invalid(path: Path, key: str | None, why: str, **extra: object) -> ParseError:
