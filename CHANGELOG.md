@@ -105,6 +105,13 @@ Apps built on treaty keep their own, structured schema changelog with
   declared `Out(high_entropy=True)` reached the error envelope unmasked. Data no
   dataclass covers is masked by name and shape, as before (#322)
 
+### Fixed
+
+- `mcp serve` stops with exit 0 and `stopped_by` naming the signal when SIGINT or SIGTERM
+  lands while it is still starting its server thread. On a loaded machine that start can
+  outlast the server's first answers, so a client that signalled right after them got
+  the CANCELLED envelope and exit 130 or 143 instead (#313)
+
 ## [1.0.0rc32] - 2026-10-03
 
 The 32th 1.0 release candidate: 1 fix.

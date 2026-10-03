@@ -314,26 +314,32 @@ def serve_wire(
         bindings=bindings,
     )
     with _claimed_stdin(wire.stdin, serving.read_all) as stdin:
+        ended = threading.Event()
 
         def run() -> None:
             try:
                 asyncio.run(_serve_wire(server, wire.out, stdin, serving))
             except BaseException as exc:  # noqa: BLE001 - re-raised on the run's thread below
                 serving.error = exc
+            finally:
+                ended.set()
 
         thread = threading.Thread(target=run, name="treaty-mcp", daemon=True)
-        thread.start()
         try:
+            # Inside the try: on a loaded machine start() can still be waiting for the
+            # thread when the server has answered its client, who may signal then (#313).
+            # Stopping first is safe, as the server stops as soon as it starts.
+            thread.start()
             while thread.is_alive():
                 thread.join(JOIN_SECONDS)
         except Cancelled as exc:
             serving.stop()
-            thread.join(GRACE_SECONDS)
+            ended.wait(GRACE_SECONDS)  # join() refuses a thread whose start() was cut short
             return McpServed(_signal_name(exc.signal.name), serving.calls)
         except KeyboardInterrupt:
             # No treaty handler on this thread (a run started off the main thread)
             serving.stop()
-            thread.join(GRACE_SECONDS)
+            ended.wait(GRACE_SECONDS)
             return McpServed("SIGINT", serving.calls)
     if serving.error is not None:
         raise serving.error
