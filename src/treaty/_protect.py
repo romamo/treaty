@@ -32,6 +32,7 @@ from ._adapters import OutputAdapters, branch
 from ._errors import RegistrationError
 from ._out import data_path, is_binary, out_spec
 from ._redact import public_key_name, secret_field
+from ._refs import defs_of
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
 SOURCE_KEY = "_source"
@@ -169,7 +170,8 @@ class _Walk:
         base, _ = strip_optional(resolve_alias(tp))
         if self.adapters.for_type(base) is not None:
             assert isinstance(base, type)
-            return self.node(value, self.adapters.node(base), path, secret)
+            node = self.adapters.node(base)
+            return self.node(value, node, path, secret, defs_of(node))
         if isinstance(value, str):
             return self.string(value, path, secret)
         if isinstance(value, list):
@@ -213,10 +215,12 @@ class _Walk:
         schema: Mapping[str, Any],
         path: tuple[str | int, ...],
         secret: bool | None,
+        defs: Mapping[str, Any],
     ) -> object:
         """``value`` by the JSON Schema an output adapter gave: a property's
-        ``x-high-entropy`` masks or exempts it, and ``x-external`` marks its content"""
-        node = branch(dict(schema), value)
+        ``x-high-entropy`` masks or exempts it, and ``x-external`` marks its content;
+        ``defs`` is the root's ``$defs``, which a ``$ref`` names"""
+        node = branch(schema, value, defs)
         if isinstance(value, str):
             return self.string(value, path, secret)
         if isinstance(value, list):
@@ -231,6 +235,7 @@ class _Walk:
                     else (items if isinstance(items, dict) else {}),
                     (*path, i),
                     secret,
+                    defs,
                 )
                 for i, v in enumerate(value)
             ]
@@ -244,14 +249,14 @@ class _Walk:
         for key, v in value.items():
             prop = props.get(key)
             if prop is None:
-                out[key] = self.node(v, rest, (*path, key), _by_name(key, v, secret))
+                out[key] = self.node(v, rest, (*path, key), _by_name(key, v, secret), defs)
                 continue
             if prop.get("x-external") is True and v is not None:
                 self.external = True
             declared = secret if secret is not None else prop.get("x-high-entropy")
             if declared is None:
                 declared = _by_name(key, v, None)
-            out[key] = self.node(v, prop, (*path, key), declared)
+            out[key] = self.node(v, prop, (*path, key), declared, defs)
         return out
 
     def string(self, value: str, path: tuple[str | int, ...], secret: bool | None) -> str:

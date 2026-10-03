@@ -20,6 +20,7 @@ from typing import Any
 
 from ._adapters import OutputAdapters, branch, untyped
 from ._errors import RegistrationError
+from ._refs import EMPTY_DEFS, defs_of, deref
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
 OUT_META = "treaty.out"
@@ -164,7 +165,8 @@ def arrange(
     base, _ = strip_optional(resolve_alias(tp))
     if adapters.for_type(base) is not None:
         assert isinstance(base, type)
-        return arrange_node(value, adapters.node(base), spec, stable=stable)
+        node = adapters.node(base)
+        return arrange_node(value, node, spec, stable=stable, defs=defs_of(node))
     # Untyped content declares nothing of its own, so an ordered declaration covers it
     inner = spec if spec.ordered else NO_ORDER
     if isinstance(value, list):
@@ -208,28 +210,35 @@ def arrange(
 
 
 def arrange_node(
-    value: object, node: Mapping[str, Any], spec: OutSpec = NO_ORDER, *, stable: bool
+    value: object,
+    node: Mapping[str, Any],
+    spec: OutSpec = NO_ORDER,
+    *,
+    stable: bool,
+    defs: Mapping[str, Any] = EMPTY_DEFS,
 ) -> object:
     """``arrange`` by a JSON Schema: a property's ``x-sort-key`` and ``x-ordered`` order
-    its array, and ``x-volatile`` drops it under ``stable``"""
+    its array, and ``x-volatile`` drops it under ``stable``; ``defs`` is the root's
+    ``$defs``, which a ``$ref`` names"""
+    node = deref(node, defs)
     sort_key = node.get("x-sort-key")
     if isinstance(sort_key, str):
         spec = OutSpec(sort_key=sort_key)
     elif node.get("x-ordered") is True:
         spec = OutSpec(ordered=True)
-    node = branch(dict(node), value)
+    node = branch(node, value, defs)
     if isinstance(value, list):
         items = node.get("items")
         if isinstance(items, list):
             extra = node.get("additionalItems")
             rest = extra if isinstance(extra, dict) else {}
             return [
-                arrange_node(v, items[i] if i < len(items) else rest, stable=stable)
+                arrange_node(v, items[i] if i < len(items) else rest, stable=stable, defs=defs)
                 for i, v in enumerate(value)
             ]
         item = items if isinstance(items, dict) else {}
         inner = spec if spec.ordered and untyped(item) else NO_ORDER
-        arranged = [arrange_node(v, item, inner, stable=stable) for v in value]
+        arranged = [arrange_node(v, item, inner, stable=stable, defs=defs) for v in value]
         if spec.ordered:
             return arranged
         return [arranged[i] for i in sorted_indices(arranged, spec.sort_key)]
@@ -244,9 +253,9 @@ def arrange_node(
     for key, v in value.items():
         prop = props.get(key)
         if prop is None:
-            out[key] = arrange_node(v, rest, inner, stable=stable)
+            out[key] = arrange_node(v, rest, inner, stable=stable, defs=defs)
         elif not (stable and prop.get("x-volatile") is True):
-            out[key] = arrange_node(v, prop, stable=stable)
+            out[key] = arrange_node(v, prop, stable=stable, defs=defs)
     return out
 
 
@@ -313,9 +322,15 @@ def can_sort_by(tp: object) -> bool:
 
 
 def check_order(
-    tp: object, where: str, spec: OutSpec = NO_ORDER, *, adapters: OutputAdapters
+    tp: object,
+    where: str,
+    spec: OutSpec = NO_ORDER,
+    *,
+    adapters: OutputAdapters,
+    seen: frozenset[type] = frozenset(),
 ) -> None:
-    """Each ``sort_key`` of an output type names a scalar field of the array's items"""
+    """Each ``sort_key`` of an output type names a scalar field of the array's items;
+    ``seen``, the dataclasses being checked, ends a type that holds itself"""
     base, _ = strip_optional(resolve_alias(tp))
     origin = typing.get_origin(base)
     args = typing.get_args(base)
@@ -346,8 +361,8 @@ def check_order(
         raise RegistrationError(f"{where}: ordered=True is for arrays, not {tp!r}")
     for arg in args:
         if arg is not Ellipsis:
-            check_order(arg, where, adapters=adapters)
-    if is_dataclass_type(base):
+            check_order(arg, where, adapters=adapters, seen=seen)
+    if is_dataclass_type(base) and base not in seen:
         assert isinstance(base, type)
         hints = type_hints(base)
         for f in dataclasses.fields(base):
@@ -356,6 +371,7 @@ def check_order(
                 f"{where}: {base.__qualname__}.{f.name}",
                 out_spec(f),
                 adapters=adapters,
+                seen=seen | {base},
             )
 
 

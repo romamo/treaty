@@ -301,11 +301,6 @@ def test_secret_and_external_fields_are_protected() -> None:
     assert unmasked["data"]["api_token"] == "**********"  # the dump never had the secret
 
 
-class Node(BaseModel):
-    name: str
-    children: list[Node]
-
-
 class Bad(BaseModel):
     items: list[Line] = Field(json_schema_extra={"x-sort-key": "nope"})
 
@@ -325,7 +320,6 @@ class Flat(BaseModel):
 @pytest.mark.parametrize(
     ("model", "match"),
     [
-        (Node, "refers to itself"),
         (Bad, "x-sort-key='nope' must name a string or integer property"),
         (Both, "pick one"),
         (Typo, "x-volatile is true or false"),

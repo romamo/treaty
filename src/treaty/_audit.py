@@ -35,6 +35,7 @@ from ._exit import ExitCodeRegistry, FrameworkCode
 from ._manifest import implicit_exit_codes
 from ._out import can_sort_by, out_spec
 from ._redact import secret_field
+from ._refs import DEFS_KEY, defs_of, deref, ref_name
 from ._retry import budget_ms
 from ._scan import (
     FOLLOW_DEPTH,
@@ -1958,9 +1959,13 @@ def _adapted_classes(app: App, c: Command) -> Iterator[tuple[str, type]]:
                 pending += [a for a in typing.get_args(base) if a is not Ellipsis]
 
 
-def _schema_gaps(node: Mapping[str, Any], where: str) -> Iterator[tuple[str, str]]:
+def _schema_gaps(
+    node: Mapping[str, Any], where: str, defs: Mapping[str, Any]
+) -> Iterator[tuple[str, str]]:
     """The arrays of objects with no declared order, and the untyped values, in an
-    adapted class's schema: ``("array", path)`` or ``("untyped", path)``"""
+    adapted class's schema: ``("array", path)`` or ``("untyped", path)``. An array of a
+    model that holds itself is one finding: its ``$ref`` leads back to fields already
+    walked."""
     properties = node.get("properties")
     for name, prop in (properties if isinstance(properties, dict) else {}).items():
         path = f"{where}.{name}" if where else name
@@ -1971,18 +1976,22 @@ def _schema_gaps(node: Mapping[str, Any], where: str) -> Iterator[tuple[str, str
             if untyped(option):
                 yield "untyped", path
             elif option.get("type") == "array" and isinstance(items, dict):
-                if isinstance(items.get("properties"), dict):
+                if ref_name(items) is not None:
+                    if isinstance(deref(items, defs).get("properties"), dict):
+                        yield "array", path
+                elif isinstance(items.get("properties"), dict):
                     yield "array", path
-                    yield from _schema_gaps(items, f"{path}[]")
+                    yield from _schema_gaps(items, f"{path}[]", defs)
             elif isinstance(option.get("properties"), dict):
-                yield from _schema_gaps(option, path)
+                yield from _schema_gaps(option, path, defs)
 
 
 def _adapted_order(app: App, c: Command) -> Iterator[Finding]:
     """Advice, not a warning: the app may not own the model, and the defaults are sound"""
     seen: set[str] = set()
     for where, cls in _adapted_classes(app, c):
-        for kind, path in _schema_gaps(app.scalars.adapters.node(cls), ""):
+        node = app.scalars.adapters.node(cls)
+        for kind, path in _schema_gaps(node, "", defs_of(node)):
             name = f"{where}.{path}" if where else path
             label = f"output field {name} of {cls.__qualname__}"
             if label in seen:
@@ -2211,15 +2220,24 @@ _BRANCHES = ("anyOf", "oneOf", "allOf")
 
 def schema_change(old: object, new: object) -> Change:
     """How an output schema changed for a reader: a removed or retyped field breaks it,
-    an added field does not; a field that became optional breaks it too"""
+    an added field does not; a field that became optional breaks it too. A recursive
+    type's ``$defs`` change definition by definition, as properties do."""
     if not isinstance(old, dict) or not isinstance(new, dict):
         return Change.NONE if old == new else Change.BREAKING
-    shape_keys = ("properties", "required", "items", *_BRANCHES, *_NOTES)
+    shape_keys = ("properties", "required", "items", DEFS_KEY, *_BRANCHES, *_NOTES)
     if {k: v for k, v in old.items() if k not in shape_keys} != {
         k: v for k, v in new.items() if k not in shape_keys
     }:
         return Change.BREAKING
     changes: list[Change] = []
+    old_defs, new_defs = old.get(DEFS_KEY, {}), new.get(DEFS_KEY, {})
+    if not isinstance(old_defs, dict) or not isinstance(new_defs, dict):
+        return Change.BREAKING
+    if set(old_defs) - set(new_defs):
+        return Change.BREAKING
+    changes += [schema_change(old_defs[k], new_defs[k]) for k in old_defs]
+    if set(new_defs) - set(old_defs):
+        changes.append(Change.ADDITIVE)
     if "items" in old or "items" in new:
         changes.append(schema_change(old.get("items"), new.get("items")))
     for key in _BRANCHES:

@@ -59,6 +59,18 @@ Apps built on treaty keep their own, structured schema changelog with
   session root, or an `out` directory that vanished mid-scan now counts as nothing to
   prune, and `cleanup` finds no outputs in an `out` that vanished; permission errors
   behave as before (#318)
+- A command may return a type that holds itself, such as a tree node whose `children`
+  are nodes (#298). Its output schema inlines the type where it first appears and refers
+  to it as `{"$ref": "#/$defs/Node"}` wherever it holds itself, with the definition in
+  `$defs` at the root of the output schema and of the MCP tool's envelope schema; a
+  pydantic model that holds itself keeps its `$defs` entry the same way. Recursion through
+  `X | None`, lists, tuples, dict values, and other classes works, and two classes of one
+  name get `Node` and `Node_2`. Masking, ordering, `--stable-output`, the audit, schema-lock
+  diffs, and `mcp-validate` follow the reference. A schema without recursion is unchanged
+  byte for byte. A value nested more than 400 arrays and objects deep, or one that holds
+  itself, fails the run with `INVALID_OUTPUT` naming the cause, before any data is
+  written; such a value used to crash the handler with a `RecursionError`. A recursive
+  argument type is still a registration error
 
 ## [1.0.0rc32] - 2026-10-03
 

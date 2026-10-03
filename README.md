@@ -1481,7 +1481,8 @@ app.output_adapter(
 
 `schema(cls)` gives the output schema and `dump(obj)` the value in `data`; the dump passes
 `by_alias=True` because `model_json_schema` names a field by its alias. treaty inlines
-the schema's `$defs`, writes a fixed tuple's `prefixItems` as draft-07 `items`, and makes it
+the schema's `$defs` (a model that holds itself keeps its entry, as a recursive dataclass
+does; see [Schemas](#schemas)), writes a fixed tuple's `prefixItems` as draft-07 `items`, and makes it
 read as a dataclass's does: every key required and no other key allowed. A dump that leaves
 out a key, or writes one a closed schema does not list, fails the run. The stable-output rules are checked on the schema when a command
 names the class: a null list or dict is a registration error (REQ-F-074) unless the adapter
@@ -1983,6 +1984,25 @@ additions (a valid ManifestResponse, so without `parameters` or `raw_payload_sch
 `tool <group> --schema` prints one group's subtree; `--print-schema` is an alias.
 `tool <cmd> --output-schema` prints only the JSON Schema of the command's `data`. The
 output is JSON in every mode.
+
+Every type in an output schema is inlined, but one that holds itself, such as a tree node:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Node:
+    path: str
+    children: list[Node] = Out(default_factory=list, ordered=True)
+```
+
+`Node` is inlined where it first appears, each place it holds itself is
+`{"$ref": "#/$defs/Node"}`, and the definition sits in `$defs` at the root of the output
+schema (of the MCP tool's envelope schema too). Recursion may run through `X | None`,
+lists, tuples, dict values, and other classes (`A` holding `B` holding `A`); two classes
+of one name get `Node` and `Node_2`. A schema without recursion has no `$defs`. A value
+nested more than 400 arrays and objects deep, or one that holds itself (`node.children`
+containing `node`), fails the run with `INVALID_OUTPUT` before any of it is written;
+return such a tree flat, as a depth-first list of `{path, parent, depth}` entries.
+Argument types stay finite: a recursive one is a registration error.
 Piped `--help` writes its text to stderr and prints only a pointer on stdout:
 `{"data": null, "meta": {"help": true, "schema_ref": "deploy --schema"}}`.
 

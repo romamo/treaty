@@ -8,7 +8,8 @@ integer ``Enum``, ``X | None``, ``list[T]``, ``tuple[T, ...]``, fixed ``tuple[A,
 
 An output schema (``output=True``) lists every key of a dataclass as required, since
 every key is always written, and refuses a nullable collection: empty is ``[]`` or ``{}``,
-never ``null`` (REQ-F-074).
+never ``null`` (REQ-F-074). A dataclass that holds itself, such as a tree node, is a
+``$ref`` to its ``$defs`` entry wherever it does (see ``_refs``); an argument type cannot.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from ._errors import RegistrationError, SchemaError
 from ._flags import FLAG_META
 from ._out import Binary, External, out_spec
 from ._redact import secret_field
+from ._refs import DEFS_KEY, DEFS_PREFIX, defs_of, free_name, rename_refs, with_defs
 from ._scalars import DATE_TEXT, DATETIME_TEXT, DECIMAL_TEXT, ScalarRegistry
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
@@ -38,6 +40,8 @@ JsonSchema = dict[str, Any]
 def schema_for(tp: object, scalars: ScalarRegistry, *, output: bool = False) -> JsonSchema:
     """Return a draft-07 schema fragment for a supported annotation; ``output`` for what a
     handler returns, rather than what a command accepts"""
+    if output and _DEFS.get() is None:
+        return _output_root(tp, scalars)
     tp = resolve_alias(tp)
     if tp is object or tp is Any:
         return {}
@@ -128,7 +132,7 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
             return {**temporal, "pattern": _TEMPORAL_ARGUMENT[base]}
         if output and scalars.adapters.for_type(base) is not None:
             # An output adapter writes a class; reading one in is another registration
-            return scalars.adapters.schema(base)
+            return _lift_defs(scalars.adapters.schema(base), base)
         if base is Decimal:
             schema: JsonSchema = {"type": "string", "pattern": DECIMAL_PATTERN}
             # An argument says format: decimal; output keeps the schema locks recorded
@@ -188,10 +192,89 @@ _BUILDING: contextvars.ContextVar[frozenset[type]] = contextvars.ContextVar(
 )
 
 
+class _Defs:
+    """The ``$defs`` of one output schema being built: a key for each dataclass that holds
+    itself, and the definitions an output adapter's schema brought"""
+
+    def __init__(self) -> None:
+        self.keys: dict[type, str] = {}
+        self.schemas: dict[str, JsonSchema] = {}
+
+    def key_for(self, cls: type) -> str:
+        key = self.keys.get(cls)
+        if key is None:
+            # Two classes of one name, from two modules or two scopes, get two keys
+            taken = {*self.keys.values(), *self.schemas}
+            key = cls.__name__ if cls.__name__ not in taken else free_name(cls.__name__, taken)
+            self.keys[cls] = key
+        return key
+
+    def adopt(self, schema: JsonSchema) -> JsonSchema:
+        """``schema`` with its ``$defs`` moved here, renamed where a name is taken by a
+        different definition"""
+        defs = defs_of(schema)
+        body = {k: v for k, v in schema.items() if k != DEFS_KEY}
+        if not defs:
+            return body
+        renames: dict[str, str] = {}
+        for name, definition in defs.items():
+            taken = {*self.keys.values(), *self.schemas}
+            if name in taken and self.schemas.get(name) != rename_refs(definition, renames):
+                renames[name] = free_name(name, {*taken, *defs, *renames.values()})
+        for name, definition in defs.items():
+            self.schemas[renames.get(name, name)] = rename_refs(definition, renames)
+        renamed: JsonSchema = rename_refs(body, renames)
+        return renamed
+
+
+_DEFS: contextvars.ContextVar[_Defs | None] = contextvars.ContextVar(
+    "treaty_schema_defs", default=None
+)
+
+
+def _output_root(tp: object, scalars: ScalarRegistry) -> JsonSchema:
+    """An output schema, with ``$defs`` at its root when a type in it holds itself"""
+    defs = _Defs()
+    token = _DEFS.set(defs)
+    try:
+        schema = schema_for(tp, scalars, output=True)
+        built: set[type] = set()
+        while pending := [c for c in defs.keys if c not in built]:
+            for cls in pending:
+                # Each definition from the class alone, wherever it was first held
+                outer = _BUILDING.set(frozenset({cls}))
+                try:
+                    definition = _dataclass_fields_schema(cls, scalars, True)
+                finally:
+                    _BUILDING.reset(outer)
+                defs.schemas[defs.keys[cls]] = definition
+                built.add(cls)
+    finally:
+        _DEFS.reset(token)
+    return with_defs(schema, defs.schemas)
+
+
+def _lift_defs(schema: JsonSchema, cls: type) -> JsonSchema:
+    """An output adapter's schema, whose ``$defs`` a model that holds itself keeps, with
+    them moved to the root of the output schema being built"""
+    defs = _DEFS.get()
+    if defs is None:
+        if DEFS_KEY in schema:
+            raise SchemaError(f"{cls.__qualname__}: $defs outside an output schema")
+        return schema
+    return defs.adopt(schema)
+
+
 def _dataclass_schema(cls: type, scalars: ScalarRegistry, output: bool) -> JsonSchema:
     building = _BUILDING.get()
     if cls in building:
-        raise SchemaError(f"{cls.__qualname__} refers to itself; recursive outputs have no schema")
+        defs = _DEFS.get()
+        if not output or defs is None:
+            raise SchemaError(
+                f"{cls.__qualname__} refers to itself; a recursive argument type has no "
+                "flag or JSON form to read"
+            )
+        return {"$ref": DEFS_PREFIX + defs.key_for(cls)}
     token = _BUILDING.set(building | {cls})
     try:
         return _dataclass_fields_schema(cls, scalars, output)
@@ -286,55 +369,94 @@ def binary_json(data: bytes, content_type: str | None = None) -> dict[str, objec
     return out
 
 
+MAX_OUTPUT_DEPTH = 400
+"""The most arrays and objects one value written as JSON nests: a tree deeper than this
+is refused whole, before any of it is written, rather than failing part way through"""
+
+
 def to_jsonable(value: object, scalars: ScalarRegistry, *, base: Path) -> object:
     """Convert handler output into plain JSON types; fails on anything else. A relative
-    ``Path`` is joined to ``base``, the run's working directory (REQ-F-040)"""
-    # A registered scalar first: a str or int subclass has its own serialize=
-    if (spec := scalars.for_value(value)) is not None:
-        return to_jsonable(spec.serialize(value), scalars, base=base)
-    if (adapter := scalars.adapters.for_value(value)) is not None:
-        return to_jsonable(scalars.adapters.dump(value, adapter), scalars, base=base)
-    if isinstance(value, float) and not math.isfinite(value):
-        raise SchemaError(f"{value!r} is not a finite number, and JSON has no NaN or Infinity")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, int) and not isinstance(value, bool) and value.bit_length() > 10_000:
-        try:
-            str(value)
-        except ValueError:
-            raise SchemaError("an integer too long to write as JSON") from None
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, Path):
-        return str(value if value.is_absolute() else base / value)
-    if isinstance(value, bytes):
-        return binary_json(value)
-    if isinstance(value, Binary):
-        return binary_json(value.data, value.content_type)
-    if isinstance(value, (dt.date, dt.time)):
-        return _temporal(value)
-    if isinstance(value, Decimal):
-        return _decimal(value)
-    if isinstance(value, (list, tuple)):
-        return [to_jsonable(v, scalars, base=base) for v in value]
-    if isinstance(value, dict):
-        out: dict[str, object] = {}
-        for k, v in value.items():
-            if not isinstance(k, str):
-                raise SchemaError(f"dict keys must be str, got {type(k).__name__}")
-            out[k] = to_jsonable(v, scalars, base=base)
-        return out
-    if isinstance(value, External):
-        raise SchemaError(
-            "treaty.External, which marks a top-level value of error.context only; "
-            "Out(external=True) or external=True marks data"
+    ``Path`` is joined to ``base``, the run's working directory (REQ-F-040). A value that
+    holds itself, or nests deeper than ``MAX_OUTPUT_DEPTH``, has no JSON form."""
+    return _Jsonable(scalars, base).value(value, 0)
+
+
+class _Jsonable:
+    def __init__(self, scalars: ScalarRegistry, base: Path) -> None:
+        self.scalars = scalars
+        self.base = base
+        self.open: set[int] = set()
+        """The containers being converted, by id, from the root down to the current one"""
+
+    def value(self, value: object, depth: int) -> object:
+        scalars = self.scalars
+        # A registered scalar first: a str or int subclass has its own serialize=
+        if (spec := scalars.for_value(value)) is not None:
+            return self.value(spec.serialize(value), depth)
+        if (adapter := scalars.adapters.for_value(value)) is not None:
+            return self.value(scalars.adapters.dump(value, adapter), depth)
+        if isinstance(value, float) and not math.isfinite(value):
+            raise SchemaError(f"{value!r} is not a finite number, and JSON has no NaN or Infinity")
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, int) and not isinstance(value, bool) and value.bit_length() > 10_000:
+            try:
+                str(value)
+            except ValueError:
+                raise SchemaError("an integer too long to write as JSON") from None
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, Path):
+            return str(value if value.is_absolute() else self.base / value)
+        if isinstance(value, bytes):
+            return binary_json(value)
+        if isinstance(value, Binary):
+            return binary_json(value.data, value.content_type)
+        if isinstance(value, (dt.date, dt.time)):
+            return _temporal(value)
+        if isinstance(value, Decimal):
+            return _decimal(value)
+        if isinstance(value, External):
+            raise SchemaError(
+                "treaty.External, which marks a top-level value of error.context only; "
+                "Out(external=True) or external=True marks data"
+            )
+        container = isinstance(value, (list, tuple, dict)) or (
+            dataclasses.is_dataclass(value) and not isinstance(value, type)
         )
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        if not container:
+            raise SchemaError(
+                f"cannot serialize {type(value).__name__} to JSON; register it with "
+                "app.scalar(...), or its model family with app.output_adapter(...)"
+            )
+        if id(value) in self.open:
+            raise SchemaError(
+                f"a {type(value).__name__} that contains itself, which has no JSON form; "
+                "return a tree whose children are new objects, or refer to a node by its id"
+            )
+        if depth >= MAX_OUTPUT_DEPTH:
+            raise SchemaError(
+                f"a value nested more than {MAX_OUTPUT_DEPTH} arrays and objects deep; "
+                "return the tree flat, such as a list of {path, parent, depth} entries in "
+                "depth-first order"
+            )
+        self.open.add(id(value))
+        try:
+            return self.container(value, depth + 1)
+        finally:
+            self.open.discard(id(value))
+
+    def container(self, value: object, depth: int) -> object:
+        if isinstance(value, (list, tuple)):
+            return [self.value(v, depth) for v in value]
+        if isinstance(value, dict):
+            out: dict[str, object] = {}
+            for k, v in value.items():
+                if not isinstance(k, str):
+                    raise SchemaError(f"dict keys must be str, got {type(k).__name__}")
+                out[k] = self.value(v, depth)
+            return out
+        assert dataclasses.is_dataclass(value) and not isinstance(value, type)
         return {
-            f.name: to_jsonable(getattr(value, f.name), scalars, base=base)
-            for f in dataclasses.fields(value)
+            f.name: self.value(getattr(value, f.name), depth) for f in dataclasses.fields(value)
         }
-    raise SchemaError(
-        f"cannot serialize {type(value).__name__} to JSON; register it with app.scalar(...), "
-        "or its model family with app.output_adapter(...)"
-    )
