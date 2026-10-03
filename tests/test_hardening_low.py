@@ -17,7 +17,15 @@ from conftest import needs_posix_signals
 
 from treaty import App, Ctx, Flag, NoArgs, RegistrationError, SideEffect
 from treaty._mode import Format
-from treaty._session import STALE_SESSION_SECONDS, Session, SessionRoot, prune
+from treaty._session import (
+    STALE_SESSION_SECONDS,
+    Session,
+    SessionRoot,
+    listed,
+    modified,
+    outputs,
+    prune,
+)
 from treaty._subprocess import reap, started
 
 BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
@@ -99,6 +107,35 @@ def test_prune_leaves_a_live_runs_session_directory(tmp_path: Path) -> None:
     assert directory.is_dir() and not dead.exists()
     live.remove()
     assert not directory.exists()
+
+
+def test_a_session_directory_removed_after_the_listing_counts_as_nothing_to_prune(
+    tmp_path: Path,
+) -> None:
+    # The race of #318, made deterministic: list the root, then remove an entry the way a
+    # concurrent run removes its own session directory, then ask for its age
+    root = SessionRoot(tmp_path / f"racectl-{os.getpid()}")
+    gone = root.make() / "gone"
+    gone.mkdir()
+    (entry,) = listed(root.path)
+    gone.rmdir()
+    assert modified(entry) is None
+
+
+def test_a_root_or_out_directory_removed_before_the_listing_lists_nothing(
+    tmp_path: Path,
+) -> None:
+    # prune and outputs check the directory, then list it; another run may remove it
+    # between the two, which listing a directory that is already gone reproduces
+    root = SessionRoot(tmp_path / f"racectl-{os.getpid()}")
+    out = root.make() / "out"
+    out.mkdir()
+    out.rmdir()
+    assert listed(out) == []
+    root.path.rmdir()
+    assert listed(root.path) == []
+    assert outputs(root) == []
+    prune(root, time.time())
 
 
 # Flag defaults, empty config flags, and schema version pins

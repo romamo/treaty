@@ -139,16 +139,17 @@ def prune(root: SessionRoot, now: float) -> None:
     if not root.owned():
         return
     due: list[str] = []
-    for entry in os.scandir(root.path):
+    for entry in listed(root.path):
         kept = (OUT_DIR, INSTANCES_DIR, BACKGROUND_DIR)
         if entry.name in kept or not entry.is_dir(follow_symlinks=False):
             continue
-        stale = now - entry.stat(follow_symlinks=False).st_mtime > STALE_SESSION_SECONDS
+        mtime = modified(entry)
+        stale = mtime is not None and now - mtime > STALE_SESSION_SECONDS
         if stale and not _live(Path(entry.path)):
             due.append(entry.path)
     out = root.path / OUT_DIR
     if _owned_dir(out):
-        for entry in os.scandir(out):
+        for entry in listed(out):
             expiry, dash, _ = entry.name.partition("-")
             if dash and expiry.isdigit() and int(expiry) <= now:
                 due.append(entry.path)
@@ -157,6 +158,24 @@ def prune(root: SessionRoot, now: float) -> None:
             _removed(Path(path))
         except OSError:
             continue
+
+
+def listed(directory: Path) -> list[os.DirEntry[str]]:
+    """The entries of ``directory``; none once another run has removed it"""
+    try:
+        with os.scandir(directory) as it:
+            return list(it)
+    except FileNotFoundError:
+        return []
+
+
+def modified(entry: os.DirEntry[str]) -> float | None:
+    """The modification time of a listed entry, symlinks not followed; None once another
+    run has removed it since the listing"""
+    try:
+        return entry.stat(follow_symlinks=False).st_mtime
+    except FileNotFoundError:
+        return None
 
 
 def _live(session: Path) -> bool:
@@ -175,7 +194,7 @@ def outputs(root: SessionRoot) -> list[Path]:
     out = root.path / OUT_DIR
     if not (root.owned() and _owned_dir(out)):
         return []
-    return sorted(Path(e.path) for e in os.scandir(out) if e.is_dir(follow_symlinks=False))
+    return sorted(Path(e.path) for e in listed(out) if e.is_dir(follow_symlinks=False))
 
 
 def cleanup_command(paths: Collection[Path]) -> str:

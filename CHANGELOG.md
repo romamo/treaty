@@ -51,6 +51,15 @@ Apps built on treaty keep their own, structured schema changelog with
   writes use the file actually read; `--config` and `<APP>_CONFIG` still replace it, and
   `--show-config`, answering before any command's arguments, follows only the variable
 
+### Fixed
+
+- A run no longer crashes at startup when another treaty run sharing its session root
+  removes its own session directory while this run prunes: the listed entry's `stat`
+  raised `FileNotFoundError` out of `prune`, which promises best effort. An entry, a
+  session root, or an `out` directory that vanished mid-scan now counts as nothing to
+  prune, and `cleanup` finds no outputs in an `out` that vanished; permission errors
+  behave as before (#318)
+
 ## [1.0.0rc32] - 2026-10-03
 
 The 32th 1.0 release candidate: 1 fix.
