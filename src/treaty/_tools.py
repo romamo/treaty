@@ -5,7 +5,7 @@ and no ``App`` import, so ``_builtins`` can compare an app against a saved tool 
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -13,7 +13,7 @@ from ._command import Command, DangerLevel
 from ._completion import COMPLETION_PATH
 from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._manifest import EXEC_PATH, payload_schema
-from ._mcp_serve import MCP_SERVE_PATH
+from ._mcp_serve import MCP_SERVE_PATH, NO_BINDINGS, Bindings
 from ._schema import JsonSchema
 from ._values import CommandPath
 
@@ -45,7 +45,10 @@ def tool_name(path: CommandPath) -> str:
     return path.value.replace(".", "_")
 
 
-def tool_description(command: Command) -> str:
+def tool_description(command: Command, bound: Collection[str] = ()) -> str:
+    """The command's description with what an MCP client should know; a rule naming a
+    field ``McpServe(bind=)`` fixed is left out, since the call cannot pass that field,
+    though the rule still applies to the bound value (#285)"""
     text = command.description
     if command.danger_level is DangerLevel.DESTRUCTIVE:
         text += (
@@ -61,9 +64,10 @@ def tool_description(command: Command) -> str:
         text += f" Mutating; pass {IDEMPOTENCY_KEY} to make retries safe."
     if command.streaming:
         text += " Streams on the CLI; here every event is returned in data."
-    if command.requires:
+    described = [r for r in command.requires if all(f.key not in bound for f in r.flags)]
+    if described:
         # REQ-C-026: inputSchema has no top-level anyOf, which some MCP clients reject
-        rules = "; ".join(r.describe() for r in command.requires)
+        rules = "; ".join(r.describe() for r in described)
         text += f" Rules: {rules}."
     return text
 
@@ -73,9 +77,20 @@ def tool_description(command: Command) -> str:
 DRAFT_07 = "http://json-schema.org/draft-07/schema#"
 
 
-def input_schema(command: Command) -> JsonSchema:
-    """The ``--raw-payload`` schema; MCP always buffers a stream, so no ``no_stream`` key"""
-    return {"$schema": DRAFT_07, **payload_schema(command, stream_key=False)}
+def input_schema(command: Command, bound: Collection[str] = ()) -> JsonSchema:
+    """The ``--raw-payload`` schema; MCP always buffers a stream, so no ``no_stream`` key.
+    ``bound`` names the keys ``McpServe(bind=)`` fixed, which the schema leaves out (#285)"""
+    schema = payload_schema(command, stream_key=False)
+    if bound:
+        properties = schema["properties"]
+        assert isinstance(properties, dict)
+        schema["properties"] = {k: v for k, v in properties.items() if k not in bound}
+        required = [k for k in schema.get("required", ()) if k not in bound]
+        if required:
+            schema["required"] = required
+        else:
+            schema.pop("required", None)
+    return {"$schema": DRAFT_07, **schema}
 
 
 def output_schema(command: Command) -> JsonSchema:
@@ -120,13 +135,18 @@ def output_schema(command: Command) -> JsonSchema:
     }
 
 
-def tool_entries(app: App, served: frozenset[CommandPath] | None = None) -> list[ToolEntry]:
+def tool_entries(
+    app: App,
+    served: frozenset[CommandPath] | None = None,
+    bindings: Bindings = NO_BINDINGS,
+) -> list[ToolEntry]:
     """Every command except ``exec``, the ``completion`` built-in, a script for a shell
     rather than a tool, the ``mcp serve`` built-in, the server itself (#239), passthrough
     commands, whose arguments and stdout belong to another tool that no input or output
     schema describes (#35), and a command registered ``mcp=False`` (#281), in path order.
     ``served``, what ``McpServe(commands=)`` selected, keeps only those paths; None keeps
-    every one"""
+    every one. A field ``bindings`` fixes leaves the tool's input schema, and a rule
+    naming it its description (#285)"""
     entries: list[ToolEntry] = []
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         if path == EXEC_PATH or (
@@ -137,12 +157,13 @@ def tool_entries(app: App, served: frozenset[CommandPath] | None = None) -> list
             continue
         if served is not None and path not in served:
             continue
+        bound = bindings.for_command(command)
         entries.append(
             ToolEntry(
                 name=tool_name(path),
                 path=path,
-                description=tool_description(command),
-                input_schema=input_schema(command),
+                description=tool_description(command, bound),
+                input_schema=input_schema(command, bound),
                 output_schema=output_schema(command),
                 read_only=command.danger_level is DangerLevel.SAFE,
                 destructive=command.danger_level is DangerLevel.DESTRUCTIVE,
@@ -158,11 +179,12 @@ def tool_list(
     *,
     extra: Sequence[ToolEntry] = (),
     served: frozenset[CommandPath] | None = None,
+    bindings: Bindings = NO_BINDINGS,
 ) -> dict[str, object]:
     """``treaty-mcp module:app --list-tools``: the tools as MCP's ``tools/list`` names
     them, with the CLI version, to commit and compare with ``mcp-validate`` (REQ-O-035);
     ``extra`` are the tools ``mcp serve`` provides beside the commands (#240), and
-    ``served`` the commands it selected (#281)"""
+    ``served`` the commands it selected (#281), and ``bindings`` the fields it fixed (#285)"""
     return {
         "cli_version": app.version,
         "tools": [
@@ -178,7 +200,7 @@ def tool_list(
                     "openWorldHint": e.open_world,
                 },
             }
-            for e in (*tool_entries(app, served), *extra)
+            for e in (*tool_entries(app, served, bindings), *extra)
         ],
     }
 

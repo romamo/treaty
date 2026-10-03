@@ -610,7 +610,8 @@
         "exit_codes",
         "tools",
         "instructions",
-        "commands"
+        "commands",
+        "bind"
       ],
       "kind": "class",
       "methods": []

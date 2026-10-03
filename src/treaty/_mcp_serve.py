@@ -18,6 +18,10 @@ provided tool runs as a command does, through ``App.call``'s path: its arguments
 checked against its input schema first, and its handler's result is enveloped and checked
 against the output schema its return annotation gives.
 
+Arguments fixed for the run (#285): ``McpServe(bind=bind)`` calls ``bind(args)`` once as
+serving starts, and each served command tool with a field it names runs with that value;
+the field leaves the tool's input schema, so a call passing it is refused as unknown.
+
 Nothing here imports the ``mcp`` package; the server itself is ``_mcp.serve_wire``.
 ``jsonschema``, which the ``mcp`` extra brings, is imported only once tools are provided.
 """
@@ -37,7 +41,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ._command import Command, DangerLevel, build_command
 from ._context import Ctx
-from ._errors import CliExit, RegistrationError
+from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError
 from ._flags import Flag
 from ._framework import CONFIRM_FLAG
 from ._redact import REDACTED
@@ -58,6 +62,9 @@ MCP_TOOL_INVALID = "MCP_TOOL_INVALID"
 MCP_TOOL_NAME_TAKEN = "MCP_TOOL_NAME_TAKEN"
 MCP_COMMAND_UNKNOWN = "MCP_COMMAND_UNKNOWN"
 MCP_INSTRUCTIONS_INVALID = "MCP_INSTRUCTIONS_INVALID"
+MCP_BIND_UNKNOWN = "MCP_BIND_UNKNOWN"
+MCP_BIND_INVALID = "MCP_BIND_INVALID"
+MCP_BIND_NEEDS_SERVE = "MCP_BIND_NEEDS_SERVE"
 LIST_TOOLS = "list_tools"
 CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
 CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
@@ -146,6 +153,7 @@ class McpTool:
 type ToolProvider = Callable[[Any, Ctx], Sequence[McpTool]]
 type CommandSelector = Callable[[Any], Collection[str] | None]
 type Instructions = str | Callable[[Any], str]
+type Binder = Callable[[Any], Mapping[str, object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,12 +165,17 @@ class McpServe:
     ``McpTool`` values served beside the commands, called once as serving starts, after
     ``setup``. ``instructions`` is the server's instructions to the client: text, or a
     function of the startup arguments returning it. ``exit_codes`` names the app exit
-    codes ``setup`` and ``tools`` may raise, registered with ``app.exit_code`` before the
-    first run. ``commands(args)`` returns the command paths served as tools for the
+    codes ``setup``, ``tools``, and ``bind`` may raise, registered with ``app.exit_code``
+    before the first run. ``commands(args)`` returns the command paths served as tools for the
     startup arguments, such as ``{"fleet", "observe.logs"}``: None serves every command,
     an empty collection only the provided tools, and a path the app does not have is
     refused before serving. A command registered ``mcp=False`` is never served, whatever
-    it returns (#281)."""
+    it returns (#281). ``bind(args)`` returns the argument values fixed for the run, such
+    as ``{"project": "/srv/fleet"}``, keyed as a tool call's arguments are, values as JSON
+    gives them: every served command tool with that field runs with the value, checked as
+    a passed one is on each call; the field leaves the tool's input schema, and a call
+    that passes it anyway is refused as an unknown field. A name no served command has, a
+    secret field, or a value its field refuses fails before serving (#285)."""
 
     args: type | None = None
     setup: Callable[..., None] | None = None
@@ -170,6 +183,7 @@ class McpServe:
     tools: ToolProvider | None = None
     instructions: Instructions | None = None
     commands: CommandSelector | None = None
+    bind: Binder | None = None
 
     def __post_init__(self) -> None:
         if self.args is not None and not is_dataclass_type(self.args):
@@ -191,6 +205,11 @@ class McpServe:
             raise RegistrationError(
                 "McpServe(commands=...) is a function (args) returning the command paths "
                 "to serve, or None for every command"
+            )
+        if self.bind is not None and not callable(self.bind):
+            raise RegistrationError(
+                "McpServe(bind=...) is a function (args) returning the argument values "
+                "fixed for the run, such as {'project': '/srv/fleet'}"
             )
         instructions = self.instructions
         if instructions is not None and not (
@@ -664,6 +683,98 @@ def served_commands(app: App, spec: McpServe, args: object) -> frozenset[Command
     return frozenset(served)
 
 
+@dataclass(frozen=True, slots=True)
+class Bindings:
+    """The argument values ``McpServe(bind=)`` fixed for a server run, by payload key, as
+    JSON gives them (#285)"""
+
+    values: Mapping[str, object] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", types.MappingProxyType(dict(self.values)))
+
+    def for_command(self, command: Command) -> Mapping[str, object]:
+        """The bound values of the fields ``command`` has"""
+        keys = {f.key for f in command.fields}
+        return types.MappingProxyType({k: v for k, v in self.values.items() if k in keys})
+
+
+NO_BINDINGS = Bindings()
+
+
+def _bind_invalid(name: str, problem: str, **context: object) -> CliExit:
+    return CliExit(
+        ExitCodeName("PRECONDITION"),
+        f"McpServe bind fixed {name!r}, which {problem}",
+        code=MCP_BIND_INVALID,
+        context={"field": name, **context},
+        fix_required="correct what McpServe(bind=...) returns for the field",
+    )
+
+
+def bound_values(
+    app: App, spec: McpServe, args: object, served: frozenset[CommandPath] | None
+) -> Bindings:
+    """``spec.bind(args)``, checked before serving (#285): each name a field of a served
+    command tool, none of them a secret, and each value one its field accepts, as JSON
+    gives it. A secret is never bound: treaty takes a secret only from a variable or a
+    file a call names, never as a value, and the variable the server runs with already
+    fixes it for every call. Values are copied through JSON, so ``bind`` keeps no handle
+    on them"""
+    from ._parse import check_bound_value
+    from ._tools import tool_entries
+
+    bind = spec.bind
+    if bind is None:
+        return NO_BINDINGS
+    returned = bind(args)
+    if not isinstance(returned, Mapping):
+        raise TypeError(
+            f"McpServe bind returned {type(returned).__name__}; it returns a mapping of "
+            "field names to values"
+        )
+    commands = [app.commands[e.path] for e in tool_entries(app, served)]
+    fixed: dict[str, object] = {}
+    for name, value in returned.items():
+        if not isinstance(name, str):
+            raise TypeError(
+                f"McpServe bind returned a {type(name).__name__} key; each key is a field "
+                "name as a tool call passes it, such as 'project'"
+            )
+        try:
+            copied = json.loads(json.dumps(value, allow_nan=False))
+        except TypeError, ValueError:
+            raise _bind_invalid(
+                name, f"is a {type(value).__name__}, not a JSON value", type=type(value).__name__
+            ) from None
+        fields = [(c, f) for c in commands for f in c.fields if f.key == name]
+        if not fields:
+            raise CliExit(
+                ExitCodeName("PRECONDITION"),
+                f"McpServe bind fixed {name!r}, which no served command tool has",
+                code=MCP_BIND_UNKNOWN,
+                context={"field": name},
+                fix_required="return field names as the tools' input schemas name them, "
+                "underscores between the words, such as 'dry_run'",
+            )
+        for command, field in fields:
+            where = {"command": command.path.value}
+            if field.secret:
+                raise _bind_invalid(
+                    name,
+                    "is a secret; a secret is read from a variable or a file, never bound",
+                    **where,
+                )
+            try:
+                check_bound_value(field, copied)
+            except ParseError as exc:
+                raise _bind_invalid(name, f"its field refuses: {exc.message}", **where) from None
+            except ArgsCrashed as exc:  # an object's __post_init__: a bug in user code
+                raise exc.cause from None
+        fixed[name] = copied
+    return Bindings(fixed)
+
+
 def instructions_for(app: App, spec: McpServe, args: object) -> str:
     given = spec.instructions
     if given is None:
@@ -723,11 +834,13 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
                     "and raises treaty.Exit to refuse"
                 )
         served = served_commands(app, spec, args)
+        bindings = bound_values(app, spec, args, served)
         provided = provided_tools(app, spec, args, ctx)
         if getattr(args, LIST_TOOLS):
             from ._tools import tool_list
 
-            listed = tool_list(app, extra=[p.entry() for p in provided.values()], served=served)
+            extra = [p.entry() for p in provided.values()]
+            listed = tool_list(app, extra=extra, served=served, bindings=bindings)
             wire.out.write(json.dumps(listed, indent=2, sort_keys=True) + "\n")
             wire.out.flush()
             return McpServed("list-tools", 0)
@@ -749,7 +862,13 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
         from ._mcp import serve_wire  # imports the App module, which imports this one
 
         return serve_wire(
-            app, wire, env=ctx.env, provided=provided, instructions=text, served=served
+            app,
+            wire,
+            env=ctx.env,
+            provided=provided,
+            instructions=text,
+            served=served,
+            bindings=bindings,
         )
 
     # The handler's signature is setup's, so the resources setup asks for are resolved

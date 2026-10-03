@@ -2078,6 +2078,24 @@ class App:
             lambda run, environ: self._call(run, path, arguments, environ),
         )
 
+    def _call_bound(
+        self,
+        path: str,
+        arguments: Mapping[str, object],
+        bound: Mapping[str, object],
+        *,
+        env: Mapping[str, str] | None,
+    ) -> Envelope:
+        """``call`` of a command tool ``mcp serve`` serves with the values
+        ``McpServe(bind=)`` fixed (#285): each fills its field, checked as a passed value
+        is, and an argument naming one is refused as an unknown field"""
+        return self._in_call(
+            path,
+            env,
+            False,
+            lambda run, environ: self._call(run, path, arguments, environ, bound),
+        )
+
     def _call_provided(
         self, provided: Provided, arguments: Mapping[str, object], *, env: Mapping[str, str]
     ) -> Envelope:
@@ -2174,7 +2192,12 @@ class App:
         return cap_envelope(envelope, cap, Rerun(argv=None, app_name=self.name, page=run.page))
 
     def _call(
-        self, run: _Run, path: str, arguments: Mapping[str, object], environ: Mapping[str, str]
+        self,
+        run: _Run,
+        path: str,
+        arguments: Mapping[str, object],
+        environ: Mapping[str, str],
+        bound: Mapping[str, object] = types.MappingProxyType({}),
     ) -> Envelope:
         meta: dict[str, object] = {"_cmd": path}
         try:
@@ -2198,7 +2221,7 @@ class App:
             )
         run.current = command
         try:
-            invocation = build_from_mapping(command, arguments, environ)
+            invocation = build_from_mapping(command, arguments, environ, bound=bound)
         except ParseError as exc:
             return run.arg_error(exc, meta={**meta, **_mode_meta(command)})
         except ArgsCrashed as exc:

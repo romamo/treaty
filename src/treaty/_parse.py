@@ -74,6 +74,7 @@ from ._verbosity import (
 )
 
 _NO_SOURCES: Mapping[str, str] = MappingProxyType({})
+_NO_BOUND: Mapping[str, object] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -1050,15 +1051,26 @@ def built_args(
 
 
 def build_from_mapping(
-    command: Command, mapping: Mapping[str, object], env: Mapping[str, str]
+    command: Command,
+    mapping: Mapping[str, object],
+    env: Mapping[str, str],
+    *,
+    bound: Mapping[str, object] = _NO_BOUND,
 ) -> Invocation:
-    """Build an invocation from already-typed JSON values, as ``exec`` receives them"""
+    """Build an invocation from already-typed JSON values, as ``exec`` receives them.
+    ``bound`` holds the values ``McpServe(bind=)`` fixed for the run, by payload key
+    (#285): each fills its field as a passed value does, checked the same way, and a key
+    of ``mapping`` that reaches a bound field, by any spelling, is refused as unknown,
+    before any other reading of it"""
     values: dict[str, object] = {}
     secrets: dict[str, SecretRef] = {}
     framework: dict[str, Any] = {}
     errors = _Collector()
     for key, value in mapping.items():
         try:
+            target = command.field_by_flag(key.replace("_", "-"))
+            if target is not None and target.key in bound:
+                raise _unknown_field(command, key, bound)
             if key == SCHEMA_VERSION_KEY:
                 # The global --schema-version, which argv takes anywhere (REQ-O-014)
                 framework["schema_version"] = command.pin(value)
@@ -1092,14 +1104,7 @@ def build_from_mapping(
                     _take_secret(secrets, owner, SecretRef(source, value))
                     continue
             if found is None:
-                raise ParseError(
-                    f"unknown field {key!r}",
-                    context={
-                        "field": key,
-                        "command": command.path.value,
-                        "known": known_flags(command, argv=False),
-                    },
-                )
+                raise _unknown_field(command, key, bound)
             if found.name in values:
                 raise ParseError(f"{key!r} given more than once", context={"field": key})
             if value is None and found.classified.optional:
@@ -1110,11 +1115,42 @@ def build_from_mapping(
             errors.add(exc)
         except ArgsCrashed as exc:  # an object's __post_init__, before secrets are read
             errors.crash(exc)
+    for key, value in bound.items():
+        field = command.field_by_flag(key.replace("_", "-"))
+        assert field is not None and not field.secret, "McpServe(bind=) is checked at startup"
+        try:
+            # Filled before the environment is read, so a bound value wins over Flag(env=)
+            if value is None and field.classified.optional:
+                values[field.name] = None
+            else:
+                values[field.name] = _check_json_value(field, value)
+        except ParseError as exc:
+            errors.add(exc)
+        except ArgsCrashed as exc:
+            errors.crash(exc)
     sources = _apply_env(command, values, secrets, env, errors)
     given = frozenset(values)
     return Invocation(
         args=_finish(command, values, errors), given=given, env_sources=sources, **framework
     )
+
+
+def _unknown_field(command: Command, key: str, bound: Collection[str]) -> ParseError:
+    """A key no field of ``command`` takes, or one ``McpServe(bind=)`` fixed: the known
+    keys leave the bound ones out, as the tool's input schema does"""
+    known = [k for k in known_flags(command, argv=False) if k.replace("-", "_") not in bound]
+    return ParseError(
+        f"unknown field {key!r}",
+        context={"field": key, "command": command.path.value, "known": known},
+    )
+
+
+def check_bound_value(field: FieldInfo, value: object) -> None:
+    """``McpServe(bind=)``'s value for ``field``, checked at startup as a call's value
+    is: its type, pattern, and scalar; a ``ParseError`` names what is wrong"""
+    if value is None and field.classified.optional:
+        return
+    _check_json_value(field, value)
 
 
 def _check_json_value(field: FieldInfo, value: object) -> object:

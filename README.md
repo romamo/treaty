@@ -2070,11 +2070,30 @@ off whatever `select` returns. A command left off answers `UNKNOWN_TOOL` by its 
 an old name `redirect` keeps answers `REDIRECTED` only toward a served tool. A provided tool
 may not take the name of any command, served or not.
 
+A server started for one project can fix arguments for the run, so no call reaches past
+it. `McpServe(bind=bind)` calls `bind(args)` as serving starts and takes the mapping it
+returns, field names as a tool call passes them and values as JSON gives them
+(`{"project": str(args.project)}`): every served command tool with that field runs with
+the value, checked on each call as a passed value is (its type and pattern,
+`__post_init__`, and a `requires=` rule naming it). The field leaves the tool's input
+schema, and a call that passes it anyway, by any spelling, is refused with `ARG_ERROR` as
+an unknown field rather than quietly overridden. A bound value wins over a `Flag(env=)`
+variable. A name no served command tool has is refused before serving with exit `4`,
+`MCP_BIND_UNKNOWN`; a secret field, a value its field refuses, or a value that is not
+JSON with `MCP_BIND_INVALID`. A secret is never bound: treaty reads one only from a
+variable or a file, and the server's own environment already fixes it for every call.
+Provided tools are not affected; their handlers already see the startup arguments. A
+`requires=` rule naming a bound field is left out of the tool's description, since the call
+cannot pass the field, and still applies to the bound value. `treaty-mcp deployctl:app`
+has no startup arguments to bind from, so it refuses an app that binds with exit `4`,
+`MCP_BIND_NEEDS_SERVE`, `--list-tools` included: serve it with `deployctl mcp serve`.
+
 `deployctl mcp serve --project . --list-tools` prints the tool list (provided tools
 included, given the same startup flags) as `treaty-mcp --list-tools` does, and exits;
 `deployctl mcp-validate --mcp-schema-file mcp.json --serve-args '{"project": "."}'`
-compares the selected commands and the provided tools, reading the startup arguments as an
-`exec` line would (`select` and `provide` run there; `setup` does not).
+compares the selected commands, the bound schemas, and the provided tools, reading the
+startup arguments as an `exec` line would (`select`, `bind`, and `provide` run there;
+`setup` does not).
 
 `treaty-mcp deployctl:app --list-tools` prints the tools as JSON with `cli_version`, no
 `mcp` package needed; commit it, and `deployctl mcp-validate --mcp-schema-file mcp.json`

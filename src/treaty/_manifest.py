@@ -618,7 +618,7 @@ def payload_schema(command: Command, *, stream_key: bool = True) -> JsonSchema:
     required: list[str] = []
     base = command.args_schema
     for f in command.fields:
-        key = f.flag.replace("-", "_")  # the field name, less a keyword's trailing _
+        key = f.key
         if f.secret:
             what = f.spec.description
             properties[f"{key}_from_env"] = {
