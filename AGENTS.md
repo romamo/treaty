@@ -106,3 +106,6 @@ uv run ruff check src tests
 
 Schema and conformance-kit tests need the sibling `cli-agent-ergonomics` checkout, or
 `TREATY_SPEC_DIR` pointing at one.
+
+Settled design decisions are in `DECISIONS.md`, numbered `D-n`. Check a change against the
+entries whose "Applies to" it touches; change a rule by adding an entry that supersedes it.
