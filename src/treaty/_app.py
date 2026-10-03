@@ -249,6 +249,7 @@ from ._protect import (
     UNTRUSTED_LINE,
     protect,
     protect_batch,
+    shape_of,
     tagged,
     untagged,
 )
@@ -5169,8 +5170,8 @@ class _Run:
                     adapters=self.app.scalars.adapters,
                 )
             else:
-                # Exit data is not the declared output type
-                tp = self._output(command)[0] if envelope.ok else object
+                # Exit data is not the declared output type: it carries its own (#322)
+                tp = self._output(command)[0] if envelope.ok else envelope._data_type
                 protected = protect(
                     data, tp, unmask=self.unmask, adapters=self.app.scalars.adapters
                 )
@@ -5894,7 +5895,7 @@ class _Run:
                 full_meta = {**full_meta, "dry_run": True}
         if preview_only:
             entry = self.app.exits.framework(FrameworkCode.ARG_ERROR)
-            return self._envelope(
+            refused = self._envelope(
                 entry.code.value,
                 data=data,
                 error=ErrorDetail(
@@ -5910,6 +5911,8 @@ class _Run:
                 started=started,
                 meta=full_meta,
             )
+            # The preview is the command's output, protected as it would be on success
+            return dataclasses.replace(refused, _data_type=self._output(command)[0])
         if command.batch:
             return self._batch_envelope(command, data, started, full_meta)
         return self._envelope(0, data=data, started=started, meta={**full_meta, **page_meta})
@@ -6505,6 +6508,8 @@ class _Run:
             known = dataclasses.is_dataclass(kind) or adapted
             shape = kind if known else object
             data = self._payload(exc.data, shape)
+            # The Out declarations of the dataclasses in it protect it, as on success (#322)
+            carried = shape_of(exc.data, self.app.scalars.adapters)
             # treaty.External marks a value from outside the tool; _protected masks and tags
             outside = frozenset(k for k, v in exc.context.items() if isinstance(v, External))
             plain = {k: v.value if isinstance(v, External) else v for k, v in exc.context.items()}
@@ -6531,7 +6536,7 @@ class _Run:
             # when retryable is false (REQ-C-030)
             fix = command.fix_commands.get(exc.code)
         auth = exc if isinstance(exc, AuthFailure) else None  # REQ-F-063: the gate's fields
-        return self._envelope(
+        envelope = self._envelope(
             entry.code.value,
             data=data,
             error=ErrorDetail(
@@ -6563,6 +6568,7 @@ class _Run:
             started=started,
             meta=meta,
         )
+        return dataclasses.replace(envelope, _data_type=carried)
 
     def _record_late(
         self, command: Command, invocation: Invocation, pending: Pending, slot: Slot, call: str

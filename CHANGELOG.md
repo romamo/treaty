@@ -95,6 +95,15 @@ Apps built on treaty keep their own, structured schema changelog with
   now sliced. The wait for an async handler also no longer uses `threading.Event`, whose
   Python code a signal could interrupt between its lock's releases, turning the
   `CANCELLED` answer into a crash
+- A failure's `data` is protected as a success's is: the dataclasses an exit carries,
+  as `CliExit(data=...)`, `treaty.already_exists(...)`, or a stream's terminal failure,
+  keep their `Out(high_entropy=True)`, `Out(high_entropy=False)`, and `Out(external=True)`
+  declarations, nested, in a list, or under a key of a plain dict, in JSON, plain, `exec`,
+  `app.call`, and MCP results, with `--unmask` the only way to the raw value. So does the
+  preview a destructive command refuses without `--confirm-destructive`, which is the
+  command's output. Error data was masked only by field name and shape, so a field
+  declared `Out(high_entropy=True)` reached the error envelope unmasked. Data no
+  dataclass covers is masked by name and shape, as before (#322)
 
 ## [1.0.0rc32] - 2026-10-03
 

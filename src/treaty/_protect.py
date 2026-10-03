@@ -122,6 +122,33 @@ def protect_batch(
     return Protected(out, tuple(walk.masked), walk.external)
 
 
+@dataclass(frozen=True, slots=True)
+class Shape:
+    """The type of a value no declaration covers, such as an exit's ``data`` (#322): the
+    declared types found in it, by the key of an object or the position of an array.
+    Anything else in it is ``object``, protected by its name and its shape."""
+
+    of: Mapping[str | int, object]
+
+
+def shape_of(value: object, adapters: OutputAdapters) -> object:
+    """What ``protect`` walks ``value``'s JSON form as: a dataclass or an output adapter's
+    type is its own; an array or an object holding one is a ``Shape``; else ``object``"""
+    kind = type(value)
+    if dataclasses.is_dataclass(kind) or adapters.for_type(kind) is not None:
+        return kind
+    pairs: list[tuple[str | int, object]]
+    if isinstance(value, (list, tuple)):
+        pairs = list(enumerate(value))
+    elif isinstance(value, Mapping):
+        # A key that is not text has no single JSON spelling to find it by
+        pairs = [(k, v) for k, v in value.items() if isinstance(k, str)]
+    else:
+        return object
+    of = {k: t for k, v in pairs if (t := shape_of(v, adapters)) is not object}
+    return Shape(of) if of else object
+
+
 def tagged(data: object) -> object:
     """Trust tags at the top of ``data``, or of each object item of an array"""
     if isinstance(data, dict):
@@ -167,6 +194,18 @@ class _Walk:
         self, value: object, tp: object, path: tuple[str | int, ...], secret: bool | None
     ) -> object:
         """``secret``: True masks every string below, False none, None by shape and name"""
+        if isinstance(tp, Shape):
+            if isinstance(value, list):
+                return [
+                    self.value(v, tp.of.get(i, object), (*path, i), secret)
+                    for i, v in enumerate(value)
+                ]
+            if isinstance(value, dict):
+                return {
+                    k: self.value(v, tp.of.get(k, object), (*path, k), _by_name(k, v, secret))
+                    for k, v in value.items()
+                }
+            return self.value(value, object, path, secret)
         base, _ = strip_optional(resolve_alias(tp))
         if self.adapters.for_type(base) is not None:
             assert isinstance(base, type)
