@@ -69,6 +69,12 @@ def strip_escapes(text: str) -> str:
     return _C1.sub("", _ESCAPES.sub("", text))
 
 
+def strip_7bit_escapes(text: str) -> str:
+    """``text`` without its 7-bit terminal escapes, as ``clean`` takes them out; the C1
+    forms stay"""
+    return _ESCAPES.sub("", text)
+
+
 def visible(text: str, keep: str = "", *, rewrite: bool = False) -> str:
     """``text`` with every control character but tab, newline, and those in ``keep``
     written as its escape (``\\x1b``, ``\\r``, ``\\u202e`` for a bidirectional override), as

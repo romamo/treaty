@@ -11,6 +11,7 @@ import pytest
 from conftest import CountedLines
 
 from treaty import App, Ctx, Flag
+from treaty._envelope import clean, strip_escapes, terminal_text
 from treaty._redact import replacer
 
 SECRET = "hunter2-s3cr3t-qzx9"
@@ -105,3 +106,44 @@ def test_the_redaction_keeps_escapes_unless_they_hide_a_secret() -> None:
     assert redact(f"\x1b[31mred\x1b[0m {SECRET}") == "\x1b[31mred\x1b[0m [REDACTED]"
     assert redact(f"\x1b[31mred\x1b[0m {split(SECRET)}") == "red [REDACTED]"
     assert redact(f"\x9b31m{SECRET[:6]}\x9d0;t\x9c{SECRET[6:]}") == "[REDACTED]"
+
+
+def test_a_secret_an_escape_splits_inside_an_unended_c1_osc_never_reaches_the_envelope() -> None:
+    """``strip_escapes`` takes an unended 8-bit OSC (``\\x9d``) and the rest of the text
+    with it, so the bare text held no secret; ``clean`` keeps the ``\\x9d`` and takes only
+    the 7-bit reset out, and the envelope had the secret whole"""
+    app = App("c1ctl", version="1.0.0")
+
+    @app.command("talk", description="Warn", danger_level="safe", exit_codes=())
+    def talk(args: Login, ctx: Ctx) -> dict[str, bool]:
+        ctx.warn("TOKEN_SEEN", f"\x9d{split(args.token)}")
+        raise ValueError(f"\x9d{split(args.token)}")
+
+    out, err = io.StringIO(), io.StringIO()
+    app.run(
+        ["talk", "--format", "json"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env={"C1CTL_TOKEN": SECRET},
+        isatty=False,
+    )
+    assert not leaks(json.dumps(json.loads(out.getvalue()), ensure_ascii=False))
+    assert not leaks(err.getvalue()), err.getvalue()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"\x9d{split(SECRET)}",
+        f"x\x9d\x1b[0m{SECRET}",
+        f"\x9b\x1b[0m1m{split(SECRET)}",
+        f"{SECRET[:5]}\x1b\x1b[0m{SECRET[5:]}",
+    ],
+)
+def test_no_cleaning_of_the_redacted_text_makes_a_secret_whole(text: str) -> None:
+    """What ``clean``, ``strip_escapes``, or a terminal's text keeps of the redacted text
+    holds no secret, whatever escapes were around it"""
+    shown = replacer({SECRET})(text)
+    views = [shown, clean(shown), strip_escapes(shown), terminal_text(shown, color=True)]
+    assert not any(leaks(str(view)) for view in views), views

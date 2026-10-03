@@ -12,7 +12,7 @@ import re
 from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import cast
 
-from ._envelope import strip_escapes
+from ._envelope import strip_7bit_escapes, strip_escapes
 
 REDACTED = "[REDACTED]"
 OMITTED = "[OMITTED]"
@@ -218,7 +218,10 @@ def replacer(spellings: Collection[str]) -> Callable[[str], str]:
     """Replace every one of ``spellings`` with ``REDACTED``, the longest first. A secret a
     terminal escape splits, such as ``hun\\x1b[0mter2``, is whole once ``clean`` takes the
     escape out, and a terminal shows it whole as it is: where the text without its escapes
-    holds one, the text goes without them (#277)"""
+    holds one, the text goes without them (#277). Both cleanings the text may get later are
+    looked at, ``clean``'s of the 7-bit escapes alone and ``strip_escapes``'s of the C1
+    forms too: an unended ``\\x9d`` takes the rest of the text in the one, and not in the
+    other. Each step takes at least one escape out, so the loop ends"""
     ordered = sorted(spellings, key=len, reverse=True)
 
     def replaced(text: str) -> str:
@@ -227,12 +230,16 @@ def replacer(spellings: Collection[str]) -> Callable[[str], str]:
         return text
 
     def redact(text: str) -> str:
-        shown = replaced(text)
-        bare = strip_escapes(shown)
-        if bare == shown:
-            return shown
-        hidden = replaced(bare)
-        return shown if hidden == bare else hidden
+        text = replaced(text)
+        while "\x1b" in text or "\x9b" in text or "\x9d" in text:
+            for bare in (strip_7bit_escapes(text), strip_escapes(text)):
+                hidden = replaced(bare)
+                if hidden != bare:
+                    text = hidden
+                    break
+            else:
+                return text
+        return text
 
     return redact
 
