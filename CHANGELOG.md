@@ -27,6 +27,13 @@ Apps built on treaty keep their own, structured schema changelog with
   exits, after `App.main()` has written its envelope, reaches stderr redacted instead of
   stdout in the clear (#263): descriptor 1 stays a pipe to stderr until the last such
   thread ends, and what the thread wrote is passed on before its secrets are forgotten
+- Under `App.call`, a secret a handler prints split across two writes no longer reaches
+  the host's stream unredacted (#261): what the call's threads print, on the calling
+  thread, a handler worker, or a handler thread held past its timeout, is passed on a line
+  at a time, each thread's held apart, as printed text is under `main()` and `exec`. A line
+  without its end waits for the end (a carriage return too), for the call to return, or
+  for a held thread to end; past 64 Ki characters it is passed on but for its tail. The
+  text keeps its escapes as before
 
 ## [1.0.0rc23] - 2026-10-02
 

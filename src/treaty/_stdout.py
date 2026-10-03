@@ -271,13 +271,21 @@ class LineBuffer:
     of a pipe, is redacted whole (#254, #256). What a line has without its end waits for
     the end, a carriage return too, or for ``drain``; past ``LINE_CAP`` it is passed on
     redacted but for its last ``LINE_TAIL`` characters. Not thread-safe: its owner holds
-    the writes in order"""
+    the writes in order.
 
-    def __init__(self) -> None:
+    With ``clean=False`` the text is held and passed on as written, escapes and all, as
+    ``App.call`` hands a host's own stream what a handler printed (#261); only the copy a
+    secret is looked for in is cleaned, as a whole line, so an escape split across two
+    writes is whole in it too"""
+
+    def __init__(self, *, clean: bool = True) -> None:
+        self._clean = clean
         self._line = ""
-        """The cleaned text since the last line end, held to be redacted whole"""
+        """The cleaned text since the last line end, held to be redacted whole; as
+        written, without ``clean``"""
         self._bare = ""
-        """``_line`` without colors, where a color may split a secret"""
+        """``_line`` without colors, where a color may split a secret; unused without
+        ``clean``, where it is made from the whole line"""
 
     @property
     def held(self) -> bool:
@@ -290,6 +298,8 @@ class LineBuffer:
         past ``LINE_CAP`` all but its tail"""
         if not text:
             return ""
+        if not self._clean:
+            return self._add_raw(text, redact)
         # A carriage return stays: a progress line printed with "\r" rewrites itself
         shown = terminal_text(text, color=color, keep="\r", rewrite=True)
         bare = terminal_text(text, color=False, keep="\r", rewrite=True) if color else shown
@@ -303,12 +313,25 @@ class LineBuffer:
             ready += self._overflow(redact, color=color)
         return ready
 
+    def _add_raw(self, text: str, redact: Callable[[str], str]) -> str:
+        """``add`` without ``clean``: the text as written, the lines it ends redacted"""
+        line = self._line + text
+        cut = _line_end(line)
+        self._line = line[cut:]
+        ready = _redacted(line[:cut], _bare(line[:cut]), redact)
+        if len(self._line) > LINE_CAP:
+            shown = _redacted(self._line, _bare(self._line), redact)
+            keep = open_escape(shown[: len(shown) - LINE_TAIL])  # never cut in an escape
+            self._line = shown[keep:]
+            ready += shown[:keep]
+        return ready
+
     def drain(self, redact: Callable[[str], str]) -> str:
         """The line held, redacted as it stands: an envelope is written next, or the run's
         secrets are about to be forgotten"""
         line, bare = self._line, self._bare
         self._line = self._bare = ""
-        return _redacted(line, bare, redact)
+        return _redacted(line, bare if self._clean else _bare(line), redact)
 
     def _overflow(self, redact: Callable[[str], str], *, color: bool) -> str:
         """A line past ``LINE_CAP`` passed on redacted but for its last ``LINE_TAIL``
@@ -328,6 +351,12 @@ def _redacted(line: str, bare: str, redact: Callable[[str], str]) -> str:
         return ""
     redacted = redact(bare)
     return redacted if redacted != bare or line == bare else redact(line)
+
+
+def _bare(text: str) -> str:
+    """``text`` without escapes, its controls shown as a log line has them, but for a
+    carriage return: where a secret a color splits is whole"""
+    return terminal_text(text, color=False, keep="\r", rewrite=True)
 
 
 def _line_end(text: str) -> int:
