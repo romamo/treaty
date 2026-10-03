@@ -25,6 +25,7 @@ import traceback
 import types
 import typing
 import uuid
+import weakref
 from collections.abc import (
     Callable,
     Generator,
@@ -2996,6 +2997,13 @@ class _Records(logging.Handler):
         attached, handed to it to restore"""
         root = logging.getLogger()
         with self._guard:
+            caller = self._callers.get(write)
+            ours = [w for w, _, owner in self._workers if owner == write]
+        if caller is not None:
+            # #261: what the call's threads printed without a line end goes out now,
+            # redacted with the run's secrets, which go as it detaches
+            _drain_late([caller, *ours])
+        with self._guard:
             index = next(i for i, (w, _, _) in enumerate(self._runs) if w == write)
             *_, level = self._runs.pop(index)
             self._callers.pop(write, None)
@@ -3032,6 +3040,7 @@ class _Records(logging.Handler):
             with self._guard:
                 kept = next((r for w, r, _ in self._workers if w is worker), None)
             below.sync(kept)
+        _drain_late([worker])  # #261: its line without an end, while its secrets are known
         with self._guard:
             self._workers = [held for held in self._workers if held[0] is not worker]
             self._changed()
@@ -3152,32 +3161,57 @@ class _LateStream:
     secrets, on the stream it was written to: the host's output stays where it was. What a
     late thread writes is redacted too, and its stdout text goes to stderr, so a late
     write never lands in a host's own output. Every other thread's write reaches the
-    stream it wraps untouched, and so does a write through ``.buffer``, as bytes"""
+    stream it wraps untouched, and so does a write through ``.buffer``, as bytes.
+
+    A redacted thread's text is passed on a line at a time, each thread's held apart, so
+    a secret split across two writes is replaced whole (#261): a line without its end
+    waits for the end, a carriage return too, for the call to return, or for a held
+    handler thread to end, while its secrets are still known"""
 
     def __init__(self, inner: TextIO, *, stdout: bool) -> None:
         self.inner = inner
         self._stdout = stdout
+        self._lines: dict[threading.Thread, LineBuffer] = {}
+        """Each redacted thread's line held without its end"""
+        self._order = threading.RLock()
+        """Holds a write whole against a drain from another thread; reentrant, so a signal
+        handler that prints on the same thread cannot deadlock"""
+        _late_streams.add(self)
+
+    def _target(self, thread: threading.Thread) -> tuple[bool, TextIO | None]:
+        """Whether ``thread``'s text is redacted, and the stream it then goes to"""
+        late, calls = _RECORDS.threads
+        if thread in late:
+            target = sys.stderr if self._stdout else self.inner
+            return True, target.inner if isinstance(target, _LateStream) else target
+        return thread in calls, self.inner
 
     def write(self, text: str, /) -> int:
         thread = threading.current_thread()
-        late, calls = _RECORDS.threads
-        target: TextIO | None
-        if thread in late:
-            target = sys.stderr if self._stdout else self.inner
-            if isinstance(target, _LateStream):
-                target = target.inner
-        elif thread in calls:
-            target = self.inner
-        else:
+        redacted, target = self._target(thread)
+        if not redacted:
             return self.inner.write(text)
-        if target is not None:
-            shown = _RECORDS.redact_late(text)
-            # A secret an escape splits, such as ``hun\x1b[0mter2``, is whole without it
-            bare = terminal_text(text, color=False, keep="\r", rewrite=True)
-            if _RECORDS.redact_late(bare) != bare:
-                shown = _RECORDS.redact_late(bare)
-            target.write(shown)
+        with self._order:
+            lines = self._lines.get(thread)
+            if lines is None:
+                lines = self._lines[thread] = LineBuffer(clean=False)
+            shown = lines.add(text, _RECORDS.redact_late, color=False)
+            if shown and target is not None:
+                target.write(shown)
         return len(text)
+
+    def drain(self, threads: Iterable[threading.Thread]) -> None:
+        """The lines ``threads`` hold, redacted and passed on where their text goes now:
+        their call is returning, or a held one ending, and its secrets are about to go"""
+        with self._order:
+            for thread in threads:
+                lines = self._lines.pop(thread, None)
+                redacted, target = self._target(thread)
+                if lines is None or not redacted:
+                    continue
+                shown = lines.drain(_RECORDS.redact_late)
+                if shown and target is not None:
+                    target.write(shown)
 
     def writelines(self, lines: Iterable[str], /) -> None:
         for line in lines:
@@ -3190,6 +3224,18 @@ class _LateStream:
 # The late streams installed now, under _guard_lock
 _late_out: _LateStream | None = None
 _late_err: _LateStream | None = None
+
+
+_late_streams: weakref.WeakSet[_LateStream] = weakref.WeakSet()
+"""Every late stream still referenced: one a host kept, such as a ``StreamHandler``'s, after
+it was unwrapped still holds the lines a call's threads write through it"""
+
+
+def _drain_late(threads: Sequence[threading.Thread]) -> None:
+    """The lines ``threads`` hold in every late stream, passed on redacted: a kept one's
+    too, or its line would go out in a later call, redacted only of that call's secrets"""
+    for stream in list(_late_streams):
+        stream.drain(threads)
 
 
 def _settle_streams() -> None:
