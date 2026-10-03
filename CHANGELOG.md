@@ -10,6 +10,22 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- A declared secret split by a terminal escape, such as `hunte\x1b[0mr2`, no longer
+  reaches stderr or the envelope whole (#277): it was redacted while the escape still hid
+  it, and became whole once the escape was cleaned away, or showed whole on a terminal
+  that kept it. The `--heartbeat-interval` status, `ctx.log` and `ctx.progress` lines in
+  every format, `ctx.warn` warnings, and a crashed handler's message and traceback were
+  affected. Redaction now also looks at the text without its escapes,
+  and where that finds a secret, the text goes without them; the heartbeat status is
+  redacted, cleaned, and redacted again before its 200-character cut, and a traceback
+  is redacted before its escapes are written out as `\x1b`. A refused setting's message
+  is redacted the same way, the longest secret first. Cleaning takes an escape a
+  terminal hides whole out whole: the charset reset `\x1b(B` that `tput sgr0` writes,
+  `\x1b7`, and a DCS, SOS, PM, or APC string left their rest as text, and a secret one
+  split reached a host's stream whole through `App.call`
+
 ## [1.0.0rc26] - 2026-10-03
 
 The 26th 1.0 release candidate: 2 fixes.
@@ -32,15 +48,6 @@ The 26th 1.0 release candidate: 2 fixes.
   was cut, its end, which may hold the start of a secret, goes first.
   `SHELL_STRING_PROHIBITED` quotes the shell string whole in `context.argv`, rather than
   its first 200 characters, for the same reason
-- A declared secret split by a terminal escape, such as `hunte\x1b[0mr2`, no longer
-  reaches stderr or the envelope whole (#277): it was redacted while the escape still hid
-  it, and became whole once the escape was cleaned away, or showed whole on a terminal
-  that kept it. The `--heartbeat-interval` status, `ctx.log` and `ctx.progress` lines in
-  every format, `ctx.warn` warnings, and a crashed handler's message and traceback were
-  affected. Redaction now also looks at the text without its escapes,
-  and where that finds a secret, the text goes without them; the heartbeat status is
-  redacted, cleaned, and redacted again before its 200-character cut, and a traceback
-  is redacted before its escapes are written out as `\x1b`
 
 ## [1.0.0rc25] - 2026-10-03
 
