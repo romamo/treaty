@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc24] - 2026-10-03
+
+The 24th 1.0 release candidate: 4 fixes.
+
 ### Fixed
 
 - A secret used as a mapping key is redacted as it is as a value (#262): a string or
@@ -1713,7 +1717,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc23...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc24...HEAD
+[1.0.0rc24]: https://github.com/romamo/treaty/compare/v1.0.0rc23...v1.0.0rc24
 [1.0.0rc23]: https://github.com/romamo/treaty/compare/v1.0.0rc22...v1.0.0rc23
 [1.0.0rc22]: https://github.com/romamo/treaty/compare/v1.0.0rc21...v1.0.0rc22
 [1.0.0rc21]: https://github.com/romamo/treaty/compare/v1.0.0rc20...v1.0.0rc21
