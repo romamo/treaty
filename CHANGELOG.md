@@ -85,6 +85,17 @@ Apps built on treaty keep their own, structured schema changelog with
   refused as a tuple is, since it would travel on argv, unless `secret=False`. Null values, nested mappings, non-`str` keys, and a bare `dict` are refused at
   registration with the supported shape, rather than a suggestion of `app.scalar(...)`
 
+### Fixed
+
+- SIGINT or SIGTERM cancels an async handler, and any handler under a timeout, within
+  50 ms of reaching the process, where it could be held until the handler ended: or
+  forever, for an untimed async handler (#304). The main thread waited for the handler
+  in one lock wait, which a signal does not wake when its C handler ran on another
+  thread, or, on free-threaded CPython, when it lands as the wait begins; the wait is
+  now sliced. The wait for an async handler also no longer uses `threading.Event`, whose
+  Python code a signal could interrupt between its lock's releases, turning the
+  `CANCELLED` answer into a crash
+
 ## [1.0.0rc32] - 2026-10-03
 
 The 32th 1.0 release candidate: 1 fix.

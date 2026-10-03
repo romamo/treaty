@@ -3,6 +3,7 @@ regressions of test_hardening; runnable. Each command writes "started" on stderr
 it is waiting, so a test signals it only then."""
 
 import asyncio
+import signal
 import sys
 from dataclasses import dataclass
 from typing import Self
@@ -31,6 +32,13 @@ async def waiting() -> dict[str, str]:
     return {}
 
 
+async def signalled() -> dict[str, str]:
+    await asyncio.sleep(0.2)  # the main thread is blocked waiting for the handler by now
+    # The C handler runs on this thread; the Python one once the main thread runs bytecode
+    signal.raise_signal(signal.SIGINT)
+    return await waiting()
+
+
 @app.command("wait", description="Wait, untimed", danger_level="safe", exit_codes=(), timeout=None)
 async def wait(args: NoArgs, ctx: Ctx, pool: Pool) -> dict[str, str]:
     return await waiting()
@@ -41,6 +49,28 @@ async def wait(args: NoArgs, ctx: Ctx, pool: Pool) -> dict[str, str]:
 )
 async def wait_timed(args: NoArgs, ctx: Ctx, pool: Pool) -> dict[str, str]:
     return await waiting()
+
+
+@app.command(
+    "wait-signalled",
+    description="Wait, untimed, after raising SIGINT on the loop's thread",
+    danger_level="safe",
+    exit_codes=(),
+    timeout=None,
+)
+async def wait_signalled(args: NoArgs, ctx: Ctx, pool: Pool) -> dict[str, str]:
+    return await signalled()
+
+
+@app.command(
+    "wait-signalled-timed",
+    description="Wait, timed, after raising SIGINT on the loop's thread",
+    danger_level="safe",
+    exit_codes=(),
+    timeout=30,
+)
+async def wait_signalled_timed(args: NoArgs, ctx: Ctx, pool: Pool) -> dict[str, str]:
+    return await signalled()
 
 
 @dataclass(frozen=True, slots=True)

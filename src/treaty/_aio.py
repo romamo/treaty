@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ._timeout import Timeout, TimeoutExpired
+from ._timeout import SIGNAL_POLL_SECONDS, Timeout, TimeoutExpired
 
 if TYPE_CHECKING:
     import asyncio
@@ -30,11 +30,20 @@ if TYPE_CHECKING:
 UNAWAITED_TASKS = "UNAWAITED_TASKS"
 
 
+def _held() -> threading.Lock:
+    lock = threading.Lock()
+    lock.acquire()
+    return lock
+
+
 @dataclass(slots=True)
 class _Job:
     coro: Coroutine[Any, Any, object]
     context: contextvars.Context
-    done: threading.Event = field(default_factory=threading.Event)
+    done: threading.Lock = field(default_factory=_held)
+    """Released once the job ended. A lock, not an ``Event``: a signal raised inside
+    ``Event.wait``'s Python code can release its condition's lock twice, which turns the
+    ``Cancelled`` into a ``RuntimeError``; ``acquire`` is one call (#304)"""
     result: object = None
     exc: BaseException | None = None
 
@@ -62,7 +71,7 @@ class Loop:
                     job.result = runner.run(self._tracked(job.coro), context=job.context)
                 except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
                     job.exc = exc
-                job.done.set()
+                job.done.release()
 
     def _refuse(self, exc: BaseException) -> None:
         """The loop could not start (on Windows, ``asyncio`` without ``SYSTEMROOT``):
@@ -70,7 +79,7 @@ class Loop:
         while (job := self._jobs.get()) is not None:
             job.coro.close()
             job.exc = exc
-            job.done.set()
+            job.done.release()
 
     async def _tracked(self, coro: Coroutine[Any, Any, object]) -> object:
         import asyncio
@@ -90,11 +99,13 @@ class Loop:
 
     def run[T](self, coro: Coroutine[Any, Any, T]) -> T:
         """Run ``coro`` to completion on the loop, in a copy of the caller's context; a
-        signal raised while this waits cancels it"""
+        signal raised while this waits cancels it. The wait is sliced, so a signal no lock
+        wait wakes for still raises here within ``SIGNAL_POLL_SECONDS`` (#304)"""
         job = _Job(coro, contextvars.copy_context())
         self._jobs.put(job)
         try:
-            job.done.wait()
+            while not job.done.acquire(timeout=SIGNAL_POLL_SECONDS):
+                pass
         except BaseException:  # noqa: BLE001 - Cancelled or KeyboardInterrupt, re-raised
             self.cancel()
             raise
