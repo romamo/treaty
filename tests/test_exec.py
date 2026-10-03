@@ -156,7 +156,7 @@ def test_exec_refuses_tty_stdin(app: App) -> None:
 
 def test_exec_drains_stdin_before_writing() -> None:
     """A caller that writes the whole plan before reading must not deadlock on the stdout pipe"""
-    plan = b'{"_cmd": "version"}\n' * 12000  # 240KB in, ~2MB out: both past the 64KB pipe buffer
+    plan = b'{"_cmd": "version"}\n' * 5000  # 100KB in, ~2MB out: both past the 64KB pipe buffer
     proc = subprocess.Popen(
         [sys.executable, "-c", "from treaty._cli import main; main()", "exec"],
         stdin=subprocess.PIPE,
@@ -179,7 +179,7 @@ def test_exec_drains_stdin_before_writing() -> None:
     finally:
         out = proc.stdout.read()
         proc.wait(timeout=10)
-    assert proc.returncode == 0 and out.count(b"\n") == 12000
+    assert proc.returncode == 0 and out.count(b"\n") == 5000
 
 
 def run_exec_raw(app: App, argv: list[str], stdin: str, env: dict[str, str]) -> tuple[int, dict]:

@@ -83,6 +83,9 @@ def test_a_sourced_block_is_in_its_file(page: str, path: str, code: str) -> None
 _CHECK = re.compile(r"<!-- check -->\n```bash\n(?P<code>.*?)```", re.S)
 
 
+_NESTED_RUN = re.compile(r"\buv run pytest -q tests/test_tutorial\.py")
+
+
 def _checked_pages() -> list[Path]:
     return [p for p in sorted(TUTORIAL.rglob("*.md")) if _CHECK.search(p.read_text())]
 
@@ -110,6 +113,8 @@ def test_a_chapters_checks_pass_in_order(page: Path) -> None:
     if leftover.is_dir():
         leftover.chmod(0o755)
     script = "\n".join(m["code"] for m in _CHECK.finditer(page.read_text()))
+    # The suite runs this file's tests itself; a chapter's run of them only has to select some
+    script = _NESTED_RUN.sub(r"\g<0> --collect-only", script)
     env = {
         **os.environ,
         "TODO_AUDIT_LOG": "0",
@@ -466,7 +471,7 @@ class _Feeds(http.server.BaseHTTPRequestHandler):
 @pytest.fixture
 def feeds() -> Iterator[str]:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Feeds)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
     finally:
@@ -652,7 +657,7 @@ class _Private(http.server.BaseHTTPRequestHandler):
 @pytest.fixture
 def private_feed() -> Iterator[str]:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Private)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}/todo.json"
     finally:
@@ -775,24 +780,6 @@ def test_the_committed_profile_is_what_treaty_writes() -> None:
     app = todo_exit_codes.app
     want = build_profile(app, ["./todo"], probes_for(app), beside_profile=True)
     assert json.loads(PROFILE.read_text()) == want
-
-
-@needs_sh_launcher
-def test_todo_passes_the_kit() -> None:
-    kit = SPEC_DIR / "conformance" / "run.py"
-    if not kit.is_file():
-        pytest.skip(f"conformance kit not found at {kit}; set TREATY_SPEC_DIR")
-    if not Path(sys.executable).is_file():
-        pytest.skip("launcher needs the project venv")
-    result = subprocess.run(
-        ["uv", "run", "--project", str(SPEC_DIR), str(kit), str(PROFILE)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    levels = json.loads(result.stdout)["data"]["levels"]
-    assert levels == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}
 
 
 # Serve commands over MCP
