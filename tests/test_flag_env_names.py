@@ -294,6 +294,93 @@ def test_help_and_agents_md_list_the_names() -> None:
     )
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Common:
+    file: Path | None = Flag(default=None, description="Ledger file", env=("LEDGER_FILE",))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WithKey(Common):
+    key: str = Flag(default="", description="API key", secret=True, env=("LEDGER_KEY",))
+
+
+def test_root_help_names_every_command_that_shares_a_flag_variable() -> None:
+    """#295: commands sharing a ``Flag(env=)`` flag share its variables; the root help
+    and AGENTS.md named only the first of them"""
+    app = App("demo", version="1.0.0", description="Demo")
+
+    def handler(args: Common, ctx: Ctx) -> None:
+        return None
+
+    for name in ("alpha", "beta", "gamma"):
+        app.command(name, description=f"Command {name}", danger_level="safe", exit_codes=())(
+            handler
+        )
+
+    def keyed(args: WithKey, ctx: Ctx) -> None:
+        return None
+
+    for name in ("beta-key", "gamma-key"):
+        app.command(name, description=f"Command {name}", danger_level="safe", exit_codes=())(keyed)
+    _, _, root = run(["--help"], {}, app=app)
+    environment = root.split("Environment\n", 1)[1]
+    assert "Default of --file of every command\n" in environment
+    assert "Default of --file of every command, when DEMO_FILE is not set" in environment
+    docs = {d.name: d.description for d in env_vars(app)}
+    assert docs["LEDGER_FILE"] == "Default of --file of every command, when DEMO_FILE is not set"
+    assert docs["DEMO_KEY"] == "Default of --key of beta-key, gamma-key"
+    assert docs["LEDGER_KEY"] == (
+        "Default of --key of beta-key, gamma-key, when DEMO_KEY is not set"
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OtherFlag:
+    path: Path | None = Flag(default=None, description="Path", env=("LEDGER_FILE",))
+    other: Path | None = Flag(default=None, description="Other", env=("DEMO_FILE",))
+
+
+def test_root_help_names_only_the_commands_whose_flag_reads_the_variable() -> None:
+    """A variable two commands read through flags of different names is the default of
+    each flag of its own command: the row of --file names no command reading it as
+    --path or --other (#295)"""
+    app = App("demo", version="1.0.0", description="Demo")
+
+    def handler(args: Common, ctx: Ctx) -> None:
+        return None
+
+    def other(args: OtherFlag, ctx: Ctx) -> None:
+        return None
+
+    app.command("alpha", description="Command alpha", danger_level="safe", exit_codes=())(handler)
+    app.command("beta", description="Command beta", danger_level="safe", exit_codes=())(other)
+    rows = dict(app.environment())
+    assert rows["LEDGER_FILE"] == "Default of --file of alpha, when DEMO_FILE is not set"
+    assert rows["DEMO_FILE"] == "Default of --file of alpha"
+    docs = {d.name: d.description for d in env_vars(app)}
+    assert docs["LEDGER_FILE"] == rows["LEDGER_FILE"]
+    assert docs["DEMO_FILE"] == rows["DEMO_FILE"]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Password:
+    pass_: str = Flag(default="", description="Password", secret=True)
+
+
+def test_root_help_spells_a_keyword_secret_as_its_flag() -> None:
+    """``pass_`` is ``--pass``: the root help said ``--pass-``"""
+    app = App("demo", version="1.0.0", description="Demo")
+
+    def handler(args: Password, ctx: Ctx) -> None:
+        return None
+
+    for name in ("alpha", "beta"):
+        app.command(name, description=f"Command {name}", danger_level="safe", exit_codes=())(
+            handler
+        )
+    assert dict(app.environment())["DEMO_PASS"] == "Default of --pass of every command"
+
+
 def test_the_env_prefix_rule_accepts_a_name_the_command_declares() -> None:
     app = make_app()
 

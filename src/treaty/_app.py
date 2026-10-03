@@ -140,7 +140,7 @@ from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy
 from ._fix import command_problem, fix_problem
 from ._flags import Arg, Flag
 from ._framework import framework_collisions
-from ._help import declared_env_rows, global_rows, render_command, render_root
+from ._help import declared_env_rows, env_readers, global_rows, render_command, render_root
 from ._http import Http, NetworkFailure, ProxyConfig
 from ._idempotency import (
     KeyBusy,
@@ -2034,13 +2034,16 @@ class App:
                 rows.append((own, f"Setting {f.name}, over the config files"))
                 rows += [(n.name, declared_text(n, f"Setting {f.name}", own, own)) for n in f.env]
         commands = sorted(self._commands.items(), key=lambda kv: kv[0].value)
+        readers = env_readers(self._commands, self._builtins)
         secrets = {
-            var: f"Default of --{field.replace('_', '-')} of {path}"
-            for path, c in commands
-            for field, var in c.secret_env_vars.items()
+            var: f"Default of --{f.flag} of {readers[var, f.flag]}"
+            for _, c in commands
+            for f in c.fields
+            if f.secret
+            for var in (c.secret_env_vars[f.name],)
         }
-        for path, c in commands:
-            for var, _, text in declared_env_rows(path, c):
+        for _, c in commands:
+            for var, _, text in declared_env_rows(c, readers):
                 secrets.setdefault(var, text)  # flags of several commands may share one
         return rows + sorted(secrets.items())
 
