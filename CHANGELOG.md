@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc33] - 2026-10-03
+
+The 33th 1.0 release candidate: 4 additions and 6 fixes.
+
 ### Added
 
 - `required_tools=` takes `None` as a program's version, or a plain list of names such as
@@ -1970,7 +1974,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc32...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc33...HEAD
+[1.0.0rc33]: https://github.com/romamo/treaty/compare/v1.0.0rc32...v1.0.0rc33
 [1.0.0rc32]: https://github.com/romamo/treaty/compare/v1.0.0rc31...v1.0.0rc32
 [1.0.0rc31]: https://github.com/romamo/treaty/compare/v1.0.0rc30...v1.0.0rc31
 [1.0.0rc30]: https://github.com/romamo/treaty/compare/v1.0.0rc29...v1.0.0rc30
