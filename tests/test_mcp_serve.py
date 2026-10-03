@@ -311,6 +311,56 @@ def test_exec_and_app_call_refuse_it_before_setup_runs(project: Path) -> None:
     assert envelope.exit_code == 4
 
 
+@needs_posix_signals
+def test_a_signal_while_the_server_thread_starts_still_stops_it_with_exit_0(
+    project: Path,
+) -> None:
+    """A SIGTERM landing while ``Thread.start`` waits for the server thread to run, which
+    a loaded machine can stretch past the first answers, stops the server like any other:
+    exit 0, not the CANCELLED envelope's 143 (#313). A trace function raises the signal
+    as ``start`` waits; its handler runs at the next bytecode, still inside that wait"""
+    import io
+
+    raised: list[threading.Thread] = []
+
+    def trace(frame, event, arg):  # type: ignore[no-untyped-def]
+        caller = frame.f_back
+        if (
+            event == "call"
+            and not raised
+            and frame.f_code is threading.Event.wait.__code__
+            and caller is not None
+            and caller.f_code is threading.Thread.start.__code__
+            and caller.f_locals["self"].name == "treaty-mcp"
+        ):
+            raised.append(caller.f_locals["self"])
+            signal.raise_signal(signal.SIGTERM)
+        return None
+
+    read, write = os.pipe()
+    out, err = io.StringIO(), io.StringIO()
+    previous = sys.gettrace()
+    sys.settrace(trace)
+    try:
+        with os.fdopen(read, "r", encoding="utf-8") as stdin:
+            code = _servectl().run(
+                ["mcp", "serve", "--project", str(project)],
+                stdin=stdin,
+                stdout=out,
+                stderr=err,
+                env={"SERVECTL_TOKEN": TOKEN},
+            )
+    finally:
+        sys.settrace(previous)
+        os.close(write)
+    assert raised, "the trace never saw the server thread start"
+    envelope = json.loads(err.getvalue().strip().splitlines()[-1])
+    assert code == 0, envelope
+    assert envelope["data"] == {"stopped_by": "SIGTERM", "tool_calls": 0}
+    raised[0].join(timeout=WAIT)
+    assert not raised[0].is_alive()
+
+
 def _run(app: App, argv: list[str]) -> str:
     import io
 
