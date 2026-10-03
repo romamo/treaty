@@ -20,17 +20,19 @@ def ran(name: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ServeArgs:
-    mode: Literal["project", "repository", "none", "unknown", "clash"] = Flag(
+    mode: Literal["project", "repository", "mixed", "none", "unknown", "clash"] = Flag(
         default="project",
         description="project serves every command; repository the brownfield ones and the "
-        "approval, which mcp=False keeps off anyway; none only the provided tool; unknown "
-        "a path the app lacks; clash a provided tool named like the approval",
+        "approval, which mcp=False keeps off anyway; mixed those and the provided tool; none "
+        "only the provided tool; unknown a path the app lacks; clash a provided tool named "
+        "like the approval",
     )
 
 
 SELECTED: Mapping[str, Collection[str] | None] = {
     "project": None,
     "repository": ("fleet", "observe.logs", "approve"),
+    "mixed": ("fleet", "observe.logs", "approve"),
     "none": (),
     "unknown": ("fleet", "observe.missing"),
     "clash": ("fleet",),
@@ -52,7 +54,7 @@ def preview(arguments: Mapping[str, object], ctx: Ctx) -> Previewed:
 
 
 def provide(args: ServeArgs, ctx: Ctx) -> list[McpTool]:
-    name = {"none": "preview", "clash": "approve"}.get(args.mode)
+    name = {"mixed": "preview", "none": "preview", "clash": "approve"}.get(args.mode)
     if name is None:
         return []
     schema: dict[str, object] = {"type": "object", "properties": {}}
