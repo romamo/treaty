@@ -81,7 +81,8 @@ Apps built on treaty keep their own, structured schema changelog with
   and every error is at its key, such as `postings[0].meta.ref`. The handler gets a
   `dict`; a default is read-only, such as `types.MappingProxyType(...)`. A setting may be
   one too: a TOML table, or a JSON object in its variable, a secret one redacted value by
-  value. Null values, nested mappings, non-`str` keys, and a bare `dict` are refused at
+  value. A flag or object field named as a secret, such as `api_keys: dict[str, str]`, is
+  refused as a tuple is, since it would travel on argv, unless `secret=False`. Null values, nested mappings, non-`str` keys, and a bare `dict` are refused at
   registration with the supported shape, rather than a suggestion of `app.scalar(...)`
 
 ## [1.0.0rc32] - 2026-10-03
