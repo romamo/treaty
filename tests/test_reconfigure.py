@@ -95,6 +95,38 @@ def test_the_no_prompt_stdin_passes_a_reconfigure_to_the_stream_it_wraps() -> No
         stdin.reconfigure(newline="x")
 
 
+@pytest.mark.parametrize(
+    "keywords",
+    [
+        {"encoding": "locale"},
+        {"encoding": "rot13"},
+        {"encoding": b"utf-8"},
+        {"errors": 1},
+        {"newline": "x"},
+        {"line_buffering": "yes"},
+        {"line_buffering": 2},
+    ],
+)
+def test_a_stand_in_takes_and_refuses_what_the_real_stream_does(
+    keywords: dict[str, object],
+) -> None:
+    """``encoding="locale"`` passes and a codec that is not a text encoding is refused, as
+    ``TextIOWrapper.reconfigure`` has them"""
+    real = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    try:
+        real.reconfigure(**keywords)  # type: ignore[arg-type]
+    except (TypeError, ValueError, LookupError) as exc:
+        refused: type[BaseException] | None = type(exc)
+    else:
+        refused = None
+    stand_in = NoPromptStdin(io.StringIO())  # no reconfigure of its own: checks alone
+    if refused is None:
+        stand_in.reconfigure(**keywords)  # type: ignore[arg-type]
+    else:
+        with pytest.raises(refused):
+            stand_in.reconfigure(**keywords)  # type: ignore[arg-type]
+
+
 def run_script(script: str) -> subprocess.CompletedProcess[bytes]:
     env = {**os.environ, "PYTHONUTF8": "1"}
     for name in ("FORCE_COLOR", "TREATY_FORMAT"):

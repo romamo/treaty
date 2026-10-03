@@ -29,6 +29,7 @@ from __future__ import annotations
 import atexit
 import codecs
 import contextlib
+import io
 import json
 import os
 import sys
@@ -36,6 +37,7 @@ import tempfile
 import threading
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from ._envelope import clean, open_escape, strip_escapes, terminal_text
 from ._mode import color_allowed
@@ -60,28 +62,23 @@ the reader, a daemon thread, stops for good while a held thread keeps descriptor
 pipe rather than blocking the exit forever on a full one: Windows' default is 4 KiB (#268)"""
 
 
-_NEWLINES = (None, "", "\n", "\r", "\r\n")
-
-
 def check_reconfigure(
     encoding: object, errors: object, newline: object, line_buffering: object, write_through: object
 ) -> None:
     """The arguments of a stand-in's ``reconfigure``, refused as ``TextIOWrapper.reconfigure``
     refuses them (#288): libraries such as ansible-core call it on ``sys.stdout`` and
-    ``sys.stdin``, so each of treaty's stand-ins takes the same keywords"""
-    if encoding is not None:
-        if not isinstance(encoding, str):
-            raise TypeError(f"reconfigure() encoding must be str, not {type(encoding).__name__}")
-        codecs.lookup(encoding)  # LookupError, as the real stream raises
-    if errors is not None and not isinstance(errors, str):
-        raise TypeError(f"reconfigure() errors must be str, not {type(errors).__name__}")
-    if newline is not None and not isinstance(newline, str):
-        raise TypeError(f"reconfigure() newline must be str, not {type(newline).__name__}")
-    if newline not in _NEWLINES:
-        raise ValueError(f"illegal newline value: {newline}")
-    for name, flag in (("line_buffering", line_buffering), ("write_through", write_through)):
-        if flag is not None and not isinstance(flag, int):
-            raise TypeError(f"reconfigure() {name} must be bool, not {type(flag).__name__}")
+    ``sys.stdin``, so each of treaty's stand-ins takes the same keywords. A throwaway
+    stream checks them, so ``encoding="locale"`` passes and ``"rot13"`` is refused, as
+    the real stream has it"""
+    given: dict[str, Any] = {
+        "encoding": encoding,
+        "errors": errors,
+        "newline": newline,
+        "line_buffering": line_buffering,
+        "write_through": write_through,
+    }
+    probe = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    probe.reconfigure(**{name: value for name, value in given.items() if value is not None})
 
 
 def reconfigure_wrapped(
@@ -100,7 +97,7 @@ def reconfigure_wrapped(
     apply = getattr(stream, "reconfigure", None)
     if apply is None:
         return
-    given = {
+    given: dict[str, Any] = {
         "encoding": encoding,
         "errors": errors,
         "newline": newline,
