@@ -121,3 +121,63 @@ def test_a_held_thread_writing_as_the_process_exits_is_redacted() -> None:
     err = proc.stderr.decode().replace("\r\n", "\n")
     for line in ("fd1 [REDACTED]", "print [REDACTED]", "stderr [REDACTED]", "log [REDACTED]"):
         assert line in err.splitlines(), err
+
+
+HOST = """
+import io, os, sys, threading
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag
+
+app = App("late", version="1.0.0")
+GO = threading.Event()
+
+
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description="API token", secret=True)
+
+
+@app.command("slow", description="Outlive the timeout", danger_level="safe", exit_codes=(),
+             timeout=1)
+def slow(args: Login, ctx: Ctx) -> dict[str, bool]:
+    GO.wait(30)  # abandoned at its timeout, alive as the process exits
+    return {"ok": True}
+
+
+capture = io.StringIO()
+sys.stdout = capture
+try:
+    app.main()
+except SystemExit:
+    pass
+print("host print")
+sys.stdout = sys.__stdout__
+os.write(2, ("captured " + repr(capture.getvalue()) + "\\n").encode())
+# Written to descriptor 1 as the process exits, the held thread still alive
+sys.__stdout__.write("dunder at exit\\n")
+os.write(1, b"fd1 at exit\\n")
+"""
+
+
+def test_the_host_stdout_stays_and_its_writes_at_exit_are_not_lost() -> None:
+    """A host's own sys.stdout that is not descriptor 1, a capture, is given back as it
+    was; what the host writes to descriptor 1 as it exits, a held thread still alive,
+    reaches stderr rather than being lost in the pipe"""
+    env = {**os.environ, "LATE_TOKEN": SECRET, "PYTHONUTF8": "1"}
+    for name in ("FORCE_COLOR", "TREATY_FORMAT"):
+        env.pop(name, None)
+    proc = subprocess.run(
+        [sys.executable, "-", "slow", "--api-token-from-env", "LATE_TOKEN"],
+        input=HOST.encode(),
+        capture_output=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    out = proc.stdout.decode().replace("\r\n", "\n")
+    err = proc.stderr.decode().replace("\r\n", "\n")
+    assert json.loads(out.splitlines()[0])["error"]["code"] == "TIMEOUT"
+    assert "host print" not in out
+    assert "captured 'host print\\n'" in err.splitlines(), err
+    for line in ("dunder at exit", "fd1 at exit"):
+        assert line in (out + err).splitlines(), (out, err)

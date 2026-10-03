@@ -2261,10 +2261,11 @@ class App:
             code = self.run(sys.argv[1:], env=started_env)
         finally:
             restored = stdout
-            if _late_threads():
+            if _late_threads() and _on_descriptor_1(stdout):
                 # #263: descriptor 1 stays a pipe to stderr while a handler thread whose
                 # run detached lives, so what it writes there is still redacted; the
-                # host's own sys.stdout writes reach stdout through a copy of the original
+                # host's own sys.stdout writes reach stdout through a copy of the original.
+                # A host's sys.stdout elsewhere, such as a capture, stays as it was
                 restored = open(  # noqa: SIM115 - sys.stdout until the process exits
                     os.dup(interceptor.saved),
                     "w",
@@ -3220,6 +3221,14 @@ def _settle_streams_locked() -> None:
         if sys.stdout is cast(TextIO, _late_out):
             sys.stdout = _late_out.inner
         _late_out = None
+
+
+def _on_descriptor_1(stream: TextIO) -> bool:
+    """Whether ``stream`` writes to descriptor 1, which may be the interceptor's pipe"""
+    try:
+        return stream.fileno() == 1
+    except AttributeError, OSError, ValueError:  # io.UnsupportedOperation is both
+        return False
 
 
 def _restore_stdout(envelopes: TextIO, stdout: TextIO) -> None:

@@ -179,13 +179,18 @@ class Interceptor:
         with self._cond:
             if self._closed:
                 return
-            if _held():
-                self.deferred = True
-                return
-            self._closed = True
-            self.deferred = False
+            held = self.deferred = _held()
+            self._closed = not held
         if sys.__stdout__ is not None:
             sys.__stdout__.flush()  # an import-time print still in Python's buffer
+        if held:
+            # The reader is a daemon: what is in the pipe reaches stderr now, not lost as
+            # the process exits. A thread that ended since ``_held`` found it settled
+            # nothing, the close not yet put off: finish it here
+            self.sync()
+            if not _held():
+                settle()
+            return
         os.dup2(self.saved, 1)  # the pipe's last write end: the reader sees its end
         self._thread.join(SYNC_SECONDS)
         os.close(self.saved)
