@@ -31,7 +31,7 @@ import inspect
 import json
 import re
 import types
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -43,7 +43,7 @@ from ._framework import CONFIRM_FLAG
 from ._redact import REDACTED
 from ._resources import dependency_params
 from ._types import is_dataclass_type, type_hints
-from ._values import CommandPath, ExitCodeName
+from ._values import CommandPath, ExitCodeName, InvalidValue
 
 if TYPE_CHECKING:
     from ._app import App
@@ -56,6 +56,7 @@ MCP_SDK_MISSING = "MCP_SDK_MISSING"
 STDIN_CLOSED = "STDIN_CLOSED"
 MCP_TOOL_INVALID = "MCP_TOOL_INVALID"
 MCP_TOOL_NAME_TAKEN = "MCP_TOOL_NAME_TAKEN"
+MCP_COMMAND_UNKNOWN = "MCP_COMMAND_UNKNOWN"
 MCP_INSTRUCTIONS_INVALID = "MCP_INSTRUCTIONS_INVALID"
 LIST_TOOLS = "list_tools"
 CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
@@ -143,6 +144,7 @@ class McpTool:
 
 
 type ToolProvider = Callable[[Any, Ctx], Sequence[McpTool]]
+type CommandSelector = Callable[[Any], Collection[str] | None]
 type Instructions = str | Callable[[Any], str]
 
 
@@ -156,13 +158,18 @@ class McpServe:
     ``setup``. ``instructions`` is the server's instructions to the client: text, or a
     function of the startup arguments returning it. ``exit_codes`` names the app exit
     codes ``setup`` and ``tools`` may raise, registered with ``app.exit_code`` before the
-    first run."""
+    first run. ``commands(args)`` returns the command paths served as tools for the
+    startup arguments, such as ``{"fleet", "observe.logs"}``: None serves every command,
+    an empty collection only the provided tools, and a path the app does not have is
+    refused before serving. A command registered ``mcp=False`` is never served, whatever
+    it returns (#281)."""
 
     args: type | None = None
     setup: Callable[..., None] | None = None
     exit_codes: Sequence[str] = ()
     tools: ToolProvider | None = None
     instructions: Instructions | None = None
+    commands: CommandSelector | None = None
 
     def __post_init__(self) -> None:
         if self.args is not None and not is_dataclass_type(self.args):
@@ -180,6 +187,11 @@ class McpServe:
             raise RegistrationError("McpServe(setup=...) is a function (args, ctx, *resources)")
         if self.tools is not None and not callable(self.tools):
             raise RegistrationError("McpServe(tools=...) is a function (args, ctx)")
+        if self.commands is not None and not callable(self.commands):
+            raise RegistrationError(
+                "McpServe(commands=...) is a function (args) returning the command paths "
+                "to serve, or None for every command"
+            )
         instructions = self.instructions
         if instructions is not None and not (
             callable(instructions) or (isinstance(instructions, str) and instructions.strip())
@@ -494,14 +506,16 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
             code=MCP_SDK_MISSING,
             fix_required="install the mcp extra: treaty[mcp]",
         ) from None
-    from ._tools import tool_entries
+    from ._tools import tool_name
 
     returned = provide(args, ctx)
     if isinstance(returned, (str, bytes, Mapping)) or not isinstance(returned, Sequence):
         raise TypeError(
             f"McpServe tools returned {type(returned).__name__}; it returns a list of McpTool"
         )
-    taken = {e.name for e in tool_entries(app)}
+    # Every command's name, served or not: a provided tool never answers for a command
+    # left off the server (#281)
+    taken = {tool_name(path) for path in app.commands}
     found: dict[str, Provided] = {}
     for tool in returned:
         if not isinstance(tool, McpTool):
@@ -612,6 +626,44 @@ def _command_for(app: App, tool: McpTool) -> Command:
     )
 
 
+def served_commands(app: App, spec: McpServe, args: object) -> frozenset[CommandPath] | None:
+    """``spec.commands(args)`` as command paths, each one the app has; None when it serves
+    every command. Checked before serving, so a typo never quietly drops a tool (#281)"""
+    select = spec.commands
+    if select is None:
+        return None
+    returned = select(args)
+    if returned is None:
+        return None
+    if isinstance(returned, (str, bytes, Mapping)) or not isinstance(returned, Collection):
+        raise TypeError(
+            f"McpServe commands returned {type(returned).__name__}; it returns a collection "
+            "of command paths, or None for every command"
+        )
+    served: set[CommandPath] = set()
+    for given in returned:
+        if not isinstance(given, str):
+            raise TypeError(
+                f"McpServe commands returned a {type(given).__name__}; each command path is "
+                "a str such as 'deploy.rollback'"
+            )
+        try:
+            path: CommandPath | None = CommandPath(given)
+        except InvalidValue:
+            path = None
+        if path is None or path not in app.commands:
+            raise CliExit(
+                ExitCodeName("PRECONDITION"),
+                f"McpServe commands selected {given!r}, which is not a command of {app.name}",
+                code=MCP_COMMAND_UNKNOWN,
+                context={"command": given},
+                fix_required="return command paths as the manifest names them, dots "
+                "between the parts, such as 'deploy.rollback'",
+            )
+        served.add(path)
+    return frozenset(served)
+
+
 def instructions_for(app: App, spec: McpServe, args: object) -> str:
     given = spec.instructions
     if given is None:
@@ -670,11 +722,12 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
                     f"McpServe setup returned {type(returned).__name__}; it returns None, "
                     "and raises treaty.Exit to refuse"
                 )
+        served = served_commands(app, spec, args)
         provided = provided_tools(app, spec, args, ctx)
         if getattr(args, LIST_TOOLS):
             from ._tools import tool_list
 
-            listed = tool_list(app, extra=[p.entry() for p in provided.values()])
+            listed = tool_list(app, extra=[p.entry() for p in provided.values()], served=served)
             wire.out.write(json.dumps(listed, indent=2, sort_keys=True) + "\n")
             wire.out.flush()
             return McpServed("list-tools", 0)
@@ -695,7 +748,9 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
         text = instructions_for(app, spec, args)
         from ._mcp import serve_wire  # imports the App module, which imports this one
 
-        return serve_wire(app, wire, env=ctx.env, provided=provided, instructions=text)
+        return serve_wire(
+            app, wire, env=ctx.env, provided=provided, instructions=text, served=served
+        )
 
     # The handler's signature is setup's, so the resources setup asks for are resolved
     kind = inspect.Parameter.POSITIONAL_OR_KEYWORD

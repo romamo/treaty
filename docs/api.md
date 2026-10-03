@@ -56,7 +56,7 @@ review), **rename**, **remove**.
 | `Init` | keep | `App(init=)` base class |
 | `Credentials`, `Expired` | keep | `App(credentials=)`, `refreshes_auth=` |
 | `Job`, `JobStore` | keep | `async_job=True`, `App(jobs=)` |
-| `McpServe` | added in 1.0 (#239) | `App(mcp=)`: the `mcp serve` built-in, its startup flags and `setup` |
+| `McpServe` | added in 1.0 (#239) | `App(mcp=)`: the `mcp serve` built-in, its startup flags and `setup`; `commands=` selects the command tools per startup arguments (#281) |
 | `McpTool` | added in 1.0 (#240) | A tool `McpServe(tools=)` provides from runtime data |
 | `McpTool` | added in 1.0 (#240) | A tool `McpServe(tools=)` provides from runtime data |
 
@@ -122,7 +122,8 @@ that no app or example called.
 `sort_key`, `ordered`, `fix_commands`, `refreshes_auth`, `requires`, `option_placement`,
 `introduced_in`, `deprecated`, `steps`, `resumable`, `rollback`, `external`,
 `subprocess`, `platform`, `required_tools`, `filesystem_side_effects`, `background`,
-`preserve_locale`, `cache`, `recursive_traversal`, `id_field`, `passthrough`, `help_command`.
+`preserve_locale`, `cache`, `recursive_traversal`, `id_field`, `passthrough`, `help_command`,
+`idempotent`, `mcp` (added in 1.0, #281).
 `Group.command` takes the
 same keywords.
 

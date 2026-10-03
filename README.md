@@ -1967,6 +1967,10 @@ treaty-mcp deployctl:app
 ```
 
 One tool per command except `exec`, named with dots as underscores (`deploy_rollback`).
+A command registered `mcp=False` is never a tool, on any server: one a person must run,
+such as an approval, or a terminal chore. The `cleanup`, `generate-skills`, and
+`audit-log` built-ins are `mcp=False`, and the manifest ends such a command's description
+with `(not an MCP tool)`, since the spec's `CommandEntry` has no key for it.
 The input schema is the args dataclass schema with field names as declared, secrets
 replaced by `<name>_from_env` and `<name>_from_file`, and the framework keys the command
 declares: `timeout`, `idempotency_key`, `confirm_destructive`, `retries`, `retry_delay`,
@@ -2057,11 +2061,20 @@ the value is taken out of what the call writes (error messages and context, a st
 `mcp.serve` with the `tool` and its `arguments`, secret properties and credential-named
 keys redacted.
 
+Which commands are tools can depend on the startup flags too. `McpServe(commands=select)`
+calls `select(args)` as serving starts, after `setup`, and serves only the command paths it
+returns (`{"fleet", "observe.logs"}`); None serves every command, and an empty collection
+only the provided tools. A path the app does not have is refused before serving with exit
+`4`, `MCP_COMMAND_UNKNOWN`, its envelope on stderr; a command registered `mcp=False` stays
+off whatever `select` returns. A command left off answers `UNKNOWN_TOOL` by its name, and
+an old name `redirect` keeps answers `REDIRECTED` only toward a served tool. A provided tool
+may not take the name of any command, served or not.
+
 `deployctl mcp serve --project . --list-tools` prints the tool list (provided tools
 included, given the same startup flags) as `treaty-mcp --list-tools` does, and exits;
 `deployctl mcp-validate --mcp-schema-file mcp.json --serve-args '{"project": "."}'`
-compares the provided tools too, reading the startup arguments as an `exec` line would
-(`provide` runs there; `setup` does not).
+compares the selected commands and the provided tools, reading the startup arguments as an
+`exec` line would (`select` and `provide` run there; `setup` does not).
 
 `treaty-mcp deployctl:app --list-tools` prints the tools as JSON with `cli_version`, no
 `mcp` package needed; commit it, and `deployctl mcp-validate --mcp-schema-file mcp.json`

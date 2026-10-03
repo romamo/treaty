@@ -85,9 +85,19 @@ def call_tool(
     *,
     env: Mapping[str, str] | None = None,
 ) -> Envelope:
-    """Dispatch one tool call; an unknown tool name is an ``UNKNOWN_TOOL`` envelope"""
+    """Dispatch one tool call; an unknown tool name is an ``UNKNOWN_TOOL`` envelope. Only
+    ``entries`` run: a command left off the server answers as an unknown tool, and an old
+    name answers ``REDIRECTED`` only when the tool it names is among them (#281)"""
     entry = entries.get(name)
-    moved = next((p for p in app.redirected_paths if tool_name(p) == name), None)
+    served = {e.path for e in entries.values()}
+    moved = next(
+        (
+            p
+            for p in app.redirected_paths
+            if tool_name(p) == name and app._redirects[p].to in served
+        ),
+        None,
+    )
     if entry is None and moved is not None:
         # An old name answers REDIRECTED, naming the tool to call instead
         return _as_tools(app.call(moved.value, arguments, env=env))
@@ -138,15 +148,16 @@ def build_server(
     called: Callable[[], None] | None = None,
     provided: Mapping[str, Provided] | None = None,
     instructions: str | None = None,
+    served: frozenset[CommandPath] | None = None,
 ) -> Any:
-    """A low-level ``mcp`` Server whose tools are the app's commands and the ``provided``
-    tools (#240), called with ``env`` (the process's when None); ``called`` runs as each
-    tool call is answered"""
+    """A low-level ``mcp`` Server whose tools are the app's commands, those ``served``
+    selects when given (#281), and the ``provided`` tools (#240), called with ``env`` (the
+    process's when None); ``called`` runs as each tool call is answered"""
     from mcp import types
     from mcp.server.lowlevel.server import Server
 
     extra = dict(provided or {})
-    entries = {e.name: e for e in tool_entries(app)}
+    entries = {e.name: e for e in tool_entries(app, served)}
     listed = [*entries.values(), *(p.entry() for p in extra.values())]
     environ = env if env is not None else os.environ
     tools = [
@@ -256,6 +267,7 @@ def serve_wire(
     env: Mapping[str, str],
     provided: Mapping[str, Provided],
     instructions: str,
+    served: frozenset[CommandPath] | None,
 ) -> McpServed:
     """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends, or until a
     signal raises ``Cancelled`` here, on the run's thread, which stops the server. The
@@ -264,7 +276,12 @@ def serve_wire(
     assert wire.stdin is not None, "mcp serve refuses a closed stdin before serving"
     serving = _Serving()
     server = build_server(
-        app, env=env, called=serving.called, provided=provided, instructions=instructions
+        app,
+        env=env,
+        called=serving.called,
+        provided=provided,
+        instructions=instructions,
+        served=served,
     )
     with _claimed_stdin(wire.stdin, serving.read_all) as stdin:
 

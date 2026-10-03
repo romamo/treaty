@@ -948,6 +948,7 @@ class App:
         passthrough: bool = False,
         help_command: Sequence[str] | None = None,
         idempotent: bool = False,
+        mcp: bool = True,
     ) -> Callable[[H], H]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -1079,8 +1080,13 @@ class App:
         manifest says ``idempotent: true``; it changes no run, and ``--idempotency-key`` still
         replays the first result. Any danger level takes it; on a safe command it is
         redundant (REQ-C-002).
+        ``mcp=False`` keeps the command off every MCP server, ``mcp serve`` and
+        ``treaty-mcp`` alike, whatever ``McpServe(commands=)`` selects: a command a person
+        must run, such as an approval. The manifest's description says so (#281).
         """
         cmd_path = CommandPath(path)
+        if not isinstance(mcp, bool):
+            raise RegistrationError(f"{cmd_path}: mcp is True or False, not {mcp!r}")
         missing = [
             fix
             for value, fix in ((exit_codes, "exit_codes=()"), (danger_level, 'danger_level="safe"'))
@@ -1265,6 +1271,7 @@ class App:
                             passthrough=passthrough,
                             help_command=help_command,
                             idempotent=idempotent,
+                            mcp=mcp,
                         )
                     )
                 )

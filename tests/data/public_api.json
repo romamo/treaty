@@ -609,7 +609,8 @@
         "setup",
         "exit_codes",
         "tools",
-        "instructions"
+        "instructions",
+        "commands"
       ],
       "kind": "class",
       "methods": []
@@ -1027,7 +1028,8 @@
       "id_field",
       "passthrough",
       "help_command",
-      "idempotent"
+      "idempotent",
+      "mcp"
     ],
     "App.format": [
       "mode",
