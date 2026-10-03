@@ -336,6 +336,33 @@ def test_a_signal_cancels_an_async_handler_and_releases_its_resources(command: s
     assert err.index("handler finally") < err.index("released")
 
 
+@needs_posix_signals
+@pytest.mark.parametrize("command", ["wait-signalled", "wait-signalled-timed"])
+def test_a_signal_that_does_not_wake_the_main_thread_still_cancels_an_async_handler(
+    command: str,
+) -> None:
+    """A signal whose C handler ran on another thread, as when it is delivered to the
+    loop's thread, or, on free-threaded CPython, lands as the main thread starts waiting:
+    its Python handler runs only once the main thread runs bytecode, so the wait for an
+    async handler, untimed or under a 30 s timeout, must not block in one long lock wait
+    (#304)"""
+    proc = subprocess.Popen(
+        [sys.executable, str(HARDCTL), command, "--format", "json"],
+        env=BASE_ENV,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stderr is not None
+    assert proc.stderr.readline() == "started\n"  # written just after the signal was raised
+    started = time.monotonic()
+    out, err = proc.communicate(timeout=10)
+    assert time.monotonic() - started < 5, err  # not held until the handler or timeout ends
+    assert proc.returncode == 130, err
+    assert json.loads(out)["error"]["code"] == "CANCELLED"
+    assert err.index("handler finally") < err.index("released")
+
+
 class SignallingStdin(io.StringIO):
     """A pipe whose writer never finishes: SIGINT arrives while the read waits"""
 

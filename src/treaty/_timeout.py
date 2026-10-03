@@ -27,6 +27,12 @@ from ._values import InvalidValue
 # One year: finite (NaN and inf fail the range check) and far below threading.TIMEOUT_MAX
 MAX_SECONDS = 365 * 24 * 3600.0
 
+# The longest one lock wait of the main thread for a handler lasts: a signal's Python
+# handler runs only once the main thread runs bytecode, and a lock wait is not woken by a
+# signal whose C handler ran on another thread or, on free-threaded CPython, landed as the
+# wait began, so a longer wait would hold the cancellation until the handler ends (#304)
+SIGNAL_POLL_SECONDS = 0.05
+
 
 @dataclass(frozen=True, slots=True)
 class Timeout:
@@ -218,7 +224,9 @@ def call_with_timeout[T](
     due = [start + h.seconds for h in heartbeats]
     while True:
         until = min(due, default=None) if deadline is None else min([deadline, *due])
-        wait = None if until is None else max(0.0, until - clock())
+        wait = SIGNAL_POLL_SECONDS
+        if until is not None:
+            wait = min(wait, max(0.0, until - clock()))
         with interruptible():
             worker.join(wait)
         if not worker.is_alive():
