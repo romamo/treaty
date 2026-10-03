@@ -11,8 +11,9 @@ import pytest
 from conftest import CountedLines
 
 from treaty import App, Ctx, Flag
-from treaty._envelope import clean, strip_escapes, terminal_text
+from treaty._envelope import clean, open_escape, strip_escapes, terminal_text
 from treaty._redact import replacer
+from treaty._stdout import LineBuffer
 
 SECRET = "hunter2-s3cr3t-qzx9"
 HEARTBEAT = re.compile(r"\[(\d+)s\] (.*)")
@@ -139,6 +140,10 @@ def test_a_secret_an_escape_splits_inside_an_unended_c1_osc_never_reaches_the_en
         f"x\x9d\x1b[0m{SECRET}",
         f"\x9b\x1b[0m1m{split(SECRET)}",
         f"{SECRET[:5]}\x1b\x1b[0m{SECRET[5:]}",
+        f"{SECRET[:5]}\x1b(B\x1b[m{SECRET[5:]}",
+        f"{SECRET[:5]}\x1b7{SECRET[5:]}",
+        f"{SECRET[:5]}\x1bPq#0\x1b\\{SECRET[5:]}",
+        f"{SECRET[:5]}\x1b_app\x07{SECRET[5:]}",
     ],
 )
 def test_no_cleaning_of_the_redacted_text_makes_a_secret_whole(text: str) -> None:
@@ -147,3 +152,26 @@ def test_no_cleaning_of_the_redacted_text_makes_a_secret_whole(text: str) -> Non
     shown = replacer({SECRET})(text)
     views = [shown, clean(shown), strip_escapes(shown), terminal_text(shown, color=True)]
     assert not any(leaks(str(view)) for view in views), views
+
+
+@pytest.mark.parametrize(
+    "escape", ["\x1b(B", "\x1b(B\x1b[m", "\x1b7", "\x1b=", "\x1bPq#0\x1b\\", "\x1b_app\x07"]
+)
+def test_an_escape_a_terminal_hides_whole_is_taken_out_whole(escape: str) -> None:
+    """``tput sgr0`` writes ``\\x1b(B\\x1b[m``: a terminal shows none of it, so neither does
+    the cleaned text, and a secret it splits is whole there as on the terminal. What
+    ``App.call`` passes to a host's stream as written is redacted too (#261)"""
+    assert strip_escapes(f"red{escape}text") == "redtext"
+    assert clean(f"red{escape}text") == "redtext"
+    raw = LineBuffer(clean=False).add(f"{split_by(escape)}\n", replacer({SECRET}), color=False)
+    assert not leaks(raw) and not leaks(strip_escapes(raw)), raw
+
+
+@pytest.mark.parametrize("head", ["\x1b(", "\x1b ", "\x1bP", "\x1bPq#0", "\x1b_app"])
+def test_a_write_that_ends_inside_such_an_escape_holds_it(head: str) -> None:
+    """Cleaned on its own, the rest of the escape in the next write would be text"""
+    assert open_escape(f"red{head}") == 3
+
+
+def split_by(escape: str) -> str:
+    return SECRET[:5] + escape + SECRET[5:]
