@@ -92,7 +92,9 @@ def test_every_page_but_the_index_has_checks_that_run() -> None:
     assert {p.relative_to(TUTORIAL) for p in _checked_pages()} == pages
 
 
+# The chapters share tmp/tutorial, so under pytest-xdist they run on one worker
 @needs_sh_launcher
+@pytest.mark.xdist_group("tutorial-chapters")
 @pytest.mark.parametrize("page", _checked_pages(), ids=lambda p: p.name)
 def test_a_chapters_checks_pass_in_order(page: Path) -> None:
     if shutil.which("bash") is None or shutil.which("jq") is None:

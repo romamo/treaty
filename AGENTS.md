@@ -99,7 +99,7 @@ rewrites the text between the treaty markers and keeps the rest.
 
 ```bash
 uv sync
-uv run pytest
+uv run pytest -n auto --dist loadgroup   # serial: plain uv run pytest
 uv run mypy src
 uv run ruff check src tests
 ```
