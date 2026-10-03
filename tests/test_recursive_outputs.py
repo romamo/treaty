@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import pytest
@@ -383,3 +384,33 @@ def test_a_batch_and_a_compat_shape_keep_the_definitions_at_the_root() -> None:
     assert list(envelope_schema["$defs"]) == ["Node"]
     Draft7Validator(envelope_schema).validate(run(app, ["show", "--unmask"])[1])
     Draft7Validator(envelope_schema).validate(run(app, ["show", "--schema-version", "1"])[1])
+
+
+def test_a_streaming_command_masks_a_deep_secret_and_refuses_a_too_deep_event() -> None:
+    app = App("streams", version="1.0.0")
+
+    @app.command("walk", description="Walk", danger_level="safe", exit_codes=(), streaming=True)
+    def walk(args: NoArgs, ctx: Ctx) -> Iterator[Node]:
+        yield tree()
+        yield tree()
+
+    @app.command("deep", description="Deep", danger_level="safe", exit_codes=(), streaming=True)
+    def deep(args: NoArgs, ctx: Ctx) -> Iterator[Node]:
+        node = Node("leaf")
+        for i in range(MAX_OUTPUT_DEPTH):
+            node = Node(str(i), [node])
+        yield node
+
+    for argv in (["walk"], ["walk", "--format", "plain"]):
+        out = io.StringIO()
+        code = app.run(argv, stdin=io.StringIO(), stdout=out, stderr=io.StringIO(), env={})
+        assert code == 0 and "sk_live_deep0123456789" not in out.getvalue()
+    entries = {e.name: e for e in tool_entries(app)}
+    schema = entries["walk"].output_schema  # type: ignore[attr-defined]
+    assert list(schema["$defs"]) == ["Node"]
+    envelope = call_tool(app, entries, "walk", {}).to_json()
+    assert "sk_live_deep0123456789" not in json.dumps(envelope)
+    Draft7Validator(schema).validate(envelope)
+    code, env = run(app, ["deep"])
+    assert code == 1 and env["error"]["code"] == "INVALID_OUTPUT"
+    assert f"more than {MAX_OUTPUT_DEPTH}" in env["error"]["message"]
