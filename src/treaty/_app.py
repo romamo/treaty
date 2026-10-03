@@ -2036,9 +2036,11 @@ class App:
         commands = sorted(self._commands.items(), key=lambda kv: kv[0].value)
         readers = env_readers(self._commands, self._builtins)
         secrets = {
-            var: f"Default of --{field.replace('_', '-')} of {readers[var]}"
+            var: f"Default of --{f.flag} of {readers[var, f.flag]}"
             for _, c in commands
-            for field, var in c.secret_env_vars.items()
+            for f in c.fields
+            if f.secret
+            for var in (c.secret_env_vars[f.name],)
         }
         for _, c in commands:
             for var, _, text in declared_env_rows(c, readers):

@@ -127,26 +127,27 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
 
 def env_readers(
     commands: Mapping[CommandPath, Command], builtins: frozenset[CommandPath]
-) -> dict[str, str]:
-    """Each variable a command's flag reads, a secret's or a ``Flag(env=)`` flag's, and
-    the commands that read it as ``--help`` names them: "every command" when all the
-    app's own commands do (treaty's ``builtins`` aside), else their paths in order.
-    Commands sharing a flag share its variables (#295)"""
-    readers: dict[str, list[str]] = {}
+) -> dict[tuple[str, str], str]:
+    """Each variable a command's flag reads, a secret's or a ``Flag(env=)`` flag's, keyed
+    with the flag, and the commands whose flag of that name reads it as ``--help`` names
+    them: "every command" when all the app's own commands do (treaty's ``builtins``
+    aside), else their paths in order. Commands sharing a flag share its variables, and
+    a command reading the variable through a flag of another name is not one (#295)"""
+    readers: dict[tuple[str, str], list[str]] = {}
     for path, command in sorted(commands.items(), key=lambda kv: kv[0].value):
         for f in command.fields:
             own = command.own_env_var(f.name)
             for var in (*(() if own is None else (own,)), *(n.name for n in f.spec.env)):
-                readers.setdefault(var, []).append(path.value)
+                readers.setdefault((var, f.flag), []).append(path.value)
     mine = {p.value for p in commands if p not in builtins}
     return {
-        var: "every command" if len(mine) > 1 and set(paths) == mine else ", ".join(paths)
-        for var, paths in readers.items()
+        key: "every command" if len(mine) > 1 and set(paths) == mine else ", ".join(paths)
+        for key, paths in readers.items()
     }
 
 
 def declared_env_rows(
-    command: Command, readers: Mapping[str, str]
+    command: Command, readers: Mapping[tuple[str, str], str]
 ) -> list[tuple[str, FieldInfo, str]]:
     """Each variable of the command's flags that declare ``Flag(env=)``, the field it sets,
     and what it is: a plain flag's ``<APP>_<NAME>``, then the declared names, each the
@@ -155,13 +156,15 @@ def declared_env_rows(
     for f in command.fields:
         own = command.own_env_var(f.name)
         if not f.secret and own is not None:
-            rows.append((own, f, f"Default of --{f.flag} of {readers[own]}"))
+            rows.append((own, f, f"Default of --{f.flag} of {readers[own, f.flag]}"))
         default = own or f"--{f.flag}"
         rows += [
             (
                 n.name,
                 f,
-                declared_text(n, f"Default of --{f.flag} of {readers[n.name]}", own, default),
+                declared_text(
+                    n, f"Default of --{f.flag} of {readers[n.name, f.flag]}", own, default
+                ),
             )
             for n in f.spec.env
         ]

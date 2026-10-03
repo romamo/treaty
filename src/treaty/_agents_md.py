@@ -108,12 +108,12 @@ def env_vars(app: App) -> tuple[EnvVarDoc, ...]:
             for n in s.env:
                 text = declared_text(n, f"Setting {s.name}", own, own)
                 add(EnvVarDoc(n.name, s.classified.flag_type.value, False, text))
-    readers = env_readers(app.commands, app._builtins)
+    readers = env_readers(app.commands, app.builtins)
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         for f in command.fields:
             if f.secret:
                 var = command.secret_env_vars[f.name]
-                text = f"Default of --{f.flag} of {readers[var]}"
+                text = f"Default of --{f.flag} of {readers[var, f.flag]}"
                 add(EnvVarDoc(var, "string", f.required, text))
         for var, f, text in declared_env_rows(command, readers):
             kind = "string" if f.secret else f.flag_type.value

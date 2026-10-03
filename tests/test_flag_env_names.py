@@ -334,6 +334,53 @@ def test_root_help_names_every_command_that_shares_a_flag_variable() -> None:
     )
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OtherFlag:
+    path: Path | None = Flag(default=None, description="Path", env=("LEDGER_FILE",))
+    other: Path | None = Flag(default=None, description="Other", env=("DEMO_FILE",))
+
+
+def test_root_help_names_only_the_commands_whose_flag_reads_the_variable() -> None:
+    """A variable two commands read through flags of different names is the default of
+    each flag of its own command: the row of --file names no command reading it as
+    --path or --other (#295)"""
+    app = App("demo", version="1.0.0", description="Demo")
+
+    def handler(args: Common, ctx: Ctx) -> None:
+        return None
+
+    def other(args: OtherFlag, ctx: Ctx) -> None:
+        return None
+
+    app.command("alpha", description="Command alpha", danger_level="safe", exit_codes=())(handler)
+    app.command("beta", description="Command beta", danger_level="safe", exit_codes=())(other)
+    rows = dict(app.environment())
+    assert rows["LEDGER_FILE"] == "Default of --file of alpha, when DEMO_FILE is not set"
+    assert rows["DEMO_FILE"] == "Default of --file of alpha"
+    docs = {d.name: d.description for d in env_vars(app)}
+    assert docs["LEDGER_FILE"] == rows["LEDGER_FILE"]
+    assert docs["DEMO_FILE"] == rows["DEMO_FILE"]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Password:
+    pass_: str = Flag(default="", description="Password", secret=True)
+
+
+def test_root_help_spells_a_keyword_secret_as_its_flag() -> None:
+    """``pass_`` is ``--pass``: the root help said ``--pass-``"""
+    app = App("demo", version="1.0.0", description="Demo")
+
+    def handler(args: Password, ctx: Ctx) -> None:
+        return None
+
+    for name in ("alpha", "beta"):
+        app.command(name, description=f"Command {name}", danger_level="safe", exit_codes=())(
+            handler
+        )
+    assert dict(app.environment())["DEMO_PASS"] == "Default of --pass of every command"
+
+
 def test_the_env_prefix_rule_accepts_a_name_the_command_declares() -> None:
     app = make_app()
 
