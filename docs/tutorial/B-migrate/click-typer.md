@@ -868,6 +868,9 @@ Migration is a breaking change for callers. Put this list in your release notes:
   every field that takes free text, such as a body or a message, `multiline=True`
 - A command that read a file or `-` for stdin takes the file as `--input-file PATH` and
   otherwise reads its stdin
+- An option taking a list of objects as one JSON array, such as `--postings '[...]'`, is
+  repeated instead, one JSON object per flag; `exec` lines, `--raw-payload`, and MCP still
+  take the array
 - A config file of the CLI's own moves to the one treaty reads
   ([Read settings and secrets](../core/config.md#a-command-that-writes-the-config-file))
 - Output is JSON whenever stdout is not a terminal; scripts that grepped the old text should
