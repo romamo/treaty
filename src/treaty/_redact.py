@@ -12,6 +12,8 @@ import re
 from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import cast
 
+from ._envelope import strip_escapes
+
 REDACTED = "[REDACTED]"
 OMITTED = "[OMITTED]"
 """A field declared ``audit=False``, as the audit log writes it"""
@@ -210,6 +212,29 @@ class StreamRedactor:
     def flush(self) -> str | None:
         """What is still held when the pipe closes, redacted"""
         return self.feed("", ended=True) if self._held else None
+
+
+def replacer(spellings: Collection[str]) -> Callable[[str], str]:
+    """Replace every one of ``spellings`` with ``REDACTED``, the longest first. A secret a
+    terminal escape splits, such as ``hun\\x1b[0mter2``, is whole once ``clean`` takes the
+    escape out, and a terminal shows it whole as it is: where the text without its escapes
+    holds one, the text goes without them (#277)"""
+    ordered = sorted(spellings, key=len, reverse=True)
+
+    def replaced(text: str) -> str:
+        for spelling in ordered:
+            text = text.replace(spelling, REDACTED)
+        return text
+
+    def redact(text: str) -> str:
+        shown = replaced(text)
+        bare = strip_escapes(shown)
+        if bare == shown:
+            return shown
+        hidden = replaced(bare)
+        return shown if hidden == bare else hidden
+
+    return redact
 
 
 def line_fragments(spellings: Collection[str], shortest: int) -> set[str]:
