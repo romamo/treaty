@@ -208,7 +208,10 @@ def save(args: Save, ctx: Ctx, store: Store) -> Saved:
 ```
 
 - **`required_tools=`** maps each program to its minimum version. `todo doctor` then checks
-  git is installed and new enough, and names the fix when it is not. Without it the audit
+  git is installed and new enough, and names the fix when it is not. A program without
+  `--version` maps to `None` instead, or the names go in a list such as
+  `required_tools=["bean-format"]`: `doctor` then checks only that it is on PATH, and the
+  manifest lists `"*"` for its version. Without it the audit
   reports `(advice) required-tools [save]: runs 'git' (line N of the handler), which
   required_tools does not list, so doctor cannot check it is installed`
 - **`subprocess=`** names the binary, the fields whose values become its arguments, and the

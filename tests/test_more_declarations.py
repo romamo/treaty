@@ -503,6 +503,104 @@ def test_a_required_tool_uses_the_fix_of_a_dependency_of_the_same_name(tmp_path:
     assert entries(env, "checks")["gonectl"]["fix"] == "brew install gonectl"
 
 
+# #296: a program without --version is needed at any version, on PATH
+
+
+def any_version_app(tools: object) -> App:
+    app = App("ledger", version="1.0.0")
+
+    @app.command(
+        "fmt",
+        description="Format the ledger",
+        danger_level="safe",
+        exit_codes=(),
+        required_tools=tools,  # type: ignore[arg-type]  # the bad shapes are the point
+    )
+    def fmt(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    return app
+
+
+def no_version_tool(tmp_path: Path) -> Path:
+    """A program that fails ``--version`` and leaves a mark when run at all"""
+    tool = tmp_path / "bean-format"
+    tool.write_text(f"#!/bin/sh\ntouch {shlex.quote(str(tmp_path / 'ran'))}\nexit 1\n")
+    tool.chmod(0o755)
+    return tmp_path / "ran"
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-in tool is a POSIX script")
+@pytest.mark.parametrize("tools", [{"bean-format": None}, ("bean-format",), ["bean-format"]])
+def test_doctor_checks_a_tool_needed_at_any_version_is_on_path_without_running_it(
+    tmp_path: Path, tools: object
+) -> None:
+    ran = no_version_tool(tmp_path)
+    code, env = doctor(any_version_app(tools), str(tmp_path))
+    assert code == 0
+    assert entries(env, "checks")["bean-format"] == {
+        "name": "bean-format",
+        "ok": True,
+        "version": None,
+        "required": None,
+        "commands": ["fmt"],
+    }
+    assert not ran.exists()
+
+
+def test_doctor_fails_a_tool_needed_at_any_version_that_is_not_on_path(tmp_path: Path) -> None:
+    code, env = doctor(any_version_app({"bean-format": None}), str(tmp_path))
+    assert code == 4
+    check = entries(env, "checks")["bean-format"]
+    assert check["ok"] is False and check["required"] is None
+    assert check["fix"] == "install bean-format"
+    assert check["error"] == "bean-format is not on PATH"
+
+
+@pytest.mark.skipif(WINDOWS, reason="the stand-in tools are POSIX scripts")
+def test_a_floor_from_another_command_still_runs_the_version_check(tmp_path: Path) -> None:
+    app = any_version_app({"fakectl": None})
+
+    @app.command(
+        "pack", description="x", danger_level="safe", exit_codes=(), required_tools={"fakectl": "2"}
+    )
+    def pack(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    _, env = doctor(app, fake_tools(tmp_path))
+    check = entries(env, "checks")["fakectl"]
+    assert check["ok"] is False and check["version"] == "1.2.3" and check["required"] == "2"
+    assert check["commands"] == ["fmt", "pack"]
+
+
+def test_the_manifest_lists_a_tool_needed_at_any_version_as_a_star() -> None:
+    app = any_version_app({"bean-format": None, "git": "2.30"})
+    manifest = app.manifest()
+    assert manifest["commands"]["fmt"]["required_tools"] == {"bean-format": "*", "git": "2.30"}  # type: ignore[index]
+    spec_validator("manifest-response").validate(manifest)
+    listed = any_version_app(("bean-format",)).manifest()
+    assert listed["commands"]["fmt"]["required_tools"] == {"bean-format": "*"}  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("tools", "message"),
+    [
+        ({"": None}, "is not a program name"),
+        ({3: None}, "is not a program name"),
+        (("",), "is not a program name"),
+        ((3,), "is not a program name"),
+        (("git", "git"), "names 'git' twice"),
+        ("git", "or to None for any version"),
+        ("", "or to None for any version"),
+        (b"", "or to None for any version"),
+        ({"git": "latest"}, "not dotted numbers"),
+    ],
+)
+def test_required_tools_refuses_a_malformed_declaration(tools: object, message: str) -> None:
+    with pytest.raises(RegistrationError, match=message):
+        any_version_app(tools)
+
+
 def test_invoking_a_linux_only_command_on_macos_emits_a_compatibility_warning() -> None:
     elsewhere = "linux" if sys.platform != "linux" else "darwin"
     code, env = run(tools_app((elsewhere,)), ["package"])
@@ -534,7 +632,10 @@ def test_platform_takes_sys_platform_values() -> None:
 def test_audit_flags_a_program_missing_from_required_tools() -> None:
     rules = {r.id: r for r in audit(echo_app(declared=False), "echoer", limit=3).rules}
     [finding] = rules["required-tools"].findings
-    assert finding.fix == 'required_tools={"echo": "<minimum version>"}'
+    assert finding.fix == (
+        'required_tools={"echo": "<minimum version>"}, or {"echo": None} when any version '
+        "will do or it has no --version"
+    )
 
 
 # 13-D1: built-ins added by 08 yield to an app command of the same name

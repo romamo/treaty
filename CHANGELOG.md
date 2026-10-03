@@ -10,6 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `required_tools=` takes `None` as a program's version, or a plain list of names such as
+  `required_tools=["bean-format"]`, for a program needed at any version, such as one
+  without `--version`: `doctor` checks only that it resolves on PATH and never runs it,
+  with `required: null` in its check, and the manifest lists `"*"` for its version, since
+  the spec's schema makes every value a string. A floor another command declares for the
+  same program still runs the version check. The `required-tools` audit advice names
+  this form too, and a name listed twice is refused at registration. Mappings of names
+  to versions work unchanged (#296)
+
 ## [1.0.0rc32] - 2026-10-03
 
 The 32th 1.0 release candidate: 1 fix.

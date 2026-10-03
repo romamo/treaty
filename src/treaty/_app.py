@@ -939,7 +939,7 @@ class App:
         external: bool | None = None,
         subprocess: Subprocess | None = None,
         platform: Sequence[str] = (),
-        required_tools: Mapping[str, str] | None = None,
+        required_tools: Mapping[str, str | None] | Sequence[str] | None = None,
         filesystem_side_effects: Sequence[SideEffect] = (),
         background: Background | None = None,
         preserve_locale: bool = False,
@@ -1029,7 +1029,9 @@ class App:
         ``platform=["linux"]`` names the ``sys.platform`` values the command supports;
         elsewhere it still runs, with an ``UNSUPPORTED_PLATFORM`` warning.
         ``required_tools={"dpkg-deb": "1.19.0"}`` names the programs it runs and their
-        minimum versions, each a ``doctor`` check (REQ-C-018).
+        minimum versions, each a ``doctor`` check (REQ-C-018). ``None`` as the version,
+        or a list of names such as ``required_tools=["bean-format"]``, needs a program on
+        PATH at any version: ``doctor`` never runs it, and the manifest lists ``"*"``.
         ``filesystem_side_effects=[SideEffect("~/.cache/tool/", "cache")]`` declares where
         the command writes on disk, in the manifest; the ``cleanup`` built-in removes the
         ``temp``, ``cache``, and ``log`` paths and never an ``output`` path, the command's

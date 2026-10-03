@@ -265,8 +265,9 @@ class Command:
     ``user_controlled_args``, never derived ones (08-D1)"""
     platform: tuple[str, ...] = ()
     """``sys.platform`` values the command supports; empty is all (REQ-C-018)"""
-    required_tools: Mapping[str, Version] = field(default_factory=dict)
-    """Programs the command runs, to their minimum versions; checked by ``doctor``"""
+    required_tools: Mapping[str, Version | None] = field(default_factory=dict)
+    """Programs the command runs, to their minimum versions, None for any version;
+    checked by ``doctor``"""
     filesystem_side_effects: tuple[SideEffect, ...] = ()
     """Where the command writes on disk; ``cleanup`` removes the temp and cache ones"""
     background: Background | None = None
@@ -485,7 +486,7 @@ def build_command(
     external: bool | None = None,
     subprocess: Subprocess | None = None,
     platform: Sequence[str] = (),
-    required_tools: Mapping[str, str] | None = None,
+    required_tools: Mapping[str, str | None] | Sequence[str] | None = None,
     filesystem_side_effects: Sequence[SideEffect] = (),
     background: Background | None = None,
     preserve_locale: bool = False,
@@ -874,7 +875,9 @@ def build_command(
         subprocess=child,
         shell_checked=() if declared_child is None else declared_child.user_controlled_args,
         platform=check_platform(str(path), platform),
-        required_tools=check_required_tools(str(path), required_tools or {}),
+        required_tools=check_required_tools(
+            str(path), {} if required_tools is None else required_tools
+        ),
         filesystem_side_effects=check_side_effects(
             str(path), filesystem_side_effects, project_root
         ),
