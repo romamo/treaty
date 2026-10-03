@@ -14,7 +14,7 @@ import shutil
 import stat
 import time
 from collections import deque
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -806,10 +806,21 @@ def register_mcp_validate(app: App) -> CommandPath:
         ],
     )
     if providing:
+        settings = app._settings_cls
 
-        def with_provided(args: McpValidateServeArgs, ctx: Ctx) -> McpValidation:
-            return _validate(app, args, ctx, *_served_tools(app, args.serve_args, ctx))
+        def with_provided(args: McpValidateServeArgs, ctx: Ctx, *given: object) -> McpValidation:
+            held = {} if settings is None else {settings: given[0]}
+            return _validate(app, args, ctx, *_served_tools(app, args.serve_args, ctx, held))
 
+        # The settings, which McpServe(tools=) may take (#302), are handed in by type
+        from ._mcp_serve import sign_handler
+
+        sign_handler(
+            with_provided,
+            McpValidateServeArgs,
+            () if settings is None else (settings,),
+            McpValidation,
+        )
         declare(with_provided)
     else:
 
@@ -821,14 +832,22 @@ def register_mcp_validate(app: App) -> CommandPath:
 
 
 def _served_tools(
-    app: App, raw: str, ctx: Ctx
+    app: App, raw: str, ctx: Ctx, held: Mapping[type, object]
 ) -> tuple[list[ToolEntry], frozenset[CommandPath] | None, Bindings]:
     """The tools ``mcp serve`` provides, the commands it selects, and the fields it binds
     given ``raw``, its startup arguments as JSON: read as an exec line's, and handed to
     ``McpServe(tools=)``, ``McpServe(commands=)``, and ``McpServe(bind=)``; ``setup``
-    does not run"""
-    from ._mcp_serve import MCP_SERVE_PATH, bound_values, provided_tools, served_commands
+    does not run. ``held`` is what the run has, such as the settings; the resources
+    ``tools`` takes are acquired as ``mcp serve`` would, and released when this run ends"""
+    from ._mcp_serve import (
+        MCP_SERVE_PATH,
+        bound_values,
+        provided_tools,
+        provider_resources,
+        served_commands,
+    )
     from ._parse import build_from_mapping
+    from ._resources import Resolver
 
     assert app.mcp is not None
     command = app.commands[MCP_SERVE_PATH]
@@ -842,7 +861,9 @@ def _served_tools(
         ) from None
     served = served_commands(app, app.mcp, invocation.args)
     bindings = bound_values(app, app.mcp, invocation.args, served)
-    provided = provided_tools(app, app.mcp, invocation.args, ctx)
+    resolver = Resolver(command.resource_graph, invocation.args, ctx, held)
+    resources = resolver.all(provider_resources(app, app.mcp))
+    provided = provided_tools(app, app.mcp, invocation.args, ctx, resources)
     return [p.entry() for p in provided.values()], served, bindings
 
 

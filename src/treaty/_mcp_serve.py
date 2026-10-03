@@ -18,6 +18,12 @@ provided tool runs as a command does, through ``App.call``'s path: its arguments
 checked against its input schema first, and its handler's result is enveloped and checked
 against the output schema its return annotation gives.
 
+Resources and settings (#302): ``provide`` and an ``McpTool`` handler may take resources by
+annotation after ``ctx``, the ``App(settings=)`` class among them, as a command handler
+does. The provider's are ``mcp serve``'s own, so they are acquired once as serving starts
+and released when it ends; a tool handler's are its synthetic command's, so each call
+acquires them and releases them when the call ends, however it ends.
+
 Arguments fixed for the run (#285): ``McpServe(bind=bind)`` calls ``bind(args)`` once as
 serving starts, and each served command tool with a field it names runs with that value;
 the field leaves the tool's input schema, so a call passing it is refused as unknown.
@@ -45,8 +51,8 @@ from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError
 from ._flags import Flag
 from ._framework import CONFIRM_FLAG
 from ._redact import REDACTED
-from ._resources import dependency_params
-from ._types import is_dataclass_type, type_hints
+from ._resources import dependency_params, resource_spec
+from ._types import is_dataclass_type, signature, type_hints
 from ._values import CommandPath, ExitCodeName, InvalidValue
 
 if TYPE_CHECKING:
@@ -92,7 +98,10 @@ DEFAULT_INSTRUCTIONS = (
 class McpTool:
     """A tool ``McpServe(tools=...)`` provides from runtime data (#240). ``input_schema``
     is the JSON Schema of its arguments, an object schema; a call's arguments are
-    checked against it before ``handler(arguments, ctx)`` runs. The handler's return
+    checked against it before ``handler(arguments, ctx, *resources)`` runs. The handler
+    may take resources by annotation after ``ctx``, the ``App(settings=)`` class among
+    them, acquired for each call and released when it ends (#302); it may be ``async
+    def``. The handler's return
     annotation gives the output schema its result is checked against, as a command's
     does. ``danger_level`` sets the tool's hints (``safe`` read-only and idempotent,
     ``destructive`` destructive); ``read_only`` and ``destructive`` override them, so a
@@ -102,7 +111,7 @@ class McpTool:
     name: str
     description: str
     input_schema: Mapping[str, object]
-    handler: Callable[[Mapping[str, object], Ctx], object]
+    handler: Callable[..., object]
     danger_level: DangerLevel | str = DangerLevel.SAFE
     read_only: bool | None = None
     destructive: bool | None = None
@@ -118,7 +127,8 @@ class McpTool:
         if not isinstance(schema, Mapping) or schema.get("type") != "object":
             raise ValueError(f'{where}: input_schema is a JSON Schema with "type": "object"')
         if not callable(self.handler):
-            raise ValueError(f"{where}: handler is a function (arguments, ctx)")
+            raise ValueError(f"{where}: handler is a function (arguments, ctx, *resources)")
+        takes_resources(self.handler, f"{where}: handler", allow_async=True)
         try:
             level = DangerLevel(self.danger_level)
         except ValueError:
@@ -150,7 +160,54 @@ class McpTool:
         return self.level is DangerLevel.DESTRUCTIVE
 
 
-type ToolProvider = Callable[[Any, Ctx], Sequence[McpTool]]
+def takes_resources(
+    fn: Callable[..., object], where: str, *, allow_async: bool = False
+) -> tuple[type, ...]:
+    """The classes ``fn`` takes by annotation after ``(first, ctx)`` (#302). A function of
+    at most two parameters takes none and is called as before; one of three or more is checked as a
+    handler is: positional parameters, ``ctx`` annotated ``Ctx``, each further one a class"""
+    if len(signature(fn).parameters) <= 2:
+        return ()
+    return dependency_params(fn, where, allow_async=allow_async)
+
+
+def resource_params(
+    fn: Callable[..., object], where: str, settings: type | None, *, allow_async: bool = False
+) -> tuple[type, ...]:
+    """``takes_resources``, each class a resource or the ``App(settings=)`` class: one that
+    is neither fails naming its parameter, before anything runs"""
+    deps = takes_resources(fn, where, allow_async=allow_async)
+    names = list(signature(fn).parameters)[2:]
+    for name, cls in zip(names, deps, strict=True):
+        if cls is settings:
+            continue
+        try:
+            resource_spec(cls)
+        except RegistrationError as exc:
+            raise RegistrationError(
+                f"{where}: parameter {name!r} is annotated with {cls.__qualname__}, which is "
+                f"neither a resource nor the App(settings=) class ({exc})"
+            ) from None
+    return deps
+
+
+def sign_handler(fn: Callable[..., object], first: type, deps: Sequence[type], out: object) -> None:
+    """Give ``fn(first, ctx, *acquired)`` a signature naming each resource it takes, so the
+    command machinery resolves and releases them as a handler's"""
+    kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
+    names = [f"resource_{n}" for n in range(len(deps))]
+    params = [inspect.Parameter(n, kind) for n in ("args", "ctx", *names)]
+    setattr(fn, "__signature__", inspect.Signature(params, return_annotation=out))  # noqa: B010
+    fn.__annotations__ = {
+        "args": first,
+        "ctx": Ctx,
+        **dict(zip(names, deps, strict=True)),
+        "return": out,
+    }
+
+
+type ToolProvider = Callable[..., Sequence[McpTool]]
+"""``provide(args, ctx, *resources)``: the resources and the settings by annotation (#302)"""
 type CommandSelector = Callable[[Any], Collection[str] | None]
 type Instructions = str | Callable[[Any], str]
 type Binder = Callable[[Any], Mapping[str, object]]
@@ -161,10 +218,12 @@ class McpServe:
     """``App(mcp=McpServe(...))`` adds the ``mcp serve`` built-in. ``args`` is the args
     dataclass of its startup flags, None for none. ``setup(args, ctx, *resources)``, if
     given, runs once before serving, takes resources as a handler does, and raises
-    ``treaty.Exit`` to refuse (answered on stderr). ``tools(args, ctx)`` returns the
-    ``McpTool`` values served beside the commands, called once as serving starts, after
-    ``setup``. ``instructions`` is the server's instructions to the client: text, or a
-    function of the startup arguments returning it. ``exit_codes`` names the app exit
+    ``treaty.Exit`` to refuse (answered on stderr). ``tools(args, ctx, *resources)``
+    returns the ``McpTool`` values served beside the commands, called once as serving
+    starts, after ``setup``; it takes resources as ``setup`` does, the ``App(settings=)``
+    class among them, acquired as serving starts and released when it ends (#302).
+    ``instructions`` is the server's instructions to the client: text, or a function of
+    the startup arguments returning it. ``exit_codes`` names the app exit
     codes ``setup``, ``tools``, and ``bind`` may raise, registered with ``app.exit_code``
     before the first run. ``commands(args)`` returns the command paths served as tools for the
     startup arguments, such as ``{"fleet", "observe.logs"}``: None serves every command,
@@ -200,7 +259,7 @@ class McpServe:
         if self.setup is not None and not callable(self.setup):
             raise RegistrationError("McpServe(setup=...) is a function (args, ctx, *resources)")
         if self.tools is not None and not callable(self.tools):
-            raise RegistrationError("McpServe(tools=...) is a function (args, ctx)")
+            raise RegistrationError("McpServe(tools=...) is a function (args, ctx, *resources)")
         if self.commands is not None and not callable(self.commands):
             raise RegistrationError(
                 "McpServe(commands=...) is a function (args) returning the command paths "
@@ -505,10 +564,12 @@ def _invalid(name: str, problem: str) -> CliExit:
     )
 
 
-def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str, Provided]:
-    """``spec.tools(args, ctx)``, each checked: an ``McpTool``, a valid input schema, a
-    name no command tool or other provided tool has, and an output type treaty can check.
-    Raised before serving, so a bad catalog never reaches a client"""
+def provided_tools(
+    app: App, spec: McpServe, args: object, ctx: Ctx, resources: Sequence[object] = ()
+) -> dict[str, Provided]:
+    """``spec.tools(args, ctx, *resources)``, each checked: an ``McpTool``, a valid input
+    schema, a name no command tool or other provided tool has, and an output type treaty
+    can check. Raised before serving, so a bad catalog never reaches a client"""
     provide = spec.tools
     if provide is None:
         return {}
@@ -527,7 +588,7 @@ def provided_tools(app: App, spec: McpServe, args: object, ctx: Ctx) -> dict[str
         ) from None
     from ._tools import tool_name
 
-    returned = provide(args, ctx)
+    returned = provide(args, ctx, *resources)
     if isinstance(returned, (str, bytes, Mapping)) or not isinstance(returned, Sequence):
         raise TypeError(
             f"McpServe tools returned {type(returned).__name__}; it returns a list of McpTool"
@@ -613,18 +674,30 @@ def _unresolved_ref(schema: Mapping[str, object], validator_class: Any) -> str |
 def _command_for(app: App, tool: McpTool) -> Command:
     """The command a provided tool runs as: no flags, the handler's return type as its
     output, safe whatever its hints say, since treaty cannot preview or deduplicate the
-    tool's own work; its arguments come from the call (``bound``)"""
+    tool's own work; its arguments come from the call (``bound``). The resources the
+    handler takes are the command's, so each call acquires and releases them (#302)"""
     from ._app import NoArgs
 
     hints = type_hints(tool.handler)
     if "return" not in hints:
         raise RegistrationError("its handler needs a return annotation for the output schema")
     handler = tool.handler
+    settings = app._settings_cls
+    deps = resource_params(handler, "its handler", settings, allow_async=True)
+    run: Callable[..., object]
+    if inspect.iscoroutinefunction(handler):
 
-    def run(args: NoArgs, ctx: Ctx) -> object:
-        return handler(_ARGUMENTS.get(), ctx)
+        async def run_async(args: object, ctx: Ctx, *acquired: object) -> object:
+            return await handler(_ARGUMENTS.get(), ctx, *acquired)
 
-    run.__annotations__ = {"args": NoArgs, "ctx": Ctx, "return": hints["return"]}
+        run = run_async
+    else:
+
+        def run_sync(args: object, ctx: Ctx, *acquired: object) -> object:
+            return handler(_ARGUMENTS.get(), ctx, *acquired)
+
+        run = run_sync
+    sign_handler(run, NoArgs, deps, hints["return"])
     return build_command(
         run,
         app_name=app.name,
@@ -642,6 +715,7 @@ def _command_for(app: App, tool: McpTool) -> Command:
         media_types={},
         scalars=app.scalars,
         args_adapters=app.args_adapters,
+        provided=() if settings is None else (settings,),
     )
 
 
@@ -792,15 +866,25 @@ def instructions_for(app: App, spec: McpServe, args: object) -> str:
     return text
 
 
+def provider_resources(app: App, spec: McpServe) -> tuple[type, ...]:
+    """The resources ``McpServe(tools=)`` takes after ``(args, ctx)``, the settings class
+    among them (#302)"""
+    if spec.tools is None:
+        return ()
+    return resource_params(spec.tools, "McpServe tools", app._settings_cls)
+
+
 def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
-    """The ``mcp serve`` built-in: its handler takes ``setup``'s resources, so they are
-    acquired and released as any handler's are. Its args extend the app's with
-    ``--list-tools``"""
+    """The ``mcp serve`` built-in: its handler takes the resources ``setup`` and ``tools``
+    ask for, so they are acquired and released as any handler's are. Its args extend the
+    app's with ``--list-tools``"""
     from ._app import NoArgs  # loaded: the App being built calls this
 
     app.group(MCP_GROUP.value, description="Serve the app to MCP clients")
     setup = spec.setup
-    resources = () if setup is None else dependency_params(setup, "McpServe setup")
+    for_setup = () if setup is None else dependency_params(setup, "McpServe setup")
+    for_tools = provider_resources(app, spec)
+    resources = tuple(dict.fromkeys((*for_setup, *for_tools)))
     base = NoArgs if spec.args is None else spec.args
     args_type = dataclasses.make_dataclass(
         base.__name__,
@@ -826,8 +910,9 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
         wire = ctx._wire
         if wire is None:
             raise needs_stdio(app.name)
+        held = dict(zip(resources, acquired, strict=True))
         if setup is not None:
-            returned = setup(args, ctx, *acquired)
+            returned = setup(args, ctx, *(held[c] for c in for_setup))
             if returned is not None:
                 raise TypeError(
                     f"McpServe setup returned {type(returned).__name__}; it returns None, "
@@ -835,7 +920,7 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
                 )
         served = served_commands(app, spec, args)
         bindings = bound_values(app, spec, args, served)
-        provided = provided_tools(app, spec, args, ctx)
+        provided = provided_tools(app, spec, args, ctx, [held[c] for c in for_tools])
         if getattr(args, LIST_TOOLS):
             from ._tools import tool_list
 
@@ -871,20 +956,8 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
             bindings=bindings,
         )
 
-    # The handler's signature is setup's, so the resources setup asks for are resolved
-    kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
-    names = [f"resource_{n}" for n in range(len(resources))]
-    signature = inspect.Signature(
-        [inspect.Parameter(n, kind) for n in ("args", "ctx", *names)],
-        return_annotation=McpServed,
-    )
-    setattr(serve, "__signature__", signature)  # noqa: B010 - functions do not declare it
-    serve.__annotations__ = {
-        "args": args_type,
-        "ctx": Ctx,
-        **dict(zip(names, resources, strict=True)),
-        "return": McpServed,
-    }
+    # The handler's signature names setup's and tools' resources, so they are resolved
+    sign_handler(serve, args_type, resources, McpServed)
     app.command(
         MCP_SERVE_PATH.value,
         description=DESCRIPTION,

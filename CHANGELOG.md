@@ -30,6 +30,15 @@ Apps built on treaty keep their own, structured schema changelog with
   argument schema says `format: date` or `date-time` with a `pattern` the parser holds the
   text to; output schemas are unchanged. An app's own `app.scalar(datetime.date, ...)`
   replaces the built-in for arguments (#297)
+- `McpServe(tools=)` and the `McpTool` handlers it provides take resources by annotation
+  after `ctx`, as a command's handler does, the `App(settings=)` class among them.
+  The provider's are acquired once as serving starts (and by `mcp-validate
+  --serve-args`) and released when the server stops; a handler's are acquired for each
+  call and released when it ends, on an error or a timeout too. A tool handler may be
+  `async def` and take async resources. A parameter annotated with a class that is
+  neither a resource nor the settings fails naming the parameter: `RegistrationError`
+  for the provider when the `App` is built, `MCP_TOOL_INVALID` for a handler before
+  serving. Providers and handlers of two parameters run as before (#302)
 
 ## [1.0.0rc32] - 2026-10-03
 

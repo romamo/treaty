@@ -2081,6 +2081,28 @@ the value is taken out of what the call writes (error messages and context, a st
 `mcp.serve` with the `tool` and its `arguments`, secret properties and credential-named
 keys redacted.
 
+`provide` and a tool's handler take resources by annotation after `ctx`, as a command's
+handler does, the `App(settings=)` class among them:
+
+```python
+def provide(args: ServeArgs, ctx: Ctx, settings: Settings, api: ApiClient) -> list[McpTool]:
+    return [McpTool(name=op.name, description=op.summary, input_schema=op.schema,
+                    handler=call_op) for op in api.operations(settings.region)]
+
+def call_op(arguments: Mapping[str, object], ctx: Ctx, api: ApiClient) -> OpResult:
+    return api.run(arguments)
+```
+
+The provider's resources are `mcp serve`'s own: acquired once as serving starts (and by
+`mcp-validate --serve-args`), released when the server stops. A handler's are acquired for
+each call and released when the call ends, whether it returns, raises, or times out (an
+`async def` handler, which may take async resources, is cancelled at its deadline; a plain
+one releases them when it returns). The settings are read as for a command tool's call:
+from the environment and config files the server runs with. A parameter annotated with a
+class that is neither a resource nor the settings fails naming the parameter: in
+`provide`, with `RegistrationError` when the `App` is built; in a handler, with
+`MCP_TOOL_INVALID` before serving. A provider or handler of two parameters runs as before.
+
 Which commands are tools can depend on the startup flags too. `McpServe(commands=select)`
 calls `select(args)` as serving starts, after `setup`, and serves only the command paths it
 returns (`{"fleet", "observe.logs"}`); None serves every command, and an empty collection
