@@ -10,6 +10,8 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
 - What reaches descriptor 1 as the process exits, a handler thread abandoned at its
   timeout still alive, is no longer lost (#271): a host's exit hook that runs after
   treaty's, or the interpreter's last flush of `sys.__stdout__`, wrote to the pipe after
@@ -18,7 +20,6 @@ Apps built on treaty keep their own, structured schema changelog with
   a spool file and passes what reaches it on to stderr, redacted, as the last held thread
   ends or at the interpreter's last flush; once no held thread lives, descriptor 1 is
   stdout again. It never leads to stdout while one does
-### Fixed
 
 - A declared secret that the `THIRD_PARTY_STDOUT` warning's 4096-character cut split no
   longer leaves its first part in the warning, its `-vv` trace, or stderr (#274): the
