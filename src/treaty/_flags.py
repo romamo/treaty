@@ -18,13 +18,13 @@ from ._errors import ParseError, RegistrationError, SchemaError
 from ._paths import PATTERN_TYPE, check_path
 from ._redact import REDACTED, secret_name
 from ._scalars import (
-    DECIMAL,
-    DECIMAL_HINT,
+    BUILT_IN_TEXT,
     PATTERN_TYPES,
     PRESET_PATTERNS,
     ScalarRegistry,
     ScalarSpec,
     anchored,
+    built_in,
     check_pattern_publishable,
     matches_preset,
 )
@@ -485,8 +485,9 @@ def object_shape(target: Classified) -> str:
         return f"[{object_shape(target.item)}]"
     if target.flag_type is FlagType.ENUM:
         return "|".join(target.enum_values)
-    if target.scalar is DECIMAL:
-        return "decimal"
+    if built_in(target.scalar):
+        assert target.scalar is not None
+        return BUILT_IN_TEXT[target.scalar.cls][2]
     return "path" if target.path else target.flag_type.value
 
 
@@ -531,11 +532,10 @@ def apply_scalar(
     violation = spec.violation(base_value)
     if violation is not None:
         problem, detail = violation
-        if spec is DECIMAL:
+        if built_in(spec):
+            what, hint, _ = BUILT_IN_TEXT[spec.cls]
             raise ParseError(
-                f"value for {flag!r} is not a fixed-point decimal",
-                context={**ctx, **detail},
-                suggestion=DECIMAL_HINT,
+                f"value for {flag!r} is not {what}", context={**ctx, **detail}, suggestion=hint
             )
         raise ParseError(f"value for {flag!r} {problem}", context={**ctx, **detail})
     try:
@@ -654,11 +654,14 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
             raise RegistrationError(
                 f"{where}: default {default!r} is not a {target.scalar.cls.__qualname__}"
             )
-        if target.scalar is DECIMAL:
-            text = format(default, "f")
+        if built_in(target.scalar):
+            # As its text, so the default is what a parsed argument would be: -0 is 0, and
+            # a datetime is no date default, nor a naive one a datetime default
+            text = target.scalar.serialize(default)
             if target.scalar.violation(text):
-                raise RegistrationError(f"{where}: default {default!r} is not a finite decimal")
-            return target.scalar.parse(text)  # what a parsed argument would be: -0 is 0
+                what = BUILT_IN_TEXT[target.scalar.cls][0]
+                raise RegistrationError(f"{where}: default {default!r} is not {what}")
+            return target.scalar.parse(text)
         return default
     match target.flag_type:
         case FlagType.OBJECT:

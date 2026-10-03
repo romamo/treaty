@@ -29,7 +29,7 @@ from ._errors import RegistrationError, SchemaError
 from ._flags import FLAG_META
 from ._out import Binary, External, out_spec
 from ._redact import secret_field
-from ._scalars import DECIMAL_TEXT, ScalarRegistry
+from ._scalars import DATE_TEXT, DATETIME_TEXT, DECIMAL_TEXT, ScalarRegistry
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
 
 JsonSchema = dict[str, Any]
@@ -112,11 +112,16 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
             return {"type": "number"}
         if base is str or base is Path:
             return {"type": "string"}
-        if base in _TEMPORAL:
-            return {"type": "string", "format": _TEMPORAL[base]}
         if (spec := scalars.get(base)) is not None:
-            # Before the built-ins it may replace, such as Decimal, as serialization is
+            # Before the built-ins it may replace, such as Decimal and date, as
+            # serialization is
             return spec.json_schema()
+        if base in _TEMPORAL:
+            temporal: JsonSchema = {"type": "string", "format": _TEMPORAL[base]}
+            if output or base not in _TEMPORAL_ARGUMENT:
+                return temporal
+            # An argument also carries the pattern its parser holds the text to
+            return {**temporal, "pattern": _TEMPORAL_ARGUMENT[base]}
         if output and scalars.adapters.for_type(base) is not None:
             # An output adapter writes a class; reading one in is another registration
             return scalars.adapters.schema(base)
@@ -136,6 +141,11 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
 
 # REQ-F-005: dates and times travel as ISO 8601 text, keyed by exact class
 _TEMPORAL: dict[object, str] = {dt.datetime: "date-time", dt.date: "date", dt.time: "time"}
+# Built-in date and datetime arguments: RFC 3339 text, a datetime with an offset
+_TEMPORAL_ARGUMENT: dict[object, str] = {
+    dt.date: f"^{DATE_TEXT}$",
+    dt.datetime: f"^{DATETIME_TEXT}$",
+}
 # A Decimal is written and read as fixed-point text, so no float rounding touches it
 DECIMAL_PATTERN = f"^{DECIMAL_TEXT}$"
 

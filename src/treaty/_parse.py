@@ -6,6 +6,7 @@ context instead of a formatted message and a hard exit.
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import re
 from collections.abc import Callable, Collection, Mapping
@@ -42,7 +43,7 @@ from ._lines import INPUT_LINES_FLAG, INPUT_LINES_KEY, Lines, StdinInput, input_
 from ._page import Limit, Position
 from ._paths import check_path
 from ._rules import check_rules
-from ._scalars import DECIMAL
+from ._scalars import BUILT_IN_TEXT, DATE, DATETIME, DECIMAL, ScalarSpec
 from ._secrets import (
     SecretRef,
     SecretSource,
@@ -1331,6 +1332,8 @@ def check_json_base(target: Classified, value: object, flag: str) -> object:
                 return check_path(value, flag) if target.path else value
             if target.scalar is DECIMAL:
                 return _decimal_text(value, flag)
+            if target.scalar is DATE or target.scalar is DATETIME:
+                return _temporal_text(target.scalar, value, flag)
             raise ParseError(f"{flag!r} expects a string", context=ctx)
         case FlagType.ENUM:
             if isinstance(value, str) and value in target.enum_values:
@@ -1362,4 +1365,25 @@ def _decimal_text(value: object, flag: str) -> str:
         context={"field": flag, "value": value},
         suggestion=f'pass it quoted, such as "12.30": a {type(value).__name__} may have '
         "lost digits",
+    )
+
+
+def _temporal_text(spec: ScalarSpec, value: object, flag: str) -> str:
+    """A date or datetime field's value other than a string, such as a TOML file's native
+    date or a Python caller's object, as the text the built-in parser checks. A datetime
+    is not a date, though it subclasses one; a naive datetime's text has no offset, so the
+    pattern refuses it"""
+    if type(value) is spec.cls or (spec is DATETIME and isinstance(value, dt.datetime)):
+        text = spec.serialize(value)
+        assert isinstance(text, str)
+        return text
+    kind = "date" if spec is DATE else "date-time"
+    raise ParseError(
+        f"{flag!r} expects a {kind} as a string",
+        context={
+            "field": flag,
+            # A TOML time or date-time is no JSON value: its ISO text is
+            "value": value.isoformat() if isinstance(value, (dt.date, dt.time)) else value,
+        },
+        suggestion=BUILT_IN_TEXT[spec.cls][1],
     )

@@ -569,6 +569,7 @@ alias from `add_parser(aliases=...)` is listed with the `app.redirect` that answ
 | `add_argument("--flag", default=v)` | `flag: T = Flag(default=v, description=...)` |
 | `required=True` | a `Flag` with no default |
 | `type=int`, `type=float`, `type=Decimal`, `type=Path` | the field's annotation |
+| `type=date.fromisoformat` | `datetime.date`: `YYYY-MM-DD` only; a `datetime.datetime` needs an offset |
 | `type=resource_id` (a converter returning a value object) | `app.scalar(ResourceId, parse=..., pattern=...)` before the commands, then annotate the field `ResourceId`; the pattern reaches the manifest and is checked before the handler runs |
 | `choices=[...]` | `Literal[...]` or a `StrEnum` |
 | `action="store_true"` | `bool = Flag(default=False, ...)` |

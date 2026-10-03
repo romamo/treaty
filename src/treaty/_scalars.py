@@ -9,6 +9,7 @@ carry the declared pattern or bounds. The domain class never imports treaty.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -219,3 +220,68 @@ DECIMAL = ScalarSpec(
 )
 """``Decimal`` arguments, built in: a string on every route, parsed without a float. An
 app's own ``app.scalar(Decimal, ...)`` is found first and replaces it"""
+
+DATE_TEXT = r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+"""RFC 3339 full-date, the one form a ``datetime.date`` argument travels in: narrower than
+``date.fromisoformat``, which also takes ``20240101`` and ``2024-W01-1``"""
+DATE_HINT = "pass a date as YYYY-MM-DD, such as 2024-01-31"
+DATETIME_TEXT = (
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?"
+    r"(Z|[+-][0-9]{2}:[0-9]{2})"
+)
+"""RFC 3339 date-time with an offset, an upper-case ``T`` and ``Z``, and at most
+microseconds: what ``datetime.fromisoformat`` reads without dropping digits. A naive value
+names no instant, so it does not match"""
+DATETIME_HINT = (
+    "pass a date-time with an offset, such as 2024-01-31T09:30:00Z or 2024-01-31T09:30:00+02:00"
+)
+
+
+def _parse_date(text: str) -> dt.date:
+    return dt.date.fromisoformat(text)
+
+
+def _parse_datetime(text: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(text)
+
+
+def _serialize_date(value: dt.date) -> str:
+    return value.isoformat()
+
+
+def _serialize_datetime(value: dt.datetime) -> str:
+    """ISO 8601 with ``Z`` for UTC, as output writes it; a naive value has no offset, so its
+    text fails ``DATETIME_TEXT`` where a default is checked"""
+    text = value.isoformat()
+    return text.removesuffix("+00:00") + "Z" if text.endswith("+00:00") else text
+
+
+DATE = ScalarSpec(
+    cls=dt.date, parse=_parse_date, serialize=_serialize_date, base=str, pattern=DATE_TEXT
+)
+"""``datetime.date`` arguments, built in: ``YYYY-MM-DD`` on every route. An app's own
+``app.scalar(datetime.date, ...)`` is found first and replaces it"""
+DATETIME = ScalarSpec(
+    cls=dt.datetime,
+    parse=_parse_datetime,
+    serialize=_serialize_datetime,
+    base=str,
+    pattern=DATETIME_TEXT,
+)
+"""``datetime.datetime`` arguments, built in: RFC 3339 text with an offset, so a handler
+always gets an aware value. An app's own ``app.scalar(datetime.datetime, ...)`` replaces it"""
+
+BUILT_IN = (DECIMAL, DATE, DATETIME)
+"""The scalars treaty registers itself, each replaced by an app's own of the same class"""
+BUILT_IN_TEXT: dict[type, tuple[str, str, str]] = {
+    Decimal: ("a fixed-point decimal", DECIMAL_HINT, "decimal"),
+    dt.date: ("a YYYY-MM-DD date", DATE_HINT, "date"),
+    dt.datetime: ("a date-time with an offset", DATETIME_HINT, "date-time"),
+}
+"""Per built-in scalar's class: what its text is, how to fix a value that is not it, and
+the type name an object's shape gives it in help and the manifest"""
+
+
+def built_in(spec: ScalarSpec | None) -> bool:
+    """True for one of treaty's own scalars, not an app's registration of the same class"""
+    return any(spec is b for b in BUILT_IN)
