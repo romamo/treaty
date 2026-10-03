@@ -187,3 +187,41 @@ def test_a_raw_line_past_the_cap_keeps_its_tail() -> None:
     passed = lines.add(long + SECRET[:5], redact, color=False)
     assert passed == "x" * (LINE_CAP + 5 - LINE_TAIL)
     assert lines.add(SECRET[5:] + "\n", redact, color=False).endswith("[REDACTED]\n")
+
+
+KEPT = """
+kept = []
+
+
+@app.command("keep", description="Keep", danger_level="safe", exit_codes=(), timeout=None)
+def keep(args: Login, ctx: Ctx) -> dict[str, bool]:
+    kept.append(sys.stdout)  # the call's stand-in, kept as a StreamHandler keeps its stream
+    return {"ok": True}
+
+
+@app.command("half", description="Print", danger_level="safe", exit_codes=(), timeout=None)
+def half(args: Login, ctx: Ctx) -> dict[str, bool]:
+    kept[0].write("first " + HEAD)
+    kept[0].write(TAIL)
+    return {"ok": True}
+
+
+@app.command("rest", description="Print", danger_level="safe", exit_codes=(), timeout=None)
+def rest(args: Login, ctx: Ctx) -> dict[str, bool]:
+    kept[0].write("|rest\\n")
+    return {"ok": True}
+
+
+app.call("keep", {}, env={"LIBCTL_API_TOKEN": "other-token-1", "LIBCTL_AUDIT_LOG": "0"})
+app.call("half", {}, env=ENV)
+app.call("rest", {}, env={"LIBCTL_API_TOKEN": "other-token-2", "LIBCTL_AUDIT_LOG": "0"})
+"""
+
+
+def test_a_line_held_in_a_stream_the_host_kept_goes_out_with_its_own_call() -> None:
+    """A late stream a host kept past its call, then written through in a later one, is
+    drained as that call returns, not in a third call that knows none of its secrets"""
+    proc = run_script(PRELUDE + KEPT)
+    assert proc.returncode == 0, proc.stderr
+    assert SECRET.encode() not in proc.stdout + proc.stderr
+    assert text(proc.stdout) == "first [REDACTED]|rest\n", proc.stdout

@@ -25,6 +25,7 @@ import traceback
 import types
 import typing
 import uuid
+import weakref
 from collections.abc import (
     Callable,
     Generator,
@@ -3175,6 +3176,7 @@ class _LateStream:
         self._order = threading.RLock()
         """Holds a write whole against a drain from another thread; reentrant, so a signal
         handler that prints on the same thread cannot deadlock"""
+        _late_streams.add(self)
 
     def _target(self, thread: threading.Thread) -> tuple[bool, TextIO | None]:
         """Whether ``thread``'s text is redacted, and the stream it then goes to"""
@@ -3224,11 +3226,16 @@ _late_out: _LateStream | None = None
 _late_err: _LateStream | None = None
 
 
+_late_streams: weakref.WeakSet[_LateStream] = weakref.WeakSet()
+"""Every late stream still referenced: one a host kept, such as a ``StreamHandler``'s, after
+it was unwrapped still holds the lines a call's threads write through it"""
+
+
 def _drain_late(threads: Sequence[threading.Thread]) -> None:
-    """The lines ``threads`` hold in the late streams, passed on redacted"""
-    for stream in (_late_out, _late_err):
-        if stream is not None:
-            stream.drain(threads)
+    """The lines ``threads`` hold in every late stream, passed on redacted: a kept one's
+    too, or its line would go out in a later call, redacted only of that call's secrets"""
+    for stream in list(_late_streams):
+        stream.drain(threads)
 
 
 def _settle_streams() -> None:
