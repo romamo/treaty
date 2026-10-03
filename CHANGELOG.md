@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc32] - 2026-10-03
+
+The 32th 1.0 release candidate: 1 fix.
+
 ### Fixed
 
 - The root `--help` Environment section and AGENTS.md name every command that reads a
@@ -1867,7 +1871,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc31...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc32...HEAD
+[1.0.0rc32]: https://github.com/romamo/treaty/compare/v1.0.0rc31...v1.0.0rc32
 [1.0.0rc31]: https://github.com/romamo/treaty/compare/v1.0.0rc30...v1.0.0rc31
 [1.0.0rc30]: https://github.com/romamo/treaty/compare/v1.0.0rc29...v1.0.0rc30
 [1.0.0rc29]: https://github.com/romamo/treaty/compare/v1.0.0rc28...v1.0.0rc29
