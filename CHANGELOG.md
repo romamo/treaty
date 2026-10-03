@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- A secret used as a mapping key is redacted as it is as a value (#262): a string or
+  numeric secret as a key in `Exit` context, a warning's context, a `ctx.log` field, the
+  audit log's arguments, or an `exec_fallback` line's error context and data came back
+  raw, and now reads `[REDACTED]` (or with the secret's text replaced inside it). Two keys
+  that redact to the same text both stay, the later one as `[REDACTED]#2`, `#3`, and so
+  on. Command `data` is still not redacted (REQ-F-034)
+
 ## [1.0.0rc23] - 2026-10-02
 
 The 23th 1.0 release candidate: 2 additions and 2 fixes.

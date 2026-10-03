@@ -9,7 +9,8 @@ using the narrower ``secret_field`` so ``author`` and ``token_count`` stay reada
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterable, Mapping
+from typing import cast
 
 REDACTED = "[REDACTED]"
 OMITTED = "[OMITTED]"
@@ -86,11 +87,11 @@ NAME_CONTEXT = frozenset(
 
 def redacted(value: object, redact: Callable[[str], str]) -> object:
     """A JSON value with the run's secret values replaced: in every string, and a number
-    equal to a numeric secret (#258)"""
+    equal to a numeric secret (#258), mapping keys included (#262)"""
     if isinstance(value, str):
         return redact(value)
     if isinstance(value, dict):
-        return {k: redacted(v, redact) for k, v in value.items()}
+        return _keyed(((k, redacted(v, redact)) for k, v in value.items()), redact)
     if isinstance(value, list):
         return [redacted(v, redact) for v in value]
     return _number(value, redact)
@@ -118,6 +119,24 @@ _EXACT_FLOAT = 2**53
 """The largest integer every float spells exactly"""
 
 
+def _keyed(
+    items: Iterable[tuple[object, object]], redact: Callable[[str], str]
+) -> dict[object, object]:
+    """A mapping's entries with their keys redacted as values are (#262): a secret used as
+    a key is no less handed out. Two keys that redact to the same text both stay, the
+    later one as ``[REDACTED]#2``, ``#3``, and so on, never one overwriting the other"""
+    shown: dict[object, object] = {}
+    for key, value in items:
+        new = redact(key) if isinstance(key, str) else _number(key, redact)
+        if new in shown:
+            n = 2
+            while f"{new}#{n}" in shown:
+                n += 1
+            new = f"{new}#{n}"
+        shown[new] = value
+    return shown
+
+
 def _unchanged(text: str) -> str:
     return text
 
@@ -129,12 +148,22 @@ def scrub(key: str, value: object, redact: Callable[[str], str] = _unchanged) ->
     if secret_name(key):
         return REDACTED
     if isinstance(value, dict):
-        return {k: scrub(str(k), v, redact) for k, v in value.items()}
+        return scrub_fields(value, redact)
     if isinstance(value, list):
         return [scrub("", v, redact) for v in value]
     if isinstance(value, str):
         return redact(value)
     return _number(value, redact)
+
+
+def scrub_fields(
+    fields: Mapping[str, object] | Mapping[object, object],
+    redact: Callable[[str], str] = _unchanged,
+) -> dict[str, object]:
+    """Each field scrubbed under its own name, the names redacted too (#262): a log
+    record's fields, an error's context, an audit entry's arguments"""
+    entries = ((k, scrub(str(k), v, redact)) for k, v in fields.items())
+    return cast(dict[str, object], _keyed(entries, redact))
 
 
 class StreamRedactor:
