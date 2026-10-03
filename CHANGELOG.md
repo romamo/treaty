@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc25] - 2026-10-03
+
+The 25th 1.0 release candidate: 2 fixes.
+
 ### Fixed
 
 - `--debug` with a `logging.handlers.QueueListener` whose handler writes to `sys.stdout`
@@ -1729,7 +1733,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc24...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc25...HEAD
+[1.0.0rc25]: https://github.com/romamo/treaty/compare/v1.0.0rc24...v1.0.0rc25
 [1.0.0rc24]: https://github.com/romamo/treaty/compare/v1.0.0rc23...v1.0.0rc24
 [1.0.0rc23]: https://github.com/romamo/treaty/compare/v1.0.0rc22...v1.0.0rc23
 [1.0.0rc22]: https://github.com/romamo/treaty/compare/v1.0.0rc21...v1.0.0rc22
