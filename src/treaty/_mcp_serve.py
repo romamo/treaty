@@ -163,10 +163,13 @@ class McpTool:
 def takes_resources(
     fn: Callable[..., object], where: str, *, allow_async: bool = False
 ) -> tuple[type, ...]:
-    """The classes ``fn`` takes by annotation after ``(first, ctx)`` (#302). A function of
-    at most two parameters takes none and is called as before; one of three or more is checked as a
+    """The classes ``fn`` takes by annotation after ``(first, ctx)`` (#302). A function
+    that needs nothing after ``(first, ctx)`` (every further parameter has a default or is
+    ``*args``/``**kwargs``) takes none and is called as before; any other is checked as a
     handler is: positional parameters, ``ctx`` annotated ``Ctx``, each further one a class"""
-    if len(signature(fn).parameters) <= 2:
+    optional = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    rest = list(signature(fn).parameters.values())[2:]
+    if all(p.kind in optional or p.default is not p.empty for p in rest):
         return ()
     return dependency_params(fn, where, allow_async=allow_async)
 
@@ -177,7 +180,7 @@ def resource_params(
     """``takes_resources``, each class a resource or the ``App(settings=)`` class: one that
     is neither fails naming its parameter, before anything runs"""
     deps = takes_resources(fn, where, allow_async=allow_async)
-    names = list(signature(fn).parameters)[2:]
+    names = list(signature(fn).parameters)[2:] if deps else []
     for name, cls in zip(names, deps, strict=True):
         if cls is settings:
             continue

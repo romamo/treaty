@@ -174,6 +174,22 @@ def test_a_two_parameter_handler_runs_as_before() -> None:
     assert EVENTS == []
 
 
+def test_a_handler_needing_nothing_after_ctx_runs_as_before() -> None:
+    def defaulted(arguments: Mapping[str, object], ctx: Ctx, note: str = "d") -> Where:
+        return Where(note, False)
+
+    def keywords(arguments: Mapping[str, object], ctx: Ctx, **extra: object) -> Where:
+        return Where("k", bool(extra))
+
+    def provide_defaulted(args: Start, ctx: Ctx, prefix: str = "p") -> list[McpTool]:
+        return [_tool(f"{prefix}-d", defaulted), _tool(f"{prefix}-k", keywords)]
+
+    app = _app(provide_defaulted)
+    tools = _provided(app, ENV)
+    assert app._call_provided(tools["p-d"], {}, env=ENV).data == {"region": "d", "token_set": False}
+    assert app._call_provided(tools["p-k"], {}, env=ENV).data == {"region": "k", "token_set": False}
+
+
 def test_an_async_handler_takes_async_resources() -> None:
     async def awaited(
         arguments: Mapping[str, object], ctx: Ctx, settings: Settings, client: AsyncClient
