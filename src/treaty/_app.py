@@ -2124,8 +2124,9 @@ class App:
         for _, c in commands:
             for var, _, text in declared_env_rows(c, readers):
                 secrets.setdefault(var, text)  # flags of several commands may share one
-        listed = {var for var, _ in rows}
-        return rows + sorted((var, text) for var, text in secrets.items() if var not in listed)
+        # The project argument's own variable may be App(config_root_env=): listed once
+        root = self.config_root_env
+        return rows + sorted((var, text) for var, text in secrets.items() if var != root)
 
     @property
     def _config_root_text(self) -> str:

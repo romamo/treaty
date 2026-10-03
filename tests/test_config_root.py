@@ -295,6 +295,34 @@ def test_the_variable_is_listed_with_the_apps_environment() -> None:
     assert "FLEET_PROJECT" in names
 
 
+def test_only_the_variable_is_listed_once_when_a_flag_reads_it_too() -> None:
+    """Every other row of ``environment()`` is as an app without the declaration has it"""
+
+    @dataclass(frozen=True, slots=True)
+    class Secret:
+        api_key: str = Flag(default="", secret=True, description="The API key")
+
+    @dataclass(frozen=True, slots=True)
+    class Both:
+        api_key: str = Flag(default="", secret=True, description="The API key")
+        project: Path | None = Flag(
+            default=None, env=("FLEET_DIR",), description="The project directory"
+        )
+
+    def rows(**root: str) -> list[str]:
+        app = App("fleet", version="1.0.0", settings=Secret, **root)  # type: ignore[arg-type]
+
+        @app.command("audit", description="Audit", danger_level="safe", exit_codes=())
+        def audit(args: Both, ctx: Ctx) -> NoArgs:
+            return NoArgs()
+
+        return [var for var, _ in app.environment()]
+
+    plain, rooted = rows(), rows(**ROOT)
+    assert plain.count("FLEET_API_KEY") == rooted.count("FLEET_API_KEY") == 2
+    assert plain.count("FLEET_PROJECT") == 1 and rooted.count("FLEET_PROJECT") == 1
+
+
 @pytest.mark.parametrize(
     ("root", "match"),
     [
