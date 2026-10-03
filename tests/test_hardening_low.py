@@ -109,6 +109,10 @@ def test_prune_leaves_a_live_runs_session_directory(tmp_path: Path) -> None:
     assert not directory.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows DirEntry.stat answers from the listing, so the entry never vanishes",
+)
 def test_a_session_directory_removed_after_the_listing_counts_as_nothing_to_prune(
     tmp_path: Path,
 ) -> None:
