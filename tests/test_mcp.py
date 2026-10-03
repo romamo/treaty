@@ -62,12 +62,10 @@ def adapter_app() -> App:
 
 
 def test_one_tool_per_command_except_exec_with_dots_as_underscores() -> None:
+    """cleanup, generate-skills, and audit-log are mcp=False built-ins (#281)"""
     names = [e.name for e in tool_entries(adapter_app())]
     assert names == [
-        "audit-log",
-        "cleanup",
         "doctor",
-        "generate-skills",
         "log_tail",
         "manifest",
         "mcp-validate",
@@ -183,10 +181,7 @@ def test_call_tool_maps_names_and_passes_unknown_through() -> None:
     unknown = call_tool(app, entries, "log.tail", {"count": 1})
     assert unknown.error is not None and unknown.error.code == "UNKNOWN_TOOL"
     assert unknown.error.context["available"] == [
-        "audit-log",
-        "cleanup",
         "doctor",
-        "generate-skills",
         "log_tail",
         "manifest",
         "mcp-validate",
@@ -235,13 +230,10 @@ def test_stdio_server_lists_tools_and_dispatches_calls() -> None:
     got = asyncio.run(scenario())
     assert got["server"] == ("deployctl", "1.4.0")
     assert got["tools"] == [
-        "audit-log",
-        "cleanup",
         "config_set",
         "deploy_rollback",
         "deploy_start",
         "doctor",
-        "generate-skills",
         "job_cancel",
         "job_status",
         "manifest",

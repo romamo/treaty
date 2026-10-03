@@ -57,6 +57,10 @@ SCHEMA_VERSION = "3.15"  # 3.1: CommandEntry.builtin (REQ-O-041)
 EXEC_PATH = CommandPath("exec")
 """The ``exec`` built-in, which reads its plan from stdin as a buffered payload"""
 
+NOT_AN_MCP_TOOL = "(not an MCP tool)"
+"""Ends the manifest description of a command registered ``mcp=False`` (#281):
+CommandEntry has no key for it, and ``additionalProperties`` is false"""
+
 # The --format values CommandEntry.output_formats leaves out (REQ-O-049): the spec's
 # universal ones, and ndjson, which every treaty command takes
 _DEFAULT_FORMATS = frozenset({Format.JSON, Format.JSONL, Format.TSV, Format.PLAIN, Format.NDJSON})
@@ -430,6 +434,9 @@ def command_entry(
         # CommandEntry has no deprecation keys (04-D2); a baseline audit reads this marker
         instead = "" if old.replacement is None else f"; use {old.replacement}"
         description = f"{description} (deprecated since {old.since}{instead})"
+    if not command.mcp:
+        # CommandEntry has no MCP key (#281): the description carries mcp=False
+        description = f"{description} {NOT_AN_MCP_TOOL}"
     out: dict[str, object] = {
         "description": description,
         "danger_level": command.danger_level.value,

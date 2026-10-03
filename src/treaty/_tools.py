@@ -120,18 +120,22 @@ def output_schema(command: Command) -> JsonSchema:
     }
 
 
-def tool_entries(app: App) -> list[ToolEntry]:
+def tool_entries(app: App, served: frozenset[CommandPath] | None = None) -> list[ToolEntry]:
     """Every command except ``exec``, the ``completion`` built-in, a script for a shell
-    rather than a tool, the ``mcp serve`` built-in, the server itself (#239), and
-    passthrough commands, whose arguments and stdout belong to another tool that no input
-    or output schema describes (#35), in path order"""
+    rather than a tool, the ``mcp serve`` built-in, the server itself (#239), passthrough
+    commands, whose arguments and stdout belong to another tool that no input or output
+    schema describes (#35), and a command registered ``mcp=False`` (#281), in path order.
+    ``served``, what ``McpServe(commands=)`` selected, keeps only those paths; None keeps
+    every one"""
     entries: list[ToolEntry] = []
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         if path == EXEC_PATH or (
             path in (COMPLETION_PATH, MCP_SERVE_PATH) and path in app.builtins
         ):
             continue
-        if command.passthrough:
+        if command.passthrough or not command.mcp:
+            continue
+        if served is not None and path not in served:
             continue
         entries.append(
             ToolEntry(
@@ -149,10 +153,16 @@ def tool_entries(app: App) -> list[ToolEntry]:
     return entries
 
 
-def tool_list(app: App, *, extra: Sequence[ToolEntry] = ()) -> dict[str, object]:
+def tool_list(
+    app: App,
+    *,
+    extra: Sequence[ToolEntry] = (),
+    served: frozenset[CommandPath] | None = None,
+) -> dict[str, object]:
     """``treaty-mcp module:app --list-tools``: the tools as MCP's ``tools/list`` names
     them, with the CLI version, to commit and compare with ``mcp-validate`` (REQ-O-035);
-    ``extra`` are the tools ``mcp serve`` provides beside the commands (#240)"""
+    ``extra`` are the tools ``mcp serve`` provides beside the commands (#240), and
+    ``served`` the commands it selected (#281)"""
     return {
         "cli_version": app.version,
         "tools": [
@@ -168,7 +178,7 @@ def tool_list(app: App, *, extra: Sequence[ToolEntry] = ()) -> dict[str, object]
                     "openWorldHint": e.open_world,
                 },
             }
-            for e in (*tool_entries(app), *extra)
+            for e in (*tool_entries(app, served), *extra)
         ],
     }
 

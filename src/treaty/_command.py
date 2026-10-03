@@ -299,6 +299,9 @@ class Command:
     idempotent: bool = False
     """A repeat with the same arguments leaves the same state, so its retryable codes are
     safe to retry; the manifest says ``idempotent: true`` on any danger level (#210, #226)"""
+    mcp: bool = True
+    """Served as an MCP tool when ``mcp serve`` or ``treaty-mcp`` serves the app; False
+    keeps it off every MCP server whatever ``McpServe(commands=)`` selects (#281)"""
 
     def handler_args(self, args: object) -> object:
         """What the handler, its resources, and its rollback receive for parsed ``args``"""
@@ -494,6 +497,7 @@ def build_command(
     passthrough: bool = False,
     help_command: Sequence[str] | None = None,
     idempotent: bool = False,
+    mcp: bool = True,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -886,6 +890,7 @@ def build_command(
         passthrough=passthrough,
         help_command=help_argv,
         idempotent=idempotent,
+        mcp=mcp,
     )
 
 

@@ -39,7 +39,7 @@ uv run treaty-mcp 2>&1 | grep -q '^usage: treaty-mcp module:app'
 
 ## Step 2: Look at the tools you get
 
-For `todo`, a client sees twelve tools: the four commands `todo` registers, and eight of
+For `todo`, a client sees nine tools: the four commands `todo` registers, and five of
 treaty's built-ins:
 
 | Command | Tool | Hints |
@@ -50,27 +50,28 @@ treaty's built-ins:
 | `todo purge` | `purge` | destructive |
 | `todo manifest` | `manifest` | read-only, idempotent |
 | `todo version` | `version` | read-only, idempotent |
-| `todo doctor`, `todo status`, `todo audit-log`, `todo mcp-validate` | the same names | read-only, idempotent |
-| `todo cleanup` | `cleanup` | destructive |
-| `todo generate-skills` | `generate-skills` | |
+| `todo doctor`, `todo status`, `todo mcp-validate` | the same names | read-only, idempotent |
 
 `treaty-mcp --list-tools` prints the tool list a client would get, without starting a
 session.
 
-**Check:** the list has the twelve tools, with `list` read-only and `purge` destructive
+**Check:** the list has the nine tools, with `list` read-only and `purge` destructive
 
 <!-- check -->
 ```bash
 uv run treaty-mcp examples.tutorial.todo_exit_codes:app --list-tools | jq -e '
-  ([.tools[].name] | sort) == ["add", "audit-log", "cleanup", "doctor", "done",
-    "generate-skills", "list", "manifest", "mcp-validate", "purge", "status", "version"]
+  ([.tools[].name] | sort) == ["add", "doctor", "done", "list", "manifest",
+    "mcp-validate", "purge", "status", "version"]
   and (.tools[] | select(.name == "list") | .annotations.readOnlyHint)
   and (.tools[] | select(.name == "purge") | .annotations.destructiveHint)'
 ```
 
 - **Names** are command paths with dots as underscores: a `deploy.rollback` command is the
   `deploy_rollback` tool. `exec` is not served, since a client batches by making several
-  calls, and neither is `completion`, which only a shell can use
+  calls, and neither is `completion`, which only a shell can use. `cleanup`,
+  `generate-skills`, and `audit-log` are registered `mcp=False`: they are a person's chores
+  at a terminal, and the manifest ends their descriptions with `(not an MCP tool)`. Your own
+  command takes `mcp=False` too, for one a person must run, such as an approval
 - **Hints** come from the danger level (`safe` is read-only and idempotent, `destructive` is
   destructive) and from `has_network_io`, which sets the open-world hint
 - **Descriptions** get the danger level spelled out: `purge`'s tells the model that without

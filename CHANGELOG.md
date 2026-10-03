@@ -18,6 +18,25 @@ Apps built on treaty keep their own, structured schema changelog with
   present only when true, so the rule never fired. A left-out flag still does not trigger
   it, as cli-agent-spec#52 settles. Its error and `--help` line read `--no-x requires
   --y`, and CI pins the spec at that change
+### Added
+
+- `McpServe(commands=select)` chooses the commands `mcp serve` serves as tools from its
+  startup arguments (#281): `select(args)` returns command paths, None serves every
+  command, and an empty collection only the provided tools. A path the app does not have
+  is refused before serving with `MCP_COMMAND_UNKNOWN`. `--list-tools` and `mcp-validate
+  --serve-args` follow the selection
+- `@app.command(..., mcp=False)` keeps a command off every MCP server, `mcp serve` and
+  `treaty-mcp` alike, whatever `select` returns: a command a person must run, such as an
+  approval. The manifest ends its description with `(not an MCP tool)`, since
+  `CommandEntry` has no key for it
+
+### Changed
+
+- The `cleanup`, `generate-skills`, and `audit-log` built-ins are no longer MCP tools
+  (`mcp=False`); an app command at one of those paths is served as before. A provided tool
+  may not take the name of any command, served or not (before, `exec`, `completion`, and
+  a passthrough command's names were free), and an old name `redirect` keeps answers
+  `REDIRECTED` over MCP only toward a served tool, else `UNKNOWN_TOOL`
 
 ## [1.0.0rc27] - 2026-10-03
 

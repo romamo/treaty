@@ -227,6 +227,7 @@ def register_cleanup(app: App) -> CommandPath:
         "filesystem_side_effects, its caches, and the output files commands handed out",
         danger_level="destructive",
         exit_codes=(),
+        mcp=False,  # a terminal's chore, not an agent's tool (#281)
         examples=[
             ("See what would be removed", f"{app.name} cleanup --dry-run"),
             (
@@ -658,6 +659,7 @@ def register_generate_skills(app: App) -> CommandPath:
         "SKILL-<command>.md per command, each with YAML frontmatter",
         danger_level="mutating",
         exit_codes=(),
+        mcp=False,  # a terminal's chore, not an agent's tool (#281)
         examples=[
             ("Write ./skills", f"{app.name} generate-skills"),
             (
@@ -713,12 +715,14 @@ class McpValidateArgs:
 
 @dataclass(frozen=True, slots=True)
 class McpValidateServeArgs(McpValidateArgs):
-    """``mcp-validate`` of an app whose ``mcp serve`` provides tools (#240)"""
+    """``mcp-validate`` of an app whose ``mcp serve`` provides tools (#240) or selects
+    commands (#281)"""
 
     serve_args: str = Flag(
         default="{}",
         description="mcp serve's startup arguments as one JSON object, field names with "
-        "underscores as in an exec line; the tools they provide are compared too",
+        "underscores as in an exec line; the commands they select and the tools they "
+        "provide are compared",
     )
 
     def __post_init__(self) -> None:
@@ -770,9 +774,10 @@ class McpValidation:
 
 
 def register_mcp_validate(app: App) -> CommandPath:
-    """``mcp-validate``; with ``--serve-args`` when ``McpServe(tools=)`` provides tools,
-    which only the server's startup arguments can list (#240)"""
-    providing = app.mcp is not None and app.mcp.tools is not None
+    """``mcp-validate``; with ``--serve-args`` when ``McpServe(tools=)`` provides tools
+    or ``McpServe(commands=)`` selects commands, which only the server's startup arguments
+    decide (#240, #281)"""
+    providing = app.mcp is not None and (app.mcp.tools is not None or app.mcp.commands is not None)
     declare = app.command(
         MCP_VALIDATE_PATH.value,
         description="Compare a saved MCP tool list with the current command schemas; drift "
@@ -789,22 +794,25 @@ def register_mcp_validate(app: App) -> CommandPath:
     if providing:
 
         def with_provided(args: McpValidateServeArgs, ctx: Ctx) -> McpValidation:
-            return _validate(app, args, ctx, _provided_entries(app, args.serve_args, ctx))
+            return _validate(app, args, ctx, *_served_tools(app, args.serve_args, ctx))
 
         declare(with_provided)
     else:
 
         def mcp_validate(args: McpValidateArgs, ctx: Ctx) -> McpValidation:
-            return _validate(app, args, ctx, [])
+            return _validate(app, args, ctx, [], None)
 
         declare(mcp_validate)
     return MCP_VALIDATE_PATH
 
 
-def _provided_entries(app: App, raw: str, ctx: Ctx) -> list[ToolEntry]:
-    """The tools ``mcp serve`` provides given ``raw``, its startup arguments as JSON: read
-    as an exec line's, and handed to ``McpServe(tools=)``; ``setup`` does not run"""
-    from ._mcp_serve import MCP_SERVE_PATH, provided_tools
+def _served_tools(
+    app: App, raw: str, ctx: Ctx
+) -> tuple[list[ToolEntry], frozenset[CommandPath] | None]:
+    """The tools ``mcp serve`` provides and the commands it selects given ``raw``, its
+    startup arguments as JSON: read as an exec line's, and handed to ``McpServe(tools=)``
+    and ``McpServe(commands=)``; ``setup`` does not run"""
+    from ._mcp_serve import MCP_SERVE_PATH, provided_tools, served_commands
     from ._parse import build_from_mapping
 
     assert app.mcp is not None
@@ -817,14 +825,20 @@ def _provided_entries(app: App, raw: str, ctx: Ctx) -> list[ToolEntry]:
             context={"flag": "serve-args", **exc.context},
             suggestion=exc.suggestion,
         ) from None
-    return [p.entry() for p in provided_tools(app, app.mcp, invocation.args, ctx).values()]
+    served = served_commands(app, app.mcp, invocation.args)
+    provided = provided_tools(app, app.mcp, invocation.args, ctx)
+    return [p.entry() for p in provided.values()], served
 
 
 def _validate(
-    app: App, args: McpValidateArgs, ctx: Ctx, provided: Sequence[ToolEntry]
+    app: App,
+    args: McpValidateArgs,
+    ctx: Ctx,
+    provided: Sequence[ToolEntry],
+    served: frozenset[CommandPath] | None,
 ) -> McpValidation:
     listed = _read_tools(ctx.cwd / args.mcp_schema_file)
-    live = {e.name: e for e in (*tool_entries(app), *provided)}
+    live = {e.name: e for e in (*tool_entries(app, served), *provided)}
     drift = Drift([], [], [], [])
     # A provided tool is no command: its drift is named by the tool
     named = {e.name for e in provided}
@@ -939,6 +953,7 @@ def register_audit_log(app: App) -> CommandPath:
         danger_level="safe",
         exit_codes=(),
         streaming=True,
+        mcp=False,  # the operator's record of what agents ran, not theirs to read (#281)
         examples=[
             ("Invocations of the past hour", f"{app.name} audit-log --since 1h --format jsonl"),
             ("One trace", f"{app.name} audit-log --trace-id abc123"),
