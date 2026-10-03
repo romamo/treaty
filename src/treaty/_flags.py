@@ -228,6 +228,12 @@ class FieldInfo:
         return self.classified.flag_type
 
     @property
+    def key(self) -> str:
+        """The field's key in a JSON payload (an exec line, an MCP call): the flag with
+        underscores, less a keyword's trailing ``_``"""
+        return self.flag.replace("-", "_")
+
+    @property
     def positional(self) -> bool:
         return self.spec.positional
 

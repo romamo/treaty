@@ -50,6 +50,7 @@ from ._journal import (
     read_entries,
     resolve,
 )
+from ._mcp_serve import NO_BINDINGS, Bindings
 from ._meta import find_project_root
 from ._mode import Format
 from ._out import Out
@@ -774,10 +775,13 @@ class McpValidation:
 
 
 def register_mcp_validate(app: App) -> CommandPath:
-    """``mcp-validate``; with ``--serve-args`` when ``McpServe(tools=)`` provides tools
-    or ``McpServe(commands=)`` selects commands, which only the server's startup arguments
-    decide (#240, #281)"""
-    providing = app.mcp is not None and (app.mcp.tools is not None or app.mcp.commands is not None)
+    """``mcp-validate``; with ``--serve-args`` when ``McpServe(tools=)`` provides tools,
+    ``McpServe(commands=)`` selects commands, or ``McpServe(bind=)`` fixes fields, which
+    only the server's startup arguments decide (#240, #281, #285)"""
+    spec = app.mcp
+    providing = spec is not None and (
+        spec.tools is not None or spec.commands is not None or spec.bind is not None
+    )
     declare = app.command(
         MCP_VALIDATE_PATH.value,
         description="Compare a saved MCP tool list with the current command schemas; drift "
@@ -800,7 +804,7 @@ def register_mcp_validate(app: App) -> CommandPath:
     else:
 
         def mcp_validate(args: McpValidateArgs, ctx: Ctx) -> McpValidation:
-            return _validate(app, args, ctx, [], None)
+            return _validate(app, args, ctx, [], None, NO_BINDINGS)
 
         declare(mcp_validate)
     return MCP_VALIDATE_PATH
@@ -808,11 +812,12 @@ def register_mcp_validate(app: App) -> CommandPath:
 
 def _served_tools(
     app: App, raw: str, ctx: Ctx
-) -> tuple[list[ToolEntry], frozenset[CommandPath] | None]:
-    """The tools ``mcp serve`` provides and the commands it selects given ``raw``, its
-    startup arguments as JSON: read as an exec line's, and handed to ``McpServe(tools=)``
-    and ``McpServe(commands=)``; ``setup`` does not run"""
-    from ._mcp_serve import MCP_SERVE_PATH, provided_tools, served_commands
+) -> tuple[list[ToolEntry], frozenset[CommandPath] | None, Bindings]:
+    """The tools ``mcp serve`` provides, the commands it selects, and the fields it binds
+    given ``raw``, its startup arguments as JSON: read as an exec line's, and handed to
+    ``McpServe(tools=)``, ``McpServe(commands=)``, and ``McpServe(bind=)``; ``setup``
+    does not run"""
+    from ._mcp_serve import MCP_SERVE_PATH, bound_values, provided_tools, served_commands
     from ._parse import build_from_mapping
 
     assert app.mcp is not None
@@ -826,8 +831,9 @@ def _served_tools(
             suggestion=exc.suggestion,
         ) from None
     served = served_commands(app, app.mcp, invocation.args)
+    bindings = bound_values(app, app.mcp, invocation.args, served)
     provided = provided_tools(app, app.mcp, invocation.args, ctx)
-    return [p.entry() for p in provided.values()], served
+    return [p.entry() for p in provided.values()], served, bindings
 
 
 def _validate(
@@ -836,9 +842,10 @@ def _validate(
     ctx: Ctx,
     provided: Sequence[ToolEntry],
     served: frozenset[CommandPath] | None,
+    bindings: Bindings,
 ) -> McpValidation:
     listed = _read_tools(ctx.cwd / args.mcp_schema_file)
-    live = {e.name: e for e in (*tool_entries(app, served), *provided)}
+    live = {e.name: e for e in (*tool_entries(app, served, bindings), *provided)}
     drift = Drift([], [], [], [])
     # A provided tool is no command: its drift is named by the tool
     named = {e.name for e in provided}

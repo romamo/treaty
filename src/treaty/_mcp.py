@@ -35,7 +35,7 @@ from ._app import App, _closed_pipe, _Run
 from ._context import Wire
 from ._envelope import Envelope, serialize
 from ._errors import CliExit, ParseError
-from ._mcp_serve import DEFAULT_INSTRUCTIONS, McpServed, Provided
+from ._mcp_serve import DEFAULT_INSTRUCTIONS, NO_BINDINGS, Bindings, McpServed, Provided
 from ._prompt import NoPromptStdin
 from ._signals import Cancelled
 from ._subprocess import GRACE_SECONDS
@@ -84,10 +84,12 @@ def call_tool(
     arguments: Mapping[str, object],
     *,
     env: Mapping[str, str] | None = None,
+    bindings: Bindings = NO_BINDINGS,
 ) -> Envelope:
     """Dispatch one tool call; an unknown tool name is an ``UNKNOWN_TOOL`` envelope. Only
     ``entries`` run: a command left off the server answers as an unknown tool, and an old
-    name answers ``REDIRECTED`` only when the tool it names is among them (#281)"""
+    name answers ``REDIRECTED`` only when the tool it names is among them (#281). A field
+    ``bindings`` fixes runs with its bound value, and the call may not pass it (#285)"""
     entry = entries.get(name)
     served = {e.path for e in entries.values()}
     moved = next(
@@ -110,7 +112,8 @@ def call_tool(
             code="UNKNOWN_TOOL",
             meta={"_cmd": name},
         )
-    return app.call(entry.path.value, arguments, env=env)
+    bound = bindings.for_command(app.commands[entry.path])
+    return app._call_bound(entry.path.value, arguments, bound, env=env)
 
 
 def _as_tools(envelope: Envelope) -> Envelope:
@@ -149,15 +152,17 @@ def build_server(
     provided: Mapping[str, Provided] | None = None,
     instructions: str | None = None,
     served: frozenset[CommandPath] | None = None,
+    bindings: Bindings = NO_BINDINGS,
 ) -> Any:
     """A low-level ``mcp`` Server whose tools are the app's commands, those ``served``
     selects when given (#281), and the ``provided`` tools (#240), called with ``env`` (the
-    process's when None); ``called`` runs as each tool call is answered"""
+    process's when None), with the fields ``bindings`` fixes (#285); ``called`` runs as
+    each tool call is answered"""
     from mcp import types
     from mcp.server.lowlevel.server import Server
 
     extra = dict(provided or {})
-    entries = {e.name: e for e in tool_entries(app, served)}
+    entries = {e.name: e for e in tool_entries(app, served, bindings)}
     listed = [*entries.values(), *(p.entry() for p in extra.values())]
     environ = env if env is not None else os.environ
     tools = [
@@ -186,7 +191,7 @@ def build_server(
             envelope = await asyncio.to_thread(app._call_provided, tool, arguments, env=environ)
         else:
             envelope = await asyncio.to_thread(
-                call_tool, app, entries, params.name, arguments, env=env
+                call_tool, app, entries, params.name, arguments, env=env, bindings=bindings
             )
         if called is not None:
             called()
@@ -268,6 +273,7 @@ def serve_wire(
     provided: Mapping[str, Provided],
     instructions: str,
     served: frozenset[CommandPath] | None,
+    bindings: Bindings,
 ) -> McpServed:
     """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends, or until a
     signal raises ``Cancelled`` here, on the run's thread, which stops the server. The
@@ -282,6 +288,7 @@ def serve_wire(
         provided=provided,
         instructions=instructions,
         served=served,
+        bindings=bindings,
     )
     with _claimed_stdin(wire.stdin, serving.read_all) as stdin:
 

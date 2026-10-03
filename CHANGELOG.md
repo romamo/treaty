@@ -10,6 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `McpServe(bind=bind)` fixes arguments of the command tools `mcp serve` serves for the
+  run (#285): `bind(args)` returns field values from the startup arguments, and every
+  served command tool with that field runs with the value, checked on each call as a
+  passed one is. The field leaves the tool's input schema, and a call passing it by any
+  spelling is refused with `ARG_ERROR` as an unknown field. A name no served command tool
+  has is refused before serving with `MCP_BIND_UNKNOWN`; a secret field, or a value its
+  field refuses, with `MCP_BIND_INVALID`. `--list-tools` and `mcp-validate --serve-args`
+  show the bound schemas; provided tools are unaffected
+
 ## [1.0.0rc28] - 2026-10-03
 
 The 28th 1.0 release candidate: 1 fix, 2 additions, and 1 change.
