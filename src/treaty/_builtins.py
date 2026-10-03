@@ -35,6 +35,7 @@ from ._deps import (
     Version,
     dependency_result,
     find,
+    on_path,
     tool_check,
 )
 from ._effect import Affects
@@ -90,18 +91,27 @@ def register_doctor(app: App) -> CommandPath:
         found = {name: find(d.check_command, d.version_regex, ctx) for name, d in declared.items()}
         dependencies = [dependency_result(declared[n], found[n], ctx) for n in sorted(declared)]
         # Every dependency is a check too (REQ-O-026), at the highest minimum anything needs
-        needed: dict[str, tuple[Version, list[str]]] = {
+        # None is any version: the program is only looked up on PATH, never run
+        needed: dict[str, tuple[Version | None, list[str]]] = {
             name: (d.minimum, []) for name, d in declared.items()
         }
         for path, command in app.commands.items():
             for tool, minimum in command.required_tools.items():
                 current, users = needed.get(tool, (minimum, []))
-                needed[tool] = (max(current, minimum, key=lambda v: v.key), [*users, path.value])
+                floors = [v for v in (current, minimum) if v is not None]
+                highest = max(floors, key=lambda v: v.key) if floors else None
+                needed[tool] = (highest, [*users, path.value])
         checks = _framework_checks(app, ctx)
         for tool in sorted(needed):
             minimum, users = needed[tool]
             dep = declared.get(tool)
-            seen: Found = found[tool] if dep else find((tool, "--version"), _ANY_VERSION, ctx)
+            seen: Found
+            if dep is not None:
+                seen = found[tool]
+            elif minimum is None:
+                seen = on_path(tool, ctx)
+            else:
+                seen = find((tool, "--version"), _ANY_VERSION, ctx)
             fix = None if dep is None else dep.fix_command
             checks.append(tool_check(tool, minimum, seen, fix, users))
         checks += [_app_check(check, ctx) for check in app.checks]

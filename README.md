@@ -1011,7 +1011,9 @@ def package(args: PackageArgs, ctx: Ctx) -> Packaged: ...
   list literals, unchecked, and the `subprocess-declared` audit rule flags a command whose argument list cannot be read, or that starts a program outside `ctx.run` (`subprocess.run` and its siblings, `os.exec*`, `os.spawn*`, however imported)
 - `platform=` lists `sys.platform` values; elsewhere the command still runs, with an
   `UNSUPPORTED_PLATFORM` warning. `required_tools=` maps each program the command runs to
-  its minimum version (REQ-C-018)
+  its minimum version (REQ-C-018); `None`, or a list of names such as
+  `required_tools=["bean-format"]`, needs it on PATH at any version, which `doctor` checks
+  without running it and the manifest lists as `"*"`
 - `App(dependencies=[...])` lists the tool's external dependencies at the manifest root
   (REQ-O-031); `check_command` is an argument list, shown with `shlex.join`
 - `doctor` checks every dependency and required tool: `data.dependencies` with

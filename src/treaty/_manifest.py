@@ -16,6 +16,7 @@ from ._command import (
     Command,
     DangerLevel,
 )
+from ._deps import ANY_VERSION
 from ._env import (
     CONFIG,
     CONTEXT,
@@ -526,7 +527,10 @@ def command_entry(
     if command.platform:
         out["platform"] = list(command.platform)  # REQ-C-018
     if command.required_tools:
-        out["required_tools"] = {t: v.value for t, v in sorted(command.required_tools.items())}
+        out["required_tools"] = {
+            t: ANY_VERSION if v is None else v.value
+            for t, v in sorted(command.required_tools.items())
+        }
     if command.background is not None:
         out.update(command.background.to_json())  # REQ-C-010
     if command.filesystem_side_effects:

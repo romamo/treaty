@@ -1299,7 +1299,8 @@ def _required_tools(app: App) -> Iterator[Finding]:
                 c.path.value,
                 f"runs {binary!r} (line {call.line} of the handler), which required_tools does "
                 "not list, so doctor cannot check it is installed (REQ-C-018)",
-                f'required_tools={{"{binary}": "<minimum version>"}}',
+                f'required_tools={{"{binary}": "<minimum version>"}}, or '
+                f'{{"{binary}": None}} when any version will do or it has no --version',
             )
 
 

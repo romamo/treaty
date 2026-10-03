@@ -129,18 +129,38 @@ def check_dependencies(dependencies: Sequence[object], app_name: str) -> tuple[D
     return tuple(d for d in dependencies if isinstance(d, Dependency))
 
 
-def check_required_tools(where: str, tools: Mapping[str, str]) -> dict[str, Version]:
-    """``required_tools={"dpkg-deb": "1.19.0"}``: program names to minimum versions"""
-    if not isinstance(tools, Mapping):
+ANY_VERSION = "*"
+"""The manifest's ``required_tools`` value for a program needed at any version: the
+spec's schema makes each value a string, and ``*`` is semver's any-version range"""
+
+
+def check_required_tools(
+    where: str, tools: Mapping[str, str | None] | Sequence[str]
+) -> dict[str, Version | None]:
+    """``required_tools={"dpkg-deb": "1.19.0"}``: program names to minimum versions
+
+    ``None`` as the version, or a plain sequence of names such as ``("bean-format",)``,
+    needs the program on PATH at any version, for a program without ``--version``.
+    """
+    pairs: list[tuple[object, object]]
+    if isinstance(tools, Mapping):
+        pairs = list(tools.items())
+    elif isinstance(tools, Sequence) and not isinstance(tools, (str, bytes)):
+        pairs = [(tool, None) for tool in tools]
+    else:
         raise RegistrationError(
             f"{where}: required_tools maps a program to its minimum version, "
-            'such as {"git": "2.30"}'
+            'such as {"git": "2.30"}, or to None for any version; a list of names, '
+            'such as ["bean-format"], needs each at any version'
         )
-    out: dict[str, Version] = {}
-    for tool, minimum in tools.items():
+    out: dict[str, Version | None] = {}
+    for tool, minimum in pairs:
         if not isinstance(tool, str) or not tool or tool != tool.strip() or " " in tool:
             raise RegistrationError(f"{where}: required_tools key {tool!r} is not a program name")
-        out[tool] = version(minimum, f"{where}: required_tools[{tool!r}]")
+        if tool in out:
+            raise RegistrationError(f"{where}: required_tools names {tool!r} twice")
+        where_tool = f"{where}: required_tools[{tool!r}]"
+        out[tool] = None if minimum is None else version(minimum, where_tool)
     return out
 
 
@@ -194,21 +214,39 @@ def dependency_result(dep: Dependency, found: Found, ctx: Ctx) -> dict[str, obje
 
 
 def tool_check(
-    tool: str, minimum: Version, found: Found, fix: str | None, commands: Sequence[str]
+    tool: str, minimum: Version | None, found: Found, fix: str | None, commands: Sequence[str]
 ) -> dict[str, object]:
-    """One entry of ``doctor``'s ``data.checks``: a command's required tool (REQ-C-018)"""
-    ok = found.version is not None and not found.version < minimum
+    """One entry of ``doctor``'s ``data.checks``: a command's required tool (REQ-C-018)
+
+    ``minimum`` is None for a program needed at any version: ``found`` then says only
+    whether it is on PATH, and ``required`` is null.
+    """
+    if minimum is None:
+        ok = found.error is None
+    else:
+        ok = found.version is not None and not found.version < minimum
     entry: dict[str, object] = {
         "name": tool,
         "ok": ok,
         "version": None if found.version is None else found.version.value,
-        "required": minimum.value,
+        "required": None if minimum is None else minimum.value,
         "commands": sorted(commands),
     }
     if not ok:
-        entry["fix"] = fix or f"install {tool} {minimum.value} or newer"
-        entry["error"] = found.error or f"{tool} {entry['version']} is older than {minimum.value}"
+        wanted = tool if minimum is None else f"{tool} {minimum.value} or newer"
+        entry["fix"] = fix or f"install {wanted}"
+        entry["error"] = (
+            found.error or f"{tool} {entry['version']} is older than {entry['required']}"
+        )
     return entry
+
+
+def on_path(tool: str, ctx: Ctx) -> Found:
+    """``tool`` resolves on PATH, for a program needed at any version; never run, since
+    it may have no ``--version``"""
+    if shutil.which(tool, path=ctx.env.get("PATH")) is None:
+        return Found(None, f"{tool} is not on PATH")
+    return Found(None)
 
 
 @dataclass(frozen=True, slots=True)
