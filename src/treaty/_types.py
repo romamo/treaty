@@ -207,9 +207,9 @@ _BUILT_IN: dict[type, ScalarSpec] = {spec.cls: spec for spec in BUILT_IN}
 
 
 MAP_SHAPE = (
-    "a mapping is dict[str, V], V one of str, int, float, bool, Decimal, Path, an enum, a "
-    "Literal, or a class registered with app.scalar(...), or a union of them, such as "
-    "dict[str, str | int]"
+    "a mapping is dict[str, V], V one of str, int, float, bool, Decimal, date, datetime, "
+    "Path, an enum, a Literal, or a class registered with app.scalar(...), or a union of "
+    "them, such as dict[str, str | int]"
 )
 
 
