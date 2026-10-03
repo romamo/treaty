@@ -125,17 +125,46 @@ def _framework_rows(command: Command) -> list[tuple[str, str]]:
     return rows
 
 
-def declared_env_rows(path: CommandPath, command: Command) -> list[tuple[str, FieldInfo, str]]:
+def env_readers(
+    commands: Mapping[CommandPath, Command], builtins: frozenset[CommandPath]
+) -> dict[str, str]:
+    """Each variable a command's flag reads, a secret's or a ``Flag(env=)`` flag's, and
+    the commands that read it as ``--help`` names them: "every command" when all the
+    app's own commands do (treaty's ``builtins`` aside), else their paths in order.
+    Commands sharing a flag share its variables (#295)"""
+    readers: dict[str, list[str]] = {}
+    for path, command in sorted(commands.items(), key=lambda kv: kv[0].value):
+        for f in command.fields:
+            own = command.own_env_var(f.name)
+            for var in (*(() if own is None else (own,)), *(n.name for n in f.spec.env)):
+                readers.setdefault(var, []).append(path.value)
+    mine = {p.value for p in commands if p not in builtins}
+    return {
+        var: "every command" if len(mine) > 1 and set(paths) == mine else ", ".join(paths)
+        for var, paths in readers.items()
+    }
+
+
+def declared_env_rows(
+    command: Command, readers: Mapping[str, str]
+) -> list[tuple[str, FieldInfo, str]]:
     """Each variable of the command's flags that declare ``Flag(env=)``, the field it sets,
-    and what it is: a plain flag's ``<APP>_<NAME>``, then the declared names"""
+    and what it is: a plain flag's ``<APP>_<NAME>``, then the declared names, each the
+    default of the flag of the ``readers`` of it (``env_readers``)"""
     rows: list[tuple[str, FieldInfo, str]] = []
     for f in command.fields:
         own = command.own_env_var(f.name)
-        what = f"Default of --{f.flag} of {path.value}"
         if not f.secret and own is not None:
-            rows.append((own, f, what))
+            rows.append((own, f, f"Default of --{f.flag} of {readers[own]}"))
         default = own or f"--{f.flag}"
-        rows += [(n.name, f, declared_text(n, what, own, default)) for n in f.spec.env]
+        rows += [
+            (
+                n.name,
+                f,
+                declared_text(n, f"Default of --{f.flag} of {readers[n.name]}", own, default),
+            )
+            for n in f.spec.env
+        ]
     return rows
 
 

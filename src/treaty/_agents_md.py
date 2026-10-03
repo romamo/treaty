@@ -30,7 +30,7 @@ from ._framework import (
     YES_FLAG,
     framework_flags,
 )
-from ._help import declared_env_rows, global_rows, render_command, render_root
+from ._help import declared_env_rows, env_readers, global_rows, render_command, render_root
 from ._manifest import global_flag_entries
 from ._values import CommandPath
 
@@ -108,12 +108,14 @@ def env_vars(app: App) -> tuple[EnvVarDoc, ...]:
             for n in s.env:
                 text = declared_text(n, f"Setting {s.name}", own, own)
                 add(EnvVarDoc(n.name, s.classified.flag_type.value, False, text))
+    readers = env_readers(app.commands, app._builtins)
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
         for f in command.fields:
             if f.secret:
-                text = f"Default of --{f.flag} of {path.value}"
-                add(EnvVarDoc(command.secret_env_vars[f.name], "string", f.required, text))
-        for var, f, text in declared_env_rows(path, command):
+                var = command.secret_env_vars[f.name]
+                text = f"Default of --{f.flag} of {readers[var]}"
+                add(EnvVarDoc(var, "string", f.required, text))
+        for var, f, text in declared_env_rows(command, readers):
             kind = "string" if f.secret else f.flag_type.value
             add(EnvVarDoc(var, kind, False, text))
         for var in command.token_env_vars:

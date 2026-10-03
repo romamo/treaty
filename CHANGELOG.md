@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- The root `--help` Environment section and AGENTS.md name every command that reads a
+  variable of a flag several commands share, such as a `kw_only` base dataclass's
+  `Flag(env=)` flag or secret (#295): "of every command" when all the app's commands
+  read it, else their paths. They named only the first command, which suggested the
+  others ignore the variable
+
 ## [1.0.0rc31] - 2026-10-03
 
 The 31th 1.0 release candidate: 1 fix.
