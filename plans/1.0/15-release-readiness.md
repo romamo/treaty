@@ -118,6 +118,6 @@ changes. Move the classifier to `4 - Beta` at rc1 and `5 - Production/Stable` at
 - [ ] Finish cloudfall port; port a second consumer; feed gaps back into Phase A
   (needs the user: a real-consumer soak)
 - [x] `1.0.0rc1`, classifier `4 - Beta` (tagged 2026-09-28, ahead of the consumer ports)
-- [ ] Soak the release candidate (rc30, 2026-10-03) with both consumers for at least two weeks
+- [ ] Soak the release candidate (rc31, 2026-10-03) with both consumers for at least two weeks
 - [ ] Tag `1.0.0`, classifier `5 - Production/Stable`; update `COMPLIANCE.md`, `README.md`, `HANDOFF.md`, `ROADMAP.md`
   (after the soak)

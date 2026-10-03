@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc31] - 2026-10-03
+
+The 31th 1.0 release candidate: 1 fix.
+
 ### Fixed
 
 - An `App.call` made while a handler abandoned at its timeout still lives redacts what it
@@ -1853,7 +1857,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc30...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc31...HEAD
+[1.0.0rc31]: https://github.com/romamo/treaty/compare/v1.0.0rc30...v1.0.0rc31
 [1.0.0rc30]: https://github.com/romamo/treaty/compare/v1.0.0rc29...v1.0.0rc30
 [1.0.0rc29]: https://github.com/romamo/treaty/compare/v1.0.0rc28...v1.0.0rc29
 [1.0.0rc28]: https://github.com/romamo/treaty/compare/v1.0.0rc27...v1.0.0rc28
