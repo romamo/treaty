@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from ._errors import CliExit, RegistrationError
+from ._stdout import reconfigure_wrapped
 from ._values import ExitCodeName
 
 
@@ -83,6 +84,26 @@ class NoPromptStdin:
 
     def isatty(self) -> bool:
         return self._stream.isatty()
+
+    def reconfigure(
+        self,
+        *,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+        line_buffering: bool | None = None,
+        write_through: bool | None = None,
+    ) -> None:
+        """The wrapped stream's, which reads as it says; a stream that has none, such as
+        an ``io.StringIO``, takes the keywords and is left as it is (#288)"""
+        reconfigure_wrapped(
+            self._stream,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+            line_buffering=line_buffering,
+            write_through=write_through,
+        )
 
     def read(self, size: int | None = -1, /) -> str:
         self._refuse_terminal("read")
