@@ -10,6 +10,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc28] - 2026-10-03
+
+The 28th 1.0 release candidate: 1 fix, 2 additions, and 1 change.
+
 ### Fixed
 
 - A `RequiredWhen` rule on a boolean with `False`, the manifest's `if_value: false`, now
@@ -1804,7 +1808,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc27...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc28...HEAD
+[1.0.0rc28]: https://github.com/romamo/treaty/compare/v1.0.0rc27...v1.0.0rc28
 [1.0.0rc27]: https://github.com/romamo/treaty/compare/v1.0.0rc26...v1.0.0rc27
 [1.0.0rc26]: https://github.com/romamo/treaty/compare/v1.0.0rc25...v1.0.0rc26
 [1.0.0rc25]: https://github.com/romamo/treaty/compare/v1.0.0rc24...v1.0.0rc25
