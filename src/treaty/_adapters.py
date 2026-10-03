@@ -5,7 +5,8 @@ every subclass of it may be returned, nested in a dataclass field, or held in a 
 adapter's ``schema(cls)`` gives the class's JSON Schema and ``dump(obj)`` its JSON value;
 treaty imports nothing from the library behind them.
 
-The schema is brought to the form treaty writes for a dataclass: ``$defs`` inlined,
+The schema is brought to the form treaty writes for a dataclass: ``$defs`` inlined but
+for a model that holds itself, which keeps its ``$defs`` entry and ``$ref``,
 ``prefixItems`` as draft-07 ``items``, every key required and no other key allowed. The
 stable-output rules are checked on it when a command names the class: an output
 collection is never null (REQ-F-074) unless the adapter writes a null one as empty
@@ -28,6 +29,7 @@ from typing import Any
 
 from ._errors import RegistrationError, SchemaError
 from ._redact import secret_field
+from ._refs import EMPTY_DEFS, defs_of, deref, ref_name, with_defs
 
 JsonSchema = dict[str, Any]
 
@@ -146,7 +148,9 @@ class OutputAdapters:
         null collection written as empty when the adapter says so"""
         cls = type(value)
         node = self.node(cls)
-        return _fit(adapter.dump(value), node, cls.__qualname__, adapter.none_as_empty)
+        return _fit(
+            adapter.dump(value), node, cls.__qualname__, adapter.none_as_empty, defs_of(node)
+        )
 
 
 class _Normalizer:
@@ -157,13 +161,21 @@ class _Normalizer:
         self.defs: dict[str, JsonSchema] = {**(legacy or {}), **(defs or {})}
         self.root = schema
         self.none_as_empty = none_as_empty
+        self.recursive: list[str] = []
 
     def run(self) -> JsonSchema:
-        return self.normalize(self.inline(self.root, ()), self.name)
+        root = self.normalize(self.inline(self.root, ()), self.name)
+        defs: dict[str, JsonSchema] = {}
+        # A definition may hold another that holds itself, so until none is new
+        while pending := [n for n in self.recursive if n not in defs]:
+            for name in pending:
+                inlined = self.inline(self.defs[name], (name,))
+                defs[name] = self.normalize(inlined, f"{self.name}.$defs.{name}")
+        return with_defs(root, defs)
 
     def inline(self, node: object, stack: tuple[str, ...]) -> Any:
-        """Every ``$ref`` replaced by its definition; a class that holds itself has no
-        finite schema, as a recursive dataclass has none"""
+        """Every ``$ref`` replaced by its definition, but one inside its own definition:
+        that model holds itself, so it stays a ``$ref`` to its ``$defs`` entry"""
         if isinstance(node, list):
             return [self.inline(n, stack) for n in node]
         if not isinstance(node, dict):
@@ -175,12 +187,13 @@ class _Normalizer:
                     f"{self.name}: $ref {ref!r} does not point into $defs, which treaty inlines"
                 )
             target = ref.removeprefix(_REF_PREFIX)
-            if target in stack:
-                raise RegistrationError(
-                    f"{self.name}: {target} refers to itself; recursive outputs have no schema"
-                )
             if target not in self.defs:
                 raise RegistrationError(f"{self.name}: $ref {ref!r} names no definition")
+            if target in stack:
+                if target not in self.recursive:
+                    self.recursive.append(target)
+                siblings = {k: self.inline(v, stack) for k, v in node.items() if k != "$ref"}
+                return {"$ref": ref, **siblings}
             resolved = self.inline(self.defs[target], (*stack, target))
             siblings = {k: self.inline(v, stack) for k, v in node.items() if k != "$ref"}
             return {**resolved, **siblings}
@@ -297,6 +310,8 @@ class _Normalizer:
             return
         array = next((b for b in branches(node) if _is_kind(b, "array")), None)
         items = array.get("items") if array is not None else None
+        if isinstance(items, dict) and (name := ref_name(items)) is not None:
+            items = self.inline(self.defs[name], (name,))
         prop = None
         if isinstance(items, dict) and isinstance(items.get("properties"), dict):
             prop = items["properties"].get(key)
@@ -368,22 +383,27 @@ def untyped(node: object) -> bool:
     return False
 
 
-def branch(node: JsonSchema, value: object) -> JsonSchema:
+def branch(
+    node: Mapping[str, Any], value: object, defs: Mapping[str, JsonSchema] = EMPTY_DEFS
+) -> JsonSchema:
     """The ``anyOf`` or ``oneOf`` branch of ``node`` that describes ``value``, by its JSON
     kind; an object picks the first object branch its keys and constants fit, as a union
-    of models needs, else the first object branch. ``{}`` when none does."""
+    of models needs, else the first object branch. ``{}`` when none does. A ``$ref`` is
+    followed into ``defs``, the ``$defs`` of the schema's root."""
+    node = deref(node, defs)
     options = node.get("anyOf", node.get("oneOf"))
     if isinstance(options, list):
-        accepted = [o for o in options if isinstance(o, dict) and _accepts(o, value)]
+        resolved = [deref(o, defs) for o in options if isinstance(o, dict)]
+        accepted = [o for o in resolved if _accepts(o, value)]
         if isinstance(value, dict):
             fitting = [o for o in accepted if _fits_object(o, value)]
             accepted = fitting or accepted
-        return branch(accepted[0], value) if accepted else {}
+        return branch(accepted[0], value, defs) if accepted else {}
     every = node.get("allOf")
     if isinstance(every, list) and len(every) == 1 and isinstance(every[0], dict):
         rest = {k: v for k, v in node.items() if k != "allOf"}
-        return branch({**every[0], **rest}, value)
-    return node
+        return branch({**deref(every[0], defs), **rest}, value, defs)
+    return dict(node)
 
 
 def _fits_object(node: JsonSchema, value: Mapping[str, object]) -> bool:
@@ -429,26 +449,33 @@ def _accepts(node: JsonSchema, value: object) -> bool:
     return kind in allowed
 
 
-def _fit(value: object, node: JsonSchema, where: str, none_as_empty: bool) -> object:
+def _fit(
+    value: object,
+    node: Mapping[str, Any],
+    where: str,
+    none_as_empty: bool,
+    defs: Mapping[str, JsonSchema] = EMPTY_DEFS,
+) -> object:
     """The dump checked against its schema: each required key written, and with
     ``none_as_empty`` a null collection written as ``[]`` or ``{}``"""
+    node = deref(node, defs)
     if value is None and none_as_empty:
         if _is_kind(node, "array"):
             return []
         if _is_kind(node, "object") and not _closed_object(node):
             return {}
-    node = branch(node, value)
+    node = branch(node, value, defs)
     if isinstance(value, list):
         items = node.get("items")
         if isinstance(items, list):
             extra = node.get("additionalItems")
             rest = extra if isinstance(extra, dict) else {}
             return [
-                _fit(v, items[i] if i < len(items) else rest, f"{where}[{i}]", none_as_empty)
+                _fit(v, items[i] if i < len(items) else rest, f"{where}[{i}]", none_as_empty, defs)
                 for i, v in enumerate(value)
             ]
         item = items if isinstance(items, dict) else {}
-        return [_fit(v, item, f"{where}[{i}]", none_as_empty) for i, v in enumerate(value)]
+        return [_fit(v, item, f"{where}[{i}]", none_as_empty, defs) for i, v in enumerate(value)]
     if not isinstance(value, dict):
         return value
     properties = node.get("properties")
@@ -469,4 +496,7 @@ def _fit(value: object, node: JsonSchema, where: str, none_as_empty: bool) -> ob
     extra = node.get("additionalProperties")
     rest = extra if isinstance(extra, dict) else {}
     props = properties if isinstance(properties, dict) else {}
-    return {k: _fit(v, props.get(k, rest), f"{where}.{k}", none_as_empty) for k, v in value.items()}
+    return {
+        k: _fit(v, props.get(k, rest), f"{where}.{k}", none_as_empty, defs)
+        for k, v in value.items()
+    }

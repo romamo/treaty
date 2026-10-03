@@ -14,6 +14,7 @@ from ._completion import COMPLETION_PATH
 from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._manifest import EXEC_PATH, payload_schema
 from ._mcp_serve import MCP_SERVE_PATH, NO_BINDINGS, Bindings
+from ._refs import EMPTY_DEFS, defs_of, deref, merge_defs, ref_name, with_defs
 from ._schema import JsonSchema
 from ._values import CommandPath
 
@@ -102,6 +103,8 @@ def output_schema(command: Command) -> JsonSchema:
     ``Exit(data=...)`` or a preview put there.
     """
     shapes = [command.output_schema, *(c.output_schema for c in command.compat)]
+    # A recursive type's $defs move to the envelope's root, where its $ref points
+    shapes, defs = merge_defs(shapes)
     if command.streaming:
         shapes = [{"type": "array", "items": s} for s in shapes]
     # schema_version picks an older shape, which its shim's own schema describes
@@ -116,7 +119,7 @@ def output_schema(command: Command) -> JsonSchema:
             }
         }
     }
-    return {
+    envelope: JsonSchema = {
         "$schema": DRAFT_07,
         "type": "object",
         "properties": {
@@ -133,6 +136,7 @@ def output_schema(command: Command) -> JsonSchema:
             "then": {"properties": {"data": {"anyOf": [data, {"type": "null"}]}}},
         },
     }
+    return with_defs(envelope, defs)
 
 
 def tool_entries(
@@ -205,9 +209,11 @@ def tool_list(
     }
 
 
-def _type(schema: object) -> str:
+def _type(schema: object, defs: Mapping[str, JsonSchema] = EMPTY_DEFS) -> str:
     if not isinstance(schema, dict):
         return "any"
+    if ref_name(schema) in defs:
+        schema = deref(schema, defs)
     kind = schema.get("type")
     if isinstance(kind, list):
         return "|".join(str(k) for k in kind)
@@ -215,7 +221,7 @@ def _type(schema: object) -> str:
         return kind
     members = schema.get("anyOf") or schema.get("oneOf")
     if isinstance(members, list):
-        return "|".join(_type(m) for m in members)
+        return "|".join(_type(m, defs) for m in members)
     return "enum" if "enum" in schema else "any"
 
 
@@ -227,6 +233,7 @@ def tool_fields(tool: Mapping[str, object]) -> dict[str, str]:
     for name, schema in (properties or {}).items():
         fields[f"input.{name}"] = _type(schema)
     data: object = tool.get("outputSchema")
+    defs = defs_of(data) if isinstance(data, dict) else EMPTY_DEFS
     for key in ("else", "then", "properties", "data", "anyOf"):
         data = data.get(key) if isinstance(data, dict) else None
     data = data[0] if isinstance(data, list) and data else None
@@ -234,5 +241,5 @@ def tool_fields(tool: Mapping[str, object]) -> dict[str, str]:
         data = data.get("items")
     properties = data.get("properties") if isinstance(data, dict) else None
     for name, schema in (properties or {}).items():
-        fields[f"data.{name}"] = _type(schema)
+        fields[f"data.{name}"] = _type(schema, defs)
     return fields

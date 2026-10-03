@@ -41,6 +41,7 @@ from ._out import NO_ORDER, Binary, OutSpec, check_order
 from ._output_base import OutputBase, OutputRoot, output_root
 from ._page import DEFAULT_LIMIT, Limit, Page
 from ._protect import check_trust, declares_external, with_trust_tags
+from ._refs import DEFS_KEY, defs_of, with_defs
 from ._resources import ResourceSpec, dependency_params, refuse_async, resource_graph
 from ._retry import Retry
 from ._rules import BoundRule, bind_rules
@@ -748,6 +749,9 @@ def build_command(
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
     output_schema = schema_for(output_type, scalars, output=True)
+    # A type that holds itself: its $defs stay at the root, whatever wraps the schema
+    output_defs = dict(defs_of(output_schema))
+    output_schema = {k: v for k, v in output_schema.items() if k != DEFS_KEY}
     id_field = _id_field(path, output_schema, id_field, batch)
     if sort_key is not None and ordered:
         raise RegistrationError(
@@ -794,6 +798,7 @@ def build_command(
         output_schema = _with_step_fields(output_schema, step_names)
     if trust_tags:
         output_schema = with_trust_tags(output_schema)
+    output_schema = with_defs(output_schema, output_defs)
     roots = tuple(dict.fromkeys((*resources, *(() if out_root is None else out_root.deps))))
     graph = resource_graph(
         roots,
@@ -1187,12 +1192,14 @@ def _compat(
             )
         check_order(returned, f"{path}: compat[{key!r}]", adapters=scalars.adapters)
         schema = schema_for(returned, scalars, output=True)
+        defs = dict(defs_of(schema))
+        schema = {k: v for k, v in schema.items() if k != DEFS_KEY}
         if danger_level is not DangerLevel.SAFE:
             # A replayed idempotency key answers noop in the older shape too
             schema = with_replay_effect(schema)
         if trust_tags or declares_external(returned, scalars.adapters):
             schema = with_trust_tags(schema)
-        out.append(Compat(version, shim, returned, schema))
+        out.append(Compat(version, shim, returned, with_defs(schema, defs)))
     return tuple(sorted(out, key=lambda c: c.version.key))
 
 

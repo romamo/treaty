@@ -27,6 +27,7 @@ from treaty import (
 from treaty._help import render_command
 from treaty._profile import probes_for
 from treaty._scaffold import ProjectName
+from treaty._values import CommandPath
 
 
 def strict_json(text: str) -> object:
@@ -352,11 +353,16 @@ def test_registration_rejects_what_would_break_later() -> None:
     for args_type in (Priced, Convert, Cache, Tokens):
         with pytest.raises(RegistrationError):
             register(app, args_type)
-    with pytest.raises(RegistrationError, match="tree: .*refers to itself"):
 
-        @app.command("tree", description="Tree", danger_level="safe", exit_codes=())
-        def tree(args: NoArgs, ctx: Ctx) -> Node:
-            return Node(())
+    # A recursive output has a schema since #298: a $ref to its $defs entry
+    @app.command("tree", description="Tree", danger_level="safe", exit_codes=())
+    def tree(args: NoArgs, ctx: Ctx) -> Node:
+        return Node(())
+
+    assert app.commands[CommandPath("tree")].output_schema["properties"]["children"] == {
+        "type": "array",
+        "items": {"$ref": "#/$defs/Node"},
+    }
 
 
 def test_confirm_given_on_argv_conflicts_with_false_in_the_payload() -> None:
