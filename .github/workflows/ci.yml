@@ -95,7 +95,8 @@ jobs:
         if: endsWith(matrix.python, 't')
         run: uv run python -c 'import sys; assert sys._is_gil_enabled() is False, sys.version'
 
-      - run: uv run pytest -rs
+      # One worker per core; tests sharing a directory share an xdist_group, so loadgroup
+      - run: uv run pytest -rs -n auto --dist loadgroup
 
   scaffold:
     # The documented path for a new project: init beside a spec checkout, then the kit

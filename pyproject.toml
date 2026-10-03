@@ -44,6 +44,7 @@ tiktoken = [
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-xdist>=3.8",
     "jsonschema>=4.23",
     "mypy>=1.14",
     "ruff>=0.9",
