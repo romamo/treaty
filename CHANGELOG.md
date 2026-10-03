@@ -38,7 +38,7 @@ Apps built on treaty keep their own, structured schema changelog with
   `async def` and take async resources. A parameter annotated with a class that is
   neither a resource nor the settings fails naming the parameter: `RegistrationError`
   for the provider when the `App` is built, `MCP_TOOL_INVALID` for a handler before
-  serving. Providers and handlers of two parameters run as before (#302)
+  serving. Providers and handlers needing nothing after `ctx` run as before (#302)
 
 ## [1.0.0rc32] - 2026-10-03
 
