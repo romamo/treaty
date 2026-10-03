@@ -148,6 +148,8 @@ def test_a_large_write_to_descriptor_1_at_exit_drains_and_never_blocks_the_exit(
     out = proc.stdout.decode().replace("\r\n", "\n")
     err = proc.stderr.decode().replace("\r\n", "\n")
     assert json.loads(out.splitlines()[0])["error"]["code"] == "TIMEOUT"
-    assert "fd1" not in out
+    # The envelope alone: a bare "fd1" also matches the hex of its request or trace id
+    assert out.splitlines()[1:] == [], out[-2000:]
     expected = LINE.format(tag="fd1", secret="[REDACTED]")
+    assert expected not in out
     assert err.splitlines().count(expected) == WRITTEN, err[-2000:]
