@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+- What reaches descriptor 1 as the process exits, a handler thread abandoned at its
+  timeout still alive, is no longer lost (#271): a host's exit hook that runs after
+  treaty's, or the interpreter's last flush of `sys.__stdout__`, wrote to the pipe after
+  its reader had stopped with the interpreter. Treaty's exit hook, now registered as
+  treaty is imported so it runs after every hook registered later, turns descriptor 1 to
+  a spool file and passes what reaches it on to stderr, redacted, as the last held thread
+  ends or at the interpreter's last flush; once no held thread lives, descriptor 1 is
+  stdout again. It never leads to stdout while one does
+
 ## [1.0.0rc25] - 2026-10-03
 
 The 25th 1.0 release candidate: 2 fixes.
