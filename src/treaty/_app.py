@@ -289,6 +289,7 @@ from ._settings import (
     SettingsSpec,
     config_root,
     plain_settings_env,
+    secret_items,
     settings_env_taken,
 )
 from ._settings import options as config_options
@@ -4495,10 +4496,16 @@ class _Run:
                 return self.cwd / value
             if isinstance(value, tuple):
                 return tuple(under(v) for v in value)
+            if isinstance(value, dict):
+                return {k: under(v) for k, v in value.items()}  # dict[str, Path] (#299)
             return value
 
         args = invocation.args
-        moved = {f.name: under(getattr(args, f.name)) for f in command.fields if f.path}
+        moved = {
+            f.name: under(getattr(args, f.name))
+            for f in command.fields
+            if f.path or any(v.path for v in f.classified.values)
+        }
         changed = {k: v for k, v in moved.items() if v != getattr(args, k)}
         stdin_file = invocation.input_file
         output = invocation.output
@@ -6628,7 +6635,7 @@ class _Run:
                 value = getattr(settings, setting.name)
                 if setting.secret and value != setting.default:
                     # A tuple setting, such as api_keys, holds one secret per item
-                    items = value if isinstance(value, tuple) else (value,)
+                    items = secret_items(value)
                     secrets += [(item, None) for item in items]
         for value, default in secrets:
             # A default is in the source anyway; redacting it (max_tokens=1) garbles text
