@@ -30,7 +30,7 @@ from typing import Any
 
 from ._adapters import OutputAdapters, branch
 from ._errors import RegistrationError
-from ._out import data_path, is_binary, out_spec
+from ._out import arrange, data_path, is_binary, out_spec, sorted_indices
 from ._redact import public_key_name, secret_field
 from ._refs import defs_of
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
@@ -147,6 +147,35 @@ def shape_of(value: object, adapters: OutputAdapters) -> object:
         return object
     of = {k: t for k, v in pairs if (t := shape_of(v, adapters)) is not object}
     return Shape(of) if of else object
+
+
+def arrange_shaped(
+    value: object, tp: object, *, adapters: OutputAdapters, stable: bool
+) -> tuple[object, object]:
+    """``arrange`` ``value``, the JSON form of a value ``shape_of`` gave ``tp``, and
+    ``tp`` with its array positions following the sort: a ``Shape`` finds a dataclass
+    by its position, and sorting an undeclared array moves it (#322)"""
+    if not isinstance(tp, Shape):
+        return arrange(value, tp, adapters=adapters, stable=stable), tp
+    if isinstance(value, list):
+        pairs = [
+            arrange_shaped(v, tp.of.get(i, object), adapters=adapters, stable=stable)
+            for i, v in enumerate(value)
+        ]
+        items = [v for v, _ in pairs]
+        order = sorted_indices(items)
+        moved: dict[str | int, object] = {
+            j: pairs[i][1] for j, i in enumerate(order) if pairs[i][1] is not object
+        }
+        return [items[i] for i in order], Shape(moved) if moved else object
+    if isinstance(value, dict) and not is_binary(value):
+        arranged = {
+            k: arrange_shaped(v, tp.of.get(k, object), adapters=adapters, stable=stable)
+            for k, v in value.items()
+        }
+        of = {k: t for k, (_, t) in arranged.items() if t is not object}
+        return {k: v for k, (v, _) in arranged.items()}, Shape(of) if of else object
+    return arrange(value, object, adapters=adapters, stable=stable), object
 
 
 def tagged(data: object) -> object:

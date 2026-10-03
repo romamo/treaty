@@ -247,6 +247,8 @@ from ._protect import (
     UNPROTECTED_CODE,
     UNTRUSTED_CODE,
     UNTRUSTED_LINE,
+    Shape,
+    arrange_shaped,
     protect,
     protect_batch,
     shape_of,
@@ -6507,9 +6509,18 @@ class _Run:
             adapted = self.app.scalars.adapters.for_type(kind) is not None
             known = dataclasses.is_dataclass(kind) or adapted
             shape = kind if known else object
-            data = self._payload(exc.data, shape)
             # The Out declarations of the dataclasses in it protect it, as on success (#322)
             carried = shape_of(exc.data, self.app.scalars.adapters)
+            if not isinstance(carried, Shape):
+                data = self._payload(exc.data, shape)
+            else:
+                # Sorting an undeclared array moves the dataclasses its Shape finds by position
+                data, carried = arrange_shaped(
+                    to_jsonable(exc.data, self.app.scalars, base=self.cwd),
+                    carried,
+                    adapters=self.app.scalars.adapters,
+                    stable=self.stable,
+                )
             # treaty.External marks a value from outside the tool; _protected masks and tags
             outside = frozenset(k for k, v in exc.context.items() if isinstance(v, External))
             plain = {k: v.value if isinstance(v, External) else v for k, v in exc.context.items()}

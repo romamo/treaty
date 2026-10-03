@@ -52,6 +52,19 @@ class Removed:
 
 
 @dataclass(frozen=True, slots=True)
+class Note:
+    id: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class Node:
+    name: str
+    material: str = Out(high_entropy=True)
+    child: Node | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class DeleteArgs:
     dry_run: bool = Flag(default=False, description="Preview only")
 
@@ -84,6 +97,16 @@ def build() -> App:
     def mixed(args: NoArgs, ctx: Ctx) -> dict[str, str]:
         data = {"existing": Key("a", SECRET), "keys": [Key("b", SECRET)], "note": "dup"}
         raise Exit.FAILED("mixed", data=data)
+
+    @app.command("sorted", description="Sorted", danger_level="safe", exit_codes=["FAILED"])
+    def sorted_(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        # Written sorted, so the Key moves ahead of the Note it follows
+        notes = [Note("b", "hello"), Key("a", SECRET)]
+        raise Exit.FAILED("sorted", data={"top": notes, "nested": {"items": notes}})
+
+    @app.command("tree", description="Tree", danger_level="safe", exit_codes=["FAILED"])
+    def tree(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        raise Exit.FAILED("tree", data=Node("r", SECRET, Node("c", SECRET)))
 
     @app.command("plain-dict", description="Dict", danger_level="safe", exit_codes=["FAILED"])
     def plain_dict(args: NoArgs, ctx: Ctx) -> dict[str, str]:
@@ -180,6 +203,18 @@ def test_dataclasses_inside_an_undeclared_object_keep_their_declarations() -> No
     assert env["data"]["existing"]["material"] == MASKED
     assert env["data"]["keys"][0]["material"] == MASKED
     assert env["data"]["note"] == "dup"
+
+
+def test_a_sorted_undeclared_array_keeps_each_dataclass_s_declarations() -> None:
+    _, env = envelope(["sorted"])
+    expected = [{"id": "a", "material": MASKED}, {"id": "b", "text": "hello"}]
+    assert env["data"]["top"] == env["data"]["nested"]["items"] == expected
+    assert SECRET not in json.dumps(env)
+
+
+def test_a_self_referencing_dataclass_is_masked_at_every_level() -> None:
+    _, env = envelope(["tree"])
+    assert env["data"]["material"] == env["data"]["child"]["material"] == MASKED
 
 
 def test_an_undeclared_object_is_masked_by_name_and_shape_as_before() -> None:
