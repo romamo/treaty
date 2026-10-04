@@ -27,6 +27,17 @@ Apps built on treaty keep their own, structured schema changelog with
   JSON envelope is byte for byte as before. The README and docs/api.md now describe both
   (#348)
 
+### Added
+
+- `FormatRenderer(render, frame=True)` on a streaming command's `plain` renderer redraws a
+  live view in place: at a terminal, treaty moves back up the rows the last frame took and
+  clears to the end of the screen before it writes the next, with escapes it emits itself,
+  so the renderer's own text stays cleaned. A line written to stderr between frames is not
+  cleared, and the last frame stays on screen when the stream ends or fails; in a pipe, a
+  file, under `NO_COLOR`, `TERM=dumb`, or CI, and in every other format, frames are
+  appended as before. `frame=True` is refused at registration off `streaming=True` or on a
+  format other than `plain`, and `FormatRenderer`'s `media_type=` is now optional (#350)
+
 ## [1.0.0rc34] - 2026-10-04
 
 The 34th 1.0 release candidate: 2 breaking changes, 5 additions, 2 changes, and 3 fixes.

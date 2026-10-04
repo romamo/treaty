@@ -244,6 +244,23 @@ def _width(text: str) -> int:
     return sum(_char_width(c) for c in text)
 
 
+def frame_rows(text: str, columns: int | None) -> int:
+    """The terminal rows from where the cursor stands once ``text`` is written back up to
+    its first line: a line wider than ``columns`` wraps onto more, and with no width
+    known each line is one row (#350)"""
+    lines = strip_escapes(text).replace("\r", "").split("\n")
+    rows = sum(_line_rows(line, columns) for line in lines[:-1])
+    # A last line with no end leaves the cursor on its own last row
+    return rows + (_line_rows(lines[-1], columns) - 1 if lines[-1] else 0)
+
+
+def _line_rows(line: str, columns: int | None) -> int:
+    width = _width(line.expandtabs())
+    if columns is None or width == 0:
+        return 1
+    return -(-width // columns)
+
+
 def _char_width(char: str) -> int:
     """Terminal cells: two for East Asian wide and fullwidth, none for a combining mark
     or a format character such as a zero-width space"""

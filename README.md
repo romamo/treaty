@@ -485,6 +485,20 @@ to state what it writes, which the command's manifest entry lists in
 )
 ```
 
+A streaming command's live view, such as an order book, can redraw in place:
+`renderers={Format.PLAIN: FormatRenderer(render_book, frame=True)}` says each call draws
+the whole view. At a terminal, treaty moves the cursor back up the rows the last frame
+took (wrapped lines counted) and clears to the end of the screen before it writes the
+next, with escapes it emits itself: the renderer's text is cleaned as any renderer's is,
+so its own cursor moves are still removed. What the terminal showed above the first frame
+stays. After a line reaches stderr, such as a warning or a `ctx.log` line, the next frame
+goes below it rather than over it. The last frame stays on screen when the stream ends,
+is cancelled, or fails, with the error lines below it, and a frame taller than the
+terminal redraws from its top row. Wherever color is off (a pipe, a file, `NO_COLOR`,
+`TERM=dumb`, CI) and in every other format, frames are appended as any stream's events
+are. `frame=True` is refused at registration on a command without `streaming=True` and
+on any format but `plain`.
+
 An app can offer a format treaty does not list, such as a page for a person:
 `app.format("html", render=render_html, media_type="text/html")`. The name (lowercase
 letters and digits, words joined by `-` or `_`) joins `--format`'s values, `<APP>_FORMAT`,

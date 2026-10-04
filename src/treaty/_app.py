@@ -242,7 +242,15 @@ from ._parse import (
     without_value,
 )
 from ._paths import rebase_suggestions
-from ._plain import NO_LAYOUT, Layout, layout_of, render_event, render_plain, table_width
+from ._plain import (
+    NO_LAYOUT,
+    Layout,
+    frame_rows,
+    layout_of,
+    render_event,
+    render_plain,
+    table_width,
+)
 from ._prompt import InputRequired, NoPromptStdin, Prompter
 from ._protect import (
     MASKED_CODE,
@@ -1227,16 +1235,30 @@ class App:
         # A name the app does not offer is this command's own: only it offers it (#209)
         overrides: dict[FormatName, Renderer] = {}
         command_media: dict[FormatName, MediaType] = {}
+        frames: set[FormatName] = set()
         for mode, given in (renderers or {}).items():
             name = _format_name(f"{cmd_path}: renderers", mode)
             render = given.render if isinstance(given, FormatRenderer) else given
             _check_renderer(f"{cmd_path}: renderers", name, render)
-            if isinstance(given, FormatRenderer):
+            if isinstance(given, FormatRenderer) and given.media_type is not None:
                 try:
                     check_media_type(name, given.media_type)
                 except InvalidValue as exc:
                     raise RegistrationError(f"{cmd_path}: renderers: {exc}") from None
                 command_media[name] = given.media_type
+            if isinstance(given, FormatRenderer) and given.frame:
+                # A frame replaces the one a terminal shows: only a stream has a next one,
+                # and only plain is drawn for a person to watch (#350)
+                if name != FormatName.of(Format.PLAIN):
+                    raise RegistrationError(
+                        f"{cmd_path}: renderers: frame=True is for the plain renderer, not {name}"
+                    )
+                if not streaming:
+                    raise RegistrationError(
+                        f"{cmd_path}: renderers: frame=True redraws a stream's events; "
+                        "the command needs streaming=True"
+                    )
+                frames.add(name)
             overrides[name] = render
         try:
             contract = SchemaVersion(schema_version)
@@ -1285,6 +1307,7 @@ class App:
                             cleanup=cleanup,
                             renderers=overrides,
                             media_types=command_media,
+                            frames=frozenset(frames),
                             scalars=self.scalars,
                             args_adapters=self.args_adapters,
                             streaming=streaming,
@@ -2639,7 +2662,9 @@ class App:
                     return run.emit(mode, buffered, render=_each(render))
                 envelopes = run.stream(command, invocation, mode)
                 run.in_flight = command
-                return run.emit_stream(mode, envelopes, render=render)
+                return run.emit_stream(
+                    mode, envelopes, render=render, frame=selected in command.frames
+                )
             envelope = run.execute(command, invocation, mode)
             if globals_.stream:
                 # REQ-O-004: answered buffered, as the command cannot stream
@@ -3074,6 +3099,8 @@ class _Stderr:
         self._lines = threading.RLock()
         """Holds a child's line whole against another ``ctx.run``'s on another thread;
         reentrant, so a signal handler that writes on the same thread cannot deadlock"""
+        self.writes = 0
+        """Writes that reached the stream: a terminal frame is not cleared over one (#350)"""
 
     @property
     def stream(self) -> IO[str]:
@@ -3083,8 +3110,9 @@ class _Stderr:
         return self.verbosity >= level.shown_from
 
     def write(self, text: str, level: Level = Level.ERROR) -> None:
-        if not self.shows(level):
+        if not self.shows(level) or not text:
             return
+        self.writes += 1
         try:
             self._stream.write(text)
         except OSError as exc:
@@ -3098,6 +3126,7 @@ class _Stderr:
         if self.verbosity is Verbosity.QUIET:
             return
         with self._lines:
+            self.writes += 1
             try:
                 self._stream.write(line + "\n")
             except OSError as exc:
@@ -3121,6 +3150,46 @@ class _Stderr:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stderr.fileno())
             os.close(devnull)
+
+
+class _Frames:
+    """A ``FormatRenderer(frame=True)`` stream at a terminal: each frame replaces the
+    last (#350). The cursor goes back up the rows the last frame took and clears to the
+    end of the screen, so what the terminal showed above the frames stays; clear-screen
+    and home would erase it, and the shell prompt with it. A frame taller than the
+    terminal redraws from its top row, as the cursor stops there; its rows that scrolled
+    off stay in the scrollback. After anything reached stderr, which shares the
+    terminal, the next frame is written below rather than over it, so no warning or
+    progress line is erased. Nothing is cleared after the last frame: it stays on screen
+    when the stream ends, is cancelled, or fails, with the error lines below it"""
+
+    def __init__(self, out: IO[str], env: Mapping[str, str], err: _Stderr) -> None:
+        self._out = out
+        self._env = env
+        self._err = err
+        self._up: int | None = None
+        """Rows from the cursor back to the last frame's first line; None before one"""
+        self._mark = 0
+        """``err.writes`` when the last frame was written"""
+
+    def draw(self, text: str) -> None:
+        if self._up is not None and self._err.writes == self._mark:
+            # CR to the first column, up to the frame's first row, clear to screen end
+            up = f"\x1b[{self._up}A" if self._up else ""
+            self._out.write(f"\r{up}\x1b[J")
+        self._out.write(text)
+        self._up = frame_rows(text, _terminal_columns(self._out, self._env))
+        self._mark = self._err.writes
+
+
+def _terminal_columns(out: IO[str], env: Mapping[str, str]) -> int | None:
+    """The width the terminal wraps stdout at: its own size, else ``COLUMNS``, else
+    unknown"""
+    try:
+        columns = os.get_terminal_size(out.fileno()).columns
+    except OSError, ValueError:  # no descriptor (a StringIO), or not a terminal's
+        return table_width(env)
+    return columns or table_width(env)
 
 
 def _unchanged(text: str) -> str:
@@ -3960,6 +4029,9 @@ class _Run:
         self.cancellation = Cancellation()
         self.in_flight: Command | None = None
         """A streaming command whose events are still being written"""
+        self.frames: _Frames | None = None
+        """The stream's frames at a terminal, each clearing the last (#350); None
+        appends each event's text"""
         self.stream_effects: collections.Counter[str] | None = None
         """The events per effect of the mutating stream that runs now (REQ-O-004), for its
         buffered answer and its audit entry; None for any other command"""
@@ -7096,9 +7168,15 @@ class _Run:
         envelopes: Generator[Envelope],
         *,
         render: Renderer | None,
+        frame: bool = False,
     ) -> int:
         """Write each envelope as it arrives; the exit code is the terminal envelope's,
-        or GENERAL_ERROR when the renderer failed on a successful stream"""
+        or GENERAL_ERROR when the renderer failed on a successful stream. ``frame``: the
+        renderer draws a whole frame per event, which replaces the last at a terminal"""
+        # Only where the run may color is stdout a terminal that acts on escapes: a pipe,
+        # a file, NO_COLOR, TERM=dumb, and CI get every frame appended (#350)
+        drawn = frame and mode is Format.PLAIN and color_allowed(self.env, self.tty)
+        self.frames = _Frames(self.out, self.env, self.err) if drawn else None
         # Closed on any exit, so a dead reader (BrokenPipeError) still runs the handler's
         # finally blocks instead of leaving them to garbage collection
         with contextlib.closing(envelopes):
@@ -7213,7 +7291,13 @@ class _Run:
             else:
                 # Outside the renderer's try: a closed stdout is not a renderer bug
                 color = color_allowed(self.env, self.tty)
-                self.out.write(terminal_text(text, color=color, keep="\r"))
+                shown = terminal_text(text, color=color, keep="\r")
+                if event and self.frames is not None:
+                    # The escapes that clear the last frame are treaty's own: the
+                    # renderer's text is cleaned as any other's (#350)
+                    self.frames.draw(shown)
+                else:
+                    self.out.write(shown)
         elif data is not None:
             if envelope._tagged:
                 # A person reads one line saying so, not the tags as data lines (#198)
