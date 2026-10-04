@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import IO, Any, Literal, NoReturn, TextIO, TypeGuard, cast
 
 from ._adapters import OutputAdapter
-from ._aio import Loop, within
+from ._aio import AsyncEvents, Loop, within
 from ._args_adapter import ArgsAdapter, ArgsAdapters
 from ._atomic import write_atomic, write_atomic_bytes
 from ._auth import (
@@ -2754,6 +2754,8 @@ def _call(
         app._gate(command, ctx)
     if app.init is not None and command.path not in app.builtins and not app.init.initialized(ctx):
         raise init_required(app.name)
+    if command.is_async and command.streaming:
+        return _call_async_stream(command, args, ctx, provided)
     if command.is_async:
         return _call_async(command, args, ctx, provided)
     resolver = Resolver(command.resource_graph, args, ctx, provided)
@@ -2795,6 +2797,46 @@ def _call_async(
     finally:
         if teardown is None:
             loop.close()
+
+
+def _call_async_stream(
+    command: Command, args: object, ctx: Ctx, provided: Mapping[type, object]
+) -> AsyncEvents:
+    """Acquire an async generator handler's resources on a loop of the run's own, then hand
+    the stream its events, each awaited there; a signal stops the pending one (#347)"""
+    loop = Loop()
+    teardown = ctx._teardown
+    if teardown is not None:
+        teardown.add(EVENT_LOOP_HOOK, loop.close, last=True)
+    resolver = Resolver(command.resource_graph, args, ctx, provided, loop)
+
+    async def source(resources: list[Any]) -> object:
+        return _located(command, args, ctx, resources)
+
+    handed = False
+    try:
+        made = loop.run(
+            within(
+                ctx.remaining,
+                ctx.timeout,
+                lambda: resolver.aall((*command.resources, *_output_deps(command, ctx))),
+                source,
+                lambda code, message, context: ctx.warn(code, message, **context),
+            )
+        )
+        if not inspect.isasyncgen(made):
+            raise TypeError(
+                f"{command.path} is streaming but returned {type(made).__name__}, not an "
+                "async generator"
+            )
+        events = AsyncEvents(made, loop, grace=GRACE_SECONDS, owns_loop=teardown is None)
+        handed = True
+    finally:
+        if not handed and teardown is None:
+            loop.close()  # the events would have closed it
+    if teardown is not None:
+        teardown.on_interrupt(events.stop)
+    return events
 
 
 def _cwd_output(command: Command) -> bool:
@@ -6212,8 +6254,14 @@ class _Run:
         stepping = _Stepping()
 
         def close() -> None:
-            if isinstance(events, Generator):
+            if isinstance(events, (Generator, AsyncEvents)):
                 self._close_events(events, secret_free)
+
+        def stop() -> None:
+            """An async generator's pending step is cancelled, so the worker awaiting it
+            returns and the source's ``finally`` runs before the run's teardown (#347)"""
+            if isinstance(events, AsyncEvents):
+                events.stop()
 
         try:
             self.cancellation.check()
@@ -6278,6 +6326,7 @@ class _Run:
         except ParseError as exc:
             terminal = functools.partial(self.after_start, exc, started=started, meta=partial())
         except TimeoutExpired:
+            stop()
             self._stop_children()
             self._grace(running)
             what = "timeout" if whole else "timeout waiting for its next event"
@@ -6322,6 +6371,7 @@ class _Run:
         finally:
             # Run the handler's finally blocks now, or, when a worker abandoned at its
             # timeout or on a signal is still inside next(), on it as next() returns (#128)
+            stop()
             if not stepping.abandon(any(p.worker.is_alive() for p in running)):
                 close()
             if lines is not None:
@@ -6441,7 +6491,9 @@ class _Run:
             {"from": before, "to": after},
         )
 
-    def _close_events(self, events: Generator[object], redact: Callable[[str], str]) -> None:
+    def _close_events(
+        self, events: Generator[object] | AsyncEvents, redact: Callable[[str], str]
+    ) -> None:
         """Close a stream's generator, running its ``finally`` blocks; a failure there goes
         to stderr redacted, the terminal envelope already decided"""
         try:

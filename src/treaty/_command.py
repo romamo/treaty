@@ -304,7 +304,8 @@ class Command:
     id_field: str | None = None
     """The output's primary identifier, which ``--format id`` writes (REQ-O-005)"""
     is_async: bool = False
-    """The handler is ``async def``: it runs on the run's event loop (REQ-F-049)"""
+    """The handler is ``async def``, a coroutine or a streaming async generator: it runs on
+    the run's event loop (REQ-F-049)"""
     args_model: ArgsModel | None = None
     """The handler's args model, taken through ``app.args_adapter``: ``args_type`` is
     then the dataclass phase 1 parses its arguments into"""
@@ -826,7 +827,7 @@ def build_command(
         provided,
         fields=[f.name for f in fields],
     )
-    is_async = inspect.iscoroutinefunction(fn)
+    is_async = inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn)
     needs_loop = sorted(s.cls.__qualname__ for s in graph.values() if s.is_async)
     if needs_loop and not is_async:
         raise RegistrationError(
@@ -1416,11 +1417,20 @@ def _inspect_handler(
     scalars: ScalarRegistry,
     args_adapters: ArgsAdapters | None = None,
 ) -> tuple[type, object, tuple[type, ...], bool]:
-    resources = dependency_params(fn, f"{path}: handler", allow_async=True)
+    yields_async = inspect.isasyncgenfunction(fn)
+    if yields_async and not streaming:
+        raise RegistrationError(
+            f"{path}: handler is an async generator, which yields events; declare "
+            "streaming=True to stream them, or return a list from an async def (REQ-F-049)"
+        )
+    resources = dependency_params(
+        fn, f"{path}: handler", allow_async=True, allow_async_generator=yields_async
+    )
     if streaming and inspect.iscoroutinefunction(fn):
         raise RegistrationError(
-            f"{path}: a streaming handler is a plain generator; an async def cannot yield "
-            "events to treaty (REQ-F-049)"
+            f"{path}: a streaming handler is a generator; an async def that returns cannot "
+            "yield events to treaty: yield them from it, an async generator annotated "
+            "AsyncIterator[T] (REQ-F-049)"
         )
     params = list(signature(fn).parameters.values())
     hints = type_hints(fn)
@@ -1435,7 +1445,7 @@ def _inspect_handler(
         raise RegistrationError(f"{path}: handler needs a return annotation for output_schema")
     output_type = hints["return"]
     if streaming:
-        output_type = _event_type(output_type, path)
+        output_type = _event_type(output_type, path, yields_async=yields_async)
         paginated = False  # a stream has no pages; its events may be lists
     if batch_item(resolve_alias(output_type)) is not None:
         assert isinstance(args_type, type)
@@ -1457,15 +1467,26 @@ _STREAM_ORIGINS = (
     collections.abc.Iterable,
     collections.abc.Generator,
 )
+_ASYNC_STREAM_ORIGINS = (
+    collections.abc.AsyncIterator,
+    collections.abc.AsyncIterable,
+    collections.abc.AsyncGenerator,
+)
 
 
-def _event_type(annotation: object, path: CommandPath) -> object:
-    """The ``T`` of a streaming handler's ``Iterator[T]`` (or ``Iterable`` / ``Generator``)"""
+def _event_type(annotation: object, path: CommandPath, *, yields_async: bool) -> object:
+    """The ``T`` of a streaming handler's ``Iterator[T]`` (or ``Iterable`` / ``Generator``),
+    or of an async generator's ``AsyncIterator[T]`` (or ``AsyncIterable`` /
+    ``AsyncGenerator``)"""
     annotation = resolve_alias(annotation)
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
-    if origin not in _STREAM_ORIGINS or not args:
-        raise RegistrationError(
-            f"{path}: a streaming handler must be annotated Iterator[T] for its event type"
-        )
+    origins, name = (
+        (_ASYNC_STREAM_ORIGINS, "AsyncIterator[T]")
+        if yields_async
+        else (_STREAM_ORIGINS, "Iterator[T]")
+    )
+    if origin not in origins or not args:
+        kind = "an async generator streaming handler" if yields_async else "a streaming handler"
+        raise RegistrationError(f"{path}: {kind} must be annotated {name} for its event type")
     return args[0]

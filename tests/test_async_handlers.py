@@ -222,19 +222,14 @@ def test_an_async_handler_without_a_timeout_runs_on_the_callers_thread() -> None
     assert code == 0 and envelope["data"] == {"remaining": None}
 
 
-def test_async_streaming_is_refused_at_registration() -> None:
+def test_an_async_def_that_returns_is_refused_as_a_streaming_handler() -> None:
+    """An async generator streams (tests/test_async_streaming.py); a coroutine cannot"""
     app = App("aio", version="1.0.0")
-    with pytest.raises(RegistrationError, match="streaming handler is a plain generator"):
+    with pytest.raises(RegistrationError, match="an async def that returns cannot yield"):
 
         @app.command("s", description="S", danger_level="safe", exit_codes=(), streaming=True)
         async def s(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:  # type: ignore[misc]
             return iter([])
-
-    with pytest.raises(RegistrationError, match="async generator"):
-
-        @app.command("g", description="G", danger_level="safe", exit_codes=(), streaming=True)
-        async def g(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:  # type: ignore[misc]
-            yield {"n": 1}
 
 
 def test_importing_treaty_does_not_import_asyncio() -> None:
