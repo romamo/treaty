@@ -138,6 +138,49 @@ def test_a_datetime_output_field_gets_volatile_data_advice() -> None:
     assert [f.severity.value for f in _audit(app)["volatile-data"]] == ["advice"]
 
 
+@dataclass(frozen=True, slots=True)
+class Trade:
+    symbol: str
+    timestamp: str
+    duration_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class Trades:
+    timestamp: str
+    trades: list[Trade]
+
+
+def test_a_volatile_name_in_a_record_is_advice_and_at_the_top_a_warning() -> None:
+    """#332: inside an array item a timestamp may be when the trade happened"""
+    app = App("tradectl", version="1.0.0")
+
+    @app.command("list", description="List", danger_level="safe", exit_codes=())
+    def list_(args: NoArgs, ctx: Ctx) -> list[Trade]:
+        return [Trade("A", "2026-10-04T10:00:00Z", 5)]
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: NoArgs, ctx: Ctx) -> Trades:
+        return Trades("2026-10-04T10:00:00Z", [])
+
+    found = {
+        (f.command, f.severity.value, f.message.split()[2]) for f in _audit(app)["volatile-data"]
+    }
+    assert found == {
+        ("list", "advice", "[].timestamp"),
+        ("list", "advice", "[].duration_ms"),
+        ("show", "warning", "timestamp"),
+        ("show", "advice", "trades[].timestamp"),
+        ("show", "advice", "trades[].duration_ms"),
+    }
+    by_path = {f.message.split()[2]: f for f in _audit(app)["volatile-data"]}
+    assert "if it is when the response was made rather than a fact of the record" in (
+        by_path["[].timestamp"].message
+    )
+    assert "about the call that made the response" in by_path["[].duration_ms"].message
+    assert "treaty.Out(volatile=True)" in by_path["[].timestamp"].fix
+
+
 def _audit(app: App) -> dict[str, list]:
     report = audit(app, "x:app", limit=100)
     return {r.id: list(r.findings) for r in report.rules}

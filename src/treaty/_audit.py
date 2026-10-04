@@ -1701,10 +1701,25 @@ _VOLATILE_NAMES = re.compile(
     r"^((fetched|generated|retrieved|requested|queried|rendered)_at|timestamp|now|"
     r"request_id|trace_id|duration(_ms|_s)?|elapsed(_ms|_s)?)$"
 )
+# The names among them that are a time, which a record can hold as a fact of its own
+_VOLATILE_TIMES = re.compile(
+    r"^((fetched|generated|retrieved|requested|queried|rendered)_at|timestamp|now)$"
+)
 
 
-def _volatile_fields(schema: object, where: str = "") -> Iterator[tuple[str, bool]]:
-    """Every output field that looks volatile, with whether its name says so"""
+@dataclass(frozen=True, slots=True)
+class _Volatile:
+    """An output field that looks volatile"""
+
+    path: str
+    named: bool
+    """Its name says so; otherwise it is a date-time"""
+    in_item: bool
+    """It is inside an array item, a record, where it may be a fact of the record (#332)"""
+
+
+def _volatile_fields(schema: object, where: str = "", in_item: bool = False) -> Iterator[_Volatile]:
+    """Every output field that looks volatile"""
     if not isinstance(schema, dict):
         return
     properties = schema.get("properties")
@@ -1714,20 +1729,42 @@ def _volatile_fields(schema: object, where: str = "") -> Iterator[tuple[str, boo
             if isinstance(prop, dict) and prop.get("x-volatile"):
                 continue  # declared: --stable-output leaves it out
             if _VOLATILE_NAMES.match(name):
-                yield path, True
+                yield _Volatile(path, True, in_item)
             elif isinstance(prop, dict) and prop.get("format") == "date-time":
-                yield path, False
-            yield from _volatile_fields(prop, path)
+                yield _Volatile(path, False, in_item)
+            yield from _volatile_fields(prop, path, in_item)
     for key in ("items", "anyOf", "oneOf"):
         nested = schema.get(key)
         for part in nested if isinstance(nested, list) else [nested]:
-            yield from _volatile_fields(part, f"{where}[]" if key == "items" else where)
+            if key == "items":
+                yield from _volatile_fields(part, f"{where}[]", True)
+            else:
+                yield from _volatile_fields(part, where, in_item)
 
 
 def _volatile_data(app: App) -> Iterator[Finding]:
+    """A volatile name at the top of the output warns; inside an array item it may be a
+    fact of the record, such as when a trade happened, so it is advice, as a date-time is"""
     for c in user_commands(app):
-        for field_path, named in _volatile_fields(c.output_schema):
-            if named:
+        for field in _volatile_fields(c.output_schema):
+            field_path = field.path
+            name = field_path.rpartition(".")[2]
+            if field.named and field.in_item:
+                about = (
+                    "when the response was made"
+                    if _VOLATILE_TIMES.match(name)
+                    else "about the call that made the response"
+                )
+                yield Finding(
+                    "volatile-data",
+                    Severity.ADVICE,
+                    c.path.value,
+                    f"output field {field_path} is named like a per-call value; if it is "
+                    f"{about} rather than a fact of the record, it breaks caching (heuristic)",
+                    f"if it is per call, drop {field_path} (meta carries timestamp, "
+                    "request_id, and duration_ms) or declare it treaty.Out(volatile=True)",
+                )
+            elif field.named:
                 yield Finding(
                     "volatile-data",
                     Severity.WARNING,
