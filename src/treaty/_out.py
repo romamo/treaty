@@ -279,19 +279,22 @@ def arrange(
     *,
     adapters: OutputAdapters,
     stable: bool = False,
+    keep: bool = False,
 ) -> object:
     """``value``, the JSON form of an instance of ``tp``, with its arrays sorted and, when
     ``stable``, its volatile fields dropped; ``spec`` declares the array ``value`` is. A
-    class an output adapter writes is arranged by its schema's ``x-`` options."""
+    class an output adapter writes is arranged by its schema's ``x-`` options. ``keep``,
+    a command's ``ordered=True``, keeps the handler's order of every array at any depth
+    but one a field or property declares a ``sort_key`` for."""
     base, _ = strip_optional(resolve_alias(tp))
     if (members := union_of(base, adapters)) and value is not None:
         # The member the value is, which its keys and tag tell; none is a broken output
         member = pick(value, members, base)
-        return arrange(value, member, spec, adapters=adapters, stable=stable)
+        return arrange(value, member, spec, adapters=adapters, stable=stable, keep=keep)
     if adapters.for_type(base) is not None:
         assert isinstance(base, type)
         node = adapters.node(base)
-        return arrange_node(value, node, spec, stable=stable, defs=defs_of(node))
+        return arrange_node(value, node, spec, stable=stable, defs=defs_of(node), keep=keep)
     # Untyped content declares nothing of its own, so an ordered declaration covers it
     inner = spec if spec.ordered else NO_ORDER
     if isinstance(value, list):
@@ -299,17 +302,24 @@ def arrange(
         args = typing.get_args(base)
         if origin is tuple and args and args[-1] is not Ellipsis:
             return [
-                arrange(v, a, adapters=adapters, stable=stable)
+                arrange(v, a, adapters=adapters, stable=stable, keep=keep)
                 for v, a in zip(value, args, strict=False)
             ]
         item = args[0] if origin in (list, tuple) and args else object
         items = [
             arrange(
-                v, item, inner if _untyped(item) else NO_ORDER, adapters=adapters, stable=stable
+                v,
+                item,
+                inner if _untyped(item) else NO_ORDER,
+                adapters=adapters,
+                stable=stable,
+                keep=keep,
             )
             for v in value
         ]
-        return items if spec.ordered else [items[i] for i in sorted_indices(items, spec.sort_key)]
+        if spec.ordered or (keep and spec.sort_key is None):
+            return items
+        return [items[i] for i in sorted_indices(items, spec.sort_key)]
     if not isinstance(value, dict) or is_binary(value):
         return value
     if is_dataclass_type(base):
@@ -324,12 +334,19 @@ def arrange(
                 del out[f.name]
                 continue
             out[f.name] = arrange(
-                out[f.name], hints[f.name], fspec, adapters=adapters, stable=stable
+                out[f.name], hints[f.name], fspec, adapters=adapters, stable=stable, keep=keep
             )
         return out
     item = typing.get_args(base)[1] if typing.get_origin(base) is dict else object
     return {
-        k: arrange(v, item, inner if _untyped(item) else NO_ORDER, adapters=adapters, stable=stable)
+        k: arrange(
+            v,
+            item,
+            inner if _untyped(item) else NO_ORDER,
+            adapters=adapters,
+            stable=stable,
+            keep=keep,
+        )
         for k, v in value.items()
     }
 
@@ -341,10 +358,12 @@ def arrange_node(
     *,
     stable: bool,
     defs: Mapping[str, Any] = EMPTY_DEFS,
+    keep: bool = False,
 ) -> object:
     """``arrange`` by a JSON Schema: a property's ``x-sort-key`` and ``x-ordered`` order
     its array, and ``x-volatile`` drops it under ``stable``; ``defs`` is the root's
-    ``$defs``, which a ``$ref`` names"""
+    ``$defs``, which a ``$ref`` names. ``keep`` keeps every array's order but one an
+    ``x-sort-key`` orders."""
     node = deref(node, defs)
     sort_key = node.get("x-sort-key")
     if isinstance(sort_key, str):
@@ -358,13 +377,17 @@ def arrange_node(
             extra = node.get("additionalItems")
             rest = extra if isinstance(extra, dict) else {}
             return [
-                arrange_node(v, items[i] if i < len(items) else rest, stable=stable, defs=defs)
+                arrange_node(
+                    v, items[i] if i < len(items) else rest, stable=stable, defs=defs, keep=keep
+                )
                 for i, v in enumerate(value)
             ]
         item = items if isinstance(items, dict) else {}
         inner = spec if spec.ordered and untyped(item) else NO_ORDER
-        arranged = [arrange_node(v, item, inner, stable=stable, defs=defs) for v in value]
-        if spec.ordered:
+        arranged = [
+            arrange_node(v, item, inner, stable=stable, defs=defs, keep=keep) for v in value
+        ]
+        if spec.ordered or (keep and spec.sort_key is None):
             return arranged
         return [arranged[i] for i in sorted_indices(arranged, spec.sort_key)]
     if not isinstance(value, dict) or is_binary(value):
@@ -378,9 +401,38 @@ def arrange_node(
     for key, v in value.items():
         prop = props.get(key)
         if prop is None:
-            out[key] = arrange_node(v, rest, inner, stable=stable, defs=defs)
+            out[key] = arrange_node(v, rest, inner, stable=stable, defs=defs, keep=keep)
         elif not (stable and prop.get("x-volatile") is True):
-            out[key] = arrange_node(v, prop, stable=stable, defs=defs)
+            out[key] = arrange_node(v, prop, stable=stable, defs=defs, keep=keep)
+    return out
+
+
+# The keys of a JSON Schema node that hold one subschema, a list of them, or a mapping of
+# names to them: the walk ``keep_order`` takes, which never reads an enum's or default's data
+_ONE = ("items", "additionalItems", "additionalProperties", "not", "contains")
+_MANY = ("items", "prefixItems", "anyOf", "oneOf", "allOf")
+_NAMED = ("properties", "patternProperties", "$defs", "definitions")
+
+
+def keep_order(node: Mapping[str, Any]) -> dict[str, Any]:
+    """``node``, an output schema, with ``"x-ordered": true`` on every array node a
+    ``x-sort-key`` does not order: what a command's ``ordered=True`` keeps"""
+    out = dict(node)
+    for key in _ONE:
+        if isinstance(out.get(key), Mapping):
+            out[key] = keep_order(out[key])
+    for key in _MANY:
+        if isinstance(out.get(key), list):
+            out[key] = [keep_order(n) if isinstance(n, Mapping) else n for n in out[key]]
+    for key in _NAMED:
+        if isinstance(out.get(key), Mapping):
+            out[key] = {
+                k: keep_order(n) if isinstance(n, Mapping) else n for k, n in out[key].items()
+            }
+    kind = out.get("type")
+    is_array = kind == "array" or (isinstance(kind, list) and "array" in kind)
+    if is_array and "x-sort-key" not in out:
+        out["x-ordered"] = True
     return out
 
 
@@ -485,7 +537,11 @@ def check_order(
                         f"date field of {one.__qualname__}"
                     )
     if spec.ordered and origin not in (list, tuple, dict) and not _untyped(base):
-        raise RegistrationError(f"{where}: ordered=True is for arrays, not {tp!r}")
+        raise RegistrationError(
+            f"{where}: ordered=True is for arrays, not {tp!r}; ordered=True on the command "
+            "keeps the order of every array in its output, and a model property keeps its "
+            'own with json_schema_extra={"x-ordered": True}'
+        )
     for arg in args:
         if arg is not Ellipsis:
             check_order(arg, where, adapters=adapters, seen=seen)

@@ -753,7 +753,9 @@ class App:
         alias. A model may be returned, held in a list, or nested in a dataclass field. Its
         properties may declare the ``Out`` options as
         ``x-sort-key``, ``x-ordered``, ``x-volatile``, ``x-high-entropy``, and
-        ``x-external``. An output list or dict is never null; ``none_as_empty=True`` writes
+        ``x-external``, for pydantic through ``Field(json_schema_extra={"x-ordered":
+        True})``; ``ordered=True`` on a command keeps the order of every array in its
+        output instead. An output list or dict is never null; ``none_as_empty=True`` writes
         a null one as ``[]`` or ``{}``, so a ``list[T] | None`` field is allowed.
         """
         for fn, name in ((schema, "schema"), (dump, "dump")):
@@ -1048,8 +1050,10 @@ class App:
         instead. ``retry=Retry(...)``
         enables ``ctx.retry`` with ``--retries`` and ``--retry-delay``.
         Arrays in ``data`` are sorted (REQ-F-020): ``sort_key="id"`` orders an output
-        list of objects by that field; ``ordered=True`` keeps the handler's order, for a
-        ranking. ``treaty.Out`` declares the same for a field of an output dataclass.
+        list of objects by that field; ``ordered=True`` keeps the handler's order of every
+        array in the output, whatever the return type, for a ranking. ``treaty.Out``
+        declares either for a field of an output dataclass, and an adapted model's
+        property ``x-sort-key`` or ``x-ordered``.
         ``fix_commands={"STORE_MISSING": "tool init"}`` gives ``error.fix_command`` for an
         error code when the raise gives none: one command of this app or a companion, run
         verbatim, never destructive (REQ-C-030). ``refreshes_auth=True`` marks the command
@@ -5980,7 +5984,7 @@ class _Run:
                 results.append({"id": item.id, "ok": False, "error": error})
                 continue
             try:
-                value = self._payload(item.value, command.output_type)
+                value = self._payload(item.value, command.output_type, command.order)
             except SchemaError as exc:
                 exc.at = ("results", len(results), *exc.at)  # where data holds the item
                 raise
@@ -6871,13 +6875,15 @@ class _Run:
 
     def _payload(self, value: object, tp: object = object, order: OutSpec = NO_ORDER) -> object:
         """A result or exit ``data`` as envelope data: an object, an array, or null, with
-        relative paths made absolute and arrays sorted as ``tp`` declares"""
+        relative paths made absolute and arrays sorted as ``tp`` declares; ``order`` is
+        the command's, whose ``ordered=True`` keeps every array's order (#329)"""
         data = arrange(
             to_jsonable(value, self.app.scalars, base=self.cwd),
             tp,
             order,
             adapters=self.app.scalars.adapters,
             stable=self.stable,
+            keep=order.ordered,
         )
         if isinstance(value, Job) and isinstance(data, dict):
             data = with_links(data, self.app.name)  # REQ-C-022

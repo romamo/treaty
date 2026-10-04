@@ -1932,8 +1932,10 @@ def _holds_untyped(tp: object) -> bool:
 def _stable_order(app: App) -> Iterator[Finding]:
     adapters = app.scalars.adapters
     for c in user_commands(app):
+        if c.order.ordered:
+            continue  # the handler's order of every array in the output is the contract
         yield from _adapted_order(app, c)
-        if not c.order.ordered and _holds_untyped(c.output_type):
+        if _holds_untyped(c.output_type):
             # REQ-F-020 sorts arrays it cannot see into too, so a model_dump()'s line
             # items come back in another order than the handler built them in
             yield Finding(
@@ -2055,7 +2057,8 @@ def _adapted_order(app: App, c: Command) -> Iterator[Finding]:
                 )
                 fix = (
                     'declare it on the model field: json_schema_extra={"x-sort-key": "<field>"} '
-                    'to order it by a field, or {"x-ordered": True} to keep the handler\'s order'
+                    'to order it by a field, or {"x-ordered": True} to keep the handler\'s order; '
+                    "ordered=True on the command keeps the order of every array in its output"
                 )
             else:
                 message = (
@@ -2064,7 +2067,8 @@ def _adapted_order(app: App, c: Command) -> Iterator[Finding]:
                 )
                 fix = (
                     'type it with a model, or declare json_schema_extra={"x-ordered": True} '
-                    "on the field to keep the handler's order of every array inside"
+                    "on the field to keep the handler's order of every array inside, or "
+                    "ordered=True on the command for every array in its output"
                 )
             yield Finding("stable-order", Severity.ADVICE, c.path.value, message, fix)
 
@@ -2079,7 +2083,8 @@ def _inner_array(c: Command, where: str, item: type) -> Finding:
         "not the order the handler built (REQ-F-020)",
         "hold the array in a field of a frozen dataclass declared "
         'treaty.Out(sort_key="...") or treaty.Out(ordered=True), such as '
-        f"dict[str, Group] for dict[str, list[{item.__qualname__}]]",
+        f"dict[str, Group] for dict[str, list[{item.__qualname__}]], or declare "
+        "ordered=True on the command to keep the order of every array in its output",
     )
 
 

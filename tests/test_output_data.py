@@ -475,19 +475,24 @@ def nested_invoice_app(**declare: object) -> App:
 
 @pytest.mark.parametrize("declare", [{}, {"ordered": True}])
 def test_nested_object_array_order_fails_strict(declare: dict[str, object]) -> None:
-    # ordered=True does not reach an array inside a dict or a list: it is still sorted
+    # Out(ordered=True) on a field does not reach an array inside a dict or a list: it is
+    # still sorted. ordered=True on the command reaches every array in its output (#329)
     _, env = run(nested_invoice_app(**declare), ["invoices"])
     assert [line["amount"] for line in env["data"]["by_customer"]["acme"]] == ["10.00", "5.00"]
     assert [line["amount"] for line in env["data"]["batches"][0]] == ["10.00", "5.00"]
     _, env = run(nested_invoice_app(**declare), ["by-customer"])
-    assert [line["amount"] for line in env["data"]["acme"]] == ["10.00", "5.00"]
+    kept = ["5.00", "10.00"] if declare else ["10.00", "5.00"]
+    assert [line["amount"] for line in env["data"]["acme"]] == kept
     found = findings(nested_invoice_app(**declare), "stable-order")
-    assert sorted((f.command, f.message.split(" nests")[0]) for f in found) == [
-        ("by-customer", "output"),
+    expected = [
         ("invoices", "output field batches"),
         ("invoices", "output field by_customer"),
     ]
+    if not declare:
+        expected.insert(0, ("by-customer", "output"))
+    assert sorted((f.command, f.message.split(" nests")[0]) for f in found) == expected
     assert all(f.severity in BLOCKING and "dict[str, Group]" in f.fix for f in found)
+    assert all("ordered=True on the command" in f.fix for f in found)
 
 
 def test_stable_order_fix_names_only_a_field_that_can_be_a_sort_key() -> None:

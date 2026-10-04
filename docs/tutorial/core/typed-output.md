@@ -111,11 +111,13 @@ sorts objects by each item's JSON text: invoice lines with amounts `"5.00"` and 
 come back `"10.00"` first. Declare `lines: list[Line] = Out(sort_key="line_no")` to sort by
 a field, or `Out(ordered=True)` to keep the order the handler built, for a ranking or any
 list whose order is the data. A command that returns the list itself takes the same
-`sort_key=` or `ordered=True`. The audit rule `stable-order` reports an array of objects
+`sort_key=` or `ordered=True`; a command's `ordered=True` keeps the order of every array in
+its output, nested ones and those inside models too. The audit rule `stable-order` reports an array of objects
 with neither as a warning, so `treaty audit --strict` fails until it is declared. A list of
 scalars, such as `list[str]`, needs nothing: strings and numbers sort by value. An array
 nested in another list or a dict, such as `dict[str, list[Line]]`, cannot take a declared
-order, so the rule warns there too: hold it in a dataclass field that declares one.
+order of its own, so the rule warns there too: hold it in a dataclass field that declares
+one, or declare `ordered=True` on the command.
 
 **Check:** `add`'s schema names every field of the result, and of the item inside it
 

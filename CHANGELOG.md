@@ -19,6 +19,10 @@ Apps built on treaty keep their own, structured schema changelog with
   describing an `--output` write. `--format plain --no-stream` of an external stream now
   prints the `(external content, untrusted)` line first and no tag columns, as a
   buffered result does (#336)
+- With `ordered=True` on a command, the arrays inside the items of a list of dataclasses
+  or models, and inside batch item values, now keep the handler's order where they used
+  to be sorted. An app's schema lock differs for an ordered command whose typed output
+  holds arrays, since those array nodes now carry `"x-ordered": true` (#329)
 
 ### Added
 
@@ -59,6 +63,17 @@ Apps built on treaty keep their own, structured schema changelog with
   with `INVALID_OUTPUT`. An untagged union still fails registration, now naming the
   members and the tag field to add; a union of scalars, or in an argument, is refused as
   before (#328)
+- `ordered=True` on a command keeps the handler's order of every array in its output,
+  whatever the return type, as it already did for a `dict[str, Any]` return: a pydantic
+  or other output-adapted model (which registration refused before), a list of models, a
+  dataclass, each member of an output union, and arrays nested in a list or dict. A field's `Out(sort_key=)` or a
+  property's `x-sort-key` still sorts its own array. The output schema marks each kept
+  array `"x-ordered": true` beside the root's, and a field's `Out(sort_key=)` array
+  `"x-sort-key"` instead, in an ordered command's schema only. Without `ordered=True` arrays are sorted as
+  before unless a property declares `x-ordered`. The `stable-order` audit asks nothing of
+  an ordered command, and its advice for a model's array, like the error for
+  `Out(ordered=True)` on a field that is not an array, names both routes: `ordered=True`
+  on the command and the per-property `json_schema_extra={"x-ordered": True}` (#329)
 
 ### Changed
 
