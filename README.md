@@ -416,7 +416,9 @@ readers ask for. Every other format writes the result data as text and errors as
 stderr. `tsv` is built in: a header row, then one row per item (nested values as compact
 JSON, `null` as an empty field, and a backslash, tab, or line break in a value escaped as
 `\\`, `\t`, `\n`, `\r`, never quoted); `treaty.table(",")` is the same renderer for CSV
-with the `csv` module's quoting, `app.format(Format.CSV, render=table(","))`.
+with the `csv` module's quoting, `app.format(Format.CSV, render=table(","))`. On an
+`external=True` command neither writes the trust tags as columns, on stdout or in an
+`--output` file: the `UNTRUSTED_CONTENT` warning on stderr says the content is untrusted.
 
 `ndjson` writes `data` alone for `jq -c`, `duckdb read_json`, `mlr`, or the next command in a
 pipe: one compact JSON line per item of a list result or per event of a stream (a stream
@@ -437,7 +439,9 @@ envelope, unless `--warnings-as-errors` is set. `ndjson` takes no renderer, and 
 `App.call`, and the MCP adapter answer with envelopes whatever `--format` says.
 
 A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
-returns the text. A format is a `Format` member, or a name treaty does not know:
+returns the text. An app's own renderer gets an external command's trust tags in `data`, as
+the JSON envelope has them, so it decides how to show them; only `table(...)` and `plain`'s
+built-in renderer leave them out. A format is a `Format` member, or a name treaty does not know:
 
 ```python
 from treaty import App, Format

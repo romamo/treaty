@@ -78,7 +78,7 @@ def test_fields_named_like_the_tags_on_a_command_that_is_not_external_still_prin
     assert out == "_source: external\n_trusted: false\nname: mine\n"
 
 
-def test_json_tsv_and_ndjson_keep_the_tags() -> None:
+def test_json_and_ndjson_keep_the_tags_and_tsv_leaves_them_out() -> None:
     _, out, _ = run(["page", "--format", "json"])
     assert json.loads(out)["data"] == {
         **TAGS,
@@ -86,7 +86,7 @@ def test_json_tsv_and_ndjson_keep_the_tags() -> None:
         "meta": {"_source": "cache", "_trusted": False},
     }
     _, out, _ = run(["rows", "--format", "tsv"])
-    assert out.splitlines()[0] == "_source\t_trusted\tname\tsize"
+    assert out.splitlines()[0] == "name\tsize"  # #336
     _, out, _ = run(["rows", "--format", "ndjson"])
     assert json.loads(out.splitlines()[0]) == {**TAGS, "name": "a", "size": 1}
     assert MARKER not in out
