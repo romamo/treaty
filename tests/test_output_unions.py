@@ -13,8 +13,11 @@ from jsonschema import Draft7Validator
 from pydantic import BaseModel
 
 from treaty import App, Arg, CommandPath, Ctx, NoArgs, Out, RegistrationError
+from treaty._adapters import OutputAdapters
 from treaty._audit import Severity, audit
+from treaty._errors import SchemaError
 from treaty._mcp import tool_entries
+from treaty._protect import protect
 from treaty._tools import tool_fields
 
 
@@ -344,3 +347,11 @@ def test_the_audit_suggests_a_sort_key_every_member_has() -> None:
 
     (fix,) = _order_fixes(app)
     assert fix.startswith('sort_key="id" ')
+
+
+def test_masking_a_value_no_member_fits_raises_rather_than_masking_by_name() -> None:
+    # arrange() never hands protect() such a value; if a change ever did, Card's declared
+    # rules must not silently give way to masking by field name and shape
+    stray = {"kind": "card", "last4": "1234", "token": TOKEN, "extra": "x"}
+    with pytest.raises(SchemaError, match="none of Card, Transfer"):
+        protect(stray, Card | Transfer, unmask=False, adapters=OutputAdapters())

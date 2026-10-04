@@ -30,7 +30,7 @@ from typing import Any
 
 from ._adapters import OutputAdapters, branch
 from ._errors import RegistrationError
-from ._out import arrange, data_path, is_binary, out_spec, sorted_indices, union_of
+from ._out import arrange, data_path, is_binary, out_spec, pick, sorted_indices, union_of
 from ._redact import public_key_name, secret_field
 from ._refs import defs_of
 from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints, union_members
@@ -237,10 +237,9 @@ class _Walk:
             return self.value(value, object, path, secret)
         base, _ = strip_optional(resolve_alias(tp))
         if (members := union_of(base, self.adapters)) and isinstance(value, dict):
-            # arrange() checked the value is one member; a member it no longer fits is
-            # protected by its names and shapes, as undeclared content is
-            member = next((m.tp for m in members if m.fits(value)), object)
-            return self.value(value, member, path, secret)
+            # arrange() checked the value is one member and keeps it one: a value no
+            # member fits here is a broken invariant, never masked by names alone
+            return self.value(value, pick(value, members, base), path, secret)
         if self.adapters.for_type(base) is not None:
             assert isinstance(base, type)
             node = self.adapters.node(base)
