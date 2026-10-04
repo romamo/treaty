@@ -4,7 +4,7 @@ whatever the return type holds (#329)"""
 import io
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from jsonschema import Draft7Validator
@@ -245,3 +245,83 @@ def test_an_unordered_command_publishes_the_schema_it_did_before() -> None:
         },
         sort_keys=True,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Ups:
+    kind: Literal["ups"]
+    steps: list[int]
+    lines: list[Line] = Out(sort_key="n")
+
+
+@dataclass(frozen=True, slots=True)
+class Tree:
+    kind: Literal["tree"]
+    names: list[str]
+    kids: list[Tree]
+
+
+def ups() -> Ups:
+    return Ups("ups", [3, 1, 2], [Line(2), Line(1)])
+
+
+def tree() -> Tree:
+    return Tree("tree", ["b", "a"], [Tree("tree", ["d", "c"], [])])
+
+
+def union_app(ordered: bool) -> App:
+    app = App("demo", version="0.1.0")
+
+    @app.command("many", description="M", danger_level="safe", exit_codes=(), ordered=ordered)
+    def many(args: NoArgs, ctx: Ctx) -> list[Ups | Tree]:
+        return [tree(), ups()]
+
+    @app.command("one", description="O", danger_level="safe", exit_codes=(), ordered=ordered)
+    def one(args: NoArgs, ctx: Ctx) -> Ups | Tree:
+        return ups()
+
+    @app.command("tree", description="T", danger_level="safe", exit_codes=(), ordered=ordered)
+    def tree_(args: NoArgs, ctx: Ctx) -> Ups | Tree:
+        return tree()
+
+    return app
+
+
+KEPT_UPS = {"kind": "ups", "steps": [3, 1, 2], "lines": [{"n": 1}, {"n": 2}]}
+KEPT_TREE = {
+    "kind": "tree",
+    "names": ["b", "a"],
+    "kids": [{"kind": "tree", "names": ["d", "c"], "kids": []}],
+}
+
+
+def test_ordered_keeps_the_arrays_inside_a_list_of_union_members() -> None:
+    app = union_app(True)
+    assert run(app, ["many"])["data"] == [KEPT_TREE, KEPT_UPS]
+    schema = run(app, ["many", "--output-schema"])["data"]
+    Draft7Validator(schema).validate(run(app, ["many"])["data"])
+    # Every array a member holds is kept, but the one its field sorts, $defs included
+    arrays = array_nodes(schema)
+    sorted_ = [a for a in arrays if "x-sort-key" in a]
+    assert [a["x-sort-key"] for a in sorted_] == ["n"]
+    assert all(a.get("x-ordered") is True for a in arrays if a not in sorted_)
+    assert all("x-ordered" not in a for a in sorted_)
+    assert any(array_nodes(d) for d in schema.get("$defs", {}).values())
+
+
+def test_ordered_keeps_the_arrays_of_a_top_level_union_member() -> None:
+    app = union_app(True)
+    assert run(app, ["one"])["data"] == KEPT_UPS
+    assert run(app, ["tree"])["data"] == KEPT_TREE
+    schema = run(app, ["one", "--output-schema"])["data"]
+    member = next(m for m in schema["oneOf"] if "steps" in m.get("properties", {}))
+    assert member["properties"]["steps"]["x-ordered"] is True
+    assert "x-ordered" not in member["properties"]["lines"]
+
+
+def test_a_union_without_ordered_still_sorts_and_publishes_no_marks() -> None:
+    app = union_app(False)
+    assert run(app, ["one"])["data"]["steps"] == [1, 2, 3]
+    assert run(app, ["tree"])["data"]["names"] == ["a", "b"]
+    schema = run(app, ["many", "--output-schema"])["data"]
+    assert "x-ordered" not in json.dumps(schema) and "x-sort-key" not in json.dumps(schema)

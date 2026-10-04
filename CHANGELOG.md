@@ -66,7 +66,7 @@ Apps built on treaty keep their own, structured schema changelog with
 - `ordered=True` on a command keeps the handler's order of every array in its output,
   whatever the return type, as it already did for a `dict[str, Any]` return: a pydantic
   or other output-adapted model (which registration refused before), a list of models, a
-  dataclass, and arrays nested in a list or dict. A field's `Out(sort_key=)` or a
+  dataclass, each member of an output union, and arrays nested in a list or dict. A field's `Out(sort_key=)` or a
   property's `x-sort-key` still sorts its own array. The output schema marks each kept
   array `"x-ordered": true` beside the root's, and a field's `Out(sort_key=)` array
   `"x-sort-key"` instead, in an ordered command's schema only. Without `ordered=True` arrays are sorted as

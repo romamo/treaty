@@ -290,7 +290,7 @@ def arrange(
     if (members := union_of(base, adapters)) and value is not None:
         # The member the value is, which its keys and tag tell; none is a broken output
         member = pick(value, members, base)
-        return arrange(value, member, spec, adapters=adapters, stable=stable)
+        return arrange(value, member, spec, adapters=adapters, stable=stable, keep=keep)
     if adapters.for_type(base) is not None:
         assert isinstance(base, type)
         node = adapters.node(base)
