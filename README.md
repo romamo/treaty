@@ -115,7 +115,10 @@ class Resolve:
 ```
 
 So `resolve AAPL`, `resolve --figi BBG000B9XRY4`, and `resolve -- --odd-name` run, while
-`resolve` and `resolve AAPL --figi BBG000B9XRY4` exit `2` before the handler runs.
+`resolve` and `resolve AAPL --figi BBG000B9XRY4` exit `2` before the handler runs. A rule
+names a positional as argv takes it, so the first answers `Pass exactly one of <query> or
+--figi` with the suggestion `add <query> or --figi`, and `--help` and the MCP tool
+description spell the rule the same way.
 
 `--validate-only` on any command runs phase 1 and stops: exit `0` with `data: null` and
 `meta.validation_only: true`, or exit `2` listing every error. The credential gate, the

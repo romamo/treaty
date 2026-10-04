@@ -182,7 +182,7 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
     positionals = [f for f in command.fields if f.positional]
     flags = [f for f in command.fields if not f.positional]
     usage = [name, *command.path.parts]
-    usage.extend(f"<{f.flag}>" if f.required else f"[{f.flag}]" for f in positionals)
+    usage.extend(f.shown if f.required else f"[{f.flag}]" for f in positionals)
     if command.passthrough:
         # #35: treaty's flags go before the path; every token after it is the tool's
         usage[1:1] = ["[flags]"]

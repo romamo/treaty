@@ -241,6 +241,12 @@ class FieldInfo:
         return self.spec.positional
 
     @property
+    def shown(self) -> str:
+        """The field as argv takes it, for ``--help`` and messages: ``<query>`` for a
+        positional, ``--figi`` for a flag (#331)"""
+        return f"<{self.flag}>" if self.positional else f"--{self.flag}"
+
+    @property
     def path(self) -> bool:
         """True for ``Path`` fields and arrays of them"""
         item = self.classified.item

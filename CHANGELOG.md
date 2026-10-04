@@ -46,6 +46,16 @@ Apps built on treaty keep their own, structured schema changelog with
   record". The same name at the top of the output, or in an object outside any array,
   still warns (#332)
 
+### Fixed
+
+- A conditional rule names a positional member as `--help` does, `<market>`, and a flag as
+  `--series`: `RequiresAny(("market", "series"))` with an optional positional `market` now
+  answers `Pass at least one of <market> or --series` with the suggestion `add <market> or
+  --series`, where it suggested `--market`, which argv does not accept. `RequiresOne`,
+  `RequiredWhen`, `Excludes`, and `DefaultWhenAbsent` spell their members the same way in
+  their errors, `--help`'s Rules section, and the MCP tool description; the manifest's
+  `requires` entries and the error's `context` keep the bare field names (#331)
+
 ## [1.0.0rc33] - 2026-10-03
 
 The 33th 1.0 release candidate: 4 additions and 6 fixes.

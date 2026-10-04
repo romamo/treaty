@@ -98,25 +98,25 @@ class BoundRule:
 
     @property
     def when(self) -> str:
-        """A ``RequiredWhen`` trigger as argv spells it: ``--layout csv``, ``--x``, ``--no-x``"""
+        """A ``RequiredWhen`` trigger as argv spells it: ``--layout csv``, ``<layout> csv``,
+        ``--x``, ``--no-x``"""
         if self.json_value is True:  # a boolean switch takes no value on argv
             return f"--{self.field.flag}"
         if self.json_value is False:  # an explicit false is the negated switch
             return f"--no-{self.field.flag}"
-        return f"--{self.field.flag} {_spelled(self.json_value)}"
+        return f"{self.field.shown} {_spelled(self.json_value)}"
 
     def describe(self) -> str:
         """The rule as a sentence, for ``--help`` and the MCP tool description"""
-        names = [f"--{f.flag}" for f in self.others]
+        names = [f.shown for f in self.others]
         match self.rule:
             case RequiredWhen():
                 return f"{self.when} requires {_listed(names, 'and')}"
             case Excludes():
-                return f"--{self.field.flag} excludes {_listed(names, 'and')}"
+                return f"{self.field.shown} excludes {_listed(names, 'and')}"
             case DefaultWhenAbsent():
-                target = self.others[0].flag
                 default = _spelled(self.json_value)
-                return f"without --{self.field.flag}, --{target} defaults to {default}"
+                return f"without {self.field.shown}, {names[0]} defaults to {default}"
             case RequiresAny():
                 return f"pass at least one of {_listed(self.flag_names, 'or')}"
             case RequiresOne():
@@ -124,8 +124,8 @@ class BoundRule:
 
     @property
     def flag_names(self) -> list[str]:
-        """``--flag`` for every field the rule names"""
-        return [f"--{f.flag}" for f in self.flags]
+        """Every field the rule names as argv takes it: ``<query>`` or ``--figi``"""
+        return [f.shown for f in self.flags]
 
     def to_json(self) -> dict[str, object]:
         """The manifest ``ConditionalRule``; a group is ``{"any_of": [...]}`` or
@@ -165,7 +165,7 @@ def _spelled(value: object) -> str:
 
 
 def _listed(names: Sequence[str], conjunction: str) -> str:
-    """``--a``, ``--a and --b``, ``--a, --b, or --c``"""
+    """``--a``, ``<a> and --b``, ``--a, --b, or --c``"""
     if len(names) < 3:
         return f" {conjunction} ".join(names)
     return f"{', '.join(names[:-1])}, {conjunction} {names[-1]}"
@@ -199,7 +199,7 @@ def bind_rules(
             )
         if optional and found.required:
             raise RegistrationError(
-                f"{where}: requires makes --{found.flag} conditional, but it is always required; "
+                f"{where}: requires makes {found.shown} conditional, but it is always required; "
                 "give it a default"
             )
         if found.secret:
@@ -246,7 +246,7 @@ def bind_rules(
                     f"RequiresAny, or RequiresOne, not {rule!r}"
                 )
         if any(o is bound[-1].field for o in bound[-1].others):
-            raise RegistrationError(f"{where}: a rule on --{bound[-1].field.flag} names itself")
+            raise RegistrationError(f"{where}: a rule on {bound[-1].field.shown} names itself")
     _check_one_of_replaces_excludes(bound, where)
     return tuple(bound)
 
@@ -263,7 +263,7 @@ def _check_one_of_replaces_excludes(bound: Sequence[BoundRule], where: str) -> N
             if inside:
                 raise RegistrationError(
                     f"{where}: Excludes({b.field.flag!r}, ...) prohibits {inside} with "
-                    f"--{b.field.flag}, which RequiresOne({group}) already "
+                    f"{b.field.shown}, which RequiresOne({group}) already "
                     "forbids; drop them from prohibited"
                 )
 
@@ -271,19 +271,19 @@ def _check_one_of_replaces_excludes(bound: Sequence[BoundRule], where: str) -> N
 def _typed(field: FieldInfo, value: object, where: str) -> tuple[object, object]:
     """``value`` as the field would parse it from argv, and its JSON form"""
     if field.flag_type is FlagType.ARRAY:
-        raise RegistrationError(f"{where}: requires cannot compare the array --{field.flag}")
+        raise RegistrationError(f"{where}: requires cannot compare the array {field.shown}")
     if field.flag_type is FlagType.OBJECT:
-        raise RegistrationError(f"{where}: requires cannot compare the object --{field.flag}")
+        raise RegistrationError(f"{where}: requires cannot compare the object {field.shown}")
     raw = value.value if isinstance(value, Enum) else value
     if isinstance(raw, bool):
         raw = "true" if raw else "false"
     if not isinstance(raw, (str, int, float)):
-        raise RegistrationError(f"{where}: {value!r} is not a value of --{field.flag}")
+        raise RegistrationError(f"{where}: {value!r} is not a value of {field.shown}")
     try:
         parsed = field.parse(str(raw))
     except ParseError as exc:
         raise RegistrationError(
-            f"{where}: {value!r} is not a value of --{field.flag}: {exc}"
+            f"{where}: {value!r} is not a value of {field.shown}: {exc}"
         ) from None
     return parsed, jsonable_default(parsed, field.scalar)
 
@@ -328,9 +328,9 @@ def check_rules(
                     if not _present(other, values) and other.flag not in failed:
                         errors.append(
                             ParseError(
-                                f"{bound.when} requires --{other.flag}",
+                                f"{bound.when} requires {other.shown}",
                                 context={"flag": other.flag, "rule": bound.to_json()},
-                                suggestion=f"add --{other.flag}, or change --{field.flag}",
+                                suggestion=f"add {other.shown}, or change {field.shown}",
                             )
                         )
             case Excludes():
@@ -340,9 +340,9 @@ def check_rules(
                     if _present(other, values):
                         errors.append(
                             ParseError(
-                                f"--{field.flag} and --{other.flag} are mutually exclusive",
+                                f"{field.shown} and {other.shown} are mutually exclusive",
                                 context={"flag": other.flag, "rule": bound.to_json()},
-                                suggestion=f"drop --{other.flag} or --{field.flag}",
+                                suggestion=f"drop {other.shown} or {field.shown}",
                             )
                         )
             case DefaultWhenAbsent():
@@ -357,7 +357,7 @@ def _check_group(
 ) -> list[ParseError]:
     """None given fails both kinds; two or more given fails ``RequiresOne``. A flag
     whose own value failed counts as given: the caller meant to pass it"""
-    given = [f"--{f.flag}" for f in bound.flags if f.flag in failed or _present(f, values)]
+    given = [f.shown for f in bound.flags if f.flag in failed or _present(f, values)]
     context: dict[str, object] = {"flags": [f.flag for f in bound.flags], "rule": bound.to_json()}
     if not given:
         suggestion = f"add {_listed(bound.flag_names, 'or')}"

@@ -9,11 +9,22 @@ from typing import Any, Literal
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, Ctx, Flag, RegistrationError, RequiresOne
+from treaty import (
+    App,
+    Arg,
+    Ctx,
+    DefaultWhenAbsent,
+    Excludes,
+    Flag,
+    RegistrationError,
+    RequiredWhen,
+    RequiresAny,
+    RequiresOne,
+)
 from treaty._audit import audit
 from treaty._command import Command
 from treaty._manifest import payload_schema
-from treaty._mcp import tool_entries
+from treaty._mcp import call_tool, tool_entries
 from treaty._skills import examples
 
 
@@ -84,8 +95,8 @@ def test_an_extra_argument_after_an_optional_positional_is_still_an_error() -> N
 @pytest.mark.parametrize(
     ("argv", "message"),
     [
-        ([], "Pass exactly one of --query or --figi"),
-        (["AAPL", "--figi", "BBG000B9XRY4"], "--query and --figi are mutually exclusive"),
+        ([], "Pass exactly one of <query> or --figi"),
+        (["AAPL", "--figi", "BBG000B9XRY4"], "<query> and --figi are mutually exclusive"),
     ],
 )
 def test_exactly_one_of_the_positional_and_the_flag(argv: list[str], message: str) -> None:
@@ -93,6 +104,66 @@ def test_exactly_one_of_the_positional_and_the_flag(argv: list[str], message: st
     assert code == 2
     assert envelope["error"]["phase"] == "validation"
     assert message in envelope["error"]["message"]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class QuoteArgs:
+    market: str | None = Arg(default=None, description="Market ticker")
+    series: str | None = Flag(default=None, description="Series ticker")
+    layout: Literal["wide", "tall"] | None = Arg(default=None, description="Table layout")
+    width: int | None = Flag(default=None, description="Column width")
+    raw: bool = Flag(default=False, description="Raw values")
+
+
+def quotes() -> App:
+    app = App("q", version="1.0.0", description="Quotes")
+
+    @app.command(
+        "quote",
+        description="Quote a market",
+        danger_level="safe",
+        exit_codes=(),
+        requires=[
+            RequiresAny(("market", "series")),
+            RequiredWhen("layout", "wide", then=("width",)),
+            Excludes("raw", prohibited=("layout",)),
+            DefaultWhenAbsent("series", target="layout", default="tall"),
+        ],
+    )
+    def quote(args: QuoteArgs, ctx: Ctx) -> dict[str, str | None]:
+        return {"market": args.market, "layout": args.layout}
+
+    return app
+
+
+def test_a_rule_spells_a_positional_member_as_argv_takes_it() -> None:
+    # #331: "--market" is not accepted on argv, so the message must not suggest it
+    app = quotes()
+    code, envelope = run(app, ["quote"])
+    assert code == 2
+    error = envelope["error"]
+    assert error["message"] == "Pass at least one of <market> or --series"
+    assert error["suggestion"] == "add <market> or --series"
+    assert error["context"]["rule"] == {"any_of": ["market", "series"]}
+    code, envelope = run(app, ["quote", "M1", "wide"])
+    assert code == 2 and envelope["error"]["message"] == "<layout> wide requires --width"
+    assert envelope["error"]["suggestion"] == "add --width, or change <layout>"
+    code, envelope = run(app, ["quote", "M1", "tall", "--raw"])
+    assert code == 2
+    assert envelope["error"]["message"] == "--raw and <layout> are mutually exclusive."
+    assert envelope["error"]["suggestion"] == "drop <layout> or --raw"
+    assert run(app, ["quote", "M1"])[1]["data"] == {"market": "M1", "layout": "tall"}
+    assert (
+        "Rules\n  pass at least one of <market> or --series\n"
+        "  <layout> wide requires --width\n"
+        "  --raw excludes <layout>\n"
+        "  without --series, <layout> defaults to tall\n"
+    ) in help_text(app, ["quote"])
+    entries = {e.name: e for e in tool_entries(app)}
+    assert "Rules: pass at least one of <market> or --series;" in entries["quote"].description
+    refused = call_tool(app, entries, "quote", {})
+    assert refused.exit_code == 2 and refused.error is not None
+    assert refused.error.message == "Pass at least one of <market> or --series"
 
 
 def test_the_documented_pattern_draws_no_conditional_rules_advice() -> None:
