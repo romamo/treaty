@@ -877,6 +877,20 @@ It keeps typer's signatures, so the table above applies; these rows cover what i
 | `typer.exit_error(msg)` | `app.exit_code(...)`, then `raise Exit.NAME(msg, ...)` | |
 | `version=` read from package metadata (`0.3.0.dev0`) | `App(version=importlib.metadata.version(...))` | PEP 440 versions are accepted and reported in their semver spelling |
 
+To [scaffold](#scaffold-the-commands-of-a-large-cli) an agentyper app, read the argparse
+parser it builds. The target takes a dotted attribute path, `module:obj.attr`, so it can
+name the app's parser method:
+
+```bash
+uv run treaty scaffold-from argparse bean.cli:app._build_parser --out bean/cli_treaty.py
+```
+
+The app object itself is not a target: `argparse bean.cli:app` calls it as a function that
+builds a parser, which runs the CLI instead, and the command exits 4. `typer` and `click`
+need those packages installed, and agentyper is neither. `_build_parser` is private to
+agentyper, so a later release of it may rename the method or change what it takes; point
+at whatever builds the parser in the version you have.
+
 ## What changes for the people using your CLI
 
 Migration is a breaking change for callers. Put this list in your release notes:

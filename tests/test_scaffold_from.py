@@ -303,3 +303,76 @@ def test_options_that_spell_one_field_get_distinct_names() -> None:
     fields = [line.split(":")[0].strip() for line in source.splitlines() if "= Flag(" in line]
     assert len(fields) == len(set(fields)) == 4, fields
     check_module(source, "dupcli:cli")
+
+
+# A dotted target, module:obj.attr, reads an attribute of an attribute: agentyper's parser
+# is built by a private method of its app object (#334)
+AGENTYPER = "fixture_scaffold_agentyper"
+
+
+def test_an_agentyper_app_object_is_not_a_parser_factory() -> None:
+    """Calling the app object runs the CLI, which is why the dotted target is needed"""
+    code, envelope = run("scaffold-from", "argparse", f"{AGENTYPER}:app")
+    assert code == 4, envelope
+    assert isinstance(envelope, dict)
+    assert envelope["error"]["code"] == "PRECONDITION"  # type: ignore[index]
+
+
+@pytest.mark.parametrize("path", ["app._build_parser", "holder.app._build_parser"])
+def test_a_dotted_target_reads_a_bound_method_that_builds_the_parser(path: str) -> None:
+    target = f"{AGENTYPER}:{path}"
+    code, envelope = run("scaffold-from", "argparse", target)
+    assert code == 0, envelope
+    data = data_of(envelope)
+    assert (data["name"], data["commands"], data["target"]) == ("bean", ["balance"], target)
+    check_module(str(data["source"]), target)
+
+
+@pytest.mark.parametrize("path", ["nosuch", "app.nosuch", "holder.nosuch.app", "nothing.x"])
+def test_a_missing_attribute_anywhere_on_the_path_is_not_found(path: str) -> None:
+    """The same exit and error shape as an unknown name before dotted targets"""
+    target = f"{AGENTYPER}:{path}"
+    code, envelope = run("scaffold-from", "argparse", target)
+    assert code == 5, envelope
+    assert isinstance(envelope, dict)
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "NOT_FOUND"
+    assert error["context"] == {"target": target}
+    assert str(error["message"]).rstrip(".") == f"Module {AGENTYPER} has no attribute {path}"
+
+
+@pytest.mark.parametrize("path", ["app.", ".app", "app..x", "", "."])
+def test_a_dotted_target_with_an_empty_name_is_an_argument_error(path: str) -> None:
+    code, envelope = run("scaffold-from", "argparse", f"{AGENTYPER}:{path}")
+    assert code == 2, envelope
+    assert isinstance(envelope, dict)
+    assert envelope["error"]["code"] == "ARG_ERROR"  # type: ignore[index]
+
+
+def test_commands_that_load_an_app_take_a_dotted_target_too() -> None:
+    """audit, schema-lock, changelog-add, agents-md, check-docs, conformance, and
+    treaty-mcp all load their App through the same import"""
+    from treaty._cli import load_app
+
+    target = f"{AGENTYPER}:holder.treaty_app"
+    assert load_app(target, TESTS).name == "books"
+    code, envelope = run("audit", target)
+    assert code == 0, envelope
+    assert data_of(envelope)["target"] == target
+    code, envelope = run("audit", f"{AGENTYPER}:holder.app")
+    assert code == 4, envelope
+    listed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from treaty._mcp import main; sys.exit(main())",
+            target,
+            "--list-tools",
+        ],
+        cwd=TESTS,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert listed.returncode == 0, listed.stderr
