@@ -21,7 +21,13 @@ from ._declare import shell_safe
 from ._dispatch import invalid_json
 from ._envnames import read_env
 from ._errors import ArgsCrashed, ArgsRefused, ParseError
-from ._flags import FieldInfo, apply_scalar, object_shape, refuse_line_breaks
+from ._flags import (
+    FieldInfo,
+    apply_scalar,
+    check_int_value,
+    object_shape,
+    refuse_line_breaks,
+)
 from ._framework import (
     NO_INJECTION_FLAG,
     RAW_PAYLOAD_FLAG,
@@ -1363,9 +1369,10 @@ def check_json_base(target: Classified, value: object, flag: str) -> object:
             raise ParseError(f"{flag!r} expects a boolean", context=ctx)
         case FlagType.INTEGER:
             if isinstance(value, int) and not isinstance(value, bool):
-                return value
+                return check_int_value(target, value, flag)
             if isinstance(value, float) and value.is_integer():
-                return int(value)  # JSON Schema counts 2.0 as an integer, and clients send it
+                # JSON Schema counts 2.0 as an integer, and clients send it
+                return check_int_value(target, int(value), flag)
             raise ParseError(f"{flag!r} expects an integer", context=ctx)
         case FlagType.NUMBER:
             if isinstance(value, bool) or not isinstance(value, (int, float)):

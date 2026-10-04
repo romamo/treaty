@@ -10,6 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- A `Literal` of integers, such as `sig_type: Literal[0, 1, 2]`, declares an argument
+  whose values are a few numbers: argv and variable text is read as an integer and must be
+  one of them, so `--sig-type 3` and `--sig-type abc` exit 2 before the handler runs;
+  `--schema`, `--raw-payload`, `exec`, and MCP tools take `{"type": "integer", "enum": [0,
+  1, 2]}` and refuse `"1"` and `true`; the manifest's `FlagEntry` is `type: integer` and
+  names the values in its description, since `enum_values` holds an enum's strings. Its
+  defaults, settings, `list[...]` items, and `| None` are checked the same way, and a mix
+  of strings and integers is refused at registration by name (#327)
+
 ### Changed
 
 - The click/typer migration chapter says every command runs under the app's

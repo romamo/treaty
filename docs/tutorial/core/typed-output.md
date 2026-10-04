@@ -82,6 +82,7 @@ Each annotation becomes a schema type:
 | --- | --- |
 | `int`, `float`, `str`, `bool` | `integer`, `number`, `string`, `boolean` |
 | `Literal["low", "high"]`, a `StrEnum` | `string` with `enum` |
+| `Literal[0, 1, 2]` | `integer` with `enum` |
 | `X \| None` | `anyOf` X and `null` |
 | `list[X]`, `tuple[X, ...]` | `array` of X |
 | a nested dataclass | `object` with its own `properties` |

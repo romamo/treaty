@@ -51,6 +51,8 @@ class Classified:
     base: object
     enum_values: tuple[str, ...] = ()
     enum_cls: type[Enum] | None = None
+    int_values: tuple[int, ...] = ()
+    """An integer ``Literal``'s values: an integer that must be one of them"""
     item: Classified | None = None
     path: bool = False
     """A ``pathlib.Path`` string: hardened against traversal and encoded bytes"""
@@ -126,6 +128,21 @@ def _undefined(tp: object) -> typing.Iterator[str]:
         yield from _undefined(arg)
 
 
+def literal_kind(literal: object) -> type[str] | type[int]:
+    """``str`` or ``int``: what every value of a ``Literal`` is. A bool is no integer
+    here, and a mix of strings and integers is refused, as is any other value"""
+    values = typing.get_args(literal)
+    if values and all(isinstance(v, str) for v in values):
+        return str
+    if values and all(isinstance(v, int) and not isinstance(v, bool) for v in values):
+        return int
+    if values and all(isinstance(v, (str, int)) and not isinstance(v, bool) for v in values):
+        raise SchemaError(
+            f"Literal values must be all strings or all integers, not a mix of both: {literal!r}"
+        )
+    raise SchemaError(f"Literal values must be all strings or all integers: {literal!r}")
+
+
 def resolve_alias(tp: object) -> object:
     """``type Port = int`` (PEP 695) names its value; follow aliases of aliases too"""
     while True:
@@ -158,8 +175,8 @@ def classify(tp: object, scalars: ScalarRegistry, objects: ObjectHook | None = N
     origin = typing.get_origin(base)
     if origin is typing.Literal:
         values = typing.get_args(base)
-        if not values or not all(isinstance(v, str) for v in values):
-            raise SchemaError(f"Literal values must all be strings: {base!r}")
+        if literal_kind(base) is int:
+            return Classified(FlagType.INTEGER, optional, base, int_values=tuple(values))
         return Classified(FlagType.ENUM, optional, base, enum_values=tuple(values))
     if origin in (list, tuple):
         args = typing.get_args(base)

@@ -154,7 +154,8 @@ def _sample(name: str, classified: object, spec: object) -> str:
     if getattr(spec, "pattern", None) is not None:
         return f"<{name}>"
     if kind is FlagType.INTEGER:
-        return "1"
+        int_values = getattr(classified, "int_values", ())
+        return str(int_values[0]) if int_values else "1"
     if kind is FlagType.NUMBER:
         return "1.5"
     if kind is FlagType.ENUM and enum_values:
