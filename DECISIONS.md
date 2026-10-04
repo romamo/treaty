@@ -43,6 +43,7 @@ entry that supersedes it, never by editing an old one.
 - Why: An agent reading a response must know which shape it got without trying each schema; X | None keeps its anyOf with null
 - Applies to: src/treaty/_types.py, src/treaty/_schema.py, src/treaty/_out.py, output types
 - Enforced by: review
+- Superseded by: D-7
 
 ## D-6: ordered=True covers every array in a command's output
 
@@ -51,3 +52,12 @@ entry that supersedes it, never by editing an old one.
 - Why: A typed return must not be less expressive than a dict return, and one command-level switch avoids a second API for the same thing
 - Applies to: src/treaty/_out.py, src/treaty/_app.py, ordered, output arrays
 - Enforced by: review
+
+## D-7: Output unions must be tagged, by a Literal or an enum
+
+- Decided: 2026-10-04, in romamo/treaty#342
+- Rule: A union of output types, anywhere in a command's output (the return type, list items, dict values, or fields), is accepted only when every member can be told apart, by a Literal or enum tag field every member requires with no shared value, or by required keys no other member has; it is published as oneOf, and an untagged union is refused at registration with a message on adding a tag
+- Why: An agent reading a response must know which shape it got without trying each schema; an enum is a closed set of values like a Literal, and pydantic models often tag with one
+- Applies to: src/treaty/_types.py, src/treaty/_schema.py, src/treaty/_out.py, src/treaty/_protect.py, output types
+- Enforced by: review
+- Supersedes: D-5
