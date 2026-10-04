@@ -53,6 +53,16 @@ Apps built on treaty keep their own, structured schema changelog with
   `streaming=True`, and an `async def` that returns with it, are still a
   `RegistrationError` (#347)
 
+### Added
+
+- `treaty conformance` writes probes for a `streaming=True` command, which it used to
+  leave out: the `invalid` ones that exit 2 before the stream starts, such as a network
+  command's `--proxy socks5://...`, and, for a safe stream, a `read` probe run with
+  `--no-stream --timeout 5`, which ends with one envelope (the collected events, or
+  `TIMEOUT`) within the kit's 10-second limit. A mutating stream is never run. A
+  committed profile of an app with streaming commands now differs from the generated one
+  and needs `--force` (#349)
+
 ## [1.0.0rc34] - 2026-10-04
 
 The 34th 1.0 release candidate: 2 breaking changes, 5 additions, 2 changes, and 3 fixes.
