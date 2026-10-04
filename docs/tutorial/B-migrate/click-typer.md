@@ -168,6 +168,28 @@ commands change state, and `destructive` commands remove something that cannot b
 It decides which framework flags a command gets and whether it can run without
 confirmation.
 
+Note how long each command can run, too. click let a command run as long as it took; treaty
+runs every command under a time limit, not only network commands: the app's
+`default_timeout`, 60 seconds unless `App(default_timeout=...)` sets another. A read-only
+command that took 70 seconds under click ends in `TIMEOUT` with exit 10 under treaty. Give
+a command that may run longer its own limit on `@app.command`:
+
+- **`timeout=300`**: a larger limit, in seconds; the run still ends in `TIMEOUT` past it
+- **`timeout=None`**: no limit, the command runs until it returns
+- **Either one** also gives the command `--timeout SECONDS`, so a caller can bound one run,
+  or lift the limit with `--timeout 0`; a command on the app default has no `--timeout`,
+  and passing it exits 2
+
+`meta.timeout_ms` in every response says which limit a run had ([Run long
+work](../core/long-running.md#step-1-set-the-time-limit)):
+
+<!-- check -->
+```bash
+todo list --db tmp/tutorial/todo.json | jq -e '.meta.timeout_ms == 60000'
+todo list --timeout 0 --db tmp/tutorial/todo.json | jq -e '.meta.exit_code == 2
+  and .error.context.flag == "timeout"'
+```
+
 Look for names treaty keeps for itself. Registration refuses a clash, so rename the option
 now; the audit never sees an app that does not build:
 
@@ -849,6 +871,7 @@ It keeps typer's signatures, so the table above applies; these rows cover what i
 | `--format table` (rich) | `--format plain`, the default at a terminal | a list of flat objects, such as a `list[Row]` result, prints as an aligned table with numbers right-aligned, and `Out(table=False)` leaves a field out of it; a single object, or a list whose objects nest a value, stays `key: value` lines. `--format table` exits 2 unless `app.format("table", render=...)` registers it ([Output formats](../../../README.md#output-formats)) |
 | JSON-string options (`--postings '[...]'`) | `postings: tuple[Posting, ...] = Flag(default=(), description=...)`, with `Posting` a frozen dataclass | on argv each `--postings` takes one JSON object, repeated for a list, and a JSON array in one value exits 2; `exec` lines, `--raw-payload`, `app.call(...)`, and MCP carry the array, as in `{"_cmd": "add", "postings": [{"account": "cash", "number": "12.30"}]}`. Each field is checked like a flag, and an error names its place, such as `postings[1].number` ([Object arguments](../../../README.md#object-arguments)) |
 | `--fields` implemented by the app | built in (`--fields` is reserved) | delete the app's code; the output matches |
+| a command that runs as long as it takes | `timeout=300` on `@app.command`, or `timeout=None` for no limit | every command runs under the app's `default_timeout`, 60 s unless `App(default_timeout=...)` sets another, and past it exits 10 with `TIMEOUT`; a command with its own longer limit, or none, takes `--timeout SECONDS`, and `--timeout 0` lifts the limit for one run ([Step 1](#step-1-take-inventory)) |
 | `exec` with `_cmd` and `_opts` | the built-in `exec` | the same line shape, so existing JSONL plans keep working; `App(exec_fallback=)` runs the lines of commands not yet migrated |
 | `@app.command(mutating=True)` | `danger_level="mutating"`, and an `effect` in the output | |
 | `typer.exit_error(msg)` | `app.exit_code(...)`, then `raise Exit.NAME(msg, ...)` | |
@@ -877,6 +900,10 @@ Migration is a breaking change for callers. Put this list in your release notes:
   read JSON, or pass `--format plain`
 - Exit codes change: failures that were all 1 now have their own numbers, listed in
   `todo manifest`
+- Every command has a time limit, 60 seconds unless the app sets another: a command that
+  runs longer now exits 10 with `TIMEOUT`, unless it declares a longer limit or none. Such
+  a command takes `--timeout SECONDS`, and `--timeout 0` runs it without a limit; a command
+  on the default has no `--timeout`
 - Secret options (`--token`, `--password`) no longer take a value on the command line; use
   `--token-from-env VAR` or `--token-from-file PATH`
 - A verbosity count stops at two: `-v` is `--verbose`, and `-vv`, `-vvv`, or more is `--debug`
