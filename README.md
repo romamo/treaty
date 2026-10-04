@@ -1852,7 +1852,8 @@ such as `importlib.metadata.version` returns, `1.0.0rc1`, is given as `1.0.0-rc.
 `1.0.0.dev0` as `1.0.0-dev.0`, and `1.0.0.post1` as `1.0.0+post.1`; also
 what `--version` prints), and `cwd` (as `pwd` prints it). `trace_id`, `project_root`, and
 `retries` appear only when they apply, never as null. `treaty audit` flags output fields
-that break this, such as a `fetched_at` (rule `volatile-data`).
+that break this, such as a `fetched_at` (rule `volatile-data`). Inside an array item such
+a name may be a fact of the record, such as when a trade happened, so there it is advice.
 
 ```python
 @app.command(

@@ -37,6 +37,14 @@ Apps built on treaty keep their own, structured schema changelog with
   `--timeout 0`, with a check that a command on the default has no `--timeout`; "What
   changes for the people using your CLI" and the agentyper table say the same. The
   behaviour is unchanged (#333)
+- The `volatile-data` audit rule is looser inside records: a per-call name such as
+  `timestamp`, `fetched_at`, `request_id`, or `duration_ms` on a field inside an array
+  item (`[].timestamp`, `trades[].timestamp`) is now advice rather than a warning, since
+  there it may be a fact of the record, such as when a trade happened, so
+  `audit --strict` passes a CLI returning timestamped records. The advice hedges as the
+  date-time advice does: "if it is when the response was made rather than a fact of the
+  record". The same name at the top of the output, or in an object outside any array,
+  still warns (#332)
 
 ## [1.0.0rc33] - 2026-10-03
 
