@@ -10,6 +10,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- `--format tsv` on an `external=True` command no longer writes the `_source` and
+  `_trusted` columns, on stdout or in an `--output` file, reversing what 1.0.0rc12 said
+  for tsv (#198): a consumer reading tsv by column position sees the columns shift. The
+  untrusted status is in the `UNTRUSTED_CONTENT` warning, on stderr or in the envelope
+  describing an `--output` write. `--format plain --no-stream` of an external stream now
+  prints the `(external content, untrusted)` line first and no tag columns, as a
+  buffered result does (#336)
+
 ### Added
 
 - A `Literal` of integers, such as `sig_type: Literal[0, 1, 2]`, declares an argument
@@ -58,13 +68,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 - `--format tsv` and a format an app registers with `render=table(...)`, such as
   `app.format(Format.CSV, render=table(","))`, no longer write the trust tags `_source`
+
+- A format an app registers with `render=table(...)`, such as
+  `app.format(Format.CSV, render=table(","))`, no longer writes the trust tags `_source`
   and `_trusted` as the first columns of an `external=True` command's rows, on stdout or
   in the `--output PATH` file, a stream's events and `--no-stream` included; the
-  `UNTRUSTED_CONTENT` warning says the content is untrusted, on stderr or in the envelope
-  describing an `--output` write. `--format plain --no-stream` of an external stream now
-  prints the `(external content, untrusted)` line instead of tag columns, as a buffered
-  result does. JSON, jsonl, and ndjson keep the tags, and an app's own renderer still
-  gets them in its data, as the `app.format(render=)` docs now say (#336)
+  `UNTRUSTED_CONTENT` warning says the content is untrusted. JSON, jsonl, and ndjson keep
+  the tags, and an app's own renderer still gets them in its data, as the
+  `app.format(render=)` docs now say (#336)
 
 ## [1.0.0rc33] - 2026-10-03
 
