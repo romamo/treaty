@@ -130,13 +130,14 @@ def _undefined(tp: object) -> typing.Iterator[str]:
 
 def literal_kind(literal: object) -> type[str] | type[int]:
     """``str`` or ``int``: what every value of a ``Literal`` is. A bool is no integer
-    here, and a mix of strings and integers is refused, as is any other value"""
+    here, nor is an ``IntEnum`` member (argv would hand the handler a plain int), and a mix
+    of strings and integers is refused, as is any other value"""
     values = typing.get_args(literal)
     if values and all(isinstance(v, str) for v in values):
         return str
-    if values and all(isinstance(v, int) and not isinstance(v, bool) for v in values):
+    if values and all(type(v) is int for v in values):
         return int
-    if values and all(isinstance(v, (str, int)) and not isinstance(v, bool) for v in values):
+    if values and all(isinstance(v, str) or type(v) is int for v in values):
         raise SchemaError(
             f"Literal values must be all strings or all integers, not a mix of both: {literal!r}"
         )

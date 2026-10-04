@@ -3,6 +3,7 @@
 import io
 import json
 from dataclasses import dataclass
+from enum import IntEnum
 from pathlib import Path
 from typing import Literal
 
@@ -14,6 +15,11 @@ from treaty._mcp import call_tool, tool_entries
 from treaty._tools import input_schema
 
 type SigType = Literal[0, 1, 2]
+
+
+class Tier(IntEnum):
+    LOW = 1
+    HIGH = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +183,12 @@ def test_a_mix_of_strings_and_integers_is_refused_by_name() -> None:
         register(Mixed)
 
 
-@pytest.mark.parametrize("annotation", [Literal[True, False], Literal[0, True], Literal[b"x"]])
+# An IntEnum member is an int, but argv would hand the handler a plain int and the
+# default an enum member: the enum's own type declares that argument
+@pytest.mark.parametrize(
+    "annotation",
+    [Literal[True, False], Literal[0, True], Literal[b"x"], Literal[Tier.LOW, Tier.HIGH]],
+)
 def test_booleans_and_other_values_are_refused(annotation: object) -> None:
     @dataclass(frozen=True, slots=True)
     class Bad:
