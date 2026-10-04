@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- A response's `seq`, `end`, `total`, `effects`, `dry_run`, and `partial` moved from
+  `Envelope.extra_meta` to typed `Meta` fields: code reading `env.extra_meta["total"]` and
+  the like must read `env.meta.total`. Building an `Envelope` whose `extra_meta` holds a
+  key `Meta` declares now raises `RegistrationError` instead of merging it into `meta`
+  (#348)
+
 ### Fixed
 
 - `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,

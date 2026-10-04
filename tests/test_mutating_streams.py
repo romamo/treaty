@@ -405,6 +405,13 @@ def test_extra_meta_refuses_a_key_meta_declares() -> None:
     assert added.meta.dry_run is False and added.extra_meta["confirmed"] is True
 
 
+def test_meta_stays_hashable_with_effects() -> None:
+    meta = sync_app().call("sync", {"users": "u1,u2*"}, env={}).meta
+    assert hash(meta) == hash(dataclasses.replace(meta, effects={"noop": 1, "created": 1}))
+    assert meta.effects == {"created": 1, "noop": 1}
+    assert meta.to_json()["effects"] == {"created": 1, "noop": 1}
+
+
 def test_mcp_serves_a_mutating_stream_buffered() -> None:
     app = sync_app()
     entries = {e.name: e for e in tool_entries(app)}

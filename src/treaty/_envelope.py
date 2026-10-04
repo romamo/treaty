@@ -6,7 +6,7 @@ import dataclasses
 import json
 import math
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import IO
@@ -427,6 +427,11 @@ class Meta:
     """On a failed or cancelled stream, cancellation, or exec plan, whether some of the
     work was done first"""
 
+    def __post_init__(self) -> None:
+        if self.effects is not None and not isinstance(self.effects, _Counts):
+            # Read-only and hashable, as every other field is
+            object.__setattr__(self, "effects", _counts({"effects": self.effects}, None))
+
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {
             "duration_ms": self.duration_ms,
@@ -516,7 +521,32 @@ def _counts(
         for k, n in value.items()
     ):
         raise RegistrationError(f"envelope: meta.effects must count effects, got {value!r}")
-    return dict(value)
+    return _Counts(value)
+
+
+class _Counts(Mapping[str, int]):
+    """``meta.effects`` read-only and hashable, so ``Meta`` stays hashable; it equals the
+    dict it was made from and keeps its order"""
+
+    __slots__ = ("_items",)
+
+    def __init__(self, counts: Mapping[str, int]) -> None:
+        self._items = dict(counts)
+
+    def __getitem__(self, key: str) -> int:
+        return self._items[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._items)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __hash__(self) -> int:
+        return hash(frozenset(self._items.items()))
+
+    def __repr__(self) -> str:
+        return repr(self._items)
 
 
 @dataclass(frozen=True, slots=True)
