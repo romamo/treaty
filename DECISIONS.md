@@ -35,3 +35,19 @@ entry that supersedes it, never by editing an old one.
 - Why: Serial landing re-runs PR CI on every rebase, and macOS was the long pole; the release bot's full matrix still gates every release
 - Applies to: .github/workflows/*, CI
 - Enforced by: .github/workflows/ci.yml
+
+## D-5: Output unions must be tagged
+
+- Decided: 2026-10-04, in romamo/treaty#328
+- Rule: A union of output types, anywhere in a command's output (the return type, list items, dict values, or fields), is accepted only when every member can be told apart, by a Literal tag field or by required keys no other member has; it is published as oneOf, and an untagged union is refused at registration with a message on adding a tag
+- Why: An agent reading a response must know which shape it got without trying each schema; X | None keeps its anyOf with null
+- Applies to: src/treaty/_types.py, src/treaty/_schema.py, src/treaty/_out.py, output types
+- Enforced by: review
+
+## D-6: ordered=True covers every array in a command's output
+
+- Decided: 2026-10-04, in romamo/treaty#329
+- Rule: ordered=True on a command keeps handler order for every array in its output whatever the return type, except an array whose field declares its own sort (Out(sort_key=) or x-sort-key), which the more specific declaration sorts; per-property x-ordered is the finer-grained route, and there is no adapter-level ordering option
+- Why: A typed return must not be less expressive than a dict return, and one command-level switch avoids a second API for the same thing
+- Applies to: src/treaty/_out.py, src/treaty/_app.py, ordered, output arrays
+- Enforced by: review
