@@ -20,6 +20,13 @@ Apps built on treaty keep their own, structured schema changelog with
   names the values in its description, since `enum_values` holds an enum's strings. Its
   defaults, settings, `list[...]` items, and `| None` are checked the same way, and a mix
   of strings and integers is refused at registration by name (#327)
+- `INVALID_OUTPUT` names the field of a result that has no JSON form, such as a
+  non-finite float, an integer too long to write, or an unsupported type: the message
+  says `Command x returned at brackets[1].hi: inf is not a finite number...`, and
+  `context.path` holds `brackets[1].hi`, spelled as the audit spells a field, with
+  indexes (`[2].hi` at the top of a list, `["a.b"]` for a key holding a dot or a
+  bracket). It names keys and indexes only, never a value; a failure at the root has
+  no path. `SchemaError.at` carries the parts (#330)
 
 ### Changed
 

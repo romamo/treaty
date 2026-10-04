@@ -23,6 +23,10 @@ class RegistrationError(TreatyError):
 class SchemaError(TreatyError):
     """A type cannot be expressed as JSON Schema or serialized to JSON"""
 
+    at: tuple[str | int, ...] = ()
+    """Where in a value being serialized it failed: the keys and indexes from the root,
+    empty at the root or for a type; ``treaty._schema.value_path`` spells it"""
+
 
 class ParseError(Exception):
     """Argument parsing failed before the handler ran; maps to ``ARG_ERROR``

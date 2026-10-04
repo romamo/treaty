@@ -271,7 +271,7 @@ from ._resources import Resolver, refuse_async
 from ._retry import Retrier, RetriesExhausted, Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen, RequiresAny, RequiresOne
 from ._scalars import ScalarRegistry, ScalarSpec, default_serializer
-from ._schema import to_jsonable
+from ._schema import to_jsonable, value_path
 from ._select import (
     APPROX,
     STREAMING_NOT_SUPPORTED,
@@ -3028,6 +3028,13 @@ def _rendered(render: Renderer, data: object) -> str:
     if not isinstance(text, str):
         raise TypeError(f"the renderer returned {type(text).__name__}, not str")
     return text
+
+
+def _at(exc: SchemaError) -> str:
+    """`` at brackets[1].hi:``, where in a value its conversion failed, or nothing at the
+    root (#330)"""
+    path = value_path(exc.at)
+    return "" if path is None else f" at {path}:"
 
 
 def _traceback(exc: BaseException, redact: Callable[[str], str]) -> str:
@@ -5863,9 +5870,10 @@ class _Run:
             return self._broken(
                 command,
                 "INVALID_OUTPUT",
-                f"Command {command.path} returned {exc}",
+                f"Command {command.path} returned{_at(exc)} {exc}",
                 started,
                 full_meta,
+                path=value_path(exc.at),
             )
         except Exception as exc:  # noqa: BLE001 - a scalar's serialize= is handler code
             return self._crashed(command, args, exc, started, full_meta)
@@ -5943,7 +5951,11 @@ class _Run:
                 error = self._item_error(command, args, item.error)
                 results.append({"id": item.id, "ok": False, "error": error})
                 continue
-            value = self._payload(item.value, command.output_type)
+            try:
+                value = self._payload(item.value, command.output_type)
+            except SchemaError as exc:
+                exc.at = ("results", len(results), *exc.at)  # where data holds the item
+                raise
             if not isinstance(value, dict):
                 raise SchemaError(f"item {item.id!r} with a value that is not an object")
             if command.danger_level is not DangerLevel.SAFE:
@@ -6177,9 +6189,15 @@ class _Run:
         except InputRequired as exc:
             terminal = functools.partial(self._input_required, exc, started, partial())
         except SchemaError as exc:
-            message = f"Command {command.path} yielded {exc}"
+            message = f"Command {command.path} yielded{_at(exc)} {exc}"
             terminal = functools.partial(
-                self._broken, command, "INVALID_OUTPUT", message, started, partial()
+                self._broken,
+                command,
+                "INVALID_OUTPUT",
+                message,
+                started,
+                partial(),
+                path=value_path(exc.at),
             )
         except _EffectBroken as exc:
             message = f"Command {command.path} broke the effect contract in event {seq + 1}: {exc}"
@@ -6739,13 +6757,14 @@ class _Run:
             data = user_code(lambda: self._payload(result), passing=(SchemaError,))
         except SchemaError as exc:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+            path = value_path(exc.at)
             return self._envelope(
                 entry.code.value,
                 error=ErrorDetail(
                     code="INVALID_OUTPUT",
-                    message=redact(f"exec_fallback for {cmd} returned {exc}"),
+                    message=redact(f"exec_fallback for {cmd} returned{_at(exc)} {exc}"),
                     retryable=False,
-                    context={"command": cmd},
+                    context={"command": cmd} if path is None else {"command": cmd, "path": path},
                     phase="execution",
                     fix_required="return an object, an array, or None from exec_fallback",
                 ),
@@ -6811,14 +6830,14 @@ class _Run:
         if command.order.ordered:
             return items
         item_type = (typing.get_args(command.output_type) or (object,))[0]
-        jsonable = [
-            arrange(
-                to_jsonable(i, self.app.scalars, base=self.cwd),
-                item_type,
-                adapters=self.app.scalars.adapters,
-            )
-            for i in items
-        ]
+        jsonable: list[object] = []
+        for index, item in enumerate(items):
+            try:
+                value = to_jsonable(item, self.app.scalars, base=self.cwd)
+            except SchemaError as exc:
+                exc.at = (index, *exc.at)  # where it is in the list the handler returned
+                raise
+            jsonable.append(arrange(value, item_type, adapters=self.app.scalars.adapters))
         return [items[i] for i in sorted_indices(jsonable, command.order.sort_key)]
 
     def _payload(self, value: object, tp: object = object, order: OutSpec = NO_ORDER) -> object:
@@ -6838,17 +6857,28 @@ class _Run:
         return data
 
     def _broken(
-        self, command: Command, code: str, message: str, started: float, meta: Mapping[str, object]
+        self,
+        command: Command,
+        code: str,
+        message: str,
+        started: float,
+        meta: Mapping[str, object],
+        *,
+        path: str | None = None,
     ) -> Envelope:
-        """GENERAL_ERROR for a handler that broke the framework contract"""
+        """GENERAL_ERROR for a handler that broke the framework contract; ``path`` names the
+        field of its output that did (#330)"""
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
+        context: dict[str, object] = {"command": command.path.value}
+        if path is not None:
+            context["path"] = path
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
                 code=code,
                 message=message,
                 retryable=False,
-                context={"command": command.path.value},
+                context=context,
                 phase="execution",
             ),
             started=started,
