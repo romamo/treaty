@@ -169,3 +169,37 @@ def test_the_converter_carries_the_parts() -> None:
     with pytest.raises(SchemaError) as caught:
         to_jsonable({"a": [Bracket(0, float("nan"))]}, ScalarRegistry(), base=Path("/"))
     assert caught.value.at == ("a", 0, "hi")
+
+
+@dataclass(frozen=True, slots=True)
+class SecretLogin:
+    token: str = Flag(description="API token", secret=True)
+
+
+@pytest.mark.parametrize("fmt", ["json", "plain"])
+def test_a_key_that_is_a_secret_value_is_redacted(fmt: str) -> None:
+    app = App("taxctl", version="1.0.0")
+
+    @app.command("login", description="Login", danger_level="safe", exit_codes=())
+    def login(args: SecretLogin, ctx: Ctx) -> dict[str, object]:
+        return {"rows": {args.token: float("inf")}}
+
+    @app.command("watch", description="Watch", danger_level="safe", exit_codes=(), streaming=True)
+    def watch(args: SecretLogin, ctx: Ctx) -> Iterator[dict[str, object]]:
+        yield {args.token: float("nan")}
+
+    for command in ("login", "watch"):
+        out, err = io.StringIO(), io.StringIO()
+        argv = [command, "--token-from-env", "K", "--format", fmt]
+        code = app.run(argv, stdin=io.StringIO(), stdout=out, stderr=err, env={"K": "s3cr3t-42"})
+        shown = out.getvalue() + err.getvalue()
+        assert code == 1 and "INVALID_OUTPUT" in shown and "s3cr3t" not in shown
+
+
+def test_an_exec_fallback_key_that_is_a_secret_value_is_redacted() -> None:
+    app = App("taxctl", version="1.0.0", exec_fallback=lambda cmd, p: {p["api_token"]: 1e999})
+    out = io.StringIO()
+    line = '{"_cmd": "old", "api_token": "s3cr3t-42"}\n'
+    code = app.run(["exec"], stdin=io.StringIO(line), stdout=out, stderr=io.StringIO(), env={})
+    assert code == 1 and "INVALID_OUTPUT" in out.getvalue()
+    assert "s3cr3t" not in out.getvalue()

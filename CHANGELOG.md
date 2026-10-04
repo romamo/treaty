@@ -25,8 +25,8 @@ Apps built on treaty keep their own, structured schema changelog with
   says `Command x returned at brackets[1].hi: inf is not a finite number...`, and
   `context.path` holds `brackets[1].hi`, spelled as the audit spells a field, with
   indexes (`[2].hi` at the top of a list, `["a.b"]` for a key holding a dot or a
-  bracket). It names keys and indexes only, never a value; a failure at the root has
-  no path. `SchemaError.at` carries the parts (#330)
+  bracket). It names keys and indexes only, never a value, and a key that is a secret
+  value is redacted in both; a failure at the root has no path. `SchemaError.at` carries the parts (#330)
 
 ### Changed
 

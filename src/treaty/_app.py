@@ -6758,6 +6758,7 @@ class _Run:
         except SchemaError as exc:
             entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
             path = value_path(exc.at)
+            path = None if path is None else redact(path)  # a key can be a secret value
             return self._envelope(
                 entry.code.value,
                 error=ErrorDetail(
@@ -6867,16 +6868,17 @@ class _Run:
         path: str | None = None,
     ) -> Envelope:
         """GENERAL_ERROR for a handler that broke the framework contract; ``path`` names the
-        field of its output that did (#330)"""
+        field of its output that did (#330). Both are redacted: a dict key in the path can
+        be a secret value"""
         entry = self.app.exits.framework(FrameworkCode.GENERAL_ERROR)
         context: dict[str, object] = {"command": command.path.value}
         if path is not None:
-            context["path"] = path
+            context["path"] = self._redact_now(path)
         return self._envelope(
             entry.code.value,
             error=ErrorDetail(
                 code=code,
-                message=message,
+                message=self._redact_now(message),
                 retryable=False,
                 context=context,
                 phase="execution",
