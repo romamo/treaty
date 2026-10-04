@@ -342,6 +342,19 @@ def test_a_missing_attribute_anywhere_on_the_path_is_not_found(path: str) -> Non
     assert str(error["message"]).rstrip(".") == f"Module {AGENTYPER} has no attribute {path}"
 
 
+@pytest.mark.parametrize(
+    "path", ["app.__class__", "holder.__class__.__init__.__globals__", "__builtins__"]
+)
+def test_a_dunder_name_in_the_target_is_an_argument_error(path: str) -> None:
+    """A dunder walks out of the app into interpreter internals; a single leading
+    underscore, as in _build_parser, stays allowed"""
+    for command in (("scaffold-from", "argparse"), ("audit",)):
+        code, envelope = run(*command, f"{AGENTYPER}:{path}")
+        assert code == 2, (command, envelope)
+        assert isinstance(envelope, dict)
+        assert envelope["error"]["code"] == "ARG_ERROR"  # type: ignore[index]
+
+
 def test_an_attribute_error_inside_a_getter_is_not_a_missing_name() -> None:
     """``holder.broken`` exists; its getter raising AttributeError is the app's bug and
     surfaces as a crash with the traceback, not as NOT_FOUND"""

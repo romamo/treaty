@@ -43,7 +43,9 @@ Apps built on treaty keep their own, structured schema changelog with
   agentyper section shows it. `audit`, `schema-lock`, `changelog-add`, `agents-md`,
   `check-docs`, `conformance`, and `treaty-mcp` load their App through the same import
   and take one too. A name missing anywhere on the path exits 5 with `NOT_FOUND`, as an
-  unknown name does, and an empty name, as in `module:app.`, exits 2 (#334)
+  unknown name does; an empty name, as in `module:app.`, or a dunder name, as in
+  `module:app.__class__`, exits 2. A name that exists but whose getter raises is the
+  app's own error, not `NOT_FOUND` (#334)
 
 ### Changed
 

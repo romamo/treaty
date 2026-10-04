@@ -80,15 +80,18 @@ BLOCKING = frozenset({Severity.ERROR, Severity.WARNING})
 
 
 MISSING = object()
-TARGET_SHAPE = "target must be module:attribute, or module:attribute.attribute"
+TARGET_SHAPE = "target must be module:attribute, or module:attribute.attribute, with no dunder name"
 
 
 def split_target(target: str) -> tuple[str, tuple[str, ...]] | None:
     """The module and the attribute path of ``module:obj.attr``, any depth; None when
-    either part is missing or a dotted name is empty"""
+    either part is missing, a dotted name is empty, or a name is a dunder such as
+    ``__class__``, which leaves the app for the interpreter's internals"""
     module_name, sep, attr = target.partition(":")
     names = tuple(attr.split("."))
     if not sep or not module_name or not all(names):
+        return None
+    if any(name.startswith("__") and name.endswith("__") for name in names):
         return None
     return module_name, names
 
