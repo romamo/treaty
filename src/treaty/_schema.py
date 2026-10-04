@@ -1,6 +1,6 @@
 """JSON Schema draft-07 generation and JSON serialization, both dependency-free.
 
-Supports the subset the framework needs: scalars, ``Literal`` strings, string or
+Supports the subset the framework needs: scalars, string or integer ``Literal``, string or
 integer ``Enum``, ``X | None``, ``list[T]``, ``tuple[T, ...]``, fixed ``tuple[A, B]``,
 ``dict[str, T]``,
 ``object`` for unconstrained values, nested dataclasses, ``datetime``, ``date``,
@@ -32,7 +32,7 @@ from ._out import Binary, External, out_spec
 from ._redact import secret_field
 from ._refs import DEFS_KEY, DEFS_PREFIX, defs_of, free_name, rename_refs, with_defs
 from ._scalars import DATE_TEXT, DATETIME_TEXT, DECIMAL_TEXT, ScalarRegistry
-from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
+from ._types import is_dataclass_type, literal_kind, resolve_alias, strip_optional, type_hints
 
 JsonSchema = dict[str, Any]
 
@@ -83,10 +83,8 @@ BINARY_SCHEMA: JsonSchema = {
 def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> JsonSchema:
     origin = typing.get_origin(base)
     if origin is typing.Literal:
-        values = typing.get_args(base)
-        if not all(isinstance(v, str) for v in values):
-            raise SchemaError(f"Literal values must all be strings: {base!r}")
-        return {"type": "string", "enum": list(values)}
+        kind = "integer" if literal_kind(base) is int else "string"
+        return {"type": kind, "enum": list(typing.get_args(base))}
     if origin is tuple and (args := typing.get_args(base)) and args[-1] is not Ellipsis:
         # A fixed-length tuple: one schema per position (draft-07 tuple validation)
         return {

@@ -263,10 +263,11 @@ class FieldInfo:
         if self.classified.is_map:
             # A mapping's values carry no names of their own, so its name speaks for them,
             # as a tuple's does: api_keys: dict[str, str] holds secrets (#299)
-            if all(v.flag_type in public for v in self.classified.values):
+            if all(v.flag_type in public or v.int_values for v in self.classified.values):
                 return False
             return secret_name(self.name)
-        if self.flag_type in public or (item is not None and item.flag_type in public):
+        target = self.classified if item is None else item
+        if target.flag_type in public or target.int_values:
             return False  # an object's own fields say which of them hold a secret
         return secret_name(self.name)
 
@@ -381,6 +382,16 @@ class FieldInfo:
             },
         }
 
+    @property
+    def int_choices(self) -> str | None:
+        """An integer ``Literal``'s values as the entry's description states them: an
+        entry's ``enum_values`` are an enum's strings, so an integer one is not (#327)"""
+        target = self.classified.item if self.flag_type is FlagType.ARRAY else self.classified
+        if target is None or not target.int_values:
+            return None
+        each = "each " if target is self.classified.item else ""
+        return f"{each}one of {', '.join(map(str, target.int_values))}"
+
     def to_flag_entry(self, own_env: str | None, prop: JsonSchema) -> dict[str, object]:
         description = self.spec.description
         if self.spec.multiline:
@@ -390,6 +401,8 @@ class FieldInfo:
             description = f"{description} (at most {self.spec.max_bytes} bytes)"
         if self.spec.from_stdin:
             description = f"{description} (- reads it from stdin)"
+        if (choices := self.int_choices) is not None:
+            description = f"{description} ({choices})"
         if not self.spec.audit:
             description = f"{description} ({UNAUDITED})"
         if (old := self.spec.deprecated) is not None:
@@ -441,6 +454,7 @@ class FieldInfo:
             "type": target.flag_type.value,
             "required": self.required,
             "description": self.spec.description
+            + ("" if (choices := self.int_choices) is None else f" ({choices})")
             + (" (- reads it from stdin)" if self.spec.from_stdin else "")
             + ("" if self.spec.audit else f" ({UNAUDITED})"),
         }
@@ -490,6 +504,8 @@ def object_shape(target: Classified) -> str:
         return f"[{object_shape(target.item)}]"
     if target.flag_type is FlagType.ENUM:
         return "|".join(target.enum_values)
+    if target.int_values:
+        return "|".join(map(str, target.int_values))
     if built_in(target.scalar):
         assert target.scalar is not None
         return BUILT_IN_TEXT[target.scalar.cls][2]
@@ -607,7 +623,7 @@ def _coerce_base(target: Classified, raw: str, flag: str) -> object:
                 raise ParseError(
                     f"{flag!r} expects an integer", context={"flag": flag, "value": raw}
                 )
-            return int(raw)
+            return check_int_value(target, int(raw), flag)
         case FlagType.NUMBER:
             if not _NUMBER.fullmatch(raw):
                 raise ParseError(f"{flag!r} expects a number", context={"flag": flag, "value": raw})
@@ -638,6 +654,17 @@ def _coerce_base(target: Classified, raw: str, flag: str) -> object:
             raise RegistrationError("nested arrays are not supported")
         case FlagType.OBJECT:
             raise ParseError(f"{flag!r} expects a JSON object", context={"flag": flag})
+
+
+def check_int_value(target: Classified, value: int, flag: str) -> int:
+    """``value`` when the field takes any integer or an integer ``Literal`` holds it"""
+    if target.int_values and value not in target.int_values:
+        allowed = list(target.int_values)
+        raise ParseError(
+            f"{flag!r} must be one of {', '.join(map(str, allowed))}",
+            context={"flag": flag, "value": value, "allowed": allowed},
+        )
+    return value
 
 
 def refuse_line_breaks(flag: str, raw: str, *, multiline: bool = False) -> None:
@@ -717,6 +744,10 @@ def _checked_default(target: Classified, default: object, where: str) -> object:
             ok = isinstance(default, bool)
         case FlagType.INTEGER:
             ok = isinstance(default, int) and not isinstance(default, bool)
+            if ok and target.int_values and default not in target.int_values:
+                raise RegistrationError(
+                    f"{where}: default {default!r} is not one of {list(target.int_values)}"
+                )
         case FlagType.NUMBER:
             ok = isinstance(default, (int, float)) and not isinstance(default, bool)
         case FlagType.STRING:

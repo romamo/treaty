@@ -61,13 +61,13 @@ class Setting:
     @property
     def secret(self) -> bool:
         """Declared, or inferred from the name as for args: shown as ``[REDACTED]`` by
-        --show-config and kept out of the config hash. A boolean or an enum is never
-        inferred one"""
+        --show-config and kept out of the config hash. A boolean, an enum, or an
+        integer ``Literal`` is never inferred one"""
         if self.declared_secret is not None:
             return self.declared_secret
         item = self.classified.item
-        plain = (FlagType.BOOLEAN, FlagType.ENUM)
-        if self.classified.flag_type in plain or (item is not None and item.flag_type in plain):
+        target = self.classified if item is None else item
+        if target.flag_type in (FlagType.BOOLEAN, FlagType.ENUM) or target.int_values:
             return False
         return secret_name(self.name)
 
