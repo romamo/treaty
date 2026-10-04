@@ -310,3 +310,37 @@ def test_format_id_writes_the_id_every_member_has() -> None:
     out = io.StringIO()
     app.run(["ls", "--format", "id"], stdin=io.StringIO(), stdout=out, stderr=io.StringIO())
     assert out.getvalue() == "a\nb\n"
+
+
+@dataclass(frozen=True, slots=True)
+class Link:
+    kind: Literal["link"]
+    target_id: str
+    name: str
+
+
+def _order_fixes(app: App) -> list[str]:
+    report = audit(app, "x:app", limit=100)
+    return [f.fix for r in report.rules for f in r.findings if f.rule == "stable-order"]
+
+
+def test_the_audit_suggests_a_sort_key_every_member_has() -> None:
+    # Folder's id is not on Link: a sort_key="id" the audit suggested would fail registration
+    app = App("probe", version="0.1.0")
+
+    @app.command("ls", description="List", danger_level="safe", exit_codes=())
+    def ls(args: NoArgs, ctx: Ctx) -> list[Folder | Link]:
+        return []
+
+    assert _order_fixes(app) == [
+        "ordered=True to keep the handler's order, as a ranking needs; no field they share "
+        "of Folder and Link can be a sort_key"
+    ]
+    app = App("probe", version="0.1.0")
+
+    @app.command("ls", description="List", danger_level="safe", exit_codes=())
+    def ls_kinds(args: NoArgs, ctx: Ctx) -> list[Folder | File]:
+        return []
+
+    (fix,) = _order_fixes(app)
+    assert fix.startswith('sort_key="id" ')
