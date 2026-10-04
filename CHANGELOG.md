@@ -46,6 +46,19 @@ Apps built on treaty keep their own, structured schema changelog with
   unknown name does; an empty name, as in `module:app.`, or a dunder name, as in
   `module:app.__class__`, exits 2. A name that exists but whose getter raises is the
   app's own error, not `NOT_FOUND` (#334)
+- A command may return one of several output types, `-> Market | Event`, when an agent
+  can tell the members apart: by a `Literal` or enum tag field every member requires,
+  with no value in two members, or by a required key no other member has. Members are
+  dataclasses or classes an output adapter writes, and the rule reads each one's
+  published keys, so pydantic models work as dataclasses do. The output schema
+  publishes the union as `oneOf` (`Market | Event | None` adds null beside it, as `anyOf`),
+  in `list[...]` and `dict[str, ...]` too. Each value is written by the member its keys
+  and tag match: `--stable-output`, masking, `Out(...)` options, a `sort_key` every member
+  has, `--fields`, the plain table (the members' columns in turn), `id_field`, and the
+  `effect` contract all apply per member, and a value that is none of them fails the run
+  with `INVALID_OUTPUT`. An untagged union still fails registration, now naming the
+  members and the tag field to add; a union of scalars, or in an argument, is refused as
+  before (#328)
 
 ### Changed
 

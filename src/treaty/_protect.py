@@ -30,10 +30,10 @@ from typing import Any
 
 from ._adapters import OutputAdapters, branch
 from ._errors import RegistrationError
-from ._out import arrange, data_path, is_binary, out_spec, sorted_indices
+from ._out import arrange, data_path, is_binary, out_spec, pick, sorted_indices, union_of
 from ._redact import public_key_name, secret_field
 from ._refs import defs_of
-from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
+from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints, union_members
 
 SOURCE_KEY = "_source"
 TRUSTED_KEY = "_trusted"
@@ -236,6 +236,10 @@ class _Walk:
                 }
             return self.value(value, object, path, secret)
         base, _ = strip_optional(resolve_alias(tp))
+        if (members := union_of(base, self.adapters)) and isinstance(value, dict):
+            # arrange() checked the value is one member and keeps it one: a value no
+            # member fits here is a broken invariant, never masked by names alone
+            return self.value(value, pick(value, members, base), path, secret)
         if self.adapters.for_type(base) is not None:
             assert isinstance(base, type)
             node = self.adapters.node(base)
@@ -550,13 +554,14 @@ def check_trust(tp: object, where: str, *, external: bool, adapters: OutputAdapt
     """Trust tags need an object to go on, and a name no output field takes"""
     item = _item_type(tp)
     names: set[str] = set()
-    if is_dataclass_type(item):
-        assert isinstance(item, type)
-        names = {f.name for f in dataclasses.fields(item)}
-    elif adapters.for_type(item) is not None:
-        assert isinstance(item, type)
-        properties = adapters.node(item).get("properties")
-        names = set(properties) if isinstance(properties, dict) else set()
+    for one in union_members(item) or (item,):
+        if is_dataclass_type(one):
+            assert isinstance(one, type)
+            names |= {f.name for f in dataclasses.fields(one)}
+        elif adapters.for_type(one) is not None:
+            assert isinstance(one, type)
+            properties = adapters.node(one).get("properties")
+            names |= set(properties) if isinstance(properties, dict) else set()
     if names:
         taken = names & {SOURCE_KEY, TRUSTED_KEY}
         if taken:

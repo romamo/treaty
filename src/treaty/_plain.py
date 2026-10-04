@@ -19,7 +19,13 @@ from decimal import Decimal
 
 from ._envelope import strip_escapes, visible
 from ._out import is_binary, out_spec
-from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
+from ._types import (
+    is_dataclass_type,
+    resolve_alias,
+    strip_optional,
+    type_hints,
+    union_members,
+)
 
 if typing.TYPE_CHECKING:
     from ._adapters import OutputAdapters
@@ -67,6 +73,22 @@ def layout_of(output_type: object, adapters: OutputAdapters | None = None) -> La
     else:
         return NO_LAYOUT
     item, _ = strip_optional(resolve_alias(item))
+    if members := union_members(item):
+        # A list of a union: each member's columns, in the order the members are named
+        layouts = [_item_layout(m, adapters) for m in members]
+        if not all(one.rows for one in layouts):
+            return NO_LAYOUT
+        return Layout(
+            order=tuple(dict.fromkeys(k for one in layouts for k in one.order)),
+            numeric=frozenset().union(*(one.numeric for one in layouts)),
+            hidden=frozenset().union(*(one.hidden for one in layouts)),
+            rows=True,
+        )
+    return _item_layout(item, adapters)
+
+
+def _item_layout(item: object, adapters: OutputAdapters | None) -> Layout:
+    """What ``T`` of a ``list[T]`` output declares of the table"""
     if adapters is not None and isinstance(item, type) and adapters.for_type(item) is not None:
         properties = adapters.node(item).get("properties", {})
         return Layout(

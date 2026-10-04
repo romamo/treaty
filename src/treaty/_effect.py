@@ -15,7 +15,7 @@ import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ._types import is_dataclass_type, strip_optional
+from ._types import is_dataclass_type, strip_optional, union_members
 
 if TYPE_CHECKING:
     from ._adapters import OutputAdapters
@@ -39,6 +39,8 @@ def can_carry(output_type: object, name: str, adapters: OutputAdapters | None = 
     """A dataclass with the field ``name``, a class an output adapter writes whose schema
     requires the key ``name``, or a dict checked at run time"""
     base, _ = strip_optional(output_type)
+    if members := union_members(base):
+        return all(can_carry(m, name, adapters) for m in members)
     if is_dataclass_type(base):
         assert isinstance(base, type)
         return any(f.name == name for f in dataclasses.fields(base))
@@ -51,7 +53,10 @@ def can_carry(output_type: object, name: str, adapters: OutputAdapters | None = 
 def lists_unrequired(output_type: object, name: str, adapters: OutputAdapters | None) -> bool:
     """An adapted class whose schema lists ``name`` but does not require it: an
     ``x-volatile`` key, which ``--stable-output`` leaves out, so ``data`` may lack it"""
-    node = _adapted_node(strip_optional(output_type)[0], adapters)
+    base, _ = strip_optional(output_type)
+    if members := union_members(base):
+        return any(lists_unrequired(m, name, adapters) for m in members)
+    node = _adapted_node(base, adapters)
     if node is None:
         return False
     properties = node.get("properties")
@@ -70,8 +75,9 @@ def _adapted_node(base: object, adapters: OutputAdapters | None) -> dict[str, An
 def with_replay_effect(schema: dict[str, Any]) -> dict[str, Any]:
     """An idempotent replay reports ``effect: "noop"``, so a closed ``effect`` enum in the
     output schema must admit it, or the replay breaks the schema agents validate against"""
-    if "anyOf" in schema:
-        return {**schema, "anyOf": [with_replay_effect(s) for s in schema["anyOf"]]}
+    for key in ("anyOf", "oneOf"):
+        if key in schema:
+            return {**schema, key: [with_replay_effect(s) for s in schema[key]]}
     effect = schema.get("properties", {}).get("effect")
     if not isinstance(effect, dict):
         return schema

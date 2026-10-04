@@ -15,13 +15,19 @@ import json
 import typing
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import MISSING, dataclass, field
-from enum import Enum
+from enum import Enum, Flag
 from typing import Any
 
 from ._adapters import OutputAdapters, branch, untyped
-from ._errors import RegistrationError
+from ._errors import RegistrationError, SchemaError
 from ._refs import EMPTY_DEFS, defs_of, deref
-from ._types import is_dataclass_type, resolve_alias, strip_optional, type_hints
+from ._types import (
+    is_dataclass_type,
+    resolve_alias,
+    strip_optional,
+    type_hints,
+    union_members,
+)
 
 OUT_META = "treaty.out"
 
@@ -139,6 +145,121 @@ def is_binary(value: object) -> bool:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Member:
+    """One type of an output union, by the keys that tell its JSON objects apart"""
+
+    tp: type
+    properties: frozenset[str]
+    """Every key its objects may have"""
+    required: frozenset[str]
+    """The keys its objects always have, under ``--stable-output`` too"""
+    tags: Mapping[str, frozenset[str]]
+    """A required key whose values are a fixed set, a ``Literal`` or an enum: the
+    canonical JSON of each value"""
+
+    def fits(self, value: Mapping[str, object]) -> bool:
+        if not self.required <= value.keys() or not value.keys() <= self.properties:
+            return False
+        return all(canonical(value[k]) in values for k, values in self.tags.items())
+
+
+def union_of(tp: object, adapters: OutputAdapters) -> tuple[Member, ...]:
+    """The members of an output union ``A | B``, each a dataclass or a class an output
+    adapter writes as an object, and every one told apart from the others by a tag field
+    or by a required key no other member has; ``()`` when ``tp`` is not a union. An
+    untagged union is a SchemaError, since an agent could not tell which shape it has."""
+    types_ = union_members(tp)
+    if not types_:
+        return ()
+    members = tuple(_member(t, tp, adapters) for t in types_)
+    if _tag(members) is None and not all(_own_keys(m, members) for m in members):
+        names = [m.tp.__qualname__ for m in members]
+        example = " and ".join(f'kind: Literal["{n.lower()}"] on {n}' for n in names[:2])
+        raise SchemaError(
+            f"output union {tp!r}: an agent cannot tell {', '.join(names)} apart; add a tag "
+            f"field to each member, such as {example}, or give each a required field no "
+            "other member has"
+        )
+    return members
+
+
+def pick(value: object, members: Sequence[Member], tp: object) -> type:
+    """The member of an output union ``value``, a JSON object, is an instance of"""
+    if isinstance(value, Mapping):
+        for m in members:
+            if m.fits(value):
+                return m.tp
+    names = ", ".join(m.tp.__qualname__ for m in members)
+    kind = "an object" if isinstance(value, Mapping) else type(value).__name__
+    raise SchemaError(f"{kind} that is none of {names}, the members of {tp!r}")
+
+
+def _member(tp: object, union: object, adapters: OutputAdapters) -> Member:
+    if isinstance(tp, type) and adapters.for_type(tp) is not None:
+        node = adapters.node(tp)
+        properties = node.get("properties")
+        if node.get("type") == "object" and isinstance(properties, dict):
+            required = frozenset(node.get("required", ()))
+            tags = {
+                k: values
+                for k, prop in properties.items()
+                if k in required and (values := _schema_values(prop)) is not None
+            }
+            return Member(tp, frozenset(properties), required, tags)
+    elif is_dataclass_type(tp):
+        assert isinstance(tp, type)
+        hints = type_hints(tp)
+        fields = dataclasses.fields(tp)
+        required = frozenset(f.name for f in fields if not out_spec(f).volatile)
+        tags = {
+            f.name: values
+            for f in fields
+            if f.name in required and (values := _type_values(hints[f.name])) is not None
+        }
+        return Member(tp, frozenset(f.name for f in fields), required, tags)
+    raise SchemaError(
+        f"unsupported union {union!r}; an output union is of dataclasses, or classes an "
+        "output adapter writes as objects, each with a tag field; else only 'X | None' is "
+        "allowed"
+    )
+
+
+def _type_values(tp: object) -> frozenset[str] | None:
+    """The values a ``Literal`` or enum field holds, as its schema's ``enum`` lists them"""
+    tp = resolve_alias(tp)
+    if typing.get_origin(tp) is typing.Literal:
+        return frozenset(canonical(v) for v in typing.get_args(tp))
+    if isinstance(tp, type) and issubclass(tp, Enum) and not issubclass(tp, Flag):
+        return frozenset(canonical(m.value) for m in tp)
+    return None
+
+
+def _schema_values(prop: object) -> frozenset[str] | None:
+    if not isinstance(prop, Mapping):
+        return None
+    if "const" in prop:
+        return frozenset({canonical(prop["const"])})
+    values = prop.get("enum")
+    return frozenset(canonical(v) for v in values) if isinstance(values, list) else None
+
+
+def _tag(members: Sequence[Member]) -> str | None:
+    """A key every member requires, whose values no two members share"""
+    shared = set.intersection(*(set(m.tags) for m in members))
+    for key in sorted(shared):
+        values = [m.tags[key] for m in members]
+        if sum(len(v) for v in values) == len(frozenset[str]().union(*values)):
+            return key  # no value in two members
+    return None
+
+
+def _own_keys(member: Member, members: Sequence[Member]) -> bool:
+    """``member`` requires a key no other member has"""
+    others = set().union(*(m.properties for m in members if m is not member))
+    return bool(member.required - others)
+
+
 def data_path(path: Sequence[str | int]) -> str:
     """Where a value sits in the envelope, as warnings name it: ``data.items[3].token``"""
     out = "data"
@@ -163,6 +284,10 @@ def arrange(
     ``stable``, its volatile fields dropped; ``spec`` declares the array ``value`` is. A
     class an output adapter writes is arranged by its schema's ``x-`` options."""
     base, _ = strip_optional(resolve_alias(tp))
+    if (members := union_of(base, adapters)) and value is not None:
+        # The member the value is, which its keys and tag tell; none is a broken output
+        member = pick(value, members, base)
+        return arrange(value, member, spec, adapters=adapters, stable=stable)
     if adapters.for_type(base) is not None:
         assert isinstance(base, type)
         node = adapters.node(base)
@@ -340,23 +465,25 @@ def check_order(
             item = resolve_alias(args[0])
         elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
             item = resolve_alias(args[0])  # a fixed tuple is never sorted
-        if adapters.for_type(item) is not None:
-            assert isinstance(item, type)
-            _check_adapted_key(adapters.node(item), item, where, spec.sort_key)
-        elif not is_dataclass_type(item):
-            raise RegistrationError(
-                f"{where}: sort_key={spec.sort_key!r} orders an array of dataclasses, not {tp!r}"
-            )
-        else:
-            assert isinstance(item, type)
-            hints = type_hints(item)
-            if spec.sort_key not in {f.name for f in dataclasses.fields(item)} or not can_sort_by(
-                hints.get(spec.sort_key)
-            ):
+        # An array of a union: each member has the key
+        for one in union_members(item) or (item,):
+            if adapters.for_type(one) is not None:
+                assert isinstance(one, type)
+                _check_adapted_key(adapters.node(one), one, where, spec.sort_key)
+            elif not is_dataclass_type(one):
                 raise RegistrationError(
-                    f"{where}: sort_key={spec.sort_key!r} must name a str, int, Enum, or date "
-                    f"field of {item.__qualname__}"
+                    f"{where}: sort_key={spec.sort_key!r} orders an array of dataclasses, "
+                    f"not {tp!r}"
                 )
+            else:
+                assert isinstance(one, type)
+                hints = type_hints(one)
+                names = {f.name for f in dataclasses.fields(one)}
+                if spec.sort_key not in names or not can_sort_by(hints.get(spec.sort_key)):
+                    raise RegistrationError(
+                        f"{where}: sort_key={spec.sort_key!r} must name a str, int, Enum, or "
+                        f"date field of {one.__qualname__}"
+                    )
     if spec.ordered and origin not in (list, tuple, dict) and not _untyped(base):
         raise RegistrationError(f"{where}: ordered=True is for arrays, not {tp!r}")
     for arg in args:

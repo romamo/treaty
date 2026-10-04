@@ -20,7 +20,7 @@ import shlex
 import time
 import types
 import typing
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -62,6 +62,7 @@ from ._types import (
     signature,
     strip_optional,
     type_hints,
+    union_members,
 )
 from ._values import InvalidValue, SchemaVersion
 
@@ -1806,20 +1807,25 @@ def output_fields(
         yield from output_fields(hints[f.name], path, seen | {base})
 
 
-def _object_items(tp: object, adapters: OutputAdapters) -> type | None:
+def _object_items(tp: object, adapters: OutputAdapters) -> tuple[type, ...]:
     """The object items of a ``list[T]`` or ``tuple[T, ...]``, which treaty sorts: a
-    dataclass, or a class an output adapter writes"""
+    dataclass, or a class an output adapter writes; each member of an output union ``T``.
+    ``()`` when the items are not objects"""
     base, _ = strip_optional(resolve_alias(tp))
     args = typing.get_args(base)
     origin = typing.get_origin(base)
-    item = None
+    item: object = None
     if origin is list and args:
         item = resolve_alias(args[0])
     elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
         item = resolve_alias(args[0])
-    if not isinstance(item, type):
-        return None
-    return item if is_dataclass_type(item) or adapters.for_type(item) is not None else None
+    members = union_members(item) or (item,)
+    found = tuple(
+        m
+        for m in members
+        if isinstance(m, type) and (is_dataclass_type(m) or adapters.for_type(m) is not None)
+    )
+    return found if len(found) == len(members) else ()
 
 
 def _inner_object_arrays(tp: object, adapters: OutputAdapters) -> Iterator[type]:
@@ -1832,9 +1838,9 @@ def _inner_object_arrays(tp: object, adapters: OutputAdapters) -> Iterator[type]
     for arg in typing.get_args(base):
         if arg is Ellipsis:
             continue
-        item = _object_items(arg, adapters)
-        if item is not None:
-            yield item
+        items = _object_items(arg, adapters)
+        if items:
+            yield items[0]
         yield from _inner_object_arrays(arg, adapters)
 
 
@@ -1858,10 +1864,13 @@ def _sort_fields(cls: type, adapters: OutputAdapters) -> list[str]:
     ]
 
 
-def _id_like(cls: type, adapters: OutputAdapters) -> str | None:
-    """The field an array of ``cls`` is most likely keyed by, of those a ``sort_key``
-    can name; None when no field can be one"""
-    names = _sort_fields(cls, adapters)
+def _id_like(classes: Sequence[type], adapters: OutputAdapters) -> str | None:
+    """The field an array of ``classes`` is most likely keyed by, of those a ``sort_key``
+    can name on each of them, as an array of an output union needs; None when no field
+    can be one"""
+    names = _sort_fields(classes[0], adapters)
+    for cls in classes[1:]:
+        names = [n for n in names if n in _sort_fields(cls, adapters)]
     for pattern in (r"^id$", r"_id$", r"^(key|name|slug)$"):
         found = next((n for n in names if re.search(pattern, n)), None)
         if found is not None:
@@ -1869,13 +1878,17 @@ def _id_like(cls: type, adapters: OutputAdapters) -> str | None:
     return names[0] if names else None
 
 
-def _order_fix(cls: type, sort_key: str, ordered: str, adapters: OutputAdapters) -> str:
-    """The fix for an array of ``cls`` with no declared order, in the two spellings given
-    as templates with ``{key}``"""
-    key = _id_like(cls, adapters)
+def _order_fix(
+    classes: Sequence[type], sort_key: str, ordered: str, adapters: OutputAdapters
+) -> str:
+    """The fix for an array of ``classes`` with no declared order, in the two spellings
+    given as templates with ``{key}``"""
+    key = _id_like(classes, adapters)
     keep = f"{ordered} to keep the handler's order, as a ranking needs"
     if key is None:
-        return f"{keep}; no field of {cls.__qualname__} can be a sort_key"
+        names = " and ".join(c.__qualname__ for c in classes)
+        field = "field" if len(classes) == 1 else "field they share"
+        return f"{keep}; no {field} of {names} can be a sort_key"
     return f"{sort_key.format(key=key)} to order it by a field for a stable listing, or {keep}"
 
 
@@ -1934,8 +1947,8 @@ def _stable_order(app: App) -> Iterator[Finding]:
                 'treaty.Out(sort_key="id") or treaty.Out(ordered=True), or ordered=True to '
                 "keep the handler's order of every array inside",
             )
-        item = _object_items(c.output_type, adapters)
-        if item is not None and c.order.sort_key is None and not c.order.ordered:
+        items = _object_items(c.output_type, adapters)
+        if items and c.order.sort_key is None and not c.order.ordered:
             # A warning, not advice: sorting by JSON text silently reorders the data, such
             # as "10.00" before "5.00", and a clean --strict audit should not allow that
             yield Finding(
@@ -1944,7 +1957,7 @@ def _stable_order(app: App) -> Iterator[Finding]:
                 c.path.value,
                 "returns an array of objects with no declared order, so treaty sorts it by "
                 "each item's JSON text, not the order the handler built (REQ-F-020)",
-                _order_fix(item, 'sort_key="{key}"', "ordered=True", adapters),
+                _order_fix(items, 'sort_key="{key}"', "ordered=True", adapters),
             )
         for item in _inner_object_arrays(c.output_type, adapters):
             yield _inner_array(c, "output", item)
@@ -1952,8 +1965,8 @@ def _stable_order(app: App) -> Iterator[Finding]:
             for inner in _inner_object_arrays(hint, adapters):
                 yield _inner_array(c, f"output field {where}", inner)
             spec = out_spec(f)
-            item = _object_items(hint, adapters)
-            if item is not None and spec.sort_key is None and not spec.ordered:
+            items = _object_items(hint, adapters)
+            if items and spec.sort_key is None and not spec.ordered:
                 yield Finding(
                     "stable-order",
                     Severity.WARNING,
@@ -1962,7 +1975,7 @@ def _stable_order(app: App) -> Iterator[Finding]:
                     "treaty sorts it by each item's JSON text, not the order the handler "
                     "built (REQ-F-020)",
                     _order_fix(
-                        item,
+                        items,
                         f'{f.name}: ... = treaty.Out(sort_key="{{key}}")',
                         "treaty.Out(ordered=True)",
                         adapters,
@@ -2891,10 +2904,11 @@ def _effects(schema: object) -> set[str] | None:
     """The ``effect`` values an output schema admits; None when it is open or absent"""
     if not isinstance(schema, dict):
         return None
-    if "anyOf" in schema:
-        found = [_effects(s) for s in schema["anyOf"]]
-        values = [v for v in found if v is not None]
-        return set().union(*values) if values else None
+    for key in ("anyOf", "oneOf"):
+        if key in schema:
+            found = [_effects(s) for s in schema[key]]
+            values = [v for v in found if v is not None]
+            return set().union(*values) if values else None
     effect = schema.get("properties", {}).get("effect")
     if not isinstance(effect, dict):
         return None
