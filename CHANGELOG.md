@@ -68,7 +68,8 @@ Apps built on treaty keep their own, structured schema changelog with
   or other output-adapted model (which registration refused before), a list of models, a
   dataclass, and arrays nested in a list or dict. A field's `Out(sort_key=)` or a
   property's `x-sort-key` still sorts its own array. The output schema marks each kept
-  array `"x-ordered": true` beside the root's. Without `ordered=True` arrays are sorted as
+  array `"x-ordered": true` beside the root's, and a field's `Out(sort_key=)` array
+  `"x-sort-key"` instead, in an ordered command's schema only. Without `ordered=True` arrays are sorted as
   before unless a property declares `x-ordered`. The `stable-order` audit asks nothing of
   an ordered command, and its advice for a model's array, like the error for
   `Out(ordered=True)` on a field that is not an array, names both routes: `ordered=True`

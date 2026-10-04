@@ -188,3 +188,60 @@ def test_out_ordered_on_a_field_that_is_not_an_array_names_x_ordered() -> None:
         @app.command("w", description="W", danger_level="safe", exit_codes=())
         def w(args: NoArgs, ctx: Ctx) -> Wrap:
             return Wrap(a_run())
+
+
+@dataclass(frozen=True, slots=True)
+class Line:
+    n: int
+
+
+@dataclass(frozen=True, slots=True)
+class Lines:
+    lines: list[Line] = Out(sort_key="n")
+
+
+def lines_app(ordered: bool) -> App:
+    app = App("demo", version="0.1.0")
+
+    @app.command("d", description="D", danger_level="safe", exit_codes=(), ordered=ordered)
+    def d(args: NoArgs, ctx: Ctx) -> Lines:
+        return Lines([Line(2), Line(3), Line(1)])
+
+    return app
+
+
+def test_an_ordered_command_still_sorts_and_never_marks_a_sort_key_field() -> None:
+    # The field's own Out(sort_key=) sorts its array, so the schema must not say it is kept
+    app = lines_app(True)
+    assert run(app, ["d"])["data"] == {"lines": [{"n": 1}, {"n": 2}, {"n": 3}]}
+    lines = run(app, ["d", "--output-schema"])["data"]["properties"]["lines"]
+    assert "x-ordered" not in lines
+    assert lines["x-sort-key"] == "n"
+
+
+def test_an_unordered_command_publishes_the_schema_it_did_before() -> None:
+    app = lines_app(False)
+    assert run(app, ["d"])["data"] == {"lines": [{"n": 1}, {"n": 2}, {"n": 3}]}
+    schema = run(app, ["d", "--output-schema"])["data"]
+    # As 1.0.0rc33 published it: no x-sort-key or x-ordered on an unordered command
+    assert json.dumps(schema, sort_keys=True) == json.dumps(
+        {
+            "type": "object",
+            "title": "Lines",
+            "properties": {
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "title": "Line",
+                        "properties": {"n": {"type": "integer"}},
+                        "additionalProperties": False,
+                        "required": ["n"],
+                    },
+                }
+            },
+            "additionalProperties": False,
+            "required": ["lines"],
+        },
+        sort_keys=True,
+    )

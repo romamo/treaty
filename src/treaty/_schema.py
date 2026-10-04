@@ -49,11 +49,15 @@ from ._types import (
 JsonSchema = dict[str, Any]
 
 
-def schema_for(tp: object, scalars: ScalarRegistry, *, output: bool = False) -> JsonSchema:
+def schema_for(
+    tp: object, scalars: ScalarRegistry, *, output: bool = False, ordered: bool = False
+) -> JsonSchema:
     """Return a draft-07 schema fragment for a supported annotation; ``output`` for what a
-    handler returns, rather than what a command accepts"""
+    handler returns, rather than what a command accepts; ``ordered`` for the output of a
+    command declared ``ordered=True``, where a field's ``Out(sort_key=)`` is published as
+    ``x-sort-key``, so the array it sorts is not marked kept (#329)"""
     if output and _DEFS.get() is None:
-        return _output_root(tp, scalars)
+        return _output_root(tp, scalars, ordered=ordered)
     tp = resolve_alias(tp)
     if tp is object or tp is Any:
         return {}
@@ -227,7 +231,8 @@ class _Defs:
     """The ``$defs`` of one output schema being built: a key for each dataclass that holds
     itself, and the definitions an output adapter's schema brought"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, ordered: bool) -> None:
+        self.ordered = ordered
         self.keys: dict[type, str] = {}
         self.schemas: dict[str, JsonSchema] = {}
 
@@ -263,9 +268,9 @@ _DEFS: contextvars.ContextVar[_Defs | None] = contextvars.ContextVar(
 )
 
 
-def _output_root(tp: object, scalars: ScalarRegistry) -> JsonSchema:
+def _output_root(tp: object, scalars: ScalarRegistry, *, ordered: bool) -> JsonSchema:
     """An output schema, with ``$defs`` at its root when a type in it holds itself"""
-    defs = _Defs()
+    defs = _Defs(ordered=ordered)
     token = _DEFS.set(defs)
     try:
         schema = schema_for(tp, scalars, output=True)
@@ -327,6 +332,11 @@ def _dataclass_fields_schema(cls: type, scalars: ScalarRegistry, output: bool) -
         spec = out_spec(f)
         if output and spec.ordered:
             prop = {**prop, "x-ordered": True}
+        root = _DEFS.get()
+        if output and spec.sort_key is not None and root is not None and root.ordered:
+            # Only an ordered command's schema says so: there it tells the array this
+            # field sorts from the ones the command keeps (#329)
+            prop = {**prop, "x-sort-key": spec.sort_key}
         if output and spec.volatile:
             prop = {**prop, "x-volatile": True}
         if output and _masked(f.name, spec.high_entropy, prop):

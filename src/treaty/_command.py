@@ -748,7 +748,7 @@ def build_command(
             )
     if len(set(exit_codes)) != len(exit_codes):
         raise RegistrationError(f"{path}: duplicate exit code names")
-    output_schema = schema_for(output_type, scalars, output=True)
+    output_schema = schema_for(output_type, scalars, output=True, ordered=ordered)
     # A type that holds itself: its $defs stay at the root, whatever wraps the schema
     output_defs = dict(defs_of(output_schema))
     output_schema = {k: v for k, v in output_schema.items() if k != DEFS_KEY}
