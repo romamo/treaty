@@ -37,6 +37,15 @@ Apps built on treaty keep their own, structured schema changelog with
   indexes (`[2].hi` at the top of a list, `["a.b"]` for a key holding a dot or a
   bracket). It names keys and indexes only, never a value, and a key that is a secret
   value is redacted in both; a failure at the root has no path. `SchemaError.at` carries the parts (#330)
+- A target takes a dotted attribute path, `module:obj.attr` at any depth, so
+  `treaty scaffold-from argparse bean.cli:app._build_parser` reads the parser an
+  agentyper app's private `_build_parser` method builds; the click/typer chapter's
+  agentyper section shows it. `audit`, `schema-lock`, `changelog-add`, `agents-md`,
+  `check-docs`, `conformance`, and `treaty-mcp` load their App through the same import
+  and take one too. A name missing anywhere on the path exits 5 with `NOT_FOUND`, as an
+  unknown name does; an empty name, as in `module:app.`, or a dunder name, as in
+  `module:app.__class__`, exits 2. A name that exists but whose getter raises is the
+  app's own error, not `NOT_FOUND` (#334)
 
 ### Changed
 

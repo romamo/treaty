@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import json
 import os
 import stat
@@ -78,13 +79,28 @@ cli.exit_code(
 BLOCKING = frozenset({Severity.ERROR, Severity.WARNING})
 
 
-def check_target(target: str) -> None:
-    """``module:attribute``, checked in phase 1 so a malformed target exits 2"""
+MISSING = object()
+TARGET_SHAPE = "target must be module:attribute, or module:attribute.attribute, with no dunder name"
+
+
+def split_target(target: str) -> tuple[str, tuple[str, ...]] | None:
+    """The module and the attribute path of ``module:obj.attr``, any depth; None when
+    either part is missing, a dotted name is empty, or a name is a dunder such as
+    ``__class__``, which leaves the app for the interpreter's internals"""
     module_name, sep, attr = target.partition(":")
-    if not sep or not module_name or not attr:
-        raise ParseError(
-            "target must be module:attribute", context={"argument": "target", "target": target}
-        )
+    names = tuple(attr.split("."))
+    if not sep or not module_name or not all(names):
+        return None
+    if any(name.startswith("__") and name.endswith("__") for name in names):
+        return None
+    return module_name, names
+
+
+def check_target(target: str) -> None:
+    """``module:attribute``, or a dotted attribute path such as ``module:app._build_parser``,
+    checked in phase 1 so a malformed target exits 2"""
+    if split_target(target) is None:
+        raise ParseError(TARGET_SHAPE, context={"argument": "target", "target": target})
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,10 +192,12 @@ def load_app(target: str, cwd: Path) -> App:
 
 def import_target(target: str, cwd: Path) -> object:
     """The object at ``target``, importable from ``cwd``: importing runs the module's
-    top-level code"""
-    module_name, sep, attr = target.partition(":")
-    if not sep or not module_name or not attr:
-        raise Exit.ARG_ERROR("target must be module:attribute", context={"target": target})
+    top-level code. A dotted attribute path, ``module:obj.attr``, reads each attribute
+    of the one before it"""
+    parts = split_target(target)
+    if parts is None:
+        raise Exit.ARG_ERROR(TARGET_SHAPE, context={"target": target})
+    module_name, names = parts
     where = str(cwd)
     if where not in sys.path:
         sys.path.insert(0, where)
@@ -204,11 +222,24 @@ def import_target(target: str, cwd: Path) -> object:
             },
             fix_required="fix the error in the app's module; the message names it",
         ) from None
-    obj = getattr(module, attr, None)
-    if obj is None:
-        raise Exit.NOT_FOUND(
-            f"Module {module_name} has no attribute {attr}", context={"target": target}
-        )
+    obj: object = module
+    for name in names:
+        try:
+            value = getattr(obj, name)
+        except AttributeError:
+            if inspect.getattr_static(obj, name, MISSING) is not MISSING:
+                # The name exists and its getter raised: the app's own bug, not a typo
+                raise
+            raise Exit.NOT_FOUND(
+                f"Module {module_name} has no attribute {'.'.join(names)}",
+                context={"target": target},
+            ) from None
+        if value is None:
+            raise Exit.NOT_FOUND(
+                f"Module {module_name} has no attribute {'.'.join(names)}",
+                context={"target": target},
+            )
+        obj = value
     return obj
 
 
@@ -658,8 +689,9 @@ class ScaffoldFromArgs:
     )
     target: str = Arg(
         description="Import path of the typer.Typer, click group, or argparse parser (or a "
-        "function that only builds and returns the parser), as module:attribute; importing "
-        "runs the module's top-level code"
+        "function that only builds and returns the parser), as module:attribute, or a "
+        "dotted path such as module:app._build_parser; importing runs the module's "
+        "top-level code"
     )
     out: Path | None = Flag(
         default=None,
