@@ -227,7 +227,7 @@ def test_a_mutating_dry_run_sets_meta_dry_run() -> None:
     assert code == 0 and env["data"] == {"effect": "would_update"}
     assert meta_of(env)["dry_run"] is True
     envelope = rename_app().call("rename", {"name": "shop", "dry_run": True}, env={})
-    assert envelope.exit_code == 0 and envelope.extra_meta["dry_run"] is True
+    assert envelope.exit_code == 0 and envelope.meta.dry_run is True
 
 
 def test_a_live_mutating_run_has_no_meta_dry_run() -> None:
@@ -330,7 +330,7 @@ def test_safe_default_argument_errors_carry_dry_run() -> None:
     code, env = run(make_app(safe_default=True), ["purge", "--bogus"])
     assert code == 2 and meta_of(env)["dry_run"] is True
     envelope = make_app(safe_default=True).call("purge", {"bogus": 1}, env={})
-    assert envelope.exit_code == 2 and envelope.extra_meta["dry_run"] is True
+    assert envelope.exit_code == 2 and envelope.meta.dry_run is True
 
 
 def test_live_is_unknown_on_other_commands() -> None:

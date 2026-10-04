@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,
+  `total`, and `effects`, and `dry_run` and `partial`, as typed optional fields of `Meta`
+  (`env.meta.effects`), where they used to land in the undocumented `Envelope.extra_meta`.
+  `extra_meta` keeps the `meta` keys `Meta` does not declare and refuses one it does; the
+  JSON envelope is byte for byte as before. The README and docs/api.md now describe both
+  (#348)
+
 ## [1.0.0rc34] - 2026-10-04
 
 The 34th 1.0 release candidate: 2 breaking changes, 5 additions, 2 changes, and 3 fixes.

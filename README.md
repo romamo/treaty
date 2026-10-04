@@ -2070,6 +2070,18 @@ idempotent too, `destructive` to
 destructive, and `has_network_io` to open-world. `App.call(path, arguments)` is public
 for other in-process adapters.
 
+`App.call` returns an `Envelope` whose `meta` is a `Meta`: the keys every envelope has,
+`retries`, and the stream and run keys `seq`, `end`, `total`, `effects`, `dry_run`, and
+`partial` as typed fields, `None` when the response leaves them out. Every other `meta` key,
+such as `pagination`, `confirmed`, `truncated`, or `config_sources`, is in the
+`Envelope.extra_meta` mapping; `to_json()` merges both into the one `meta` object:
+
+```python
+env = app.call("operator.run", {"dry_run": True})
+assert env.meta.dry_run is True and env.meta.effects == {"would_create": 3}
+assert env.meta.total == 3
+```
+
 ### An app's own `mcp serve`
 
 `treaty-mcp module:app` takes no startup flags. An app whose server needs some (which

@@ -155,6 +155,9 @@ above). `Ctx.config` was already private (`_config_file`, workstream 02).
   `tool_version`, `cwd`, `trace_id`, `project_root`, `retries`, plus the conditional keys
   the README lists (`pagination`, `config_sources`, `update_available`, `not_modified`,
   and the like); optional keys are absent, never null
+- `Meta` declares the keys above and the stream and run keys `seq`, `end`, `total`,
+  `effects`, `dry_run`, and `partial` as fields, `None` when absent; `Envelope.extra_meta`
+  holds every other `meta` key and refuses one `Meta` declares
 - `error`: `code`, `message`, `retryable`, `detail`, `cause`, `context`, `suggestion`,
   `fix_command`, `retry_after_ms`, `fix_required`, `phase`, `errors`, `alternatives`,
   `hint`, `auth_methods`, `retries_exhausted`, `retry_strategy`, `conflict_id`,

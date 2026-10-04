@@ -410,6 +410,22 @@ class Meta:
     """The directory holding a ``project_root=`` marker, when one was found"""
     retries: int = 0
     """Retries ``ctx.retry`` made; 0 is left out"""
+    seq: int | None = None
+    """A stream event's position, from 1; on a stream's last line, the events delivered
+    (REQ-O-004)"""
+    end: bool | None = None
+    """True on a stream's summary line"""
+    total: int | None = None
+    """A stream's event count: on its summary line, and on the buffered answer that
+    ``--no-stream`` and ``App.call`` collect"""
+    effects: Mapping[str, int] | None = None
+    """A mutating stream's count of events per ``effect`` value (REQ-O-004)"""
+    dry_run: bool | None = None
+    """Whether nothing was applied: a preview, a dry run, or a ``safe_default`` run
+    without ``--live`` (REQ-O-048)"""
+    partial: bool | None = None
+    """On a failed or cancelled stream, cancellation, or exec plan, whether some of the
+    work was done first"""
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -429,7 +445,78 @@ class Meta:
             out["project_root"] = self.project_root
         if self.retries:
             out["retries"] = self.retries
+        out.update(stream_meta(self))
         return out
+
+
+_STREAM_KEYS = frozenset({"seq", "end", "total", "effects", "dry_run", "partial"})
+"""The optional ``meta`` keys ``Meta`` declares beside the ones every envelope has"""
+_META_KEYS = frozenset(f.name for f in dataclasses.fields(Meta))
+
+
+def stream_meta(meta: Meta) -> dict[str, object]:
+    """The keys a stream, a dry run, or a partial run adds to ``meta``, as JSON"""
+    out: dict[str, object] = {}
+    if meta.seq is not None:
+        out["seq"] = meta.seq
+    if meta.end is not None:
+        out["end"] = meta.end
+    if meta.total is not None:
+        out["total"] = meta.total
+    if meta.effects is not None:
+        out["effects"] = dict(meta.effects)
+    if meta.dry_run is not None:
+        out["dry_run"] = meta.dry_run
+    if meta.partial is not None:
+        out["partial"] = meta.partial
+    return out
+
+
+def absorb_meta(meta: Meta, keys: Mapping[str, object]) -> tuple[Meta, dict[str, object]]:
+    """``meta`` with the keys it declares taken from ``keys``, and the keys left over for
+    ``Envelope.extra_meta``; a declared key of the wrong type raises"""
+    absorbed = dataclasses.replace(
+        meta,
+        seq=_whole(keys, "seq", meta.seq),
+        end=_flag(keys, "end", meta.end),
+        total=_whole(keys, "total", meta.total),
+        effects=_counts(keys, meta.effects),
+        dry_run=_flag(keys, "dry_run", meta.dry_run),
+        partial=_flag(keys, "partial", meta.partial),
+    )
+    return absorbed, {k: v for k, v in keys.items() if k not in _STREAM_KEYS}
+
+
+def _whole(keys: Mapping[str, object], key: str, default: int | None) -> int | None:
+    if key not in keys:
+        return default
+    value = keys[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RegistrationError(f"envelope: meta.{key} must be a whole number, got {value!r}")
+    return value
+
+
+def _flag(keys: Mapping[str, object], key: str, default: bool | None) -> bool | None:
+    if key not in keys:
+        return default
+    value = keys[key]
+    if not isinstance(value, bool):
+        raise RegistrationError(f"envelope: meta.{key} must be a boolean, got {value!r}")
+    return value
+
+
+def _counts(
+    keys: Mapping[str, object], default: Mapping[str, int] | None
+) -> Mapping[str, int] | None:
+    if "effects" not in keys:
+        return default
+    value = keys["effects"]
+    if not isinstance(value, Mapping) or not all(
+        isinstance(k, str) and isinstance(n, int) and not isinstance(n, bool) and n >= 0
+        for k, n in value.items()
+    ):
+        raise RegistrationError(f"envelope: meta.effects must count effects, got {value!r}")
+    return dict(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,7 +527,8 @@ class Envelope:
     meta: Meta
     warnings: Sequence[WarningDetail] = ()
     extra_meta: Mapping[str, object] = field(default_factory=dict)
-    """Keys a response adds besides the framework's, such as ``pagination``"""
+    """The ``meta`` keys ``Meta`` does not declare, such as ``pagination``; a key it
+    declares, such as a stream's ``effects`` or ``total``, is refused here"""
     _tagged: bool = field(default=False, repr=False, compare=False)
     """``data`` carries the trust tags of external content, which plain output prints as
     one line instead (#198); not part of the envelope"""
@@ -454,6 +542,11 @@ class Envelope:
             raise RegistrationError("envelope: error must be present exactly when exit_code != 0")
         if self.data is not None and not isinstance(self.data, (dict, list)):
             raise RegistrationError("envelope: data must be an object, array, or null")
+        declared = sorted(_META_KEYS.intersection(self.extra_meta))
+        if declared:
+            raise RegistrationError(
+                f"envelope: extra_meta holds {', '.join(declared)}, which Meta declares"
+            )
 
     @property
     def ok(self) -> bool:
@@ -474,6 +567,18 @@ class Envelope:
             "warnings": clean([w.to_json() for w in self.warnings]),
             "meta": clean(meta),
         }
+
+
+def with_meta(envelope: Envelope, keys: Mapping[str, object]) -> Envelope:
+    """``envelope`` with ``keys`` added to its ``meta``: a key ``Meta`` declares sets that
+    field, any other lands in ``extra_meta``"""
+    meta, extra = absorb_meta(envelope.meta, keys)
+    return dataclasses.replace(envelope, meta=meta, extra_meta={**envelope.extra_meta, **extra})
+
+
+def added_meta(envelope: Envelope) -> dict[str, object]:
+    """Every ``meta`` key a response added to the ones every envelope has"""
+    return {**stream_meta(envelope.meta), **envelope.extra_meta}
 
 
 def serialize(envelope: Envelope) -> str:

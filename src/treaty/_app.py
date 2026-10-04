@@ -118,12 +118,15 @@ from ._envelope import (
     Redirect,
     RedirectReason,
     WarningDetail,
+    absorb_meta,
+    added_meta,
     clean,
     json_safe,
     open_escape,
     serialize,
     terminal_text,
     visible,
+    with_meta,
     write_envelope,
 )
 from ._envnames import DEPRECATED_ENV_VAR, check_env_names, declared_text, deprecated_name
@@ -3725,8 +3728,7 @@ def _still_running(running: Sequence[Pending]) -> Pending | None:
 
 def _terminal(envelope: Envelope) -> bool:
     """Whether an envelope ends its invocation: anything but a stream's event"""
-    meta = envelope.extra_meta
-    return not envelope.ok or "seq" not in meta or bool(meta.get("end"))
+    return not envelope.ok or envelope.meta.seq is None or bool(envelope.meta.end)
 
 
 def _mode_meta(command: Command) -> dict[str, object]:
@@ -3897,25 +3899,27 @@ def buffer_stream(
     # The events keep their trust tags, which a text format then leaves out (#336)
     tagged = False
     for last in drain(envelopes):
-        if last.ok and not last.extra_meta.get("end"):
+        if last.ok and not last.meta.end:
             events.append(last.data)
             warnings += last.warnings
             tagged = tagged or last._tagged
     assert last is not None, "a stream always ends with a terminal envelope"
-    meta = {k: v for k, v in last.extra_meta.items() if k not in ("seq", "end", "pagination")}
+    extra = {k: v for k, v in last.extra_meta.items() if k != "pagination"}
     merged = list(last.warnings)
     for warning in warnings:
         if warning not in merged:
             merged.append(warning)
+    meta = dataclasses.replace(last.meta, seq=None, end=None, total=len(events))
     counted = None if effects is None else effects()
     if counted is not None:
         # REQ-O-004: also on a failure, whose data keeps the events it counts
-        meta["effects"] = dict(counted)
+        meta = dataclasses.replace(meta, effects=dict(counted))
     return dataclasses.replace(
         last,
         data=events,
         warnings=tuple(merged),
-        extra_meta={**meta, "total": len(events)},
+        meta=meta,
+        extra_meta=extra,
         _tagged=tagged,
     )
 
@@ -4924,26 +4928,29 @@ class _Run:
             name = command.path.value
             version = (self.pinned or command.schema_version).value
             root = self.project_root(command)
+        common = Meta(
+            # REQ-O-007: what differs between identical calls is left out, and the
+            # required duration_ms is 0
+            duration_ms=0 if self.stable else int((time.perf_counter() - origin) * 1000),
+            request_id=None if self.stable else self.request_id,
+            command=name,
+            timestamp=None if self.stable else self.timestamp,
+            schema_version=version,
+            tool_version=self.app.version,
+            cwd=str(self.cwd),
+            trace_id=self.trace_id,
+            project_root=None if root is None else str(root),
+            retries=0 if self.retrier is None or self.stable else self.retrier.count,
+        )
+        # The keys Meta declares, such as a stream's seq, are its fields (#348)
+        declared, rest = absorb_meta(common, {**extra, **(meta or {})})
         return Envelope(
             exit_code=code,
             data=data,
             error=error,
-            meta=Meta(
-                # REQ-O-007: what differs between identical calls is left out, and the
-                # required duration_ms is 0
-                duration_ms=0 if self.stable else int((time.perf_counter() - origin) * 1000),
-                request_id=None if self.stable else self.request_id,
-                command=name,
-                timestamp=None if self.stable else self.timestamp,
-                schema_version=version,
-                tool_version=self.app.version,
-                cwd=str(self.cwd),
-                trace_id=self.trace_id,
-                project_root=None if root is None else str(root),
-                retries=0 if self.retrier is None or self.stable else self.retrier.count,
-            ),
+            meta=declared,
             warnings=self._shown_warnings(),
-            extra_meta={**extra, **(meta or {})},
+            extra_meta=rest,
         )
 
     def _shown_warnings(self) -> tuple[WarningDetail, ...]:
@@ -5187,7 +5194,7 @@ class _Run:
             if problem is not None:
                 message = f"Command {command.path} answered an id --format id cannot write: "
                 return self._broken(
-                    command, "INVALID_OUTPUT", message + problem, self.started, envelope.extra_meta
+                    command, "INVALID_OUTPUT", message + problem, self.started, added_meta(envelope)
                 )
         return envelope
 
@@ -5325,7 +5332,7 @@ class _Run:
         extra: dict[str, object] = {"dry_run": dry_run}
         if not dry_run:
             extra["confirmed"] = True
-        return dataclasses.replace(envelope, extra_meta={**envelope.extra_meta, **extra})
+        return with_meta(envelope, extra)
 
     def validated(self, meta: Mapping[str, object] | None) -> Envelope:
         """``--validate-only`` (REQ-O-009): phase 1 passed, so the command would run; the
@@ -7296,7 +7303,7 @@ class _Run:
                 if size <= self.cap.bytes:
                     kept.append(line)
                     continue
-                seq = envelope.extra_meta.get("seq")
+                seq = envelope.meta.seq
                 cut.append(record_dropped(self.cap, rerun, size, seq))
         else:
             sent = 0
