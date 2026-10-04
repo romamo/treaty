@@ -32,6 +32,11 @@ class Holder:
         self.app = app
         self.treaty_app = App("books", version="1.0.0", description="Keep the books")
 
+    @property
+    def broken(self) -> object:
+        """Exists, but its getter fails: the app's own bug, not a missing name"""
+        return self.unset  # type: ignore[attr-defined]
+
 
 app = Agentyper("bean")
 holder = Holder()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import json
 import os
 import stat
@@ -78,6 +79,7 @@ cli.exit_code(
 BLOCKING = frozenset({Severity.ERROR, Severity.WARNING})
 
 
+MISSING = object()
 TARGET_SHAPE = "target must be module:attribute, or module:attribute.attribute"
 
 
@@ -219,12 +221,22 @@ def import_target(target: str, cwd: Path) -> object:
         ) from None
     obj: object = module
     for name in names:
-        obj = getattr(obj, name, None)
-        if obj is None:
+        try:
+            value = getattr(obj, name)
+        except AttributeError:
+            if inspect.getattr_static(obj, name, MISSING) is not MISSING:
+                # The name exists and its getter raised: the app's own bug, not a typo
+                raise
+            raise Exit.NOT_FOUND(
+                f"Module {module_name} has no attribute {'.'.join(names)}",
+                context={"target": target},
+            ) from None
+        if value is None:
             raise Exit.NOT_FOUND(
                 f"Module {module_name} has no attribute {'.'.join(names)}",
                 context={"target": target},
             )
+        obj = value
     return obj
 
 

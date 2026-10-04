@@ -342,6 +342,18 @@ def test_a_missing_attribute_anywhere_on_the_path_is_not_found(path: str) -> Non
     assert str(error["message"]).rstrip(".") == f"Module {AGENTYPER} has no attribute {path}"
 
 
+def test_an_attribute_error_inside_a_getter_is_not_a_missing_name() -> None:
+    """``holder.broken`` exists; its getter raising AttributeError is the app's bug and
+    surfaces as a crash with the traceback, not as NOT_FOUND"""
+    code, envelope = run("scaffold-from", "argparse", f"{AGENTYPER}:holder.broken")
+    assert code == 1, envelope
+    assert isinstance(envelope, dict)
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "HANDLER_CRASHED"
+    assert error["context"]["exception"] == "AttributeError"  # type: ignore[index]
+
+
 @pytest.mark.parametrize("path", ["app.", ".app", "app..x", "", "."])
 def test_a_dotted_target_with_an_empty_name_is_an_argument_error(path: str) -> None:
     code, envelope = run("scaffold-from", "argparse", f"{AGENTYPER}:{path}")
