@@ -322,7 +322,7 @@ from ._subprocess import (
     Processes,
 )
 from ._suggest import closest, hint
-from ._table import table
+from ._table import Table, table
 from ._timeout import (
     DEADLINE_RESERVE,
     Heartbeat,
@@ -820,6 +820,11 @@ class App:
         ``plain`` and ``tsv`` are always offered, and registering one replaces its built-in
         renderer. ``json`` and ``jsonl`` are the response envelope agents read, and
         ``ndjson`` is ``data`` as JSON lines, so they take no renderer.
+
+        ``render`` gets ``data`` as the JSON envelope has it: on an ``external=True``
+        command, with the ``_source`` and ``_trusted`` trust tags, for the renderer to show
+        or leave out. ``table(...)`` leaves them out, as ``plain``'s built-in renderer does,
+        the ``UNTRUSTED_CONTENT`` warning on stderr saying the content is untrusted (#336).
 
         A name ``Format`` lacks, such as ``app.format("html", render=...,
         media_type="text/html")``, offers a new value: lowercase letters and digits, words
@@ -3686,7 +3691,23 @@ def _each(render: Renderer | None) -> Renderer | None:
     """A renderer takes one event; --no-stream data is the list of them"""
     if render is None:
         return None
-    return lambda events: "".join(render(e) for e in events)
+    return _Each(render)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Each:
+    render: Renderer
+
+    def __call__(self, events: list[object]) -> str:
+        return "".join(self.render(e) for e in events)
+
+
+def _sees_tags(render: Renderer) -> bool:
+    """Whether ``render`` gets an external command's trust tags in its data: an app's own
+    renderer does, as the JSON envelope has them; ``table``'s writes text a person or a
+    spreadsheet reads, where the tags would be columns of data, so it does not (#336)"""
+    inner = render.render if isinstance(render, _Each) else render
+    return not isinstance(inner, Table)
 
 
 def _ready(envelope: Envelope) -> Callable[[], Envelope]:
@@ -3869,10 +3890,13 @@ def buffer_stream(
     # An event's own warnings, such as what was masked in it, which the terminal lacks
     warnings: list[WarningDetail] = []
     last: Envelope | None = None
+    # The events keep their trust tags, which a text format then leaves out (#336)
+    tagged = False
     for last in drain(envelopes):
         if last.ok and not last.extra_meta.get("end"):
             events.append(last.data)
             warnings += last.warnings
+            tagged = tagged or last._tagged
     assert last is not None, "a stream always ends with a terminal envelope"
     meta = {k: v for k, v in last.extra_meta.items() if k not in ("seq", "end", "pagination")}
     merged = list(last.warnings)
@@ -3884,7 +3908,11 @@ def buffer_stream(
         # REQ-O-004: also on a failure, whose data keeps the events it counts
         meta["effects"] = dict(counted)
     return dataclasses.replace(
-        last, data=events, warnings=tuple(merged), extra_meta={**meta, "total": len(events)}
+        last,
+        data=events,
+        warnings=tuple(merged),
+        extra_meta={**meta, "total": len(events)},
+        _tagged=tagged,
     )
 
 
@@ -6979,6 +7007,8 @@ class _Run:
             data = clean(data)  # values as the JSON envelope has them (REQ-F-007)
             try:
                 if render is not None:
+                    if envelope._tagged and not _sees_tags(render):
+                        data = untagged(data)  # as on stdout (#336)
                     text = _rendered(render, data)
                 elif envelope._tagged:
                     # As on stdout: one line instead of the trust tags (#198)
@@ -7158,6 +7188,9 @@ class _Run:
         if mode is Format.NDJSON:
             self.out.write(records)
         elif data is not None and render is not None:
+            if envelope._tagged and not _sees_tags(render):
+                # The UNTRUSTED_CONTENT warning on stderr says it, not tag columns (#336)
+                data = untagged(data)
             try:
                 text = _rendered(render, data)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code

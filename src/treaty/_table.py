@@ -19,12 +19,30 @@ def table(delimiter: str) -> Renderer:
     escape, as in a Python string literal. Any other delimiter quotes like the ``csv``
     module. A cell loses its terminal escapes, as in the JSON envelope (REQ-F-007), and
     shows any other control as its escape, a header too. ``tsv`` is built in; offer CSV
-    with ``app.format(Format.CSV, render=table(","))``.
+    with ``app.format(Format.CSV, render=table(","))``. On an ``external=True`` command
+    the trust tags are no columns: the ``UNTRUSTED_CONTENT`` warning on stderr says the
+    content is untrusted instead (#336).
     """
     if len(delimiter) != 1:
         raise ValueError("a table delimiter is one character")
+    return Table(delimiter)
 
-    def render(data: object) -> str:
+
+class Table:
+    """The renderer ``table`` returns, which treaty tells from an app's own: it hands a
+    ``Table`` the data without the trust tags, and an app's renderer the data as the JSON
+    envelope has it (#336)"""
+
+    __slots__ = ("delimiter",)
+
+    def __init__(self, delimiter: str) -> None:
+        self.delimiter = delimiter
+
+    def __repr__(self) -> str:
+        return f"table({self.delimiter!r})"
+
+    def __call__(self, data: object) -> str:
+        delimiter = self.delimiter
         items = data if isinstance(data, list) else [data]
         rows = [item if isinstance(item, dict) else {"value": item} for item in items]
         header = list(dict.fromkeys(key for row in rows for key in row))
@@ -39,8 +57,6 @@ def table(delimiter: str) -> Renderer:
         for row in rows:
             writer.writerow([visible(_cell(row.get(key)), _CSV_KEEP) for key in header])
         return out.getvalue()
-
-    return render
 
 
 _TSV_ESCAPES = str.maketrans({"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r"})

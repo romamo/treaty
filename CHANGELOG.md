@@ -56,6 +56,16 @@ Apps built on treaty keep their own, structured schema changelog with
   their errors, `--help`'s Rules section, and the MCP tool description; the manifest's
   `requires` entries and the error's `context` keep the bare field names (#331)
 
+- `--format tsv` and a format an app registers with `render=table(...)`, such as
+  `app.format(Format.CSV, render=table(","))`, no longer write the trust tags `_source`
+  and `_trusted` as the first columns of an `external=True` command's rows, on stdout or
+  in the `--output PATH` file, a stream's events and `--no-stream` included; the
+  `UNTRUSTED_CONTENT` warning says the content is untrusted, on stderr or in the envelope
+  describing an `--output` write. `--format plain --no-stream` of an external stream now
+  prints the `(external content, untrusted)` line instead of tag columns, as a buffered
+  result does. JSON, jsonl, and ndjson keep the tags, and an app's own renderer still
+  gets them in its data, as the `app.format(render=)` docs now say (#336)
+
 ## [1.0.0rc33] - 2026-10-03
 
 The 33th 1.0 release candidate: 4 additions and 6 fixes.
