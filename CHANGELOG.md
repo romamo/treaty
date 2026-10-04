@@ -10,6 +10,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Changed
+
+- The click/typer migration chapter says every command runs under the app's
+  `default_timeout`, 60 seconds unless set, not only network commands, so a migrated
+  command that ran longer ends in `TIMEOUT` with exit 10: Step 1 has a command that may
+  run longer declare `timeout=` or `timeout=None`, which also gives it `--timeout` and
+  `--timeout 0`, with a check that a command on the default has no `--timeout`; "What
+  changes for the people using your CLI" and the agentyper table say the same. The
+  behaviour is unchanged (#333)
+
 ## [1.0.0rc33] - 2026-10-03
 
 The 33th 1.0 release candidate: 4 additions and 6 fixes.
