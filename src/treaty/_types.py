@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import annotationlib
 import dataclasses
+import functools
 import inspect
+import operator
 import types
 import typing
 from collections.abc import Callable, Mapping
@@ -159,20 +161,40 @@ def resolve_alias(tp: object) -> object:
 
 
 def strip_optional(tp: object) -> tuple[object, bool]:
+    """``X | None`` as ``(X, True)``. A union of several types keeps them as one union,
+    ``A | B`` of ``A | B | None``, which only an output may be (see ``union_members``)"""
     tp = resolve_alias(tp)
-    origin = typing.get_origin(tp)
-    if origin is not types.UnionType and origin is not typing.Union:
+    if not is_union(tp):
         return tp, False
-    members = [a for a in typing.get_args(tp) if a is not types.NoneType]
-    if len(members) != 1 or len(members) == len(typing.get_args(tp)):
-        raise SchemaError(f"unsupported union {tp!r}; only 'X | None' is allowed")
-    return resolve_alias(members[0]), True
+    args = typing.get_args(tp)
+    members = [resolve_alias(a) for a in args if a is not types.NoneType]
+    optional = len(members) != len(args)
+    if len(members) == 1:
+        return members[0], optional
+    return functools.reduce(operator.or_, members), optional
+
+
+def is_union(tp: object) -> bool:
+    origin = typing.get_origin(tp)
+    return origin is types.UnionType or origin is typing.Union
+
+
+def union_members(tp: object) -> tuple[object, ...]:
+    """The members of a union of several types, ``None`` left out; ``()`` for any other"""
+    base, _ = strip_optional(tp)
+    return typing.get_args(base) if is_union(base) else ()
+
+
+def unsupported_union(tp: object) -> SchemaError:
+    return SchemaError(f"unsupported union {tp!r}; only 'X | None' is allowed")
 
 
 def classify(tp: object, scalars: ScalarRegistry, objects: ObjectHook | None = None) -> Classified:
     """``objects`` reads a dataclass, or the items of an array of them, as an object;
     without it, as for settings, a dataclass is an unsupported annotation"""
     base, optional = strip_optional(tp)
+    if is_union(base):
+        raise unsupported_union(tp)
     origin = typing.get_origin(base)
     if origin is typing.Literal:
         values = typing.get_args(base)

@@ -239,7 +239,10 @@ def tool_fields(tool: Mapping[str, object]) -> dict[str, str]:
     data = data[0] if isinstance(data, list) and data else None
     if isinstance(data, dict) and data.get("type") == "array":
         data = data.get("items")
-    properties = data.get("properties") if isinstance(data, dict) else None
-    for name, schema in (properties or {}).items():
-        fields[f"data.{name}"] = _type(schema, defs)
+    members = data.get("oneOf") if isinstance(data, dict) else None
+    # An output union: the fields of each member, a name two share by its first
+    for member in members if isinstance(members, list) else [data]:
+        properties = member.get("properties") if isinstance(member, dict) else None
+        for name, schema in (properties or {}).items():
+            fields.setdefault(f"data.{name}", _type(schema, defs))
     return fields

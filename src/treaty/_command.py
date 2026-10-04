@@ -989,6 +989,11 @@ def _id_field(
     if not isinstance(item, dict):
         # A fixed-length tuple lists one schema per position: no one item to take an id from
         return declared
+    members = item.get("oneOf")
+    if isinstance(members, list):
+        # An output union: the id is a field each member has
+        found = {_id_field(path, m, declared, batch) for m in members}
+        return found.pop() if len(found) == 1 else None
     properties = item.get("properties")
     if properties is None:
         if declared is not None and item.get("type") != "object":

@@ -62,6 +62,7 @@ from ._types import (
     signature,
     strip_optional,
     type_hints,
+    union_members,
 )
 from ._values import InvalidValue, SchemaVersion
 
@@ -1817,6 +1818,9 @@ def _object_items(tp: object, adapters: OutputAdapters) -> type | None:
         item = resolve_alias(args[0])
     elif origin is tuple and len(args) == 2 and args[1] is Ellipsis:
         item = resolve_alias(args[0])
+    # An array of an output union: its first member names the fix
+    members = [m for m in union_members(item) or (item,) if isinstance(m, type)]
+    item = members[0] if members else None
     if not isinstance(item, type):
         return None
     return item if is_dataclass_type(item) or adapters.for_type(item) is not None else None
@@ -2891,10 +2895,11 @@ def _effects(schema: object) -> set[str] | None:
     """The ``effect`` values an output schema admits; None when it is open or absent"""
     if not isinstance(schema, dict):
         return None
-    if "anyOf" in schema:
-        found = [_effects(s) for s in schema["anyOf"]]
-        values = [v for v in found if v is not None]
-        return set().union(*values) if values else None
+    for key in ("anyOf", "oneOf"):
+        if key in schema:
+            found = [_effects(s) for s in schema[key]]
+            values = [v for v in found if v is not None]
+            return set().union(*values) if values else None
     effect = schema.get("properties", {}).get("effect")
     if not isinstance(effect, dict):
         return None

@@ -1923,6 +1923,14 @@ a name may be a fact of the record, such as when a trade happened, so there it i
   `tags: list[str] = treaty.Out(default_factory=list)`. A key that exists only in some
   versions belongs to a new `schema_version`. `""` means empty and `null` means unset;
   treaty cannot tell which you meant, so keep them apart
+- **One of several types**: `-> Market | Event` returns either, published as `oneOf`
+  (`anyOf` with null beside it for `Market | Event | None`), in a list or dict too. Each
+  member is a dataclass or a class an output adapter writes, and an agent must be able
+  to tell them apart: by a tag field every member has, such as `kind: Literal["market"]`
+  and `kind: Literal["event"]`, or by a required field no other member has. An untagged
+  union fails registration naming the members. Each member keeps its own output rules
+  (`--stable-output`, masking, order), and a returned value that is none of the members
+  fails the run with `INVALID_OUTPUT`
 - **Binary**: `bytes`, or `treaty.Binary(data, content_type="image/png")`, becomes
   `{"type": "binary", "encoding": "base64", "value": ..., "size_bytes": N,
   "content_type": ...}`; plain mode prints `<binary N bytes image/png>`. Rule

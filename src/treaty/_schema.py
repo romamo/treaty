@@ -31,11 +31,20 @@ from typing import Any
 
 from ._errors import RegistrationError, SchemaError
 from ._flags import FLAG_META
-from ._out import Binary, External, out_spec
+from ._out import Binary, External, out_spec, union_of
 from ._redact import secret_field
 from ._refs import DEFS_KEY, DEFS_PREFIX, defs_of, free_name, rename_refs, with_defs
 from ._scalars import DATE_TEXT, DATETIME_TEXT, DECIMAL_TEXT, ScalarRegistry
-from ._types import is_dataclass_type, literal_kind, resolve_alias, strip_optional, type_hints
+from ._types import (
+    is_dataclass_type,
+    is_union,
+    literal_kind,
+    resolve_alias,
+    strip_optional,
+    type_hints,
+    union_members,
+    unsupported_union,
+)
 
 JsonSchema = dict[str, Any]
 
@@ -53,10 +62,22 @@ def schema_for(tp: object, scalars: ScalarRegistry, *, output: bool = False) -> 
     base, optional = strip_optional(tp)
     if output and optional and typing.get_origin(base) in (list, tuple, dict):
         _nullable_collection(repr(tp), base)
-    schema = _schema_for_base(base, scalars, output)
+    if is_union(base):
+        schema = _union_schema(base, scalars, output)
+    else:
+        schema = _schema_for_base(base, scalars, output)
     if optional:
         return {"anyOf": [schema, {"type": "null"}]}
     return schema
+
+
+def _union_schema(base: object, scalars: ScalarRegistry, output: bool) -> JsonSchema:
+    """An output union whose members a tag field or their own keys tell apart, as
+    ``oneOf``: exactly one member describes each value"""
+    if not output:
+        raise unsupported_union(base)
+    members = union_of(base, scalars.adapters)
+    return {"oneOf": [schema_for(m.tp, scalars, output=True) for m in members]}
 
 
 def _nullable_collection(where: str, base: object) -> typing.NoReturn:
@@ -106,8 +127,10 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
         if key is not str:
             raise SchemaError(f"dict keys must be str: {base!r}")
         value = resolve_alias(value)
-        if typing.get_origin(value) in (types.UnionType, typing.Union) and (
-            types.NoneType not in typing.get_args(value)
+        if (
+            is_union(value)
+            and types.NoneType not in typing.get_args(value)
+            and not (output and any(_object_type(v, scalars) for v in typing.get_args(value)))
         ):
             # dict[str, str | int]: a value of any of the scalars (#299)
             branches = [schema_for(v, scalars, output=output) for v in typing.get_args(value)]
@@ -353,9 +376,17 @@ def _masked(name: str, declared: bool | None, prop: JsonSchema) -> bool:
     return secret_field(name) and _textual(prop)
 
 
+def _object_type(tp: object, scalars: ScalarRegistry) -> bool:
+    """A dataclass, or a class an output adapter writes: what an output union holds"""
+    tp = resolve_alias(tp)
+    return is_dataclass_type(tp) or scalars.adapters.for_type(tp) is not None
+
+
 def is_payload_type(tp: object, scalars: ScalarRegistry) -> bool:
     """True when values of this type serialize to a JSON object, array, or null"""
     base, _ = strip_optional(tp)
+    if members := union_members(base):
+        return all(is_payload_type(m, scalars) for m in members)
     if base is types.NoneType:
         return True
     if scalars.adapters.for_type(base) is not None:
