@@ -107,6 +107,29 @@ def test_an_output_file_in_a_table_format_has_no_tag_columns(
     assert "UNTRUSTED_CONTENT" in [w["code"] for w in json.loads(out)["warnings"]]
 
 
+@pytest.mark.parametrize(
+    ("fmt", "first", "second"),
+    [
+        ("csv", "title,price\na,1.5\n", "title,price\nb,2.0\n"),
+        ("tsv", "title\tprice\na\t1.5\n", "title\tprice\nb\t2.0\n"),
+    ],
+)
+def test_each_page_of_a_paginated_table_has_no_tag_columns_and_warns(
+    tmp_path: Path, fmt: str, first: str, second: str
+) -> None:
+    target = tmp_path / f"page1.{fmt}"
+    code, out, _ = run(["rows", "--format", fmt, "--limit", "1", "--output", str(target)])
+    assert code == 0
+    assert target.read_text() == first
+    envelope = json.loads(out)
+    assert "UNTRUSTED_CONTENT" in [w["code"] for w in envelope["warnings"]]
+    cursor = envelope["meta"]["pagination"]["next_cursor"]
+    code, out, err = run(["rows", "--format", fmt, "--limit", "1", "--cursor", cursor])
+    assert code == 0
+    assert out == second
+    assert UNTRUSTED in err
+
+
 def test_a_single_object_loses_only_its_top_level_tags() -> None:
     _, out, _ = run(["one", "--format", "csv"])
     assert out == 'title,meta\na,"{""_source"":""cache"",""_trusted"":false}"\n'
@@ -121,8 +144,9 @@ def test_a_stream_and_its_buffered_form_have_no_tag_columns() -> None:
     _, out, err = run(["feed", "--format", "tsv"])
     assert out == "title\tprice\na\t1.5\ntitle\tprice\nb\t2.0\n"
     assert UNTRUSTED in err
-    _, out, _ = run(["feed", "--format", "csv", "--no-stream"])
+    _, out, err = run(["feed", "--format", "csv", "--no-stream"])
     assert out == "title,price\na,1.5\ntitle,price\nb,2.0\n"
+    assert UNTRUSTED in err
 
 
 def test_fields_named_like_the_tags_on_a_command_that_is_not_external_still_print() -> None:
