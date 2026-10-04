@@ -18,9 +18,12 @@ import base64
 import contextvars
 import dataclasses
 import datetime as dt
+import json
 import math
+import re
 import types
 import typing
+from collections.abc import Sequence
 from decimal import Decimal
 from enum import Enum, Flag
 from pathlib import Path
@@ -382,8 +385,30 @@ is refused whole, before any of it is written, rather than failing part way thro
 def to_jsonable(value: object, scalars: ScalarRegistry, *, base: Path) -> object:
     """Convert handler output into plain JSON types; fails on anything else. A relative
     ``Path`` is joined to ``base``, the run's working directory (REQ-F-040). A value that
-    holds itself, or nests deeper than ``MAX_OUTPUT_DEPTH``, has no JSON form."""
+    holds itself, or nests deeper than ``MAX_OUTPUT_DEPTH``, has no JSON form. The
+    ``SchemaError`` raised carries in ``at`` the keys and indexes of the part that failed."""
     return _Jsonable(scalars, base).value(value, 0)
+
+
+_PLAIN_KEY = re.compile(r"[^.\[\]\"\s]+")
+
+
+def value_path(at: Sequence[str | int]) -> str | None:
+    """``at`` spelled as the audit spells a field, with indexes: ``brackets[1].hi``,
+    ``[2].hi`` at the top of a list; a key holding ``.``, a bracket, a quote, or a space,
+    or an empty one, is quoted, ``["a.b"]``. None at the root. Keys and indexes only:
+    a value never appears in it."""
+    if not at:
+        return None
+    out: list[str] = []
+    for part in at:
+        if isinstance(part, int):
+            out.append(f"[{part}]")
+        elif _PLAIN_KEY.fullmatch(part):
+            out.append(f".{part}" if out else part)
+        else:
+            out.append(f"[{json.dumps(part)}]")
+    return "".join(out)
 
 
 class _Jsonable:
@@ -452,16 +477,34 @@ class _Jsonable:
             self.open.discard(id(value))
 
     def container(self, value: object, depth: int) -> object:
+        # A try costs nothing until a SchemaError passes it; it gains its key on the way out,
+        # so no path is built for a value that converts
         if isinstance(value, (list, tuple)):
-            return [self.value(v, depth) for v in value]
+            items: list[object] = []
+            for i, v in enumerate(value):
+                try:
+                    items.append(self.value(v, depth))
+                except SchemaError as exc:
+                    exc.at = (i, *exc.at)
+                    raise
+            return items
         if isinstance(value, dict):
             out: dict[str, object] = {}
             for k, v in value.items():
                 if not isinstance(k, str):
                     raise SchemaError(f"dict keys must be str, got {type(k).__name__}")
-                out[k] = self.value(v, depth)
+                try:
+                    out[k] = self.value(v, depth)
+                except SchemaError as exc:
+                    exc.at = (k, *exc.at)
+                    raise
             return out
         assert dataclasses.is_dataclass(value) and not isinstance(value, type)
-        return {
-            f.name: self.value(getattr(value, f.name), depth) for f in dataclasses.fields(value)
-        }
+        fields: dict[str, object] = {}
+        for f in dataclasses.fields(value):
+            try:
+                fields[f.name] = self.value(getattr(value, f.name), depth)
+            except SchemaError as exc:
+                exc.at = (f.name, *exc.at)
+                raise
+        return fields

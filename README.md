@@ -586,7 +586,9 @@ record exits `4` (`STATE_DIR_UNWRITABLE`, `IDEMPOTENCY_RECORD_CORRUPT`).
 
 A handler that raises anything else exits `1` with `HANDLER_CRASHED`, naming the exception;
 the traceback goes to stderr with secret values redacted. A result or `Exit` payload the
-framework cannot serialize exits `1` with `INVALID_OUTPUT` or `INVALID_EXIT`.
+framework cannot serialize exits `1` with `INVALID_OUTPUT` or `INVALID_EXIT`. An
+`INVALID_OUTPUT` names the field that failed in its message and in `context.path`, such
+as `brackets[1].hi`, or `[2].hi` at the top of a list.
 
 ## Long-running commands
 
