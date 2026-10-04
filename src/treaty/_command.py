@@ -37,7 +37,7 @@ from ._flags import FieldInfo, confirm_field, dry_run_field, inspect_fields
 from ._jobs import Job, descriptor_schema
 from ._lines import INPUT_LINES_FLAG, StdinInput
 from ._mode import FormatName, MediaType
-from ._out import NO_ORDER, Binary, OutSpec, check_order
+from ._out import NO_ORDER, Binary, OutSpec, check_order, keep_order
 from ._output_base import OutputBase, OutputRoot, output_root
 from ._page import DEFAULT_LIMIT, Limit, Page
 from ._protect import check_trust, declares_external, with_trust_tags
@@ -758,9 +758,11 @@ def build_command(
             f"{path}: sort_key orders the output array, ordered=True keeps it; pick one"
         )
     order = OutSpec(sort_key=sort_key, ordered=ordered)
-    check_order(output_type, str(path), order, adapters=scalars.adapters)
+    # ordered=True keeps every array's order, whatever the output type holds (#329)
+    check_order(output_type, str(path), OutSpec(sort_key=sort_key), adapters=scalars.adapters)
     if ordered:
-        output_schema = {**output_schema, "x-ordered": True}
+        output_schema = {**keep_order(output_schema), "x-ordered": True}
+        output_defs = {k: keep_order(v) for k, v in output_defs.items()}
     if external is not None and not isinstance(external, bool):
         raise RegistrationError(f"{path}: external is True, False, or None (undeclared)")
     check_trust(output_type, str(path), external=bool(external), adapters=scalars.adapters)
