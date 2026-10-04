@@ -10,6 +10,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc34] - 2026-10-04
+
+The 34th 1.0 release candidate: 2 breaking changes, 5 additions, 2 changes, and 3 fixes.
+Not additive over rc33: see Breaking.
+
 ### Breaking
 
 - `--format tsv` on an `external=True` command no longer writes the `_source` and
@@ -2078,7 +2083,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc33...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc34...HEAD
+[1.0.0rc34]: https://github.com/romamo/treaty/compare/v1.0.0rc33...v1.0.0rc34
 [1.0.0rc33]: https://github.com/romamo/treaty/compare/v1.0.0rc32...v1.0.0rc33
 [1.0.0rc32]: https://github.com/romamo/treaty/compare/v1.0.0rc31...v1.0.0rc32
 [1.0.0rc31]: https://github.com/romamo/treaty/compare/v1.0.0rc30...v1.0.0rc31
