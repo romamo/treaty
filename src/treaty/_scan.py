@@ -93,27 +93,85 @@ def _tree(fn: Callable[..., object]) -> ast.Module | None:
 
 def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
     """Every ``<ctx>.<method>(...)`` call in the handler, ``<ctx>`` its second parameter"""
+    return list(handler_scan(fn).ctx_calls)
+
+
+@dataclass(frozen=True, slots=True)
+class HandlerScan:
+    """What the registration rules read from a handler's source, found in one walk of its
+    tree: its ``ctx`` calls, the ``ctx`` attributes it reads, and its shell calls"""
+
+    ctx_calls: tuple[CtxCall, ...] = ()
+    attributes: Mapping[str, int] = types.MappingProxyType({})
+    """The first line reading each ``<ctx>.<name>``, such as ``ctx.http``"""
+    shell_calls: tuple[ShellCall, ...] = ()
+
+
+def handler_scan(fn: Callable[..., object]) -> HandlerScan:
+    """The handler's scan, cached per function like its tree, so ``ctx_calls``,
+    ``ctx_attribute``, and ``shell_calls`` share one walk; an unhashable callable is scanned
+    each time"""
+    try:
+        return _cached_scan(fn)
+    except TypeError:
+        return _scan(fn)
+
+
+@functools.lru_cache(maxsize=4096)
+def _cached_scan(fn: Callable[..., object]) -> HandlerScan:
+    return _scan(fn)
+
+
+def _scan(fn: Callable[..., object]) -> HandlerScan:
     params = list(signature(fn).parameters)
-    tree = None if len(params) < 2 else source_tree(fn)
+    tree = source_tree(fn)
     if tree is None:
-        return []
-    carried = _carried(params[0], tree)
-    copies = _copies(params[0], tree)
+        return HandlerScan()
+    has_ctx = len(params) >= 2
+    args_name, ctx_name = (params[0], params[1]) if has_ctx else ("", "")
+    ctx_nodes: list[ast.Call] = []
+    attributes: dict[str, int] = {}
+    shells: list[ShellCall] = []
+    assigned: list[tuple[str, ast.expr]] = []
+    bound: dict[str, list[ast.expr]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            started = _shell_call(node)
+            if started is not None:
+                shells.append(started)
+            if (
+                has_ctx
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == ctx_name
+            ):
+                ctx_nodes.append(node)
+        elif (
+            has_ctx
+            and isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == ctx_name
+        ):
+            line = attributes.get(node.attr)
+            attributes[node.attr] = node.lineno if line is None else min(line, node.lineno)
+        if has_ctx:
+            assigned += _assigned(node)
+            for name, value in _binds(node):
+                bound.setdefault(name, []).append(value)
+    shell_calls = tuple(sorted(shells, key=lambda c: c.line))
+    if not has_ctx:
+        return HandlerScan(shell_calls=shell_calls)
+    copies = _copies(args_name, bound)
+    carried = _carried(args_name, assigned, copies)
 
     def reads(*nodes: ast.expr) -> tuple[str, ...]:
         """The fields ``nodes`` read, directly or through a local that holds one"""
-        through = (f for node in nodes for f in _through(node, carried, copies))
-        return tuple(dict.fromkeys((*_reads(params[0], *nodes), *through)))
+        through = (f for node in nodes for f in _through(_refs(node, copies), carried))
+        return tuple(dict.fromkeys((*_reads(args_name, *nodes), *through)))
 
     calls: list[CtxCall] = []
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == params[1]
-        ):
-            continue
+    for node in ctx_nodes:
+        assert isinstance(node.func, ast.Attribute)
         method = node.func.attr
         shell = False
         if method in ("run", "pipeline") and node.args:
@@ -127,7 +185,7 @@ def ctx_calls(fn: Callable[..., object]) -> list[CtxCall]:
         if method == "run" and isinstance(first_arg, (ast.List, ast.Tuple)):
             argv = tuple(ArgvItem(_literal(e), reads(e)) for e in first_arg.elts)
         calls.append(CtxCall(method, node.lineno, shell, fields, literal, argv))
-    return calls
+    return HandlerScan(tuple(calls), types.MappingProxyType(attributes), shell_calls)
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,66 +269,77 @@ def raw_child_context(fn: Callable[..., object]) -> list[RawContext]:
 
 def ctx_attribute(fn: Callable[..., object], name: str) -> int | None:
     """The first line of the handler reading ``<ctx>.<name>``, such as ``ctx.http``"""
-    params = list(signature(fn).parameters)
-    tree = None if len(params) < 2 else source_tree(fn)
-    if tree is None:
-        return None
-    lines = [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-        and node.attr == name
-        and isinstance(node.value, ast.Name)
-        and node.value.id == params[1]
-    ]
-    return min(lines, default=None)
+    return handler_scan(fn).attributes.get(name)
 
 
-def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
-    """Each local the handler fills from an expression that reads a field, with the
-    fields it carries: ``extra = list(args.extra)``, ``cmd.extend(args.extra)``,
-    ``cmd[0] = args.ref``, ``(extra := args.extra)``, and ``with open(args.path) as f``
-    all make the local carry the field, and a local built from such a local carries them
-    on. A value from anywhere else carries none"""
-    assigned: list[tuple[str, ast.expr]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and node.value is not None:
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            assigned += [(name, node.value) for t in targets for name in _bound(t)]
-        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-            assigned += [(name, node.iter) for name in _bound(node.target)]
-        elif isinstance(node, ast.NamedExpr):
-            assigned.append((node.target.id, node.value))
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            assigned += [
-                (name, item.context_expr)
-                for item in node.items
-                if item.optional_vars is not None
-                for name in _bound(item.optional_vars)
-            ]
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in _FILLS
-        ):
-            # cmd.append(x) and the rest put x into cmd, or into self.cmd; insert's first
-            # argument is a position, not a value
-            put = node.args[1:] if node.func.attr == "insert" else node.args
-            assigned += [
-                (name, arg)
-                for name in _bound(node.func.value)
-                for arg in (*put, *(k.value for k in node.keywords))
-            ]
-    copies = _copies(args_name, tree)
+def _assigned(node: ast.AST) -> list[tuple[str, ast.expr]]:
+    """Each local ``node`` fills and the expression it fills it from: ``extra =
+    list(args.extra)``, ``cmd.extend(args.extra)``, ``cmd[0] = args.ref``, ``(extra :=
+    args.extra)``, ``for x in args.items``, and ``with open(args.path) as f``"""
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and node.value is not None:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return [(name, node.value) for t in targets for name in _bound(t)]
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        return [(name, node.iter) for name in _bound(node.target)]
+    if isinstance(node, ast.NamedExpr):
+        return [(node.target.id, node.value)]
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return [
+            (name, item.context_expr)
+            for item in node.items
+            if item.optional_vars is not None
+            for name in _bound(item.optional_vars)
+        ]
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _FILLS
+    ):
+        # cmd.append(x) and the rest put x into cmd, or into self.cmd; insert's first
+        # argument is a position, not a value
+        put = node.args[1:] if node.func.attr == "insert" else node.args
+        return [
+            (name, arg)
+            for name in _bound(node.func.value)
+            for arg in (*put, *(k.value for k in node.keywords))
+        ]
+    return []
+
+
+def _binds(node: ast.AST) -> list[tuple[str, ast.expr]]:
+    """Each name ``node`` binds and its value, for ``_copies``; a ``None`` constant stands
+    for a value that is never the arguments object, such as an element of a tuple target"""
+    if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        found: list[tuple[str, ast.expr]] = []
+        for target in targets:
+            if isinstance(target, ast.Name):
+                found.append((target.id, node.value))
+            else:
+                found += [(name, ast.Constant(None)) for name in _bound(target)]
+        return found
+    if isinstance(node, ast.NamedExpr):
+        return [(node.target.id, node.value)]
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        return [(name, ast.Constant(None)) for name in _bound(node.target)]
+    return []
+
+
+def _carried(
+    args_name: str, assigned: list[tuple[str, ast.expr]], copies: frozenset[str]
+) -> dict[str, tuple[str, ...]]:
+    """Each local the handler fills (``_assigned``) from an expression that reads a field,
+    with the fields it carries; a local built from such a local carries them on, and a value
+    from anywhere else carries none. Each value's reads are found once, then followed
+    through the locals until nothing changes"""
+    found = [(name, _reads(args_name, value), _refs(value, copies)) for name, value in assigned]
     carried: dict[str, tuple[str, ...]] = {}
     changed = True
     while changed:
         changed = False
-        for name, value in assigned:
-            through = _through(value, carried, copies)
-            fields = tuple(
-                dict.fromkeys((*carried.get(name, ()), *_reads(args_name, value), *through))
-            )
+        for name, direct, refs in found:
+            through = _through(refs, carried)
+            fields = tuple(dict.fromkeys((*carried.get(name, ()), *direct, *through)))
             if fields != carried.get(name, ()):
                 carried[name] = fields
                 changed = True
@@ -280,25 +349,10 @@ def _carried(args_name: str, tree: ast.AST) -> dict[str, tuple[str, ...]]:
 _REPLACES = frozenset({"replace", "dataclasses.replace", "copy.replace"})
 
 
-def _copies(args_name: str, tree: ast.AST) -> frozenset[str]:
-    """Locals that hold the arguments object itself: every value bound to the name is
-    ``args``, another copy, or ``replace(<one of those>, ...)``. A name also bound to
-    anything else, such as ``load_settings(args)`` on one branch, is not a copy"""
-    bound: dict[str, list[ast.expr]] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    bound.setdefault(target.id, []).append(node.value)
-                else:
-                    for name in _bound(target):
-                        bound.setdefault(name, []).append(ast.Constant(None))
-        elif isinstance(node, ast.NamedExpr):
-            bound.setdefault(node.target.id, []).append(node.value)
-        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-            for name in _bound(node.target):
-                bound.setdefault(name, []).append(ast.Constant(None))
+def _copies(args_name: str, bound: Mapping[str, list[ast.expr]]) -> frozenset[str]:
+    """Locals that hold the arguments object itself: every value bound to the name
+    (``_binds``) is ``args``, another copy, or ``replace(<one of those>, ...)``. A name also
+    bound to anything else, such as ``load_settings(args)`` on one branch, is not a copy"""
 
     def is_copy(value: ast.expr, copies: set[str]) -> bool:
         if isinstance(value, ast.Name):
@@ -321,26 +375,31 @@ def _copies(args_name: str, tree: ast.AST) -> frozenset[str]:
     return frozenset(copies)
 
 
-def _through(
-    node: ast.expr, carried: Mapping[str, tuple[str, ...]], copies: frozenset[str]
-) -> list[str]:
-    """The fields ``node`` reads through locals: what each local it names carries, and,
-    for a copy of the arguments object (``clean = replace(args, ref=args.base)``), the field
-    a ``clean.ref`` reads plus the fields replaced into the copy, rather than every field"""
+type _Refs = tuple[tuple[str, str | None], ...]
+
+
+def _refs(node: ast.expr, copies: frozenset[str]) -> _Refs:
+    """Each name ``node`` reads, in walk order, with the field read off it when the name is
+    a copy of the arguments object, as ``clean.ref`` reads ``ref``"""
     by_field = {
         id(n.value): n.attr
         for n in ast.walk(node)
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in copies
     }
+    return tuple((n.id, by_field.get(id(n))) for n in ast.walk(node) if isinstance(n, ast.Name))
+
+
+def _through(refs: _Refs, carried: Mapping[str, tuple[str, ...]]) -> list[str]:
+    """The fields an expression reads through locals: what each local it names carries, and,
+    for a copy of the arguments object (``clean = replace(args, ref=args.base)``), the field
+    a ``clean.ref`` reads plus the fields replaced into the copy, rather than every field"""
     found: list[str] = []
-    for n in ast.walk(node):
-        if not isinstance(n, ast.Name):
-            continue
-        if id(n) in by_field:
-            found.append(by_field[id(n)])
-            found.extend(f for f in carried.get(n.id, ()) if f != EVERY_FIELD)
+    for name, field in refs:
+        if field is not None:
+            found.append(field)
+            found.extend(f for f in carried.get(name, ()) if f != EVERY_FIELD)
         else:
-            found.extend(carried.get(n.id, ()))
+            found.extend(carried.get(name, ()))
     return found
 
 
@@ -408,24 +467,22 @@ def shell_calls(fn: Callable[..., object]) -> list[ShellCall]:
     """Calls in the handler's source that hand a string to a shell (REQ-F-044, REQ-C-019):
     ``os.system``, ``os.popen``, ``subprocess.getoutput``, and ``subprocess.run``,
     ``Popen``, and the rest with a ``shell=`` that is not a false constant"""
-    tree = source_tree(fn)
-    if tree is None:
-        return []
-    found: list[ShellCall] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = dotted(node.func)
-        if name is None:
-            continue
-        last = name.rpartition(".")[2]
-        shell = last in _SHELL_KEYWORD and any(
-            k.arg == "shell" and not (isinstance(k.value, ast.Constant) and not k.value.value)
-            for k in node.keywords
-        )
-        if name in _SHELL_CALLS or last in ("getoutput", "getstatusoutput") or shell:
-            found.append(ShellCall(name, node.lineno))
-    return sorted(found, key=lambda c: c.line)
+    return list(handler_scan(fn).shell_calls)
+
+
+def _shell_call(node: ast.Call) -> ShellCall | None:
+    """``node`` as a shell call, when it is one ``shell_calls`` names"""
+    name = dotted(node.func)
+    if name is None:
+        return None
+    last = name.rpartition(".")[2]
+    shell = last in _SHELL_KEYWORD and any(
+        k.arg == "shell" and not (isinstance(k.value, ast.Constant) and not k.value.value)
+        for k in node.keywords
+    )
+    if name in _SHELL_CALLS or last in ("getoutput", "getstatusoutput") or shell:
+        return ShellCall(name, node.lineno)
+    return None
 
 
 def _program_starters() -> tuple[object, ...]:
@@ -494,6 +551,7 @@ def _resolve(fn: Callable[..., object] | type, name: str) -> object:
 def clear_caches() -> None:
     """Forget parsed sources and followed helpers, so a new audit sees the code as it is"""
     _cached_tree.cache_clear()
+    _cached_scan.cache_clear()
     _cached_reach.cache_clear()
     _shipped.cache_clear()
     _editable_roots.cache_clear()
