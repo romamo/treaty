@@ -1,5 +1,6 @@
 """Mutating streams: an effect per event, counted on the summary line (REQ-O-004, #175)."""
 
+import dataclasses
 import io
 import json
 from collections.abc import Iterator
@@ -10,6 +11,7 @@ import pytest
 from conftest import spec_validator
 
 from treaty import App, Arg, Ctx, Exit, Flag, RegistrationError
+from treaty._envelope import with_meta
 from treaty._mcp import call_tool, tool_entries
 from treaty._skills import render
 
@@ -332,6 +334,82 @@ def test_app_call_buffers_a_mutating_stream_with_its_counts() -> None:
     assert preview["meta"]["dry_run"] is True
     keyed = sync_app().call("sync", {"users": "u1", "idempotency_key": "k"}).to_json()
     assert keyed["meta"]["exit_code"] == 2
+
+
+STREAM_KEYS = {"seq", "end", "total", "effects", "dry_run", "partial"}
+
+
+def test_app_call_puts_the_stream_keys_on_meta_not_extra_meta() -> None:
+    # #348: typed fields of Meta, so a test reads env.meta.effects
+    envelope = sync_app().call("sync", {"users": "u1,u2*"}, env={})
+    assert envelope.meta.effects == {"created": 1, "noop": 1}
+    assert envelope.meta.total == 2
+    assert envelope.meta.dry_run is None and envelope.meta.partial is None
+    assert envelope.meta.seq is None and envelope.meta.end is None
+    preview = sync_app().call("sync", {"users": "u1", "dry_run": True}, env={})
+    assert preview.meta.effects == {"would_create": 1} and preview.meta.dry_run is True
+    failed = sync_app().call("sync", {"users": "u1,u2", "fail_after": 1}, env={})
+    assert failed.meta.partial is True and failed.meta.effects == {"created": 1}
+    for env in (envelope, preview, failed):
+        assert not STREAM_KEYS & set(env.extra_meta)
+
+
+def test_the_stream_keys_serialize_as_before() -> None:
+    # #348: moving the keys onto Meta leaves every line's meta as it was
+    code, lines = run(["sync", "u1,u2*", "--stable-output"])
+    assert code == 0
+    valid(lines)
+    assert [STREAM_KEYS & set(line["meta"]) for line in lines] == [
+        {"seq"},
+        {"seq"},
+        {"seq", "end", "total", "effects"},
+    ]
+    assert lines[2]["meta"]["seq"] == 2 and lines[2]["meta"]["pagination"]["total"] == 2
+    code, lines = run(["sync", "u1,u2", "--no-stream", "--fail-after", "1", "--dry-run"])
+    assert code == 80
+    valid(lines)
+    (failed,) = lines
+    assert {k: failed["meta"][k] for k in STREAM_KEYS & set(failed["meta"])} == {
+        "total": 1,
+        "effects": {"would_create": 1},
+        "dry_run": True,
+        "partial": True,
+    }
+    code, lines = run(["tail", "a", "--no-stream"])
+    assert code == 0 and STREAM_KEYS & set(lines[0]["meta"]) == {"total"}
+
+
+def test_a_non_stream_envelope_has_none_of_the_stream_keys() -> None:
+    app = App("plain", version="1.0.0")
+
+    @app.command("show", description="Show", danger_level="safe", exit_codes=())
+    def show(args: SyncArgs, ctx: Ctx) -> Synced:
+        return Synced(args.users, "seen")
+
+    envelope = app.call("show", {"users": "u1"}, env={})
+    assert envelope.ok
+    meta = envelope.to_json()["meta"]
+    assert isinstance(meta, dict) and not STREAM_KEYS & set(meta)
+    assert all(getattr(envelope.meta, key) is None for key in STREAM_KEYS)
+
+
+def test_extra_meta_refuses_a_key_meta_declares() -> None:
+    envelope = sync_app().call("sync", {"users": "u1"}, env={})
+    with pytest.raises(RegistrationError, match="extra_meta holds effects, total"):
+        dataclasses.replace(envelope, extra_meta={"total": 1, "effects": {}})
+    with pytest.raises(RegistrationError, match=r"meta\.total must be a whole number"):
+        with_meta(envelope, {"total": True})
+    with pytest.raises(RegistrationError, match=r"meta\.effects must count effects"):
+        with_meta(envelope, {"effects": {"created": -1}})
+    added = with_meta(envelope, {"dry_run": False, "confirmed": True})
+    assert added.meta.dry_run is False and added.extra_meta["confirmed"] is True
+
+
+def test_meta_stays_hashable_with_effects() -> None:
+    meta = sync_app().call("sync", {"users": "u1,u2*"}, env={}).meta
+    assert hash(meta) == hash(dataclasses.replace(meta, effects={"noop": 1, "created": 1}))
+    assert meta.effects == {"created": 1, "noop": 1}
+    assert meta.to_json()["effects"] == {"created": 1, "noop": 1}
 
 
 def test_mcp_serves_a_mutating_stream_buffered() -> None:

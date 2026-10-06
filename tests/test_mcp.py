@@ -171,7 +171,7 @@ def test_call_buffers_streaming_commands() -> None:
     envelope = adapter_app().call("log.tail", {"count": 2})
     assert envelope.ok
     assert envelope.data == [{"n": 0}, {"n": 1}]
-    assert envelope.extra_meta["total"] == 2
+    assert envelope.meta.total == 2
 
 
 def test_call_tool_maps_names_and_passes_unknown_through() -> None:
