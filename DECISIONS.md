@@ -61,3 +61,11 @@ entry that supersedes it, never by editing an old one.
 - Applies to: src/treaty/_types.py, src/treaty/_schema.py, src/treaty/_out.py, src/treaty/_protect.py, output types
 - Enforced by: review
 - Supersedes: D-5
+
+## D-8: A renderer's context comes by arity
+
+- Decided: 2026-10-06, in romamo/treaty#357
+- Rule: A renderer that takes two parameters is called render(data, RenderContext); one that takes one is called render(data); renderers never receive Ctx
+- Why: Existing one-parameter renderers keep working, and a renderer sees only what rendering needs (color, width), not the handler's context
+- Applies to: src/treaty/_command.py, src/treaty/_app.py, renderers, FormatRenderer
+- Enforced by: review
