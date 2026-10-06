@@ -13,7 +13,7 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from ._command import Command, DangerLevel
+from ._command import Command, DangerLevel, OptionPlacement
 from ._manifest import payload_schema
 from ._values import CommandPath
 
@@ -60,12 +60,15 @@ def examples(
     named = {p["name"] for p in positionals}
     flags = entry.get("flags", {})
     assert isinstance(flags, dict)
+    options: list[str] = []
     for flag, spec in flags.items():
         if spec.get("required") and flag not in named:
-            words.append(f"--{flag}")
+            options.append(f"--{flag}")
             if spec.get("type") != "boolean":
-                words.append(_placeholder(flag, spec))
-    minimal = " ".join((base, *words))
+                options.append(_placeholder(flag, spec))
+    # REQ-C-027: a strict command reads options only before its first positional
+    strict = entry.get("option_placement") == "strict"
+    minimal = " ".join((base, *(options + words if strict else words + options)))
     return list(dict.fromkeys((*found, minimal, f"{base} --schema", f"{base} --help")))
 
 
@@ -145,12 +148,17 @@ def render_skill(app: App, command: Command, entry: Mapping[str, object]) -> str
             f"- Guessing the tool's arguments instead of reading `{invocation} --help`"
         )
     else:
+        # REQ-C-027: a strict command reads options only before its first positional
+        strict = command.option_placement is OptionPlacement.STRICT
+        check = (
+            f"{invocation} --validate-only ..." if strict else f"{invocation} ... --validate-only"
+        )
         patterns = (
             "- Read `ok` first, then `data`; on failure act on `error.code` and "
             "`error.fix_required`\n"
             "- Pass `--format json` when stdout may be a terminal; off a terminal it is the "
             "default\n"
-            f"- Check arguments without running: `{invocation} ... --validate-only`"
+            f"- Check arguments without running: `{check}`"
         )
         avoid = (
             "- Parsing the text of `--format plain` instead of the JSON envelope\n"

@@ -3,6 +3,7 @@
 import io
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from treaty import App, Arg, Ctx, Flag
@@ -158,3 +159,84 @@ def test_a_strict_command_usage_puts_the_options_before_the_positionals() -> Non
         isatty=True,
     )
     assert code == 0
+
+
+@dataclass(frozen=True, slots=True)
+class StrictOptionalArgs:
+    count: int = Flag(default=1, description="Attempts")
+    child: tuple[str, ...] = Arg(default=(), description="Passed to the child")
+
+
+def help_usage(app: App, command: str) -> list[str]:
+    out = io.StringIO()
+    code = app.run([command, "--help"], stdout=out, stderr=io.StringIO(), env={}, isatty=True)
+    assert code == 0
+    return out.getvalue().splitlines()[0].split()
+
+
+def runs(app: App, argv: list[str]) -> int:
+    return app.run(
+        argv, stdin=io.StringIO(), stdout=io.StringIO(), stderr=io.StringIO(), env={}, isatty=True
+    )
+
+
+def test_a_strict_command_help_usage_puts_the_flags_before_the_positionals() -> None:
+    app = App("bean", version="1.0.0")
+
+    @app.command(
+        "wrap",
+        description="Wrap",
+        danger_level="safe",
+        exit_codes=(),
+        option_placement="strict",
+    )
+    def wrap(args: StrictArgs, ctx: Ctx) -> None:
+        return None
+
+    @app.command(
+        "pick",
+        description="Pick",
+        danger_level="safe",
+        exit_codes=(),
+        option_placement="strict",
+    )
+    def pick(args: StrictOptionalArgs, ctx: Ctx) -> None:
+        return None
+
+    usage = help_usage(app, "wrap")
+    assert usage[:3] == ["bean", "wrap", "[flags]"]
+    # The usage line, typed with a real flag for [flags] and values for the rest, runs
+    typed = [{"[flags]": "--count=1"}.get(t, "x" if t.startswith("<") else t) for t in usage]
+    assert runs(app, typed[1:]) == 0
+    assert help_usage(app, "pick") == ["bean", "pick", "[flags]", "[child]"]
+    assert runs(app, ["pick", "--count", "2", "x"]) == 0
+
+
+def test_a_command_without_strict_placement_keeps_the_flags_last() -> None:
+    _, help_text, _ = run(["login", "--help"])
+    assert help_text.splitlines()[0] == "bean login <user> [flags]"
+
+
+def test_a_strict_command_skill_puts_the_flags_before_the_positionals(tmp_path: Path) -> None:
+    app = App("bean", version="1.0.0")
+
+    @app.command(
+        "wrap",
+        description="Wrap",
+        danger_level="safe",
+        exit_codes=(),
+        option_placement="strict",
+    )
+    def wrap(args: StrictArgs, ctx: Ctx) -> None:
+        return None
+
+    code = runs(app, ["generate-skills", "--output-dir", str(tmp_path)])
+    assert code == 0
+    skill = (tmp_path / "SKILL-wrap.md").read_text()
+    lines = skill.splitlines()
+    minimal = lines[lines.index("```bash") + 1]
+    assert minimal == "bean wrap --count <count> <child>"
+    # The minimal call, typed with values for the placeholders, runs
+    typed = ["1" if t == "<count>" else "x" if t.startswith("<") else t for t in minimal.split()]
+    assert runs(app, typed[1:]) == 0
+    assert "`bean wrap --validate-only ...`" in skill
