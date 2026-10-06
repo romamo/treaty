@@ -50,6 +50,12 @@ Apps built on treaty keep their own, structured schema changelog with
   a tool that refuses unknown options failed a valid example with `DELEGATED_EXIT`. Only
   treaty's part is judged: the options before the path, and the path
 
+- The `http-client` audit rule only advises on a direct `requests`, `httpx`, or `urlopen`
+  client configured from `ctx.network`'s `proxies`, `proxy_for()`, or `ca_bundle`, as the
+  README recommends, so `treaty audit --strict` passes for it; the advice names the gap
+  left, a failure without `error.network_context`. A direct client with no such read on
+  the handler's path still warns (#356)
+
 ### Added
 
 - `FormatRenderer(render, frame=True)` on a streaming command's `plain` renderer redraws a
