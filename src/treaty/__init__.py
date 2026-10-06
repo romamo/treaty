@@ -1,6 +1,6 @@
 """treaty: zero-dependency CLI framework implementing the CLI Agent Spec."""
 
-from importlib.metadata import version
+from typing import TYPE_CHECKING
 
 from ._adapters import OutputAdapter
 from ._app import App, Group, NoArgs
@@ -27,12 +27,11 @@ from ._errors import (
 )
 from ._exit import ExitCodeEntry, FrameworkCode, RetryStrategy, SideEffects
 from ._flags import Arg, Flag
-from ._http import HttpResponse, NetworkSettings
 from ._init import Init
 from ._jobs import Job, JobStore
 from ._journal import AuditLog
-from ._mcp_serve import McpServe, McpTool
 from ._mode import Format, FormatName
+from ._network import HttpResponse, NetworkSettings
 from ._out import Binary, External, Out
 from ._output_base import OutputBase
 from ._page import Page, PageRequest
@@ -48,7 +47,30 @@ from ._update import UpdateCheck
 from ._values import CommandPath, ExitCode, ExitCodeName, SchemaVersion, Scope
 from ._walk import WalkEntry
 
-__version__ = version("treaty")
+if TYPE_CHECKING:
+    from ._mcp_serve import McpServe, McpTool
+
+    __version__: str
+
+_LAZY_MCP = frozenset({"McpServe", "McpTool"})
+
+
+def __getattr__(name: str) -> object:
+    """``__version__``, ``McpServe``, and ``McpTool`` on first use (PEP 562), so ``import
+    treaty`` reads no package metadata and loads no MCP server (#360)"""
+    if name == "__version__":
+        from importlib.metadata import version
+
+        found: object = version("treaty")
+    elif name in _LAZY_MCP:
+        from . import _mcp_serve
+
+        found = getattr(_mcp_serve, name)
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = found
+    return found
+
 
 __all__ = [
     "Affects",

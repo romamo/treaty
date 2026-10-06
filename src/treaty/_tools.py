@@ -13,7 +13,7 @@ from ._command import Command, DangerLevel
 from ._completion import COMPLETION_PATH
 from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
 from ._manifest import EXEC_PATH, payload_schema
-from ._mcp_serve import MCP_SERVE_PATH, NO_BINDINGS, Bindings
+from ._mcp_shared import MCP_SERVE_PATH, NO_BINDINGS, Bindings
 from ._refs import EMPTY_DEFS, defs_of, deref, merge_defs, ref_name, with_defs
 from ._schema import JsonSchema
 from ._values import CommandPath

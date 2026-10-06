@@ -26,9 +26,9 @@ from ._command import (
 )
 from ._config import GLOBAL_FLAG, ConfigScope
 from ._errors import ParseError
-from ._http import NO_PROXY_FLAG, PROXY_FLAG, parse_proxy
 from ._idempotency import IdempotencyKey
 from ._lines import StdinInput
+from ._network import NO_PROXY_FLAG, PROXY_FLAG, parse_proxy
 from ._output_base import PROJECT_ROOT
 from ._page import CURSOR_FLAG, LIMIT_FLAG, Limit, Position, whole_number
 from ._paths import check_path

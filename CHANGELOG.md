@@ -46,6 +46,12 @@ Apps built on treaty keep their own, structured schema changelog with
   treaty's own CLI spends about a third of the CPU time it did on these scans; every
   registration rule's verdict is unchanged (#359)
 
+- `import treaty` no longer loads `http.client`, `ssl`, the MCP server module, or
+  `importlib.metadata`: `ctx.http`'s client loads for a `has_network_io=True` command,
+  the MCP server for an `App(mcp=)` app, and package metadata when `treaty.__version__`
+  or a manifest reads it. `treaty.McpServe`, `treaty.McpTool`, and `treaty.__version__`
+  resolve on first use, as the same objects as before (#360)
+
 ### Fixed
 
 - `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,

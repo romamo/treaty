@@ -51,7 +51,7 @@ from ._journal import (
     read_entries,
     resolve,
 )
-from ._mcp_serve import NO_BINDINGS, Bindings
+from ._mcp_shared import NO_BINDINGS, Bindings
 from ._meta import find_project_root
 from ._mode import Format
 from ._out import Out
