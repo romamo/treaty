@@ -8,11 +8,21 @@ from pathlib import Path
 
 import fixture_audit_app
 import pytest
-from conftest import SPEC_DIR
+from conftest import SPEC_DIR, spec_validator
 
 from treaty._cli import cli, resolve_spec_dir
 from treaty._errors import CliExit
-from treaty._profile import SPEC_FALLBACK, build_profile, default_command, has_kit, probes_for
+from treaty._profile import (
+    SPEC_FALLBACK,
+    Probe,
+    argument_order_for,
+    build_profile,
+    default_command,
+    has_kit,
+    probes_for,
+    run_kit,
+    write_profile,
+)
 
 
 def run_cli(
@@ -85,6 +95,69 @@ def test_probes_derive_from_examples_and_danger_levels() -> None:
     fixture = {p.name: p for p in probes_for(fixture_audit_app.app)}
     assert "create-item" not in fixture  # mutating without example: skipped
     assert "delete-item" not in fixture  # safe but has a required positional and no example
+
+
+def test_an_app_without_a_destructive_command_gets_the_cleanup_built_in_probe() -> None:
+    """The dry-run checks are not skipped for want of a destructive command (#361)"""
+    from examples.deployctl import app as deployctl
+
+    own = probes_for(cli)
+    assert [p for p in own if p.kind == "destructive"] == [
+        Probe("cleanup built-in", ("cleanup",), "destructive", dry_run_flag="--dry-run")
+    ]
+    # A destructive command of the app's own already gives the checks their probe
+    assert "cleanup built-in" not in {p.name for p in probes_for(deployctl)}
+    # No example with a local option: the built-in manifest --etag stands in
+    assert argument_order_for(cli) == {
+        "command_path": ["manifest"],
+        "local_args": ["--etag", "sha256:" + "0" * 32],
+        "global_flag": "--format",
+        "value": "json",
+        "alternate_value": "plain",
+    }
+    assert argument_order_for(deployctl)["command_path"] != ["manifest"]  # type: ignore[index]
+
+
+def test_the_cleanup_probe_removes_nothing(tmp_path: Path) -> None:
+    """The kit runs a destructive probe unconfirmed and with its dry-run flag, never with
+    --confirm-destructive: both leave every declared path in place (#361)"""
+    from test_built_ins import effects_app, populate
+    from test_built_ins import run as run_app
+
+    populate(tmp_path)
+    before = sorted(tmp_path.rglob("*"))
+    app = effects_app(tmp_path)
+    [probe] = [p for p in probes_for(app) if p.kind == "destructive"]
+    assert probe.dry_run_flag is not None
+    unconfirmed, envelope = run_app(app, list(probe.argv))
+    assert unconfirmed == 2 and envelope["error"]["code"] == "CONFIRMATION_REQUIRED"  # type: ignore[index]
+    assert run_app(app, [*probe.argv, probe.dry_run_flag])[0] == 0
+    assert sorted(tmp_path.rglob("*")) == before
+
+
+def test_treatys_own_profile_passes_the_dry_run_and_argument_order_checks(
+    tmp_path: Path,
+) -> None:
+    """treaty's generated profile is valid and the kit passes the checks the cleanup and
+    manifest probes enable; HOME and the XDG directories are the test's own (#361)"""
+    if not has_kit(SPEC_DIR):
+        pytest.skip("spec checkout not found")
+    launcher = Path(sys.executable).parent / ("treaty.exe" if sys.platform == "win32" else "treaty")
+    if not launcher.is_file():
+        pytest.skip("treaty's console script is not installed in this venv")
+    profile = build_profile(cli, [str(launcher)], probes_for(cli))
+    assert not list(spec_validator("conformance-profile").iter_errors(profile))
+    path = tmp_path / "profile.json"
+    write_profile(profile, path)
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("XDG_", "TREATY_"))}
+    env |= {"HOME": str(home), "USERPROFILE": str(home), "TREATY_NO_UPDATE": "1"}
+    env |= {f"XDG_{d}_HOME": str(home / d.lower()) for d in ("CONFIG", "DATA", "CACHE", "STATE")}
+    run = run_kit(SPEC_DIR, path, 600, env)
+    assert run.envelope is not None, run.stderr
+    checks = {c["id"]: c for c in run.envelope["data"]["checks"]}  # type: ignore[index]
+    for check in ("dry_run_preview", "destructive_refuses_unconfirmed", "argument_order"):
+        assert checks[check]["status"] == "pass", checks[check]
 
 
 def test_conformance_writes_profile_without_running(tmp_path: Path) -> None:

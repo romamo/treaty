@@ -102,6 +102,13 @@ def probes_for(app: App) -> list[Probe]:
     probes.append(Probe("version", ("version",), "read"))
     if CommandPath("status") in app.builtins:
         probes.append(Probe("status built-in", ("status",), "read"))  # REQ-O-028: always 0
+    if CommandPath("cleanup") in app.builtins and not any(p.kind == "destructive" for p in probes):
+        # The built-in cleanup is destructive and has --dry-run, so an app with no
+        # destructive command of its own still gets the kit's dry-run and refusal checks
+        # (#361). The kit runs it unconfirmed, which previews and exits 2, and with
+        # --dry-run; never with --confirm-destructive, so nothing is removed
+        cleanup = Probe("cleanup built-in", ("cleanup",), "destructive", dry_run_flag="--dry-run")
+        probes.append(cleanup)
     # REQ-O-041: an etag that is not sha256:<32 hex> exits 2 before anything runs
     probes.append(Probe("manifest malformed etag", ("manifest", "--etag", "x"), "invalid"))
     first = next(p for p in probes if p.kind != "invalid")
@@ -143,7 +150,8 @@ def _without_stream_flags(argv: tuple[str, ...]) -> tuple[str, ...]:
 
 def argument_order_for(app: App) -> dict[str, object] | None:
     """The first example whose tokens after its positionals start with an option, so the kit
-    can move ``--format`` around it (REQ-F-079); destructive ones are run with their dry-run flag"""
+    can move ``--format`` around it (REQ-F-079); destructive ones are run with their dry-run
+    flag. Without one, the built-in ``manifest --etag``"""
     for command in user_commands(app):
         if command.danger_level is DangerLevel.MUTATING or command.streaming:
             continue
@@ -161,14 +169,26 @@ def argument_order_for(app: App) -> dict[str, object] | None:
                 local.append("--confirm-destructive")
         if len(local) < 2 or "--" in local:
             continue
-        return {
-            "command_path": list(argv[:head]),
-            "local_args": local,
-            "global_flag": "--format",
-            "value": "json",
-            "alternate_value": "plain",
-        }
+        return _order(list(argv[:head]), local)
+    if CommandPath("manifest") in app.builtins:
+        # No example has a local option: the built-in manifest has one and is safe. An
+        # etag no manifest has, so the manifest is printed in full, never not_modified (#361)
+        return _order(["manifest"], ["--etag", UNMATCHED_ETAG])
     return None
+
+
+UNMATCHED_ETAG = "sha256:" + "0" * 32
+"""A well-formed etag that is never a manifest's, for the argument_order fallback"""
+
+
+def _order(command_path: list[str], local_args: list[str]) -> dict[str, object]:
+    return {
+        "command_path": command_path,
+        "local_args": local_args,
+        "global_flag": "--format",
+        "value": "json",
+        "alternate_value": "plain",
+    }
 
 
 def default_command(
