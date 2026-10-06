@@ -69,3 +69,11 @@ entry that supersedes it, never by editing an old one.
 - Why: Existing one-parameter renderers keep working, and a renderer sees only what rendering needs (color, width), not the handler's context
 - Applies to: src/treaty/_command.py, src/treaty/_app.py, renderers, FormatRenderer
 - Enforced by: review
+
+## D-9: Cleanup cut short by the grace is a warning in the envelope
+
+- Decided: 2026-10-06, in romamo/treaty#379
+- Rule: When an async handler or async stream source is still running after its cancellation grace, the run reports it as a CLEANUP_FAILED warning in the envelope (and error.context.cleanup_failed on the error), not only as a stderr note
+- Why: An agent reads the JSON envelope, not stderr; it has to learn that cleanup (a connection, a lock, a flush) may not have finished
+- Applies to: src/treaty/_aio.py, src/treaty/_app.py, cancellation, timeouts, async handlers
+- Enforced by: review
