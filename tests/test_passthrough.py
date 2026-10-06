@@ -20,6 +20,7 @@ from treaty._agents_md import render_block
 from treaty._audit import audit
 from treaty._completion import tree
 from treaty._mcp import call_tool, tool_entries
+from treaty._profile import argument_order_for, probes_for
 from treaty._skills import render
 
 LEDGER = Path(__file__).resolve().parent / "fixture_passthrough_app.py"
@@ -389,3 +390,50 @@ def test_the_skill_file_puts_treaty_flags_before_the_path() -> None:
     skill = render(ledger)["SKILL-ingest.md"]
     assert "ledger --schema ingest" in skill and "ledger ingest --schema" not in skill
     assert "`ledger --validate-only ingest ...`" in skill
+
+
+# Conformance probes
+
+
+def wrapper_app(ran: list[tuple[str, ...]]) -> App:
+    """A network passthrough command, the unknown-flag probe's base, whose example has
+    options after the path that argument_order could pick"""
+    app = App("gitw", version="1.0.0")
+
+    @app.command(
+        "git",
+        description="Run git",
+        danger_level="safe",
+        exit_codes=(),
+        passthrough=True,
+        has_network_io=True,
+        examples=[("Log", "gitw --format json git log --format oneline --max-count 3")],
+    )
+    def git(args: NoArgs, ctx: Ctx) -> int:
+        ran.append(ctx.argv_rest)
+        return 0
+
+    return app
+
+
+def test_the_example_after_the_path_reaches_the_probe_verbatim() -> None:
+    """Only the globals before the path are dropped: --format oneline is git's (#367)"""
+    probes = {p.name: p for p in probes_for(wrapper_app([]))}
+    assert probes["git"].argv == ("git", "log", "--format", "oneline", "--max-count", "3")
+
+
+def test_conformance_probes_put_treatys_flags_before_a_passthrough_path() -> None:
+    """After the path, the tool got --no-such-flag and the handler ran with exit 0 (#367)"""
+    ran: list[tuple[str, ...]] = []
+    app = wrapper_app(ran)
+    invalid = [p for p in probes_for(app) if p.kind == "invalid" and "git" in p.argv]
+    assert {p.name for p in invalid} == {"git --proxy socks5", "unknown flag"}
+    for probe in invalid:
+        assert run(list(probe.argv), app=app).code == 2, probe
+    assert ran == []
+
+
+def test_argument_order_skips_a_passthrough_command() -> None:
+    """The kit moves --format after the path, where the tool would get it (#367)"""
+    order = argument_order_for(wrapper_app([]))
+    assert order is not None and order["command_path"] == ["manifest"]
