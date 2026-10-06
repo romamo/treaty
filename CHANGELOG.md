@@ -10,6 +10,22 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- An app with an `output_file` command whose example passes `--output PATH` now generates
+  a conformance profile without it, in the read and `unknown flag` probes and the
+  `argument_order` run, so a committed profile with the old `--output` differs from the
+  generated one and `treaty conformance` exits `CONFLICT`: rerun
+  `treaty conformance --force` once to update it (#391)
+
+### Fixed
+
+- `treaty conformance` drops an `output_file` command's `--output PATH` and
+  `--output=PATH` from the argv it takes from the command's example, so the kit's runs of
+  its probes return the data in the envelope instead of writing the file on every run. An
+  example whose only option was `--output` no longer gives `argument_order`, which moves
+  to the next example or the built-in `manifest --etag` (#391)
+
 ## [1.0.0rc36] - 2026-10-06
 
 The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see

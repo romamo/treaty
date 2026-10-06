@@ -11,7 +11,7 @@ import pytest
 from conftest import SPEC_DIR, needs_sh_launcher, spec_validator
 
 from examples.tutorial import todo_exit_codes
-from treaty import App, Ctx, Flag, NoArgs
+from treaty import App, Arg, Ctx, Flag, NoArgs
 from treaty._profile import (
     STREAM_SECONDS,
     TIMEOUT_SECONDS,
@@ -185,3 +185,55 @@ def test_argument_order_skips_a_destructive_example_with_only_its_dry_run_flag()
     order = argument_order_for(destructive_app(with_option=True))
     assert order is not None and order["command_path"] == ["prune"]
     assert order["local_args"] == ["--keep", "3", "--dry-run"]
+
+
+@dataclass(frozen=True, slots=True)
+class PdfArgs:
+    pdf: Path = Arg(description="PDF to read")
+    pages: int = Flag(default=1, description="Pages to read")
+
+
+def output_file_app(example: str) -> App:
+    app = App("pdfctl", version="1.0.0")
+
+    @app.command(
+        "profile",
+        description="Profile a PDF",
+        examples=[("Profile a PDF and save it", example)],
+        danger_level="safe",
+        exit_codes=(),
+        output_file=True,
+    )
+    def profile(args: PdfArgs, ctx: Ctx) -> dict[str, int]:
+        return {"pages": args.pages}
+
+    return app
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        "pdfctl profile lease.pdf --output bundle.json --pages 2",
+        "pdfctl profile lease.pdf --output=bundle.json --pages 2",
+        "pdfctl profile --output bundle.json lease.pdf --pages 2",
+    ],
+    ids=["spaced", "inline", "before the positional"],
+)
+def test_no_probe_writes_the_output_file_of_an_example(example: str) -> None:
+    """Every kit run of a probe with --output would write the file (#391)"""
+    app = output_file_app(example)
+    probes = {p.name: p for p in probes_for(app)}
+    assert probes["profile"].argv == ("profile", "lease.pdf", "--pages", "2")
+    assert probes["unknown flag"].argv == ("profile", "lease.pdf", "--pages", "2", "--no-such-flag")
+    order = argument_order_for(app)
+    assert order is not None
+    assert order["command_path"] == ["profile", "lease.pdf"]
+    assert order["local_args"] == ["--pages", "2"]
+
+
+def test_an_example_whose_only_option_is_output_leaves_argument_order_to_the_manifest() -> None:
+    app = output_file_app("pdfctl profile lease.pdf --output bundle.json")
+    order = argument_order_for(app)
+    assert order is not None and order["command_path"] == ["manifest"]
+    for argv in profile_argvs(app):
+        assert not any(tok.startswith("--output") for tok in argv), argv
