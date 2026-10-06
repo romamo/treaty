@@ -1137,13 +1137,38 @@ def _reads_ctx(fn: Callable[..., object], routes: frozenset[str], *, first: bool
     return False
 
 
+_CLIENT_SETTINGS_ROUTES = frozenset({"network.proxies", "network.ca_bundle", "network.proxy_for"})
+"""What hands a client of the handler's own the settings ctx.http would use: the proxies,
+the proxy for one URL, and the CA bundle. ctx.network's timeout() and fits() hand it only
+the deadline, so reading them alone does not count (#356)"""
+
+
 def _http_client(app: App) -> Iterator[Finding]:
     for c in user_commands(app):
         if not c.has_network_io:
             continue
         units = reached_functions(c.handler)
         found = _first(units, direct_http_calls)
-        if found is not None:
+        # A unit with no source to read is not taken as configuring the client
+        configured = found is not None and any(
+            source_tree(u.fn) is not None
+            and _reads_ctx(u.fn, _CLIENT_SETTINGS_ROUTES, first=i == 0)
+            for i, u in enumerate(units)
+        )
+        if found is not None and configured:
+            # The README's pattern: the client takes ctx.network's proxies and CA bundle,
+            # so the flags reach it; only ctx.http's failure context is missing (#356)
+            unit, calls = found
+            yield Finding(
+                "http-client",
+                Severity.ADVICE,
+                c.path.value,
+                f"{calls[0]}() is configured from ctx.network, but a failure in it ends the "
+                "run with no error.network_context, which ctx.http adds "
+                f"(REQ-F-037, heuristic){unit.where}",
+                "response = ctx.http.get(url)",
+            )
+        elif found is not None:
             unit, calls = found
             yield Finding(
                 "http-client",

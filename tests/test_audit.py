@@ -127,6 +127,18 @@ def test_cli_audit_strict() -> None:
     assert code == 0 and json.loads(out)["ok"]
 
 
+def test_cli_audit_strict_passes_a_client_configured_from_ctx_network() -> None:
+    """The README's ctx.network pattern only advises, so --strict passes (#356)"""
+    code, out = run_cli(["audit", "fixture_net_client_app:app", "--strict"], isatty=False)
+    assert code == 0, out
+    rules = json.loads(out)["data"]["rules"]
+    [http] = [r for r in rules if r["id"] == "http-client"]
+    assert [(f["command"], f["severity"]) for f in http["findings"]] == [
+        ("helper", "advice"),
+        ("session", "advice"),
+    ]
+
+
 def test_cli_audit_strict_renders_plain_report() -> None:
     out, err = io.StringIO(), io.StringIO()
     code = cli.run(

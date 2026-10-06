@@ -949,6 +949,10 @@ session.verify = True if bundle is None else str(bundle)
   `ctx.network` removes it
 - The `http-client` audit rule advises on a network command whose handler reaches none of
   `ctx.http`, `ctx.network`, and `ctx.run`: a client of its own would not see `--proxy`
+- A client configured this way, from `ctx.network`'s `proxies`, `proxy_for()`, or
+  `ca_bundle` anywhere the handler reaches, gets only advice from `http-client`, so
+  `treaty audit --strict` passes: the flags reach it, and the gap left is that its failure
+  carries no `error.network_context`, which `ctx.http` adds
 
 The same client keeps its own timeout and retries, which may not fit `--timeout`: a
 `timeout=30` with three retries can outlast a 60 s limit, and the run then answers `TIMEOUT`
@@ -1013,8 +1017,9 @@ plus `--no-follow-symlinks` and `--max-depth N` (default 50):
 - With `--no-follow-symlinks` symlinks are listed but never entered; the walk's `count`
   and `symlinks_skipped` are there for the result (REQ-O-040)
 
-The `http-client` audit rule flags `urlopen`, `requests`, and `httpx` in a network command,
-and `recursive-traversal` warns on a walk a circular symlink can loop: `shutil.copytree`,
+The `http-client` audit rule warns on `urlopen`, `requests`, and `httpx` in a network
+command, and only advises when the client is configured from `ctx.network`'s proxies or CA
+bundle. `recursive-traversal` warns on a walk a circular symlink can loop: `shutil.copytree`,
 recursive `glob`, and `os.walk`, `Path.walk`, or `rglob` told to follow symlinks. Without
 that they cannot loop, nor can `shutil.rmtree`, and the rule only advises that no
 `--max-depth` bounds them.
