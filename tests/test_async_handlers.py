@@ -19,7 +19,9 @@ import pytest
 from conftest import needs_posix_signals, spec_validator
 
 from treaty import App, Ctx, Exit, NoArgs, RegistrationError
+from treaty._aio import Loop, within
 from treaty._subprocess import GRACE_SECONDS
+from treaty._timeout import Timeout
 
 LINGERCTL = Path(__file__).resolve().parent / "fixture_async_app.py"
 
@@ -168,6 +170,48 @@ def test_a_timed_out_async_handler_finishes_its_finally_before_the_answer() -> N
     code, envelope = run(app, ["go"])
     assert envelope["error"]["code"] == "TIMEOUT" and code == 10
     assert cleaned.is_set() and envelope["warnings"] == []
+
+
+def _cleaning(started: threading.Event, cleaning: threading.Event, done: list[str]) -> Any:
+    async def handler(resources: list[Any]) -> None:
+        try:
+            started.set()
+            await asyncio.sleep(3600)
+        finally:
+            cleaning.set()
+            await asyncio.sleep(0.4)
+            done.append("finally")
+
+    return handler
+
+
+async def _no_resources() -> list[Any]:
+    return []
+
+
+def _warn(code: str, message: str, context: dict[str, object]) -> None:
+    raise AssertionError(code)
+
+
+@pytest.mark.parametrize("deadline", [0.2, 0.01])
+def test_a_handler_is_cancelled_once_by_a_signal_and_its_deadline_together(
+    deadline: float,
+) -> None:
+    """A signal's cancel turns the deadline off, so it does not land in the ``finally``
+    too; when the deadline fired first, the signal's cancel is skipped instead (#355)"""
+    loop = Loop()
+    started, cleaning = threading.Event(), threading.Event()
+    done: list[str] = []
+    job = loop.submit(
+        within(deadline, Timeout(1), _no_resources, _cleaning(started, cleaning, done), _warn, loop)
+    )
+    assert started.wait(5)
+    if deadline < 0.2:
+        assert cleaning.wait(5)  # the deadline fired: the finally is running
+    loop.cancel(job)
+    assert job.wait(5)
+    loop.close()
+    assert done == ["finally"], job.exc
 
 
 def _interrupted(path: str, *flags: str) -> tuple[subprocess.CompletedProcess[str], float]:

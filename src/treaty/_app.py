@@ -2826,6 +2826,7 @@ def _call_async(
             lambda: resolver.aall((*command.resources, *_output_deps(command, ctx))),
             lambda resources: _located(command, args, ctx, resources),
             lambda code, message, context: ctx.warn(code, message, **context),
+            loop,
         )
     )
     if teardown is not None:
@@ -2868,6 +2869,7 @@ def _call_async_stream(
                 lambda: resolver.aall((*command.resources, *_output_deps(command, ctx))),
                 source,
                 lambda code, message, context: ctx.warn(code, message, **context),
+                loop,
             )
         )
         if not inspect.isasyncgen(made):
