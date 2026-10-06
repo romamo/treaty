@@ -3254,9 +3254,10 @@ class _Frames:
     After anything else reached the terminal, the next frame is written below rather
     than over it, so nothing is erased: a stderr line, a prompt and its answer, or what
     descriptor 1 passed on to stderr, a child's or C code's write (#365); what reached
-    descriptor 1 before the frame is passed on first. A write that bypasses all of them
-    is not seen: one to descriptor 2 directly, or, once descriptor 1 is no longer
-    intercepted, to descriptor 1.
+    descriptor 1 before the frame is passed on first, but for an unfinished line, held
+    for its end so a secret split across two writes is redacted whole. A write that
+    bypasses all of them is not seen: one to descriptor 2 directly, or, once descriptor
+    1 is no longer intercepted, to descriptor 1.
 
     The last frame's rows are counted at the width the terminal has when the next one
     is drawn, so after a resize the cursor moves up the rows a terminal that reflows its
@@ -3275,7 +3276,9 @@ class _Frames:
     def draw(self, text: str) -> None:
         below = active_interceptor()
         if below is not None:
-            below.sync()  # descriptor 1's writes before this frame reach stderr, counted
+            # Descriptor 1's lines before this frame reach stderr, counted; an unfinished
+            # one waits for its end, so a secret split across two writes is redacted whole
+            below.sync(whole=True)
         if self._last is not None and stderr_writes.count == self._mark:
             rows = frame_rows(self._last, _terminal_columns(self._out, self._env))
             # CR to the first column, up to the frame's first row, clear to screen end

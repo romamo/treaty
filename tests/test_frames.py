@@ -253,6 +253,67 @@ def test_a_descriptor_1_write_between_frames_is_not_cleared() -> None:
     assert proc.stdout.strip() == repr((0, f"frame 1\nframe 2\n{CLEAR_ONE}frame 3\n"))
 
 
+SPLIT = """
+import io, os
+from collections.abc import Iterator
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag, Format, FormatRenderer
+from treaty._stdout import intercept_stdout
+
+interceptor = intercept_stdout()
+app = App("ap", version="0.1.0")
+SECRET = "hunter2-s3cret"
+
+
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description="API token", secret=True)
+
+
+@app.command(
+    "frames",
+    description="Draw frames",
+    danger_level="safe",
+    exit_codes=(),
+    streaming=True,
+    timeout=None,
+    renderers={Format.PLAIN: FormatRenderer(lambda e: f"frame {e['n']}\\n", frame=True)},
+)
+def frames(args: Login, ctx: Ctx) -> Iterator[dict[str, int]]:
+    yield {"n": 1}
+    os.write(1, b"token=" + SECRET[:5].encode())  # a child's write, half the secret
+    yield {"n": 2}
+    os.write(1, SECRET[5:].encode() + b"\\n")
+    yield {"n": 3}
+
+
+out = io.StringIO()
+code = app.run(
+    ["frames", "--format", "plain", "--api-token-from-env", "AP_TOKEN"],
+    stdout=out,
+    stderr=io.StringIO(),
+    isatty=True,
+    env={"AP_AUDIT_LOG": "0", "TERM": "xterm", "AP_TOKEN": SECRET},
+)
+interceptor.close()
+print(repr((code, out.getvalue())))
+"""
+
+
+def test_a_secret_split_by_a_frame_on_descriptor_1_is_redacted() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-c", SPLIT],
+        capture_output=True,
+        env={**os.environ, "PYTHONUTF8": "1"},
+        timeout=30,
+        check=True,
+        text=True,
+    )
+    # Frame 2 waits for no unfinished line: the line is passed on whole, redacted
+    assert proc.stderr.replace("\r\n", "\n") == "token=[REDACTED]\n"
+    assert proc.stdout.strip() == repr((0, f"frame 1\n{CLEAR_ONE}frame 2\nframe 3\n"))
+
+
 def test_bumps_from_many_threads_each_count() -> None:
     # With the GIL off (3.14t), an unlocked += lost about a third of them
     writes = Writes()
