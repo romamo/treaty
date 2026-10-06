@@ -40,6 +40,12 @@ Apps built on treaty keep their own, structured schema changelog with
   never a Python repr. JSON is unchanged but for `error.message`: `error.context.missing`
   keeps the names, and the code and exit 2 are the same (#358)
 
+- Registering a command walks its handler's source once: the `ctx` calls, the `ctx`
+  attributes, the shell calls, and the locals that carry an argument's fields come from
+  one cached scan per handler, which registration's two reads share. Registering
+  treaty's own CLI spends about a third of the CPU time it did on these scans; every
+  registration rule's verdict is unchanged (#359)
+
 ### Fixed
 
 - `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,
