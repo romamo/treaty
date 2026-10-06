@@ -44,6 +44,12 @@ Apps built on treaty keep their own, structured schema changelog with
   previews it or sees it refused. Without an example that has a local option, the
   profile's `argument_order` uses the built-in `manifest --etag` (#361)
 
+- `treaty audit`'s `describe` rule checks an example of a `passthrough=True` command by
+  putting `--validate-only` before the command path, where treaty reads it (#306). It went
+  after the path, into the delegated tool's argv, so the handler ran during the audit and
+  a tool that refuses unknown options failed a valid example with `DELEGATED_EXIT`. Only
+  treaty's part is judged: the options before the path, and the path
+
 ### Added
 
 - `FormatRenderer(render, frame=True)` on a streaming command's `plain` renderer redraws a
