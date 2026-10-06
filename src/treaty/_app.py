@@ -96,9 +96,12 @@ from ._command import (
     FormatRenderer,
     Handler,
     OptionPlacement,
+    RenderContext,
     Renderer,
+    Rendering,
     Shim,
     build_command,
+    rendering,
 )
 from ._completion import COMPLETION_PATH
 from ._config import ConfigFile, ConfigScope, local_config, user_config
@@ -610,7 +613,7 @@ class App:
         self._state: Mapping[str, object] = dict(state or {})
         self._commands: dict[CommandPath, Command] = {}
         self._groups: dict[CommandPath, str] = {}
-        self._renderers: dict[FormatName, Renderer] = {}
+        self._renderers: dict[FormatName, Rendering] = {}
         self._media_types: dict[FormatName, MediaType] = {}
         self._tokenizers: dict[str, Tokenizer] = {APPROX: Tokenizer(APPROX, approx)}
         self.default_tokenizer = APPROX
@@ -834,10 +837,13 @@ class App:
         renderer. ``json`` and ``jsonl`` are the response envelope agents read, and
         ``ndjson`` is ``data`` as JSON lines, so they take no renderer.
 
-        ``render`` gets ``data`` as the JSON envelope has it: on an ``external=True``
-        command, with the ``_source`` and ``_trusted`` trust tags, for the renderer to show
-        or leave out. ``table(...)`` leaves them out, as ``plain``'s built-in renderer does,
-        the ``UNTRUSTED_CONTENT`` warning on stderr saying the content is untrusted (#336).
+        A renderer that takes two parameters is called ``render(data, rc)``, the
+        ``RenderContext`` saying whether it may color and the width to fit; one that takes
+        one is called ``render(data)`` (#357). ``data`` is as the JSON envelope has it: on
+        an ``external=True`` command, with the ``_source`` and ``_trusted`` trust tags, for
+        the renderer to show or leave out. ``table(...)`` leaves them out, as ``plain``'s
+        built-in renderer does, the ``UNTRUSTED_CONTENT`` warning on stderr saying the
+        content is untrusted (#336).
 
         A name ``Format`` lacks, such as ``app.format("html", render=...,
         media_type="text/html")``, offers a new value: lowercase letters and digits, words
@@ -845,7 +851,7 @@ class App:
         prose, and ``media_type`` tells an agent in the manifest not to parse it as JSON.
         """
         name = _format_name("app.format", mode)
-        _check_renderer("app.format", name, render)
+        bound = _check_renderer("app.format", name, render)
         if name in self._renderers:
             raise RegistrationError(f"--format {name} already has a renderer")
         if media_type is not None:
@@ -855,7 +861,7 @@ class App:
                 self._media_types[name] = declared
             except InvalidValue as exc:
                 raise RegistrationError(f"app.format({name.value!r}): {exc}") from None
-        self._renderers[name] = render
+        self._renderers[name] = bound
 
     @property
     def formats(self) -> tuple[FormatName, ...]:
@@ -929,18 +935,18 @@ class App:
         if default:
             self.default_tokenizer = name
 
-    def _renderer(self, command: Command, name: FormatName) -> Renderer | None:
+    def _renderer(self, command: Command, name: FormatName) -> Rendering | None:
         """The command's renderer for a text mode, else the app's; None is plain's built-in"""
         mode = name.builtin
         if mode is Format.ID:
             assert command.id_field is not None
-            return functools.partial(id_lines, field=command.id_field)
+            return Rendering(functools.partial(id_lines, field=command.id_field), False)
         if mode is Format.NDJSON:
             # A stream's event is one record, a list in it too; a result's list is records
-            return ndjson_line if command.streaming else ndjson_records
+            return _NDJSON_LINE if command.streaming else _NDJSON_RECORDS
         if command.path == MANIFEST_PATH:
             # The manifest is for agents: every text mode keeps it JSON, indented for reading
-            return _json_text
+            return _JSON_TEXT
         built_in = None if mode is None else _BUILT_IN.get(mode)
         return command.renderers.get(name, self._renderers.get(name, built_in))
 
@@ -1233,13 +1239,13 @@ class App:
                 f"{cmd_path}: config_write_scope={config_write_scope!r} is not one of {scopes}"
             )
         # A name the app does not offer is this command's own: only it offers it (#209)
-        overrides: dict[FormatName, Renderer] = {}
+        overrides: dict[FormatName, Rendering] = {}
         command_media: dict[FormatName, MediaType] = {}
         frames: set[FormatName] = set()
         for mode, given in (renderers or {}).items():
             name = _format_name(f"{cmd_path}: renderers", mode)
             render = given.render if isinstance(given, FormatRenderer) else given
-            _check_renderer(f"{cmd_path}: renderers", name, render)
+            bound = _check_renderer(f"{cmd_path}: renderers", name, render)
             if isinstance(given, FormatRenderer) and given.media_type is not None:
                 try:
                     check_media_type(name, given.media_type)
@@ -1259,7 +1265,7 @@ class App:
                         "the command needs streaming=True"
                     )
                 frames.add(name)
-            overrides[name] = render
+            overrides[name] = bound
         try:
             contract = SchemaVersion(schema_version)
         except InvalidValue as exc:
@@ -3101,9 +3107,9 @@ def _text(exc: BaseException) -> str:
         return f"<{type(exc).__name__} whose str() failed>"
 
 
-def _rendered(render: Renderer, data: object) -> str:
+def _rendered(render: Rendering, data: object, rc: RenderContext) -> str:
     """A renderer's text; any other return value is the renderer's bug"""
-    text = render(data)
+    text = render(data, rc)
     if not isinstance(text, str):
         raise TypeError(f"the renderer returned {type(text).__name__}, not str")
     return text
@@ -3725,7 +3731,7 @@ def _warned(envelope: Envelope, code: str, message: str, command: Command) -> En
     return dataclasses.replace(envelope, warnings=(*envelope.warnings, warning))
 
 
-_BUILT_IN: Mapping[Format, Renderer] = {Format.TSV: table("\t")}
+_BUILT_IN: Mapping[Format, Rendering] = {Format.TSV: Rendering(table("\t"), False)}
 
 
 def _json_text(data: Any) -> str:
@@ -3744,10 +3750,15 @@ def ndjson_records(data: Any) -> str:
     return "".join(ndjson_line(i) for i in items)
 
 
-def _machine_text(mode: Format) -> Renderer:
+_NDJSON_LINE = Rendering(ndjson_line, False)
+_NDJSON_RECORDS = Rendering(ndjson_records, False)
+_JSON_TEXT = Rendering(_json_text, False)
+
+
+def _machine_text(mode: Format) -> Rendering:
     """How a text mode writes the manifest, a schema, or the settings: one record in
     ``ndjson``, indented JSON in the formats a person reads"""
-    return ndjson_line if mode is Format.NDJSON else _json_text
+    return _NDJSON_LINE if mode is Format.NDJSON else _JSON_TEXT
 
 
 def _example_pairs(path: CommandPath, examples: object, usage: str) -> list[tuple[str, str]]:
@@ -3793,7 +3804,7 @@ def _format_name(where: str, mode: object) -> FormatName:
         raise RegistrationError(f"{where}: {exc}") from None
 
 
-def _check_renderer(where: str, name: FormatName, render: object) -> None:
+def _check_renderer(where: str, name: FormatName, render: object) -> Rendering:
     mode = name.builtin
     if mode in (Format.JSON, Format.JSONL):
         raise RegistrationError(f"{where}: {mode} is the response envelope and takes no renderer")
@@ -3803,28 +3814,31 @@ def _check_renderer(where: str, name: FormatName, render: object) -> None:
         raise RegistrationError(f"{where}: {mode} writes the id_field= value and takes no renderer")
     if not callable(render):
         raise RegistrationError(f"{where}: the {name} renderer is not callable")
+    return rendering(f"{where}: {name}", render)
 
 
-def _each(render: Renderer | None) -> Renderer | None:
+def _each(render: Rendering | None) -> Rendering | None:
     """A renderer takes one event; --no-stream data is the list of them"""
     if render is None:
         return None
-    return _Each(render)
+    return Rendering(_Each(render), contextual=True)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class _Each:
-    render: Renderer
+    render: Rendering
 
-    def __call__(self, events: list[object]) -> str:
-        return "".join(self.render(e) for e in events)
+    def __call__(self, events: list[object], rc: RenderContext) -> str:
+        return "".join(_rendered(self.render, e, rc) for e in events)
 
 
-def _sees_tags(render: Renderer) -> bool:
+def _sees_tags(render: Rendering) -> bool:
     """Whether ``render`` gets an external command's trust tags in its data: an app's own
     renderer does, as the JSON envelope has them; ``table``'s writes text a person or a
     spreadsheet reads, where the tags would be columns of data, so it does not (#336)"""
-    inner = render.render if isinstance(render, _Each) else render
+    inner = render.render
+    if isinstance(inner, _Each):
+        inner = inner.render.render
     return not isinstance(inner, Table)
 
 
@@ -7089,7 +7103,7 @@ class _Run:
         mode: Format,
         envelope: Envelope,
         *,
-        render: Renderer | None = None,
+        render: Rendering | None = None,
         settle: bool = True,
         layout: Layout = NO_LAYOUT,
     ) -> int:
@@ -7100,7 +7114,7 @@ class _Run:
         if mode is Format.JSON:
             return self._write(envelope, settle=settle)
         if mode is Format.NDJSON and render is None:
-            render = ndjson_records
+            render = _NDJSON_RECORDS
         plain = functools.partial(render_plain, layout=layout, width=table_width(self.env))
         return self._emit_text(mode, envelope, render, fallback=plain, settle=settle)
 
@@ -7125,7 +7139,7 @@ class _Run:
         path: Path,
         name: FormatName,
         envelope: Envelope,
-        render: Renderer | None,
+        render: Rendering | None,
         layout: Layout = NO_LAYOUT,
     ) -> Envelope:
         """Write a successful result's ``data`` to ``path``; the envelope then describes
@@ -7146,7 +7160,8 @@ class _Run:
                 if render is not None:
                     if envelope._tagged and not _sees_tags(render):
                         data = untagged(data)  # as on stdout (#336)
-                    text = _rendered(render, data)
+                    # A file is not a terminal: no color, and nothing to fit (#357)
+                    text = _rendered(render, data, RenderContext(color=False, width=None))
                 elif envelope._tagged:
                     # As on stdout: one line instead of the trust tags (#198)
                     text = f"{UNTRUSTED_LINE}\n{render_plain(untagged(data), layout)}"
@@ -7219,7 +7234,7 @@ class _Run:
         mode: Format,
         envelopes: Generator[Envelope],
         *,
-        render: Renderer | None,
+        render: Rendering | None,
         frame: bool = False,
     ) -> int:
         """Write each envelope as it arrives; the exit code is the terminal envelope's,
@@ -7238,7 +7253,7 @@ class _Run:
         self,
         mode: Format,
         envelopes: Generator[Envelope],
-        render: Renderer | None,
+        render: Rendering | None,
     ) -> int:
         code = 0
         render_failed = False
@@ -7261,9 +7276,9 @@ class _Run:
         self,
         mode: Format,
         envelope: Envelope,
-        render: Renderer | None,
+        render: Rendering | None,
         *,
-        fallback: Renderer = render_plain,
+        fallback: Callable[[Any], str] = render_plain,
         settle: bool = True,
         event: bool = False,
     ) -> int:
@@ -7281,7 +7296,9 @@ class _Run:
                 self.warnings_shown += envelope.warnings[before:]
         records = ""
         if mode is Format.NDJSON:
-            records, envelope = self._capped_records(envelope, render or fallback, event)
+            records, envelope = self._capped_records(
+                envelope, render or Rendering(fallback, False), event
+            )
         # A program reading ndjson gets every warning once, as a stream's events add them;
         # a person, those settling added
         before = len(envelope.warnings)
@@ -7334,15 +7351,18 @@ class _Run:
             if envelope._tagged and not _sees_tags(render):
                 # The UNTRUSTED_CONTENT warning on stderr says it, not tag columns (#336)
                 data = untagged(data)
+            # What the run keeps of the text is what the renderer is told: the colors only
+            # where the run may color, and the width plain's tables are cut to (#357)
+            color = color_allowed(self.env, self.tty)
+            rc = RenderContext(color=color, width=table_width(self.env))
             try:
-                text = _rendered(render, data)
+                text = _rendered(render, data, rc)
             except Exception as exc:  # noqa: BLE001 - a renderer is user code
                 self.err.write(_traceback(exc, self._redact_now))
                 self.err.write(f"{self.app.name}: HANDLER_CRASHED: the {mode} renderer failed\n")
                 code = FrameworkCode.GENERAL_ERROR.value
             else:
                 # Outside the renderer's try: a closed stdout is not a renderer bug
-                color = color_allowed(self.env, self.tty)
                 shown = terminal_text(text, color=color, keep="\r")
                 if event and self.frames is not None:
                     # The escapes that clear the last frame are treaty's own: the
@@ -7421,7 +7441,7 @@ class _Run:
             self.err.write(terminal_text(line, color=color) + "\n", Level.WARN)
 
     def _capped_records(
-        self, envelope: Envelope, render: Renderer, event: bool
+        self, envelope: Envelope, render: Rendering, event: bool
     ) -> tuple[str, Envelope]:
         """The ``ndjson`` lines of ``envelope`` within ``--max-output`` (REQ-F-052), each
         cut reported as a ``FIELD_TRUNCATED`` warning and one ``{"truncation": ...}`` line
@@ -7429,7 +7449,9 @@ class _Run:
         ``jsonl`` caps each envelope, so a record over the cap is left out and the stream
         goes on; a buffered answer keeps whole records up to the cap, and none after."""
         data = clean(envelope.data)
-        lines = [] if data is None else _rendered(render, data).splitlines(keepends=True)
+        # ndjson is for a program: no color, and records are never cut to a width
+        rc = RenderContext(color=False, width=None)
+        lines = [] if data is None else _rendered(render, data, rc).splitlines(keepends=True)
         sizes = [len(line.encode("utf-8")) for line in lines]
         rerun = Rerun(self.argv, self.app.name, self.page)
         kept: list[str] = []

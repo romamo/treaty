@@ -37,6 +37,12 @@ Apps built on treaty keep their own, structured schema changelog with
   file, under `NO_COLOR`, `TERM=dumb`, or CI, and in every other format, frames are
   appended as before. `frame=True` is refused at registration off `streaming=True` or on a
   format other than `plain`, and `FormatRenderer`'s `media_type=` is now optional (#350)
+- `RenderContext`: a renderer that takes two parameters is called `render(data, rc)`, where
+  `rc.color` says whether it may color and `rc.width` is the width plain's tables are cut
+  to (`COLUMNS`), or `None` when unset and in an `--output` file; a one-parameter renderer
+  is called `render(data)` as before. The parameters are read once at registration, for
+  `app.format`, a command's `renderers=`, and `FormatRenderer`, and any other shape is a
+  `RegistrationError` naming the renderer (#357)
 
 - A streaming handler may be an async generator (`async def ... -> AsyncIterator[T]`),
   with async resources, stepped on the run's event loop. A signal, the idle timeout, or a

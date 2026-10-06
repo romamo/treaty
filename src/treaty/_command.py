@@ -69,8 +69,80 @@ if TYPE_CHECKING:
 Handler = Callable[..., Any]
 """``(args, ctx, *resources)``: extra parameters are annotated with resource classes"""
 Cleanup = Callable[[], None]
-Renderer = Callable[[Any], str]
-"""Text for one result, or one stream event, from its JSON-ready ``data``"""
+
+
+@dataclass(frozen=True, slots=True)
+class RenderContext:
+    """What a renderer that takes two parameters gets beside ``data``:
+    ``def render(data, rc): ...``. ``color`` is whether the text may carry color, as
+    ``ctx.color`` is for the run; ``width`` is the most cells a line takes, as plain's
+    tables are cut to ``COLUMNS``, or None where nothing is cut, as in an ``--output``
+    file (#357)"""
+
+    color: bool
+    width: int | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.color, bool):
+            raise TypeError(f"RenderContext.color is a bool, not {self.color!r}")
+        width = self.width
+        if width is not None and (isinstance(width, bool) or not isinstance(width, int)):
+            raise TypeError(f"RenderContext.width is an int or None, not {width!r}")
+        if width is not None and width < 1:
+            raise ValueError(f"RenderContext.width is at least 1, not {width}")
+
+
+if TYPE_CHECKING:
+    Renderer = Callable[[Any], str] | Callable[[Any, RenderContext], str]
+else:
+    # The runtime alias names the one-parameter shape it always had: the public-API
+    # snapshot records it, and a two-parameter renderer is the type checker's concern
+    Renderer = Callable[[Any], str]
+"""Text for one result, or one stream event, from its JSON-ready ``data``; a renderer
+that takes two parameters gets a ``RenderContext`` as the second (#357)"""
+
+
+@dataclass(frozen=True, slots=True)
+class Rendering:
+    """A renderer with its parameters read once, at registration: called with ``data``
+    alone, or with the run's ``RenderContext`` too"""
+
+    render: Callable[..., object]
+    contextual: bool
+
+    def __call__(self, data: Any, rc: RenderContext) -> object:
+        return self.render(data, rc) if self.contextual else self.render(data)
+
+
+def rendering(where: str, render: object) -> Rendering:
+    """``render`` as treaty calls it: a renderer whose positional parameters without a
+    default are one is called ``render(data)``, two ``render(data, rc)``. Any other
+    count, or a keyword-only parameter without a default, is refused here rather than
+    failing on the first run. A callable without a signature, as some C builtins are,
+    is called ``render(data)``"""
+    if not callable(render):
+        raise RegistrationError(f"{where}: the renderer {render!r} is not callable")
+    try:
+        params = inspect.signature(render).parameters.values()
+    except ValueError:
+        return Rendering(render, contextual=False)
+    positional = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    required = [p for p in params if p.kind in positional and p.default is p.empty]
+    keyword = [p.name for p in params if p.kind is p.KEYWORD_ONLY and p.default is p.empty]
+    name = getattr(render, "__qualname__", None) or repr(render)
+    if keyword:
+        raise RegistrationError(
+            f"{where}: the renderer {name} requires the keyword-only parameter(s) "
+            f"{', '.join(keyword)}; a renderer takes (data) or (data, rc: RenderContext)"
+        )
+    if len(required) not in (1, 2):
+        raise RegistrationError(
+            f"{where}: the renderer {name} takes {len(required)} required positional "
+            "parameter(s); a renderer takes (data) or (data, rc: RenderContext)"
+        )
+    return Rendering(render, contextual=len(required) == 2)
+
+
 Shim = Callable[[Any], Any]
 """The command's output in the shape of an older schema version (REQ-O-014)"""
 DEFAULT_SCHEMA_VERSION = SchemaVersion("1.0")
@@ -135,8 +207,7 @@ class FormatRenderer:
     else:
 
         def __init__(self, render, *, media_type=None, frame=False):
-            if not callable(render):
-                raise RegistrationError(f"FormatRenderer: {render!r} is not callable")
+            rendering("FormatRenderer", render)
             if media_type is not None and not isinstance(media_type, MediaType):
                 try:
                     media_type = MediaType(media_type)
@@ -178,7 +249,7 @@ class Command:
     timeout: Timeout | None
     supports_raw_payload: bool
     cleanup: Cleanup | None
-    renderers: Mapping[FormatName, Renderer]
+    renderers: Mapping[FormatName, Rendering]
     """Per-format overrides of the app's renderers, and the formats only this command
     offers"""
     media_types: Mapping[FormatName, MediaType]
@@ -463,7 +534,7 @@ def build_command(
     timeout: Timeout | None,
     supports_raw_payload: bool,
     cleanup: Cleanup | None,
-    renderers: Mapping[FormatName, Renderer],
+    renderers: Mapping[FormatName, Rendering],
     media_types: Mapping[FormatName, MediaType],
     scalars: ScalarRegistry,
     frames: frozenset[FormatName] = frozenset(),

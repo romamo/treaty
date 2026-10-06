@@ -29,7 +29,8 @@ review), **rename**, **remove**.
 | `FormatRenderer` | value object | keep | A command's renderer with the media type it writes: `renderers={"html": FormatRenderer(render, media_type="text/html")}`; with `frame=True`, a streaming command's `plain` renderer redraws in place at a terminal (#350); a bare callable stays accepted beside it |
 | `DangerLevel` | enum | keep | `SAFE`, `MUTATING`, `DESTRUCTIVE` |
 | `Example` | class | keep | Also accepted as `(description, command)` tuples |
-| `Renderer` | type alias | keep | `Callable[[Any], str]` |
+| `Renderer` | type alias | keep | `Callable[[Any], str]`, or `Callable[[Any, RenderContext], str]` to the type checker (#357) |
+| `RenderContext` | value object | keep | What a two-parameter renderer gets beside `data`: `color` and `width` (#357) |
 | `table` | function | keep | Delimited renderer factory |
 | `ScalarSpec` | class | keep | Returned by `app.scalar` |
 | `OutputAdapter` | class | keep | Returned by `app.output_adapter` |
