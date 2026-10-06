@@ -20,7 +20,7 @@ from fixture_async_stream_app import EVENTS, app
 from test_streaming import read_lines
 
 from treaty import App, Ctx, NoArgs, RegistrationError
-from treaty._aio import Loop
+from treaty._aio import AsyncEvents, Loop
 from treaty._mcp import call_tool, tool_entries
 
 TICKCTL = Path(__file__).resolve().parent / "fixture_async_stream_app.py"
@@ -135,8 +135,17 @@ def test_a_source_that_ignores_cancellation_delays_the_end_only_by_the_grace() -
         text=True,
     )
     read_lines(proc, 1, deadline=time.monotonic() + 10)
+    # A signal that lands between steps, with no await pending, closes the source at its
+    # yield: nothing then ignores the cancellation, so wait until the source awaits
+    assert proc.stderr is not None
+    seen = ""
+    while "tickctl: waiting" not in seen:
+        line = proc.stderr.readline()
+        assert line, seen
+        seen += line
     proc.send_signal(signal.SIGINT)
     out, err = proc.communicate(timeout=15)
+    err = seen + err
     assert proc.returncode == 130, err
     assert json.loads(out.splitlines()[-1])["error"]["code"] == "CANCELLED"
     assert "tickctl: cancellation ignored" in err
@@ -203,3 +212,39 @@ def test_a_streaming_handler_is_annotated_for_its_own_kind() -> None:
         @other.command("s", description="S", danger_level="safe", exit_codes=(), streaming=True)
         def s(args: NoArgs, ctx: Ctx) -> AsyncIterator[dict[str, int]]:  # type: ignore[misc]
             yield {"n": 1}
+
+
+def test_stop_cancels_a_step_still_queued_on_the_loop() -> None:
+    """A signal that lands after a step was queued but before the loop started it found
+    no running task to cancel: the step then ran uncancelled and its ``aclose()`` never
+    did, so the stream ended only at the grace, with the source's ``finally`` skipped"""
+    loop = Loop()
+    gate, entered = threading.Event(), threading.Event()
+    seen: list[str] = []
+
+    async def source() -> AsyncIterator[int]:
+        try:
+            yield 1
+            await asyncio.sleep(3600)
+            yield 2
+        finally:
+            seen.append("finally")
+
+    async def blocker() -> None:
+        entered.set()
+        gate.wait(5)  # holds the loop's thread, so the next step stays queued
+
+    events = AsyncEvents(source(), loop, grace=2, owns_loop=True)
+    assert next(events) == 1
+    loop.submit(blocker())
+    assert entered.wait(5)
+    stepped: list[object] = []
+    stepping = threading.Thread(target=lambda: stepped.append(next(events, "end")), daemon=True)
+    stepping.start()
+    time.sleep(0.05)  # the step is queued behind the blocker
+    events.stop()
+    gate.set()
+    events.close()
+    stepping.join(5)
+    assert stepped == ["end"]
+    assert seen == ["finally"]

@@ -38,8 +38,6 @@ Apps built on treaty keep their own, structured schema changelog with
   appended as before. `frame=True` is refused at registration off `streaming=True` or on a
   format other than `plain`, and `FormatRenderer`'s `media_type=` is now optional (#350)
 
-### Added
-
 - A streaming handler may be an async generator (`async def ... -> AsyncIterator[T]`),
   with async resources, stepped on the run's event loop. A signal, the idle timeout, or a
   reader that stops cancels the pending step before closing the generator, so its

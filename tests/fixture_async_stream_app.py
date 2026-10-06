@@ -100,6 +100,7 @@ async def stubborn(args: NoArgs, ctx: Ctx) -> AsyncIterator[Tick]:
     yield Tick(1, "none")
     while True:
         try:
+            note("waiting")  # the test signals once the source is inside its await
             await asyncio.sleep(3600)
         except asyncio.CancelledError:
             note("cancellation ignored")

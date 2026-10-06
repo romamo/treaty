@@ -47,6 +47,8 @@ class _Job:
     ``Cancelled`` into a ``RuntimeError``; ``acquire`` is one call (#304)"""
     result: object = None
     exc: BaseException | None = None
+    cancelled: bool = False
+    """``Loop.cancel`` reached it; one still queued is then cancelled as it starts"""
 
     def wait(self, seconds: float) -> bool:
         """Whether the job ended within ``seconds``; sliced as ``Loop.run``'s wait is"""
@@ -65,11 +67,11 @@ class Loop:
     def __init__(self) -> None:
         self._jobs: queue.SimpleQueue[_Job | None] = queue.SimpleQueue()
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._running: _Job | None = None
         self._task: asyncio.Task[object] | None = None
         self._closed = False
         """Set before the ``None`` that stops the loop; no lock, as a signal raised while
         one is held could leave it held"""
-        self._cancelled: asyncio.Task[object] | None = None
         self._thread = threading.Thread(target=self._serve, name="treaty-loop", daemon=True)
         self._thread.start()
 
@@ -83,7 +85,7 @@ class Loop:
             self._loop = runner.get_loop()
             while (job := self._jobs.get()) is not None:
                 try:
-                    job.result = runner.run(self._tracked(job.coro), context=job.context)
+                    job.result = runner.run(self._tracked(job), context=job.context)
                 except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
                     job.exc = exc
                 job.done.release()
@@ -109,50 +111,80 @@ class Loop:
             job.exc = exc
             job.done.release()
 
-    async def _tracked(self, coro: Coroutine[Any, Any, object]) -> object:
+    async def _tracked(self, job: _Job) -> object:
         import asyncio
 
-        self._task = asyncio.current_task()
+        # Running before the check, as cancel() sets the flag before it reads _running:
+        # one of the two sees the other
+        self._running, self._task = job, asyncio.current_task()
         try:
-            return await coro
+            if job.cancelled and self._task is not None:
+                # Cancelled while queued: it ends at its first await, as if cancelled
+                # there; closing it unstarted would leave an async generator's step
+                # marked running, so its aclose() would fail
+                self._task.cancel()
+            return await job.coro
         finally:
-            self._task = None
+            self._running = self._task = None
 
-    def cancel(self) -> None:
-        """Cancel the job running on the loop, so its ``finally`` blocks run now and the
-        jobs queued behind it, such as the async releases, do not wait for it. Once per
-        job: a second cancel would land in those ``finally`` blocks' own awaits (#347)"""
-        loop, task = self._loop, self._task
-        if loop is None or task is None or task is self._cancelled:
+    def _cancel_running(self, job: _Job) -> None:
+        """On the loop: cancel ``job``'s task if it is still the one running"""
+        if self._running is job and self._task is not None:
+            self._task.cancel()
+
+    def cancel(self, job: _Job | None = None) -> None:
+        """Cancel ``job``, or the one running, so its ``finally`` blocks run now and the
+        jobs queued behind it, such as the async releases, do not wait for it; queued, it
+        is cancelled as it starts (#347). Once per job: a second cancel would land in
+        those ``finally`` blocks' own awaits"""
+        job = self._running if job is None else job
+        if job is None or job.cancelled:
             return
-        self._cancelled = task
-        loop.call_soon_threadsafe(task.cancel)
+        job.cancelled = True
+        loop = self._loop
+        if loop is not None and self._running is job:
+            loop.call_soon_threadsafe(self._cancel_running, job)
 
-    def submit(
+    def job(
         self, coro: Coroutine[Any, Any, object], context: contextvars.Context | None = None
     ) -> _Job:
-        """Queue ``coro`` behind the jobs before it, without waiting; once the loop was
-        closed, the job fails with ``coro`` unrun"""
-        job = _Job(coro, contextvars.copy_context() if context is None else context)
+        """A job for ``coro``, in ``context`` or a copy of the caller's, not yet queued: a
+        caller that may cancel it holds it before a signal can land in ``submit``"""
+        return _Job(coro, contextvars.copy_context() if context is None else context)
+
+    def enqueue(self, job: _Job) -> _Job:
+        """Queue ``job`` behind the jobs before it, without waiting; once the loop was
+        closed, the job fails with its coroutine unrun"""
         self._jobs.put(job)
         if self._closed:
             self._drain()  # the loop may have drained before this job landed
         return job
 
+    def submit(
+        self, coro: Coroutine[Any, Any, object], context: contextvars.Context | None = None
+    ) -> _Job:
+        """Queue ``coro`` behind the jobs before it, without waiting"""
+        return self.enqueue(self.job(coro, context))
+
     def run[T](self, coro: Coroutine[Any, Any, T], context: contextvars.Context | None = None) -> T:
         """Run ``coro`` to completion on the loop, in ``context`` or a copy of the caller's;
-        a signal raised while this waits cancels it. The wait is sliced, so a signal no
-        lock wait wakes for still raises here within ``SIGNAL_POLL_SECONDS`` (#304)"""
-        job = self.submit(coro, context)
+        a signal raised while this waits cancels it"""
+        return self.run_job(self.job(coro, context))  # type: ignore[return-value]
+
+    def run_job(self, job: _Job) -> object:
+        """Queue ``job`` and wait for it; a signal raised meanwhile cancels it, queued or
+        running. The wait is sliced, so a signal no lock wait wakes for still raises here
+        within ``SIGNAL_POLL_SECONDS`` (#304)"""
         try:
+            self.enqueue(job)
             while not job.done.acquire(timeout=SIGNAL_POLL_SECONDS):
                 pass
         except BaseException:  # noqa: BLE001 - Cancelled or KeyboardInterrupt, re-raised
-            self.cancel()
+            self.cancel(job)
             raise
         if job.exc is not None:
             raise job.exc
-        return job.result  # type: ignore[return-value]
+        return job.result
 
     def close(self) -> None:
         """Stop the loop once the jobs queued before this one are done"""
@@ -182,6 +214,8 @@ class AsyncEvents(Iterator[object]):
         self._stopped = False
         """A flag, not a lock: the stream's thread may be interrupted anywhere by a signal"""
         self._closing: _Job | None = None
+        self._step: _Job | None = None
+        """The pending ``__anext__()``, held before it is queued so ``stop`` can cancel it"""
 
     def __next__(self) -> object:
         import asyncio
@@ -189,7 +223,8 @@ class AsyncEvents(Iterator[object]):
         if self._stopped:
             raise StopIteration
         try:
-            return self._loop.run(self._source.__anext__(), self._context)
+            self._step = self._loop.job(self._source.__anext__(), self._context)
+            return self._loop.run_job(self._step)
         except StopAsyncIteration:
             raise StopIteration from None
         except asyncio.CancelledError:
@@ -202,7 +237,8 @@ class AsyncEvents(Iterator[object]):
         if self._stopped:
             return
         self._stopped = True
-        self._loop.cancel()
+        if self._step is not None:
+            self._loop.cancel(self._step)
         self._closing = self._loop.submit(self._source.aclose(), self._context)
 
     def close(self) -> None:
