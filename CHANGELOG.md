@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- An `async def release` no longer waits forever behind an `async def` handler or async
+  stream source still running after its cancellation grace, which holds the run's event
+  loop: the run's async releases wait to start for one grace more in all, then each is
+  reported as a `CLEANUP_FAILED` warning naming its `release`, and the run answers
+  `CANCELLED` or `TIMEOUT` as it would without the resource. A release that cannot start is
+  cancelled, so it never runs late; once started, a release still runs to its end (#383)
+
 ## [1.0.0rc36] - 2026-10-06
 
 The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see

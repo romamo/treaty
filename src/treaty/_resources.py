@@ -20,6 +20,7 @@ from typing import Any, cast
 from ._aio import Loop
 from ._context import Ctx
 from ._errors import RegistrationError
+from ._subprocess import GRACE_SECONDS
 from ._types import signature, type_hints
 
 
@@ -252,7 +253,11 @@ class Resolver:
             if spec.async_release:
                 assert self._loop is not None  # an async resource needs an async handler
                 loop = self._loop
-                teardown.add(f"{cls.__qualname__}.release", lambda: loop.run(release()))
+                # Bounded: a handler stuck past its grace holds the loop (#383)
+                teardown.add(
+                    f"{cls.__qualname__}.release",
+                    lambda: loop.release(release(), GRACE_SECONDS),
+                )
             else:
                 teardown.add(f"{cls.__qualname__}.release", release)
         return value
