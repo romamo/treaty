@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 
-from ._command import Command, DangerLevel
+from ._command import Command, DangerLevel, OptionPlacement
 from ._envelope import visible
 from ._envnames import declared_text
 from ._flags import FieldInfo, object_shape
@@ -178,6 +178,63 @@ def _declared_rows(f: FieldInfo, when: str, default: str) -> list[tuple[str, str
     return [(f"${n.name}", declared_text(n, what, None, default)) for n in f.spec.env]
 
 
+def field_rows(command: Command, f: FieldInfo) -> list[Row]:
+    """A field's rows in ``--help``: a positional's under Arguments; a flag's under
+    Flags with the variables it reads; a secret's as its two sources and its variable"""
+    if f.positional:
+        return [(f.flag, f.spec.description)]
+    if f.secret:
+        var = command.secret_env_vars[f.name]
+        need = " (required)" if f.required else ""
+        return [
+            (f"--{f.env_flag} VAR", f"{f.spec.description}: read from $VAR{need}"),
+            (f"--{f.file_flag} PATH", f"{f.spec.description}: read from PATH"),
+            (f"${var}", f"{f.spec.description}: default when neither is given"),
+            *_declared_rows(f, f"when ${var} is not set", var),
+        ]
+    label = f"--{f.flag}" + (f", -{f.spec.short}" if f.spec.short else "")
+    text = f.spec.description + (" (required)" if f.required else "")
+    if (shape := f.object_type) is not None:
+        label += " JSON"
+        repeated = f.flag_type is FlagType.ARRAY
+        each = "repeat it, one JSON object each" if repeated else "a JSON object"
+        text += f"; {each}: {object_shape(shape)}"
+    rows = [(label, text)]
+    own = command.own_env_var(f.name)
+    if own is None:
+        return rows
+    rows.append((f"${own}", f"{f.spec.description}: read when --{f.flag} is not given"))
+    rows += _declared_rows(f, f"when --{f.flag} is not given and ${own} is not set", own)
+    return rows
+
+
+def missing_lines(
+    name: str, command: Command, missing: Sequence[FieldInfo]
+) -> tuple[list[str], list[str]]:
+    """What a person reads about a missing required argument (#358): each missing
+    field's ``--help`` rows, then a usage line with only the command's required
+    arguments and where the rest are. Names and descriptions only, never a value"""
+    shown = [(visible(label), text) for f in missing for label, text in field_rows(command, f)]
+    width = max(len(label) for label, _ in shown)
+    rows = [_shown(f"  {label:<{width}}  {text}") for label, text in shown]
+    path = [name, *command.path.parts]
+    positionals = [f.shown for f in command.fields if f.required and f.positional]
+    options = [
+        f"--{f.env_flag} <var>" if f.secret else f"--{f.flag} <{f.flag}>"
+        for f in command.fields
+        if f.required and not f.positional
+    ]
+    options.append("[options]")
+    # REQ-C-027: a strict command reads options only before its first positional
+    strict = command.option_placement is OptionPlacement.STRICT
+    usage = [*path, *(options + positionals if strict else positionals + options)]
+    tail = [
+        f"usage: {' '.join(usage)}",
+        f"Run '{' '.join([*path, '--help'])}' for all options.",
+    ]
+    return rows, [_shown(line) for line in tail]
+
+
 def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
     positionals = [f for f in command.fields if f.positional]
     flags = [f for f in command.fields if not f.positional]
@@ -206,29 +263,7 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
         for f in positionals:
             lines.append(f"  {f.flag:<{width}}  {f.spec.description}")
         lines.append("")
-    rows: list[tuple[str, str]] = []
-    for f in flags:
-        if f.secret:
-            var = command.secret_env_vars[f.name]
-            need = " (required)" if f.required else ""
-            rows.append((f"--{f.env_flag} VAR", f"{f.spec.description}: read from $VAR{need}"))
-            rows.append((f"--{f.file_flag} PATH", f"{f.spec.description}: read from PATH"))
-            rows.append((f"${var}", f"{f.spec.description}: default when neither is given"))
-            rows += _declared_rows(f, f"when ${var} is not set", var)
-            continue
-        label = f"--{f.flag}" + (f", -{f.spec.short}" if f.spec.short else "")
-        text = f.spec.description + (" (required)" if f.required else "")
-        if (shape := f.object_type) is not None:
-            label += " JSON"
-            repeated = f.flag_type is FlagType.ARRAY
-            each = "repeat it, one JSON object each" if repeated else "a JSON object"
-            text += f"; {each}: {object_shape(shape)}"
-        rows.append((label, text))
-        own = command.own_env_var(f.name)
-        if own is None:
-            continue
-        rows.append((f"${own}", f"{f.spec.description}: read when --{f.flag} is not given"))
-        rows += _declared_rows(f, f"when --{f.flag} is not given and ${own} is not set", own)
+    rows = [row for f in flags for row in field_rows(command, f)]
     rows.extend(_framework_rows(command))
     lines += _section("Flags", rows)
     if command.requires:  # REQ-C-026

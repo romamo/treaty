@@ -29,6 +29,17 @@ Apps built on treaty keep their own, structured schema changelog with
   one and `treaty conformance` exits `CONFLICT`: rerun `treaty conformance --force` once
   to update it (#361)
 
+### Changed
+
+- A missing required argument names it as it is typed: `Missing required option
+  --name/-n`, a positional as `<name>`, a secret by its `--x-from-env/--x-from-file`
+  sources. At a terminal or with `--format plain`, each missing argument's `--help` row
+  follows, then a usage line with only the command's required arguments and `Run '<app>
+  <command> --help' for all options.`, which replaces the generic `correct the arguments`
+  hint. The human error lines print context values as text, a list joined with `, `,
+  never a Python repr. JSON is unchanged but for `error.message`: `error.context.missing`
+  keeps the names, and the code and exit 2 are the same (#358)
+
 ### Fixed
 
 - `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,

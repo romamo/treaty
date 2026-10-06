@@ -995,16 +995,21 @@ def _construct(command: Command, values: dict[str, object], errors: _Collector) 
                 errors.add(refused)
     objects = {f.flag for f in command.fields if f.object_type is not None}
     failed = {_field_of(e.field, objects) for e in errors.errors}
-    missing = [
-        f.env_flag if f.secret else f.flag
+    absent = [
+        f
         for f in command.fields
-        # A secret's source errors name --x-from-env or --x-from-file, not --x
         if f.required and f.name not in values and failed.isdisjoint({f.flag, *f.exposed_flags()})
     ]
+    # A secret's source errors name --x-from-env or --x-from-file, not --x
+    missing = [f.env_flag if f.secret else f.flag for f in absent]
     if missing:
+        # The message spells each as argv takes it; the context keeps the names (#358)
+        kind = "argument" if any(f.positional for f in absent) else "option"
+        plural = "s" if len(absent) > 1 else ""
+        spelled = ", ".join(f.spelled for f in absent)
         errors.add(
             ParseError(
-                f"missing required: {', '.join(missing)}",
+                f"missing required {kind}{plural} {spelled}",
                 context={"missing": missing, "command": command.path.value},
             )
         )

@@ -202,7 +202,7 @@ def test_a_conflict_in_plain_mode_names_the_changed_keys(tmp_path: Path) -> None
     err = io.StringIO()
     argv = ["conformance", "examples.deployctl:app", "--format", "plain", "--cwd", str(tmp_path)]
     code = cli.run(argv, stdout=io.StringIO(), stderr=err, env={})
-    assert code == 6 and "changed_keys: ['timeout_seconds']" in err.getvalue()
+    assert code == 6 and "changed_keys: timeout_seconds\n" in err.getvalue()
 
 
 def test_conformance_refuses_to_overwrite_a_differing_profile(tmp_path: Path) -> None:
