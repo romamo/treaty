@@ -6,6 +6,7 @@ import io
 import os
 import subprocess
 import sys
+import threading
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
@@ -13,6 +14,7 @@ import pytest
 
 from treaty import App, Ctx, Format, FormatRenderer, NoArgs, RegistrationError
 from treaty._plain import frame_rows
+from treaty._stdout import Writes
 
 CLEAR_ONE = "\r\x1b[1A\x1b[J"
 TERMINAL = {"AP_AUDIT_LOG": "0", "TERM": "xterm"}
@@ -249,6 +251,19 @@ def test_a_descriptor_1_write_between_frames_is_not_cleared() -> None:
     # The interceptor passed it on to stderr before frame 2, which goes below it
     assert proc.stderr.replace("\r\n", "\n") == "native\n"
     assert proc.stdout.strip() == repr((0, f"frame 1\nframe 2\n{CLEAR_ONE}frame 3\n"))
+
+
+def test_bumps_from_many_threads_each_count() -> None:
+    # With the GIL off (3.14t), an unlocked += lost about a third of them
+    writes = Writes()
+    threads = [
+        threading.Thread(target=lambda: [writes.bump() for _ in range(20000)]) for _ in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert writes.count == 8 * 20000
 
 
 def test_frame_is_refused_off_a_stream_or_off_plain() -> None:

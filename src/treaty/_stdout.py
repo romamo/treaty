@@ -154,14 +154,17 @@ class Writes:
     """Writes that reached stderr, or the terminal through it: a run's diagnostics, a
     prompt, and what descriptor 1 passes on. A frame is not drawn over the last once the
     count moved (#350, #365). One count for the process, as descriptor 1's reader serves
-    every run. Bumped without a lock: two bumps that race may count once, and the count
-    still moved"""
+    every run. Bumped under a lock: with the GIL off, an unlocked ``+=`` loses bumps,
+    and a stale one stored late can set the count back to a frame's mark"""
 
     def __init__(self) -> None:
         self.count = 0
+        self._lock = threading.RLock()
+        """Reentrant: a signal handler that writes on the bumping thread cannot deadlock"""
 
     def bump(self) -> None:
-        self.count += 1
+        with self._lock:
+            self.count += 1
 
 
 stderr_writes = Writes()
