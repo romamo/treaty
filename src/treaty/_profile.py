@@ -85,8 +85,13 @@ def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[s
     return (*flags, *argv) if command.passthrough else (*argv, *flags)
 
 
+VERSION_PROBE = Probe("version", ("version",), "read")
+
+
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
+    # The first probe that runs a command: the unknown-flag probe adds its flag to it
+    unknown_from: Probe | None = None
     for command in user_commands(app):
         argv = _argv_from_example(app, command)
         if argv is None:
@@ -106,22 +111,34 @@ def probes_for(app: App) -> list[Probe]:
             # REQ-O-040: a walk of no levels is not a limit
             shallow = _with_flags(command, argv, "--max-depth", "0")
             probes.append(Probe(f"{label} --max-depth 0", shallow, "invalid"))
+        run: Probe | None = None
         if command.streaming:
             # JSONL, and possibly endless, while the kit expects one envelope: the probes
             # above end before the stream starts, and a read is bounded (#349). A stream is
             # safe or mutating, and a mutating one, as elsewhere, gets no probe that runs it
             if command.danger_level is DangerLevel.SAFE:
                 bounded = (*_without_stream_flags(argv), "--no-stream", "--timeout")
-                probes.append(Probe(label, (*bounded, str(STREAM_SECONDS)), "read"))
+                run = Probe(label, (*bounded, str(STREAM_SECONDS)), "read")
         elif command.danger_level is DangerLevel.DESTRUCTIVE and command.safe_default:
             # Unconfirmed, a safe_default command previews and exits 0, and --live alone is
             # its confirmation: nothing refuses, so it is probed as the read its default is
-            probes.append(Probe(label, argv, "read"))
+            run = Probe(label, argv, "read")
         elif command.danger_level is DangerLevel.DESTRUCTIVE:
-            probes.append(Probe(label, argv, "destructive", dry_run_flag=_dry_run_flag(command)))
+            run = Probe(label, argv, "destructive", dry_run_flag=_dry_run_flag(command))
         elif command.danger_level is DangerLevel.SAFE:
-            probes.append(Probe(label, argv, "read", passthrough=command.passthrough))
-    probes.append(Probe("version", ("version",), "read"))
+            run = Probe(label, argv, "read", passthrough=command.passthrough)
+        if run is None:
+            continue
+        if unknown_from is None:
+            # An unknown flag exits 2 before anything runs, so a network command's run is
+            # one to add it to, though the profile has no read probe of it
+            unknown_from = run
+        if run.kind == "read" and command.has_network_io:
+            # Each kit run of a read would make the command's real, perhaps paid, requests:
+            # its probes are the ones above, which end before the network (#390)
+            continue
+        probes.append(run)
+    probes.append(VERSION_PROBE)
     if CommandPath("status") in app.builtins:
         probes.append(Probe("status built-in", ("status",), "read"))  # REQ-O-028: always 0
     if CommandPath("cleanup") in app.builtins and not any(p.kind == "destructive" for p in probes):
@@ -133,7 +150,7 @@ def probes_for(app: App) -> list[Probe]:
         probes.append(cleanup)
     # REQ-O-041: an etag that is not sha256:<32 hex> exits 2 before anything runs
     probes.append(Probe("manifest malformed etag", ("manifest", "--etag", "x"), "invalid"))
-    first = next(p for p in probes if p.kind != "invalid")
+    first = VERSION_PROBE if unknown_from is None else unknown_from
     unknown = (*first.argv, "--no-such-flag")
     if first.passthrough:
         unknown = ("--no-such-flag", *first.argv)  # after the path, the tool would get it
@@ -194,13 +211,16 @@ def _without_stream_flags(argv: tuple[str, ...]) -> tuple[str, ...]:
 def argument_order_for(app: App) -> dict[str, object] | None:
     """The first example whose tokens after its positionals start with an option, so the kit
     can move ``--format`` around it (REQ-F-079). A destructive one runs with its dry-run flag
-    and never ``--confirm-destructive``, so one whose only option is that flag is skipped.
-    Without one, the built-in ``manifest --etag``"""
+    and never ``--confirm-destructive``, so one whose only option is that flag is skipped,
+    as is a safe network command's, which would make its real requests (#390). Without one,
+    the built-in ``manifest --etag``"""
     for command in user_commands(app):
         if command.danger_level is DangerLevel.MUTATING or command.streaming:
             continue
         if command.passthrough:
             continue  # the kit moves --format after the path, where the tool would get it
+        if command.has_network_io and command.danger_level is DangerLevel.SAFE:
+            continue  # each run would make its real requests, as a read probe would (#390)
         argv = _argv_from_example(app, command)
         if argv is None:
             continue

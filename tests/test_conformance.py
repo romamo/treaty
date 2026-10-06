@@ -70,6 +70,17 @@ def stream_app() -> App:
     def trade(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
         yield {"filled": 1}
 
+    @app.command(
+        "tail",
+        description="Tail the local price log",
+        streaming=True,
+        danger_level="safe",
+        exit_codes=(),
+        examples=[("Tail for a minute", "streamctl tail --timeout 60 --no-stream")],
+    )
+    def tail(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        yield {"price": 1}
+
     return app
 
 
@@ -79,11 +90,11 @@ def test_streaming_commands_keep_the_probes_that_end_in_one_envelope() -> None:
     assert probes["watch --proxy socks5"].kind == probes["trade --proxy socks5"].kind == "invalid"
     # A read is bounded: --no-stream makes --timeout a deadline for the whole stream;
     # the example's own --timeout and --no-stream are replaced, not repeated
-    assert probes["watch"].kind == "read"
-    assert probes["watch"].argv == ("watch", "--no-stream", "--timeout", str(STREAM_SECONDS))
+    assert probes["tail"].kind == "read"
+    assert probes["tail"].argv == ("tail", "--no-stream", "--timeout", str(STREAM_SECONDS))
     assert 0 < STREAM_SECONDS < TIMEOUT_SECONDS
-    # Nothing runs a mutating stream for real
-    assert "trade" not in probes
+    # Nothing runs a mutating stream for real, nor a network one, whose reads go out (#390)
+    assert "trade" not in probes and "watch" not in probes
 
 
 def test_a_streaming_read_probe_profile_validates_against_the_spec() -> None:
@@ -237,3 +248,55 @@ def test_an_example_whose_only_option_is_output_leaves_argument_order_to_the_man
     assert order is not None and order["command_path"] == ["manifest"]
     for argv in profile_argvs(app):
         assert not any(tok.startswith("--output") for tok in argv), argv
+
+
+def network_app(calls: list[str], *, with_local: bool) -> App:
+    app = App("pdfctl", version="1.0.0")
+
+    @app.command(
+        "summarize",
+        description="Summarize a PDF with a paid remote API",
+        examples=[("Summarize two pages", "pdfctl summarize lease.pdf --pages 2")],
+        danger_level="safe",
+        exit_codes=(),
+        has_network_io=True,
+    )
+    def summarize(args: PdfArgs, ctx: Ctx) -> dict[str, int]:
+        calls.append("summarize")
+        return {"pages": args.pages}
+
+    if with_local:
+
+        @app.command(
+            "tally",
+            description="Count a PDF's pages",
+            examples=[("Tally two pages", "pdfctl tally lease.pdf --pages 2")],
+            danger_level="safe",
+            exit_codes=(),
+        )
+        def tally(args: PdfArgs, ctx: Ctx) -> dict[str, int]:
+            return {"pages": args.pages}
+
+    return app
+
+
+@pytest.mark.parametrize("with_local", [True, False], ids=["with a local command", "alone"])
+def test_no_probe_runs_a_network_command(with_local: bool) -> None:
+    """Each kit run of a read probe made the command's real, perhaps paid, requests (#390)"""
+    calls: list[str] = []
+    app = network_app(calls, with_local=with_local)
+    probes = {p.name: p for p in probes_for(app)}
+    assert "summarize" not in probes
+    assert probes["summarize --proxy socks5"].kind == "invalid"
+    # The unknown flag still goes on the first command's example, never the bare version,
+    # and exits 2 before the handler runs
+    unknown = probes["unknown flag"].argv
+    assert unknown == ("summarize", "lease.pdf", "--pages", "2", "--no-such-flag")
+    for probe in probes.values():
+        if probe.kind == "invalid" and probe.argv[0] == "summarize":
+            assert app.run(list(probe.argv), env={}, isatty=False) == 2, probe
+    assert calls == []
+    # argument_order runs the command: the next example, or the built-in manifest
+    order = argument_order_for(app)
+    assert order is not None
+    assert order["command_path"] == (["tally", "lease.pdf"] if with_local else ["manifest"])
