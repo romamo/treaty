@@ -519,7 +519,8 @@
     "FormatRenderer": {
       "fields": [
         "render",
-        "media_type"
+        "media_type",
+        "frame"
       ],
       "kind": "class",
       "methods": []

@@ -110,30 +110,43 @@ class Example:
 
 @dataclass(frozen=True, slots=True)
 class FormatRenderer:
-    """A command's renderer for one ``--format`` and the media type it writes:
+    """A command's renderer for one ``--format`` and what it writes:
     ``renderers={"html": FormatRenderer(render_page, media_type="text/html")}``. The
     command's manifest entry states the media type, so an agent knows not to parse the
-    output as JSON (#209)"""
+    output as JSON (#209). ``frame=True`` on a streaming command's ``plain`` renderer
+    says each call draws the whole view: at a terminal, treaty clears the previous frame
+    before it writes the next, so a live view redraws in place instead of scrolling (#350)"""
 
     render: Renderer
-    media_type: MediaType
+    media_type: MediaType | None
+    """None leaves it undeclared: a spec format keeps the spec's, another is opaque"""
+    frame: bool
 
     if TYPE_CHECKING:
 
-        def __init__(self, render: Renderer, *, media_type: MediaType | str) -> None: ...
+        def __init__(
+            self,
+            render: Renderer,
+            *,
+            media_type: MediaType | str | None = None,
+            frame: bool = False,
+        ) -> None: ...
 
     else:
 
-        def __init__(self, render: Renderer, *, media_type: MediaType | str) -> None:
+        def __init__(self, render, *, media_type=None, frame=False):
             if not callable(render):
                 raise RegistrationError(f"FormatRenderer: {render!r} is not callable")
-            if not isinstance(media_type, MediaType):
+            if media_type is not None and not isinstance(media_type, MediaType):
                 try:
                     media_type = MediaType(media_type)
                 except InvalidValue as exc:
                     raise RegistrationError(f"FormatRenderer: {exc}") from None
+            if not isinstance(frame, bool):
+                raise RegistrationError(f"FormatRenderer: frame={frame!r} is not a bool")
             object.__setattr__(self, "render", render)
             object.__setattr__(self, "media_type", media_type)
+            object.__setattr__(self, "frame", frame)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +183,9 @@ class Command:
     offers"""
     media_types: Mapping[FormatName, MediaType]
     """What the command's own renderers write, where it declared it (#209)"""
+    frames: frozenset[FormatName]
+    """The formats whose renderer draws a whole frame per event, ``FormatRenderer(frame=
+    True)``: at a terminal the previous frame is cleared before the next (#350)"""
     secret_env_vars: Mapping[str, str]
     """Field name to the default ``<APP>_<FIELD>`` variable, for secret fields only"""
     flag_env_vars: Mapping[str, str]
@@ -449,6 +465,7 @@ def build_command(
     renderers: Mapping[FormatName, Renderer],
     media_types: Mapping[FormatName, MediaType],
     scalars: ScalarRegistry,
+    frames: frozenset[FormatName] = frozenset(),
     outlasts_default: bool = False,
     streaming: bool = False,
     safe_default: bool = False,
@@ -836,6 +853,7 @@ def build_command(
         cleanup=cleanup,
         renderers=dict(renderers),
         media_types=dict(media_types),
+        frames=frames,
         secret_env_vars={f.name: default_env_var(app_name, f.name) for f in fields if f.secret},
         flag_env_vars={
             f.name: default_env_var(app_name, f.name) for f in fields if not f.secret and f.spec.env
