@@ -11,7 +11,6 @@ from __future__ import annotations
 import ast
 import collections
 import functools
-import importlib.metadata
 import importlib.util
 import inspect
 import json
@@ -25,10 +24,14 @@ import types
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ._errors import CliExit, Exit
 from ._types import signature
 from ._values import ExitCodeName, InvalidValue
+
+if TYPE_CHECKING:
+    import importlib.metadata  # read only by the audit, so imported where it is used (#360)
 
 
 @dataclass(frozen=True, slots=True)
@@ -802,6 +805,8 @@ def _distribution_packages(
 @functools.lru_cache(maxsize=1)
 def _shipped() -> dict[str, tuple[str, ...]]:
     """Each top-level package to the distributions that ship it, read once per audit"""
+    import importlib.metadata
+
     return {
         name: tuple(dict.fromkeys(dists))
         for name, dists in importlib.metadata.packages_distributions().items()
@@ -813,6 +818,8 @@ def _ships(name: str, file: Path) -> bool:
     """Whether a distribution called ``name`` installed ``file``, a resolved path: its
     file list names it, or it is an editable install whose project directory, or a
     directory its ``.pth`` puts on ``sys.path``, holds it"""
+    import importlib.metadata
+
     key = os.path.normcase(file.name)
     for dist in importlib.metadata.distributions(name=name):
         if any(
@@ -843,6 +850,8 @@ def _editable_roots() -> _Editables:
     ``sys.path`` through a ``.pth`` file; an install that hooks the import system
     instead names none. Every installed distribution is read, so one whose record is
     malformed is skipped and named rather than stopping the audit"""
+    import importlib.metadata
+
     found: set[Path] = set()
     unread: list[str] = []
     for dist in importlib.metadata.distributions():

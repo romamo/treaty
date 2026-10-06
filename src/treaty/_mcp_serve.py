@@ -49,7 +49,15 @@ from ._command import Command, DangerLevel, build_command
 from ._context import Ctx
 from ._errors import ArgsCrashed, CliExit, ParseError, RegistrationError
 from ._flags import Flag
-from ._framework import CONFIRM_FLAG
+
+# Re-exported: these lived here before #360 moved them to the light module
+from ._mcp_shared import CONFIRM_KEY as CONFIRM_KEY
+from ._mcp_shared import CONFIRMATION_REQUIRED as CONFIRMATION_REQUIRED
+from ._mcp_shared import MCP_GROUP as MCP_GROUP
+from ._mcp_shared import MCP_SERVE_PATH as MCP_SERVE_PATH
+from ._mcp_shared import NO_BINDINGS as NO_BINDINGS
+from ._mcp_shared import Bindings as Bindings
+from ._mcp_shared import protocol_command as protocol_command
 from ._redact import REDACTED
 from ._resources import dependency_params, resource_spec
 from ._types import is_dataclass_type, signature, type_hints
@@ -59,8 +67,6 @@ if TYPE_CHECKING:
     from ._app import App
     from ._tools import ToolEntry
 
-MCP_GROUP = CommandPath("mcp")
-MCP_SERVE_PATH = MCP_GROUP.child("serve")
 NEEDS_STDIO = "NEEDS_STDIO"
 MCP_SDK_MISSING = "MCP_SDK_MISSING"
 STDIN_CLOSED = "STDIN_CLOSED"
@@ -72,8 +78,6 @@ MCP_BIND_UNKNOWN = "MCP_BIND_UNKNOWN"
 MCP_BIND_INVALID = "MCP_BIND_INVALID"
 MCP_BIND_NEEDS_SERVE = "MCP_BIND_NEEDS_SERVE"
 LIST_TOOLS = "list_tools"
-CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
-CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
 
 DESCRIPTION = (
     "Serve the app's commands as MCP tools over stdio until stdin ends or SIGINT or "
@@ -541,11 +545,6 @@ def unbound(token: contextvars.Token[Mapping[str, object]]) -> None:
     _ARGUMENTS.reset(token)
 
 
-def protocol_command(app: App, path: CommandPath) -> bool:
-    """Whether the command at ``path`` is ``mcp serve``, whose stdout is the protocol's"""
-    return app.mcp is not None and path == MCP_SERVE_PATH and path in app.builtins
-
-
 def needs_stdio(app_name: str) -> CliExit:
     """``mcp serve`` from an ``exec`` line or ``App.call``, which have no stdout to give it"""
     return CliExit(
@@ -758,25 +757,6 @@ def served_commands(app: App, spec: McpServe, args: object) -> frozenset[Command
             )
         served.add(path)
     return frozenset(served)
-
-
-@dataclass(frozen=True, slots=True)
-class Bindings:
-    """The argument values ``McpServe(bind=)`` fixed for a server run, by payload key, as
-    JSON gives them (#285)"""
-
-    values: Mapping[str, object] = dataclasses.field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "values", types.MappingProxyType(dict(self.values)))
-
-    def for_command(self, command: Command) -> Mapping[str, object]:
-        """The bound values of the fields ``command`` has"""
-        keys = {f.key for f in command.fields}
-        return types.MappingProxyType({k: v for k, v in self.values.items() if k in keys})
-
-
-NO_BINDINGS = Bindings()
 
 
 def _bind_invalid(name: str, problem: str, **context: object) -> CliExit:

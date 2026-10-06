@@ -28,6 +28,7 @@ import uuid
 import weakref
 from collections.abc import (
     Callable,
+    Collection,
     Generator,
     Iterable,
     Iterator,
@@ -155,7 +156,6 @@ from ._help import (
     render_command,
     render_root,
 )
-from ._http import Http, NetworkFailure, ProxyConfig
 from ._idempotency import (
     KeyBusy,
     Record,
@@ -186,16 +186,11 @@ from ._manifest import (
     global_flag_entries,
     implicit_exit_codes,
 )
-from ._mcp_serve import (
+from ._mcp_shared import (
     CONFIRM_KEY,
     CONFIRMATION_REQUIRED,
     MCP_SERVE_PATH,
-    McpServe,
-    Provided,
-    bound,
     protocol_command,
-    register_mcp_serve,
-    unbound,
 )
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
 from ._mode import (
@@ -213,6 +208,7 @@ from ._mode import (
     resolve_mode,
     suppress_updates,
 )
+from ._network import NetworkFailure, ProxyConfig
 from ._out import (
     NO_ORDER,
     External,
@@ -374,9 +370,27 @@ from ._verbosity import (
 )
 from ._walk import DEFAULT_MAX_DEPTH, Traversal, TraversalStopped
 
+if typing.TYPE_CHECKING:
+    from ._http import Http
+    from ._mcp_serve import McpServe, Provided
+
 type ExecFallback = Callable[[str, Mapping[str, object]], object]
 """``App(exec_fallback=)``: the old CLI's dispatcher, called with an exec line's ``_cmd``
 and the rest of the line"""
+
+
+def _http_client(
+    proxies: ProxyConfig,
+    *,
+    deadline: float | None,
+    retrier: Retrier | None,
+    declared: Collection[ExitCodeName],
+) -> Http:
+    """``ctx.http`` for a network command; ``http.client`` and ``ssl`` load only then"""
+    from ._http import Http
+
+    return Http(proxies, deadline=deadline, retrier=retrier, declared=declared)
+
 
 CHECK_PERMISSIONS_PATH = CommandPath("check-permissions")
 MANIFEST_PATH = CommandPath("manifest")
@@ -663,8 +677,11 @@ class App:
                 f"App {name}: exec_fallback needs the exec built-in; drop enable_exec=False"
             )
         self.exec_fallback = exec_fallback
-        if mcp is not None and not isinstance(mcp, McpServe):
-            raise RegistrationError(f"App {name}: mcp is a treaty.McpServe, or None")
+        if mcp is not None:
+            from ._mcp_serve import McpServe  # only an app serving MCP loads the server
+
+            if not isinstance(mcp, McpServe):
+                raise RegistrationError(f"App {name}: mcp is a treaty.McpServe, or None")
         self.mcp = mcp
         self.config_root_flag, self.config_root_env = _config_root(
             name, config_root_flag, config_root_env
@@ -1752,6 +1769,8 @@ class App:
             self._yielding.add(register_changelog(self, self.changelog))
         self._yielding.add(register_audit_log(self))
         if self.mcp is not None:
+            from ._mcp_serve import register_mcp_serve
+
             register_mcp_serve(self, self.mcp)
 
         if self.init is not None:
@@ -2290,6 +2309,8 @@ class App:
                     meta=meta,
                 )
             invocation = build_from_mapping(command, {}, environ)
+            from ._mcp_serve import bound, unbound
+
             token = bound(given)
             try:
                 return run.execute(command, invocation, Format.JSON, meta=meta)
@@ -4626,7 +4647,7 @@ class _Run:
             _steps=self.steps,
             _session=self.processes.session,
             _cache=self.cache_for(command, invocation),
-            _http=Http(
+            _http=_http_client(
                 proxies,
                 deadline=deadline,
                 retrier=self.retrier,

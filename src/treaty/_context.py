@@ -13,11 +13,11 @@ from ._cache import Cache
 from ._cap import MARKER, TRUNCATED_CODE
 from ._config import ConfigFile
 from ._errors import RegistrationError
-from ._http import Http, NetworkSettings
 from ._lifecycle import Teardown
 from ._lines import Lines
 from ._locks import Locks
 from ._mode import Format, FormatName
+from ._network import NetworkSettings
 from ._page import PageRequest
 from ._prompt import Prompter
 from ._retry import Retrier
@@ -37,6 +37,7 @@ from ._verbosity import Level
 from ._walk import Traversal, Walk
 
 if TYPE_CHECKING:
+    from ._http import Http  # http.client and ssl, loaded only for a network command
     from ._records import Records  # imports the parser, which imports this module
 
 LogSink = Callable[[Level, str, Mapping[str, object]], None]

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from ._envelope import NetworkContext, without_userinfo
 from ._errors import RegistrationError
-from ._http import NetworkFailure
+from ._network import NetworkFailure
 from ._resources import refuse_async
 from ._values import InvalidValue
 

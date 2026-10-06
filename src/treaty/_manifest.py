@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Collection, Mapping, Sequence
-from importlib.metadata import version
 from types import MappingProxyType
 
 from ._cap import DEFAULT_STDIN_CAP, StdinCap
@@ -762,6 +761,8 @@ def build_manifest(
         shape["secret_env_vars"] = list(secret_env_vars)
     digest = hashlib.sha256(canonical_json(shape).encode()).hexdigest()
     etag = Etag(f"sha256:{digest[:32]}")
+    from importlib.metadata import version  # only a manifest reads it (#360)
+
     manifest: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "framework_version": version("treaty"),
