@@ -4,6 +4,7 @@ REQ-O-012, REQ-O-049, REQ-O-050)"""
 
 import importlib.util
 import io
+import itertools
 import json
 import os
 import re
@@ -471,15 +472,23 @@ HEARTBEAT = re.compile(r"\[(\d+)s\] (.+)")
 
 def migrating(argv: list[str], beats: int) -> tuple[int, str, str]:
     """Run a migrate command that, after each of its two progress statuses, waits until
-    stderr has had ``beats`` more heartbeat lines: a fixed sleep is outlasted by a loaded
-    runner's timer slack, which delays every beat (#168)"""
-    out, err = io.StringIO(), CountedLines(lambda line: HEARTBEAT.fullmatch(line) is not None)
+    stderr has had ``beats`` more heartbeat lines carrying it: a fixed sleep is outlasted by
+    a loaded runner's timer slack, which delays every beat (#168), and a beat that read the
+    previous status before the switch can be written after it (#375)"""
+    current = [""]
+
+    def carries_current(line: str) -> bool:
+        m = HEARTBEAT.fullmatch(line)
+        return m is not None and m[2] == current[0]
+
+    out, err = io.StringIO(), CountedLines(carries_current)
     app = App("beatctl", version="1.0.0")
 
     @app.command("migrate", description="Work a while", danger_level="safe",
                  exit_codes=(), heartbeat=True, timeout=30)  # fmt: skip
     def migrate(args: NoArgs, ctx: Ctx) -> dict[str, bool]:
         for status in ("Connecting to database...", "Running migration batch 1/2..."):
+            current[0] = status
             ctx.progress(status)
             err.wait_for(err.seen + beats)
         return {"done": True}
@@ -502,6 +511,8 @@ def test_the_heartbeat_message_includes_elapsed_time_and_the_most_recent_progres
     statuses = [HEARTBEAT.fullmatch(line) for line in err.splitlines()]
     assert all(m is not None and m.group(1) == "0" for m in statuses)
     said = [m.group(2) for m in statuses if m is not None]
+    # A beat before the handler's first ctx.progress reports the default status (#375)
+    said = list(itertools.dropwhile(lambda status: status == "running", said))
     assert said[0] == "Connecting to database..."
     assert said[-1] == "Running migration batch 1/2..."
 
