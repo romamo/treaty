@@ -10,6 +10,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- `treaty conformance` puts the flags its probes add to a passthrough command before the
+  command path, where treaty reads them: the `unknown flag` and `--proxy` probes used to
+  append them after the path, so the delegated tool got `--no-such-flag` and the handler
+  ran and exited 0 instead of exiting 2. A passthrough example's tokens after the path
+  reach its probe verbatim, where an option named like a global, such as `--format
+  oneline`, was dropped, and `argument_order` skips passthrough commands, since the kit
+  moves `--format` after the path (#367)
+
 ## [1.0.0rc35] - 2026-10-06
 
 The 35th 1.0 release candidate: 3 breaking changes, 3 changes, 4 fixes, and 4 additions.
