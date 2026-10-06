@@ -150,6 +150,27 @@ def _unchanged(text: str) -> str:
     return text
 
 
+class Writes:
+    """Writes that reached stderr, or the terminal through it: a run's diagnostics, a
+    prompt, and what descriptor 1 passes on. A frame is not drawn over the last once the
+    count moved (#350, #365). One count for the process, as descriptor 1's reader serves
+    every run. Bumped under a lock: with the GIL off, an unlocked ``+=`` loses bumps,
+    and a stale one stored late can set the count back to a frame's mark"""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self._lock = threading.RLock()
+        """Reentrant: a signal handler that writes on the bumping thread cannot deadlock"""
+
+    def bump(self) -> None:
+        with self._lock:
+            self.count += 1
+
+
+stderr_writes = Writes()
+"""What a terminal frame checks before it clears the last one"""
+
+
 _redact: Callable[[str], str] = _unchanged
 """The secrets of every attached run out of a line, as ``redact_with`` set it"""
 
@@ -203,6 +224,11 @@ class Interceptor:
         self._text = bytearray()
         self._bytes = 0
         self._synced = 0
+        self._sent = 0
+        """Markers written to descriptor 1; they arrive in that order"""
+        self._whole: set[int] = set()
+        """The numbers of the markers that pass on whole lines only, the unfinished one
+        held: a terminal frame's (#365)"""
         self._closed = False
         self._pipe: int | None = None
         """The pipe's write end while ``pause`` gave descriptor 1 back to stdout"""
@@ -239,13 +265,14 @@ class Interceptor:
         decoded = decoder.decode(text, final=count <= len(text))
         return decoded.replace("\r\n", "\n"), count
 
-    def sync(self, redact: Callable[[str], str] | None = None) -> bool:
+    def sync(self, redact: Callable[[str], str] | None = None, *, whole: bool = False) -> bool:
         """Wait until everything written to descriptor 1 before this call reached stderr,
         redacted, its unfinished line too: called as an envelope is written and before a
         run detaches, while its secrets are still known. Past ``SYNC_SECONDS``, a reader
         held up on a full stderr, what is still in the pipe from before is redacted with
-        ``redact`` too, the secrets the caller is about to forget. False when paused or
-        closed"""
+        ``redact`` too, the secrets the caller is about to forget. With ``whole``, the
+        unfinished line is held, as a terminal frame syncs: a secret its next write
+        finishes is redacted whole then (#254). False when paused or closed"""
         with self._switch:
             with self._cond:
                 if self._closed or self._pipe is not None:
@@ -256,10 +283,14 @@ class Interceptor:
                     # on its way, in a stuck reader's pipe or in a write to the spool
                     self._lingering = (*self._lingering, (sys.maxsize, redact))
                 target = self._synced + 1
+                if not spooled:
+                    self._sent += 1
+                    if whole:
+                        self._whole.add(self._sent)
             if not spooled:
                 os.write(1, self._marker)  # below PIPE_BUF, so no other write splits it
         if spooled:
-            self._drain()
+            self._drain(whole=whole)
             return True
         with self._cond:
             synced = self._cond.wait_for(lambda: self._synced >= target, timeout=SYNC_SECONDS)
@@ -355,7 +386,9 @@ class Interceptor:
             dunder.flush()
         self._drain(final=True, wait=False)
 
-    def _drain(self, *, final: bool = False, close: bool = False, wait: bool = True) -> None:
+    def _drain(
+        self, *, final: bool = False, close: bool = False, wait: bool = True, whole: bool = False
+    ) -> None:
         """What the spool holds, read to its end and passed on as the reader would, its
         unfinished line too; with ``close``, the spool is closed after. Past
         ``SYNC_SECONDS`` waiting for a reader that still passes on what the pipe held,
@@ -369,7 +402,8 @@ class Interceptor:
                 return
             while chunk := os.read(spool, 65536):
                 self._pass_on(chunk)
-            self._release(final=final)
+            if not whole:
+                self._release(final=final)
             if close:
                 self._spool = None
                 os.close(spool)
@@ -392,7 +426,11 @@ class Interceptor:
         marker = self._marker
         while (at := pending.find(marker)) >= 0:
             self._pass_on(pending[:at])
-            self._release()  # what was written before the envelope is out whole
+            with self._cond:
+                whole = self._synced + 1 in self._whole
+                self._whole.discard(self._synced + 1)
+            if not whole:
+                self._release()  # what was written before the envelope is out whole
             pending = pending[at + len(marker) :]
             with self._cond:
                 self._synced += 1
@@ -446,6 +484,8 @@ class Interceptor:
 
     def _emit(self, shown: str) -> None:
         view = memoryview(shown.encode("utf-8", "surrogateescape"))
+        if view:
+            stderr_writes.bump()  # before the write: a frame drawn as it lands is not cleared
         while view:
             view = view[os.write(2, view) :]
 

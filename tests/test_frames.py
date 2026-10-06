@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import io
+import os
+import subprocess
+import sys
+import threading
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
@@ -10,6 +14,7 @@ import pytest
 
 from treaty import App, Ctx, Format, FormatRenderer, NoArgs, RegistrationError
 from treaty._plain import frame_rows
+from treaty._stdout import Writes
 
 CLEAR_ONE = "\r\x1b[1A\x1b[J"
 TERMINAL = {"AP_AUDIT_LOG": "0", "TERM": "xterm"}
@@ -131,6 +136,195 @@ def test_a_wrapped_frame_moves_up_every_row_it_took() -> None:
     _, out, _ = run(app, {**TERMINAL, "COLUMNS": "4"})
     # 10 cells over 4 columns wrap to 3 rows, then two blank lines
     assert out == "xxxxxxxxxx\n\n\n\r\x1b[5A\x1b[Jxxxxxxxxxx\n\n\n"
+
+
+class Terminal(io.StringIO):
+    """A stdin a person types at"""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_a_prompt_between_frames_is_not_cleared() -> None:
+    app = App("ap", version="0.1.0")
+
+    @app.command(
+        "frames",
+        description="Draw frames",
+        danger_level="safe",
+        exit_codes=(),
+        streaming=True,
+        timeout=None,
+        interactive=True,
+        renderers={Format.PLAIN: FormatRenderer(lambda e: f"frame {e['n']}\n", frame=True)},
+    )
+    def frames(args: NoArgs, ctx: Ctx) -> Iterator[Frame]:
+        yield Frame(1)
+        ctx.confirm("Go on")
+        yield Frame(2)
+        yield Frame(3)
+
+    out, err = io.StringIO(), io.StringIO()
+    code = app.run(
+        ["frames", "--format", "plain"],
+        stdout=out,
+        stderr=err,
+        stdin=Terminal("y\n"),
+        isatty=True,
+        env=TERMINAL,
+    )
+    assert (code, err.getvalue()) == (0, "Go on [y/N] ")
+    # The question and the typed answer stay: frame 2 goes below them
+    assert out.getvalue() == f"frame 1\nframe 2\n{CLEAR_ONE}frame 3\n"
+
+
+def test_a_narrowing_resize_moves_up_the_rows_the_last_frame_now_takes() -> None:
+    app = App("ap", version="0.1.0")
+    env = {**TERMINAL, "COLUMNS": "10"}
+
+    @app.command(
+        "frames",
+        description="Draw frames",
+        danger_level="safe",
+        exit_codes=(),
+        streaming=True,
+        timeout=None,
+        renderers={Format.PLAIN: FormatRenderer(lambda e: "x" * 8 + "\n", frame=True)},
+    )
+    def frames(args: NoArgs, ctx: Ctx) -> Iterator[Frame]:
+        yield Frame(1)
+        env["COLUMNS"] = "4"  # the terminal narrowed: frame 1's line now wraps to 2 rows
+        yield Frame(2)
+
+    _, out, _ = run(app, env)
+    assert out == "xxxxxxxx\n\r\x1b[2A\x1b[Jxxxxxxxx\n"
+
+
+NATIVE = """
+import io, os
+from collections.abc import Iterator
+from treaty import App, Ctx, Format, FormatRenderer, NoArgs
+from treaty._stdout import intercept_stdout
+
+interceptor = intercept_stdout()
+app = App("ap", version="0.1.0")
+
+
+@app.command(
+    "frames",
+    description="Draw frames",
+    danger_level="safe",
+    exit_codes=(),
+    streaming=True,
+    timeout=None,
+    renderers={Format.PLAIN: FormatRenderer(lambda e: f"frame {e['n']}\\n", frame=True)},
+)
+def frames(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+    yield {"n": 1}
+    os.write(1, b"native\\n")  # C code, or a child that inherited descriptor 1
+    yield {"n": 2}
+    yield {"n": 3}
+
+
+out = io.StringIO()
+code = app.run(
+    ["frames", "--format", "plain"],
+    stdout=out,
+    stderr=io.StringIO(),
+    isatty=True,
+    env={"AP_AUDIT_LOG": "0", "TERM": "xterm"},
+)
+interceptor.close()
+print(repr((code, out.getvalue())))
+"""
+
+
+def test_a_descriptor_1_write_between_frames_is_not_cleared() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-c", NATIVE],
+        capture_output=True,
+        env={**os.environ, "PYTHONUTF8": "1"},
+        timeout=30,
+        check=True,
+        text=True,
+    )
+    # The interceptor passed it on to stderr before frame 2, which goes below it
+    assert proc.stderr.replace("\r\n", "\n") == "native\n"
+    assert proc.stdout.strip() == repr((0, f"frame 1\nframe 2\n{CLEAR_ONE}frame 3\n"))
+
+
+SPLIT = """
+import io, os
+from collections.abc import Iterator
+from dataclasses import dataclass
+from treaty import App, Ctx, Flag, Format, FormatRenderer
+from treaty._stdout import intercept_stdout
+
+interceptor = intercept_stdout()
+app = App("ap", version="0.1.0")
+SECRET = "hunter2-s3cret"
+
+
+@dataclass(frozen=True, slots=True)
+class Login:
+    api_token: str = Flag(description="API token", secret=True)
+
+
+@app.command(
+    "frames",
+    description="Draw frames",
+    danger_level="safe",
+    exit_codes=(),
+    streaming=True,
+    timeout=None,
+    renderers={Format.PLAIN: FormatRenderer(lambda e: f"frame {e['n']}\\n", frame=True)},
+)
+def frames(args: Login, ctx: Ctx) -> Iterator[dict[str, int]]:
+    yield {"n": 1}
+    os.write(1, b"token=" + SECRET[:5].encode())  # a child's write, half the secret
+    yield {"n": 2}
+    os.write(1, SECRET[5:].encode() + b"\\n")
+    yield {"n": 3}
+
+
+out = io.StringIO()
+code = app.run(
+    ["frames", "--format", "plain", "--api-token-from-env", "AP_TOKEN"],
+    stdout=out,
+    stderr=io.StringIO(),
+    isatty=True,
+    env={"AP_AUDIT_LOG": "0", "TERM": "xterm", "AP_TOKEN": SECRET},
+)
+interceptor.close()
+print(repr((code, out.getvalue())))
+"""
+
+
+def test_a_secret_split_by_a_frame_on_descriptor_1_is_redacted() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-c", SPLIT],
+        capture_output=True,
+        env={**os.environ, "PYTHONUTF8": "1"},
+        timeout=30,
+        check=True,
+        text=True,
+    )
+    # Frame 2 waits for no unfinished line: the line is passed on whole, redacted
+    assert proc.stderr.replace("\r\n", "\n") == "token=[REDACTED]\n"
+    assert proc.stdout.strip() == repr((0, f"frame 1\n{CLEAR_ONE}frame 2\nframe 3\n"))
+
+
+def test_bumps_from_many_threads_each_count() -> None:
+    # With the GIL off (3.14t), an unlocked += lost about a third of them
+    writes = Writes()
+    threads = [
+        threading.Thread(target=lambda: [writes.bump() for _ in range(20000)]) for _ in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert writes.count == 8 * 20000
 
 
 def test_frame_is_refused_off_a_stream_or_off_plain() -> None:
