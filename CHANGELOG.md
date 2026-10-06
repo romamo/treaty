@@ -18,6 +18,11 @@ Apps built on treaty keep their own, structured schema changelog with
   key `Meta` declares now raises `RegistrationError` instead of merging it into `meta`
   (#348)
 
+- An app with streaming commands now generates a conformance profile with probes for
+  them, so a committed profile differs from the generated one and `treaty conformance`
+  exits `CONFLICT`: rerun `treaty conformance --force` once to update it. Each safe
+  stream's read probe adds about 15 s to a kit run, which runs it three times (#349)
+
 ### Fixed
 
 - `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,
@@ -37,6 +42,7 @@ Apps built on treaty keep their own, structured schema changelog with
   file, under `NO_COLOR`, `TERM=dumb`, or CI, and in every other format, frames are
   appended as before. `frame=True` is refused at registration off `streaming=True` or on a
   format other than `plain`, and `FormatRenderer`'s `media_type=` is now optional (#350)
+
 - `RenderContext`: a renderer that takes two parameters is called `render(data, rc)`, where
   `rc.color` says whether it may color and `rc.width` is the width plain's tables are cut
   to (`COLUMNS`), or `None` when unset and in an `--output` file; a one-parameter renderer
@@ -52,6 +58,12 @@ Apps built on treaty keep their own, structured schema changelog with
   `--no-stream`, `App.call`, and MCP collect it as any stream; an async generator without
   `streaming=True`, and an `async def` that returns with it, are still a
   `RegistrationError` (#347)
+
+- `treaty conformance` writes probes for a `streaming=True` command, which it used to
+  leave out: the `invalid` ones that exit 2 before the stream starts, such as a network
+  command's `--proxy socks5://...`, and, for a safe stream, a `read` probe run with
+  `--no-stream --timeout 5`, which ends with one envelope (the collected events, or
+  `TIMEOUT`) within the kit's 10-second limit. A mutating stream is never run (#349)
 
 ## [1.0.0rc34] - 2026-10-04
 

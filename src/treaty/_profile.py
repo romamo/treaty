@@ -23,6 +23,12 @@ if TYPE_CHECKING:
     from ._app import App
 
 PREVIEW_FLAGS = ("--dry-run", "--confirm-destructive", "--live")
+TIMEOUT_SECONDS = 10
+"""The kit's limit on each run of a probe; a run past it is killed and counts as a hang"""
+STREAM_SECONDS = TIMEOUT_SECONDS // 2
+"""``--timeout`` of a streaming command's read probe: with ``--no-stream`` it is a deadline
+for the whole stream, which then ends with one envelope (the events, or TIMEOUT). Half the
+kit's limit leaves the other half for interpreter startup and cleanup on a loaded machine"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,8 +67,6 @@ def _dry_run_flag(command: Command) -> str:
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
     for command in user_commands(app):
-        if command.streaming:
-            continue  # JSONL, and possibly endless: the kit's probes expect one envelope
         argv = _argv_from_example(app, command)
         if argv is None:
             if any(f.required for f in command.fields):
@@ -80,7 +84,14 @@ def probes_for(app: App) -> list[Probe]:
         if command.recursive_traversal:
             # REQ-O-040: a walk of no levels is not a limit
             probes.append(Probe(f"{label} --max-depth 0", (*argv, "--max-depth", "0"), "invalid"))
-        if command.danger_level is DangerLevel.DESTRUCTIVE and command.safe_default:
+        if command.streaming:
+            # JSONL, and possibly endless, while the kit expects one envelope: the probes
+            # above end before the stream starts, and a read is bounded (#349). A stream is
+            # safe or mutating, and a mutating one, as elsewhere, gets no probe that runs it
+            if command.danger_level is DangerLevel.SAFE:
+                bounded = (*_without_stream_flags(argv), "--no-stream", "--timeout")
+                probes.append(Probe(label, (*bounded, str(STREAM_SECONDS)), "read"))
+        elif command.danger_level is DangerLevel.DESTRUCTIVE and command.safe_default:
             # Unconfirmed, a safe_default command previews and exits 0, and --live alone is
             # its confirmation: nothing refuses, so it is probed as the read its default is
             probes.append(Probe(label, argv, "read"))
@@ -109,6 +120,23 @@ def _without_globals(argv: tuple[str, ...]) -> tuple[str, ...]:
         elif name in VALUED_GLOBALS:
             skip = "=" not in tok
         elif tok not in ("--help", "-h", "--schema"):
+            out.append(tok)
+    return tuple(out)
+
+
+def _without_stream_flags(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """An example's own ``--stream``, ``--no-stream``, or ``--timeout`` would repeat or
+    contradict the ones a streaming read probe adds"""
+    out: list[str] = []
+    skip = False
+    for tok in argv:
+        if skip:
+            skip = False
+        elif tok in ("--stream", "--no-stream"):
+            continue
+        elif tok == "--timeout":
+            skip = True
+        elif not tok.startswith("--timeout="):
             out.append(tok)
     return tuple(out)
 
@@ -183,7 +211,7 @@ def build_profile(
         "schema_version": "1.0",
         "tool": f"{app.name} {app.version}",
         "command": argv,
-        "timeout_seconds": 10,
+        "timeout_seconds": TIMEOUT_SECONDS,
         "manifest": ["manifest"],
     }
     order = argument_order_for(app)
