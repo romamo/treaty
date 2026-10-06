@@ -10,6 +10,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- An app whose `argument_order` came from a destructive example with only its dry-run
+  flag now generates a conformance profile with another example's options or the
+  `manifest --etag` `argument_order`, and never `--confirm-destructive`, so a committed
+  profile with the old confirmed run differs from the generated one and
+  `treaty conformance` exits `CONFLICT`: rerun `treaty conformance --force` once to update
+  it. `treaty init` scaffolds the `manifest --etag` one (#373)
+
 ### Fixed
 
 - `treaty conformance` puts the flags its probes add to a passthrough command before the
@@ -28,9 +37,7 @@ Apps built on treaty keep their own, structured schema changelog with
   a destructive example whose only option is its dry-run flag is skipped, so the search
   moves to the next example or the built-in `manifest --etag`, where it used to run the
   command confirmed and dry run, and a handler that ignored its dry-run flag applied for
-  real on the kit's machine. A profile that had it differs from the generated one and
-  `treaty conformance` exits `CONFLICT`: rerun it with `--force` once. `treaty init`'s
-  profile uses `manifest --etag` (#373)
+  real on the kit's machine (#373)
 
 ## [1.0.0rc35] - 2026-10-06
 
