@@ -10,6 +10,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc35] - 2026-10-06
+
+The 35th 1.0 release candidate: 3 breaking changes, 3 changes, 4 fixes, and 4 additions.
+Not additive over rc34: see Breaking.
+
 ### Breaking
 
 - A response's `seq`, `end`, `total`, `effects`, `dry_run`, and `partial` moved from
@@ -2185,7 +2190,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc34...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc35...HEAD
+[1.0.0rc35]: https://github.com/romamo/treaty/compare/v1.0.0rc34...v1.0.0rc35
 [1.0.0rc34]: https://github.com/romamo/treaty/compare/v1.0.0rc33...v1.0.0rc34
 [1.0.0rc33]: https://github.com/romamo/treaty/compare/v1.0.0rc32...v1.0.0rc33
 [1.0.0rc32]: https://github.com/romamo/treaty/compare/v1.0.0rc31...v1.0.0rc32

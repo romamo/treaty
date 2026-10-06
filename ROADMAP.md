@@ -218,7 +218,7 @@ Ordered by value to an agent using a treaty-built CLI. Requirement IDs refer to 
   `docs/api.md` with a decision per public item, the `tests/test_public_api.py` snapshot,
   `CHANGELOG.md`, `docs/guide.md`, "Stability" and "Platforms" in the README. Breaking:
   `ExecArgs` unexported, `Ctx` run plumbing and seven `App` helpers private, and
-  `framework_version` is treaty's version. The latest release is `1.0.0rc34`, tagged 2026-10-04. Open: the consumer ports,
+  `framework_version` is treaty's version. The latest release is `1.0.0rc35`, tagged 2026-10-06. Open: the consumer ports,
   the rc soak, and the `1.0.0` tag, which need real consumers
 
 - Shell completion: the `completion` built-in prints a static bash or zsh script
