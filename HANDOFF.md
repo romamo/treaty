@@ -30,32 +30,18 @@ Breaking section in `CHANGELOG.md`, and rc5's `stable-order` fix can fail a
 `treaty audit --strict` that rc4 passed, so the API has not yet held still through a
 release candidate.
 
-Cutting a release is one commit: `uv version X` (bumps `pyproject.toml` and `uv.lock`),
-the AGENTS.md `cli-version` comment in semver spelling (`1.0.0-rc.5`), a dated
-`CHANGELOG.md` section with its compare links, and the rc lines in `ROADMAP.md` and
-`plans/1.0/15-release-readiness.md`. Then push an annotated tag `vX` with the message
-`treaty X`. `publish.yml` runs the full CI on the tag before uploading, so a failing test
-blocks the upload. Its `release-check` job blocks it too: the tagged commit must be on
-`main`, `pyproject.toml` must declare the tag's version, and the `CHANGELOG.md` must have
-the dated section, both compare links, and nothing left under Unreleased. No open issue may
-be labelled `release-blocker`. Run the same check before tagging:
-`uv run --no-project python .github/scripts/release_check.py --tag vX --check-blockers`.
-
-The release bot (`.github/workflows/release-bot.yml`) cuts releases instead of a person,
-after each batch of merges. A push to `main` starts it: it waits `quiet_minutes` (30), and
-each newer push restarts the wait, so a run of merges gives one release. A run started from
-the Actions tab, or by `github-pr-triage` after its last merge, skips the wait, and a Monday
-run is a backstop. `.github/release-policy.toml` says a release is due when:
-- entries are under Unreleased
-- at least `min_days_between` days (0) have passed since the latest release
-- no `release-blocker` issue is open
-
-It also says which version comes next. A pre-release goes to the next pre-release, and a
-stable version bumps by the largest CHANGELOG heading; the bot never goes from a pre-release
-to its stable version. `.github/scripts/release_prepare.py` writes the release commit, and the
-bot runs CI on it, lands it on main if main hasn't moved, tags it, and starts `publish.yml`.
-In `dry-run` mode the bot only shows the release commit it would make, in the run's
-summary; `off` stops it. To hold a release, label an issue `release-blocker`.
+shipmill cuts releases (`.github/workflows/release.yml`, policy in
+`.github/shipmill.toml`); nobody tags by hand. The `rc` lane releases the next `1.0.0rcN`
+from main once main has been quiet for 30 minutes with entries under Unreleased. An rc
+writes no CHANGELOG section: its entries stay under Unreleased until the stable release.
+The `stable` lane promotes an rc that soaked 3 days to `1.0.0`, and only once the `1.0.0`
+milestone has closed issues and none open, so the remaining 1.0 tasks belong in that
+milestone. `hotfix` runs by hand. Each release stamps `pyproject.toml`, `uv.lock`, the
+AGENTS.md `cli-version` comment, and the ROADMAP.md release line, runs CI on the release
+commit, tags it, and starts `publish.yml`, which runs CI on the tag again before uploading.
+An open `release-blocker` issue holds `rc` and `stable`; an open `shipmill-hold` issue
+stops every release. `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill
+plan --lane rc --dry-run` previews the next release.
 
 Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
 

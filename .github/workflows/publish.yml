@@ -1,8 +1,7 @@
 name: Publish
 
+# shipmill's release workflow starts this on each tag it pushes (.github/shipmill.toml)
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
@@ -13,46 +12,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-${{ inputs.tag || github.ref_name }}
+  group: publish-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
-  TAG: ${{ inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag }}
 
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
     with:
-      ref: refs/tags/${{ inputs.tag || github.ref_name }}
-
-  # The rules a tag must meet before anything is built: the tagged commit is on main, the
-  # version matches, the CHANGELOG has the dated section and its links, nothing is left
-  # under Unreleased, and no open issue is labelled release-blocker
-  release-check:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: refs/tags/${{ env.TAG }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          python-version: "3.14"
-
-      - name: Check the tag is ready to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          uv run --no-project python .github/scripts/release_check.py
-          --tag "$TAG" --main origin/main --check-blockers
+      ref: refs/tags/${{ inputs.tag }}
 
   build:
-    needs: [ci, release-check]
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -69,11 +42,17 @@ jobs:
 
       - run: uv build --out-dir dist
 
-      - name: Smoke-test the wheel
+      - name: Check the sdist leaves out tooling
         run: |
-          uv venv --python 3.14 _smoke
-          VIRTUAL_ENV=_smoke uv pip install dist/*.whl
-          _smoke/bin/treaty --version
+          if tar -tzf dist/*.tar.gz | grep -E '^[^/]+/(\.github|\.agents?|\.claude|uv\.lock)(/|$)'; then
+            exit 1
+          fi
+
+      - name: Smoke-test the wheel and the sdist
+        run: |
+          for dist in dist/*.whl dist/*.tar.gz; do
+            uv run --isolated --no-project --python 3.14 --with "$dist" treaty --version
+          done
 
       - uses: actions/upload-artifact@v7
         with:
