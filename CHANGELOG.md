@@ -22,7 +22,8 @@ Apps built on treaty keep their own, structured schema changelog with
 - The `--help` usage line of an `option_placement="strict"` command puts `[flags]` before
   its positionals, where the command reads them; after them, a usage line typed as shown
   passed the options to the positional verbatim. The missing-argument usage got the same
-  order in rc35 (#374)
+  order in rc35, and `generate-skills` now writes a strict command's minimal call and
+  `--validate-only` pattern with the options first too (#374)
 
 ## [1.0.0rc35] - 2026-10-06
 

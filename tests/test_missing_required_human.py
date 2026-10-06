@@ -3,6 +3,7 @@
 import io
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from treaty import App, Arg, Ctx, Flag
@@ -214,3 +215,28 @@ def test_a_strict_command_help_usage_puts_the_flags_before_the_positionals() -> 
 def test_a_command_without_strict_placement_keeps_the_flags_last() -> None:
     _, help_text, _ = run(["login", "--help"])
     assert help_text.splitlines()[0] == "bean login <user> [flags]"
+
+
+def test_a_strict_command_skill_puts_the_flags_before_the_positionals(tmp_path: Path) -> None:
+    app = App("bean", version="1.0.0")
+
+    @app.command(
+        "wrap",
+        description="Wrap",
+        danger_level="safe",
+        exit_codes=(),
+        option_placement="strict",
+    )
+    def wrap(args: StrictArgs, ctx: Ctx) -> None:
+        return None
+
+    code = runs(app, ["generate-skills", "--output-dir", str(tmp_path)])
+    assert code == 0
+    skill = (tmp_path / "SKILL-wrap.md").read_text()
+    lines = skill.splitlines()
+    minimal = lines[lines.index("```bash") + 1]
+    assert minimal == "bean wrap --count <count> <child>"
+    # The minimal call, typed with values for the placeholders, runs
+    typed = ["1" if t == "<count>" else "x" if t.startswith("<") else t for t in minimal.split()]
+    assert runs(app, typed[1:]) == 0
+    assert "`bean wrap --validate-only ...`" in skill
