@@ -83,9 +83,14 @@ Probes run the real CLI. treaty derives them from your commands:
   confirmation removed: `todo purge`. The kit runs it with `--dry-run`, and again with no
   flags to check that it is refused
 - `version`, and `status`, a built-in that always exits 0
+- when no command of yours is destructive, the built-in `cleanup` in its place, so the
+  dry-run checks still run: the kit only ever previews it or sees it refused, and nothing
+  is removed
 - for each network command, an `invalid` probe with a malformed `--proxy`
 - two `invalid` probes: `manifest --etag x`, a malformed etag, and the first probe with
   `--no-such-flag` added
+- for `argument_order`, the first example with a command-local option to move `--format`
+  around; without one, the built-in `manifest --etag` with an etag no manifest has
 
 Mutating commands are never run: the only probes built from them are `invalid` ones, such as
 a network command's malformed `--proxy`, which exit 2 before anything runs. Destructive ones

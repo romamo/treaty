@@ -23,6 +23,12 @@ Apps built on treaty keep their own, structured schema changelog with
   exits `CONFLICT`: rerun `treaty conformance --force` once to update it. Each safe
   stream's read probe adds about 15 s to a kit run, which runs it three times (#349)
 
+- An app with no destructive command of its own, or no example with a local option, now
+  generates a conformance profile with the `cleanup built-in` probe or the
+  `manifest --etag` `argument_order`, so a committed profile differs from the generated
+  one and `treaty conformance` exits `CONFLICT`: rerun `treaty conformance --force` once
+  to update it (#361)
+
 ### Fixed
 
 - `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,
@@ -31,6 +37,12 @@ Apps built on treaty keep their own, structured schema changelog with
   `extra_meta` keeps the `meta` keys `Meta` does not declare and refuses one it does; the
   JSON envelope is byte for byte as before. The README and docs/api.md now describe both
   (#348)
+
+- `treaty conformance` probes the built-in `cleanup` as the destructive command when no
+  command of the app's own is destructive, so the kit's `dry_run_preview` and
+  `destructive_refuses_unconfirmed` checks run instead of being skipped; the kit only
+  previews it or sees it refused. Without an example that has a local option, the
+  profile's `argument_order` uses the built-in `manifest --etag` (#361)
 
 ### Added
 
