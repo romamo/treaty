@@ -103,6 +103,15 @@ def test_frame_rows_count_wrapped_lines_and_an_open_last_line() -> None:
     assert frame_rows("", 4) == 0
 
 
+def test_frame_rows_count_a_carriage_return_as_overwriting_its_row() -> None:
+    # The second part overwrites the first's row: one row, so the next frame's move up
+    # does not erase the line above the frame
+    assert frame_rows("loading 50%\rready 100%\n", 20) == 1
+    # 8 cells wrap to a second row at 4 columns; the CR goes back to that row's start
+    assert frame_rows("abcdefgh\rxy\n", 4) == 2
+    assert frame_rows("abcdefgh\rxy", 4) == 1
+
+
 def test_a_wrapped_frame_moves_up_every_row_it_took() -> None:
     app = App("ap", version="0.1.0")
 
