@@ -4,13 +4,21 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from conftest import SPEC_DIR, needs_sh_launcher, spec_validator
 
-from treaty import App, Ctx, NoArgs
-from treaty._profile import STREAM_SECONDS, TIMEOUT_SECONDS, build_profile, probes_for
+from examples.tutorial import todo_exit_codes
+from treaty import App, Ctx, Flag, NoArgs
+from treaty._profile import (
+    STREAM_SECONDS,
+    TIMEOUT_SECONDS,
+    argument_order_for,
+    build_profile,
+    probes_for,
+)
 
 KIT = SPEC_DIR / "conformance" / "run.py"
 PROFILE = Path(__file__).resolve().parents[1] / "conformance" / "deployctl.json"
@@ -111,3 +119,69 @@ def test_an_endless_stream_read_probe_ends_with_one_envelope_within_the_kit_limi
     assert envelope["data"][0]["event"] == "listening"
     assert result.returncode == envelope["meta"]["exit_code"]
     assert result.returncode in range(14)  # within the kit's exit code table
+
+
+@dataclass(frozen=True, slots=True)
+class Wipe:
+    dry_run: bool = Flag(default=False, description="Preview")
+
+
+@dataclass(frozen=True, slots=True)
+class Prune:
+    keep: int = Flag(default=1, description="Items to keep")
+    dry_run: bool = Flag(default=False, description="Preview")
+
+
+def destructive_app(*, with_option: bool) -> App:
+    app = App("wipectl", version="1.0.0")
+
+    @app.command(
+        "wipe",
+        description="Wipe everything",
+        danger_level="destructive",
+        exit_codes=(),
+        examples=[("Wipe", "wipectl wipe --dry-run")],
+    )
+    def wipe(args: Wipe, ctx: Ctx) -> dict[str, bool]:
+        return {"dry_run": args.dry_run}
+
+    if with_option:
+
+        @app.command(
+            "prune",
+            description="Prune old items",
+            danger_level="destructive",
+            exit_codes=(),
+            examples=[("Keep three", "wipectl prune --keep 3 --confirm-destructive")],
+        )
+        def prune(args: Prune, ctx: Ctx) -> dict[str, bool]:
+            return {"dry_run": args.dry_run}
+
+    return app
+
+
+def profile_argvs(app: App) -> list[list[str]]:
+    """The argument_order run and every probe's argv"""
+    profile = build_profile(app, [app.name], probes_for(app))
+    order, probes = profile["argument_order"], profile["probes"]
+    assert isinstance(order, dict) and isinstance(probes, list)
+    return [[*order["command_path"], *order["local_args"]], *(p["argv"] for p in probes)]
+
+
+@pytest.mark.parametrize(
+    "app",
+    [todo_exit_codes.app, destructive_app(with_option=False), destructive_app(with_option=True)],
+    ids=["tutorial", "dry-run only", "with an option"],
+)
+def test_no_probe_runs_a_destructive_command_confirmed(app: App) -> None:
+    """A handler that ignored its dry-run flag would apply for real on the kit's machine (#373)"""
+    for argv in profile_argvs(app):
+        assert "--confirm-destructive" not in argv, argv
+
+
+def test_argument_order_skips_a_destructive_example_with_only_its_dry_run_flag() -> None:
+    order = argument_order_for(destructive_app(with_option=False))
+    assert order is not None and order["command_path"] == ["manifest"]
+    order = argument_order_for(destructive_app(with_option=True))
+    assert order is not None and order["command_path"] == ["prune"]
+    assert order["local_args"] == ["--keep", "3", "--dry-run"]
