@@ -245,7 +245,9 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
         usage[1:1] = ["[flags]"]
         usage.append("[tool arguments...]")
     elif flags or _framework_rows(command):
-        usage.append("[flags]")
+        # REQ-C-027: a strict command reads options only before its first positional
+        strict = command.option_placement is OptionPlacement.STRICT
+        usage.insert(1 + len(command.path.parts) if strict else len(usage), "[flags]")
     lines = [f"{' '.join(usage)}", "", command.description, ""]
     if command.passthrough:
         lines.append(
