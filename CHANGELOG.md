@@ -10,6 +10,16 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- An async generator stream whose source is still running after its cancellation grace,
+  as when it swallows `CancelledError`, now reports it in the stream's end envelope: a
+  `CLEANUP_FAILED` warning for the `async stream` hook, and `error.context.cleanup_failed`
+  on `CANCELLED`, as an `async def` handler does since rc36 (D-9). It used to be only a
+  stderr note, and on a timeout not even that, since the timeout answered without
+  waiting for the source; it now gives the source its grace first. The stream's lines
+  are unchanged (#382)
+
 ## [1.0.0rc36] - 2026-10-06
 
 The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see

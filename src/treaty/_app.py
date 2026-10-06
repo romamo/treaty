@@ -2885,6 +2885,10 @@ def _call_async_stream(
             loop.close()  # the events would have closed it
     if teardown is not None:
         teardown.on_interrupt(events.stop)
+        # Added after the resources, so it runs before their releases, which wait behind
+        # the source's aclose() on the loop; not last, so the timeout path gives the
+        # source its grace (Teardown.pending). A source past its grace warns (D-9, #382)
+        teardown.add(ASYNC_STREAM_HOOK, events.unfinished)
     return events
 
 
@@ -2937,6 +2941,7 @@ CWD_CHANGED = "CWD_CHANGED"
 SESSION_HOOK = "session temp dir"
 EVENT_LOOP_HOOK = "event loop"
 ASYNC_HANDLER_HOOK = "async handler"
+ASYNC_STREAM_HOOK = "async stream"
 
 
 def _process_cwd() -> str | None:
