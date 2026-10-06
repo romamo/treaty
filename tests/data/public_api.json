@@ -755,6 +755,14 @@
       "kind": "class",
       "methods": []
     },
+    "RenderContext": {
+      "fields": [
+        "color",
+        "width"
+      ],
+      "kind": "class",
+      "methods": []
+    },
     "Renderer": {
       "kind": "alias",
       "value": "collections.abc.Callable[[typing.Any], str]"

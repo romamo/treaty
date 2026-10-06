@@ -8,7 +8,7 @@ from ._args_adapter import ArgsAdapter
 from ._auth import Credentials, Expired
 from ._batch import Batch, Item, ItemError
 from ._cache import CachePolicy
-from ._command import DangerLevel, Example, FormatRenderer, Renderer
+from ._command import DangerLevel, Example, FormatRenderer, RenderContext, Renderer
 from ._context import Ctx
 from ._declare import Background, SideEffect, Subprocess
 from ._deprecation import Deprecated
@@ -107,6 +107,7 @@ __all__ = [
     "Redirect",
     "ParseError",
     "RegistrationError",
+    "RenderContext",
     "Renderer",
     "RequiredWhen",
     "RequiresAny",

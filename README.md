@@ -441,7 +441,25 @@ envelope, unless `--warnings-as-errors` is set. `ndjson` takes no renderer, and 
 A renderer receives `data` as JSON values (dicts and lists, after secret redaction) and
 returns the text. An app's own renderer gets an external command's trust tags in `data`, as
 the JSON envelope has them, so it decides how to show them; only `table(...)` and `plain`'s
-built-in renderer leave them out. A format is a `Format` member, or a name treaty does not know:
+built-in renderer leave them out.
+
+A renderer that takes a second parameter gets a `RenderContext`: `rc.color` is whether its
+text may carry color (as `ctx.color` is for the run), and `rc.width` is the most cells a line
+takes, `COLUMNS` as `plain`'s tables are cut to, or `None` when it is unset and in an
+`--output` file. A renderer never gets `ctx`. Treaty reads the parameters once, at
+registration: one or two positional parameters without a default, else `RegistrationError`.
+A callable without a signature, as some C builtins are, gets `data` alone:
+
+```python
+from treaty import RenderContext
+
+
+def render_greet(data: dict[str, str], rc: RenderContext) -> str:
+    line = data["message"][: rc.width]
+    return f"\x1b[1m{line}\x1b[0m\n" if rc.color else line + "\n"
+```
+
+A format is a `Format` member, or a name treaty does not know:
 
 ```python
 from treaty import App, Format
@@ -757,8 +775,8 @@ Object keys and carriage returns are left as returned. Text formats clean values
 way before they are rendered, and show a key's or a value's other controls as escapes
 (`\x1b`, `\x07`, `\r`), the Unicode bidirectional embeddings, overrides, and isolates
 among them (`\u202e`), which JSON keeps as data; the LRM, RLM, and ALM marks stay text. A
-renderer's own text keeps its colors only where the run may color, and a CRLF. Stderr error lines show every control as its escape. `ctx.color` tells a renderer whether it may
-color: never in JSON mode, under `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`,
+renderer's own text keeps its colors only where the run may color, and a CRLF. Stderr error lines show every control as its escape. A renderer that takes a `RenderContext`
+reads in `rc.color` whether it may color, and a handler in `ctx.color`: never in JSON mode, under `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`,
 `JENKINS_URL`, or `TERM=dumb`, or when stdout is not a terminal (REQ-F-008). `App.main()`
 sets `PAGER=cat` and `GIT_PAGER=cat` for every child process, and `NO_COLOR=1` whenever
 color is off (REQ-F-010); `App.run()` leaves the process environment alone. See
