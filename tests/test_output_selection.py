@@ -4,6 +4,7 @@ REQ-O-012, REQ-O-049, REQ-O-050)"""
 
 import importlib.util
 import io
+import itertools
 import json
 import os
 import re
@@ -502,6 +503,8 @@ def test_the_heartbeat_message_includes_elapsed_time_and_the_most_recent_progres
     statuses = [HEARTBEAT.fullmatch(line) for line in err.splitlines()]
     assert all(m is not None and m.group(1) == "0" for m in statuses)
     said = [m.group(2) for m in statuses if m is not None]
+    # A beat before the handler's first ctx.progress reports the default status (#375)
+    said = list(itertools.dropwhile(lambda status: status == "running", said))
     assert said[0] == "Connecting to database..."
     assert said[-1] == "Running migration batch 1/2..."
 

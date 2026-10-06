@@ -55,7 +55,9 @@ def test_a_heartbeat_status_with_a_secret_an_escape_splits_never_shows_it() -> N
     )
     beats = [m[2] for m in map(HEARTBEAT.fullmatch, err.getvalue().splitlines()) if m]
     assert code == 0 and len(beats) >= 2
-    assert all(beat == "connecting with [REDACTED]" for beat in beats), beats
+    # A beat before the handler's first ctx.progress reports the default status (#375)
+    assert set(beats) <= {"running", "connecting with [REDACTED]"}, beats
+    assert "connecting with [REDACTED]" in beats, beats
     assert not leaks(err.getvalue()), err.getvalue()
 
 
