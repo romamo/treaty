@@ -247,6 +247,17 @@ class FieldInfo:
         return f"<{self.flag}>" if self.positional else f"--{self.flag}"
 
     @property
+    def spelled(self) -> str:
+        """Every way argv takes the field, for a message about it (#358): ``<query>``
+        for a positional, ``--name/-n`` for a flag with a short form, and a secret's
+        ``--token-from-env/--token-from-file``"""
+        if self.positional:
+            return self.shown
+        if self.secret:
+            return "/".join(f"--{f}" for f in self.exposed_flags())
+        return f"--{self.flag}" + (f"/-{self.spec.short}" if self.spec.short else "")
+
+    @property
     def path(self) -> bool:
         """True for ``Path`` fields and arrays of them"""
         item = self.classified.item

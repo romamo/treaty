@@ -147,7 +147,14 @@ from ._exit import ExitCodeEntry, ExitCodeRegistry, FrameworkCode, RetryStrategy
 from ._fix import command_problem, fix_problem
 from ._flags import Arg, FieldInfo, Flag
 from ._framework import RESERVED_GLOBAL, framework_collisions
-from ._help import declared_env_rows, env_readers, global_rows, render_command, render_root
+from ._help import (
+    declared_env_rows,
+    env_readers,
+    global_rows,
+    missing_lines,
+    render_command,
+    render_root,
+)
 from ._http import Http, NetworkFailure, ProxyConfig
 from ._idempotency import (
     KeyBusy,
@@ -3842,6 +3849,24 @@ def _sees_tags(render: Rendering) -> bool:
     return not isinstance(inner, Table)
 
 
+def _context_text(value: object) -> str:
+    """An error context value as a stderr line prints it: text, never a Python repr
+    (#358). A list joins its items with ", ", a boolean and null are spelled as JSON
+    spells them, and a mapping, or a list or mapping in a list, is compact JSON"""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return ", ".join(
+            json.dumps(v, ensure_ascii=False, default=str)
+            if isinstance(v, (list, tuple, dict))
+            else _context_text(v)
+            for v in value
+        )
+    if isinstance(value, (bool, dict)) or value is None:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    return str(value)
+
+
 def _ready(envelope: Envelope) -> Callable[[], Envelope]:
     return lambda: envelope
 
@@ -7400,11 +7425,14 @@ class _Run:
             first = f"{self.app.name}: {error.code}: {error.message}{self._trace_suffix()}"
             self.err.write(visible(first) + "\n")
             errors = envelope.error.errors or ()
+            # A missing required argument: its --help rows, then usage and --help (#358)
+            rows, usage = self._missing_usage(errors)
             if len(errors) > 1:
                 for item in errors:
                     where = f"{item['field']}: " if "field" in item else ""
                     self.err.write(visible(f"  - {where}{item['message']}") + "\n")
-            else:
+            elif not rows:
+                # The rows, when there are some, say what the context's names would
                 context = envelope.error.context
                 if error._external and not self.unprotected:
                     # The context _protected tagged: one line instead of the tags (#198)
@@ -7416,15 +7444,40 @@ class _Run:
                     printed: object = (
                         value if (error.code, key) in NAME_CONTEXT else scrub(key, value)
                     )
-                    if isinstance(printed, bool):
-                        printed = "true" if printed else "false"  # as plain output spells it
-                    self.err.write(visible(f"  {key}: {printed}") + "\n")
-            if envelope.error.suggestion is not None:
-                self.err.write(visible(f"hint: {envelope.error.suggestion}") + "\n")
+                    self.err.write(visible(f"  {key}: {_context_text(printed)}") + "\n")
+            for line in rows:
+                self.err.write(line + "\n")
+            suggestion = envelope.error.suggestion
+            if suggestion is not None and not (usage and suggestion == error.fix_required):
+                # The --help line closing the usage says how to correct the arguments
+                self.err.write(visible(f"hint: {suggestion}") + "\n")
+            for line in usage:
+                self.err.write(line + "\n")
         self.out.flush()
         self.delivered = True
         self.err.flush()
         return code
+
+    def _missing_usage(self, errors: Sequence[Mapping[str, object]]) -> tuple[list[str], list[str]]:
+        """The ``--help`` rows of the routed command's missing required arguments, and its
+        usage and ``--help`` lines, when an error of the run reports some (#358); none
+        when it names a field the command does not have"""
+        command = self.current
+        if command is None:
+            return [], []
+        by_name = {(f.env_flag if f.secret else f.flag): f for f in command.fields}
+        for item in errors:
+            context = item.get("context")
+            if not isinstance(context, Mapping) or set(context) != {"missing", "command"}:
+                continue
+            names = context["missing"]
+            if context["command"] != command.path.value or not isinstance(names, list):
+                continue
+            missing = [by_name.get(str(n)) for n in names]
+            fields = [f for f in missing if f is not None]
+            if fields and len(fields) == len(missing):
+                return missing_lines(self.app.name, command, fields)
+        return [], []
 
     def _warning_lines(self, envelope: Envelope) -> None:
         """The envelope's warnings, which a text format's stdout has no room for: one

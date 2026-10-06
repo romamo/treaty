@@ -189,7 +189,9 @@ def test_the_audit_log_entry_is_redacted(tmp_path: Path) -> None:
 def test_treaty_s_own_errors_are_unchanged() -> None:
     code, out, _ = run(["go", "--format", "json"], env={})
     assert code == 2
-    assert json.loads(out)["error"]["message"] == "Missing required: password-from-env"
+    assert json.loads(out)["error"]["message"] == (
+        "Missing required option --password-from-env/--password-from-file"
+    )
 
 
 def test_a_non_secret_value_stays_quoted() -> None:
