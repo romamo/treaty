@@ -49,6 +49,8 @@ class _Job:
     exc: BaseException | None = None
     cancelled: bool = False
     """``Loop.cancel`` reached it; one still queued is then cancelled as it starts"""
+    ended: bool = False
+    """Set as it ends, before ``done`` is released: a waiter that took ``done`` keeps it"""
 
     def wait(self, seconds: float) -> bool:
         """Whether the job ended within ``seconds``; sliced as ``Loop.run``'s wait is"""
@@ -88,6 +90,7 @@ class Loop:
                     job.result = runner.run(self._tracked(job), context=job.context)
                 except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
                     job.exc = exc
+                job.ended = True
                 job.done.release()
         self._drain()
 
@@ -101,6 +104,7 @@ class Loop:
             if job is not None:
                 job.coro.close()
                 job.exc = RuntimeError("the run's event loop is closed")
+                job.ended = True
                 job.done.release()
 
     def _refuse(self, exc: BaseException) -> None:
@@ -109,6 +113,7 @@ class Loop:
         while (job := self._jobs.get()) is not None:
             job.coro.close()
             job.exc = exc
+            job.ended = True
             job.done.release()
 
     async def _tracked(self, job: _Job) -> object:
@@ -260,6 +265,16 @@ class AsyncEvents(Iterator[object]):
         finally:
             if self._owns_loop:
                 self._loop.close()
+
+
+def unfinished(job: _Job, grace: float) -> None:
+    """Raise when ``job``, an async handler's, still runs as the run tears down: it
+    outlived its cancellation's grace, so its ``finally`` blocks may not finish (#355)"""
+    if not job.ended:
+        raise RuntimeError(
+            f"the async handler was still running {grace}s after its cancellation; its "
+            "finally blocks may not finish: let CancelledError propagate from its awaits"
+        ) from None  # raised as the run ends, often beside the signal: not because of it
 
 
 async def within[T](

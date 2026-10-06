@@ -6,17 +6,22 @@ import asyncio
 import contextvars
 import io
 import json
+import signal
 import subprocess
 import sys
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import spec_validator
+from conftest import needs_posix_signals, spec_validator
 
 from treaty import App, Ctx, Exit, NoArgs, RegistrationError
+from treaty._subprocess import GRACE_SECONDS
+
+LINGERCTL = Path(__file__).resolve().parent / "fixture_async_app.py"
 
 
 def run(app: App, argv: list[str]) -> tuple[int, dict[str, Any]]:
@@ -144,6 +149,74 @@ def test_an_async_handler_past_its_timeout_is_cancelled_and_answers_timeout() ->
     code, envelope = run(app, ["go"])
     assert envelope["error"]["code"] == "TIMEOUT" and code == 10
     assert cancelled.wait(5) and time.monotonic() - started < 5
+
+
+def test_a_timed_out_async_handler_finishes_its_finally_before_the_answer() -> None:
+    """The cancellation lands a reserve before the hard limit; a finally that outlasts
+    the reserve still gets the grace, not abandoned at the deadline (#355)"""
+    app = App("aio", version="1.0.0")
+    cleaned = threading.Event()
+
+    @app.command("go", description="Go", danger_level="safe", exit_codes=(), timeout=0.3)
+    async def go(args: NoArgs, ctx: Ctx) -> None:
+        try:
+            await asyncio.sleep(30)
+        finally:
+            await asyncio.sleep(0.3)
+            cleaned.set()
+
+    code, envelope = run(app, ["go"])
+    assert envelope["error"]["code"] == "TIMEOUT" and code == 10
+    assert cleaned.is_set() and envelope["warnings"] == []
+
+
+def _interrupted(path: str, *flags: str) -> tuple[subprocess.CompletedProcess[str], float]:
+    """Run ``path`` until its handler awaits, SIGINT it; the result, and seconds to exit"""
+    proc = subprocess.Popen(
+        [sys.executable, str(LINGERCTL), path, *flags, "--format", "json"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stderr is not None
+    seen = ""
+    while "lingerctl: waiting" not in seen:
+        line = proc.stderr.readline()
+        assert line, seen
+        seen += line
+    proc.send_signal(signal.SIGINT)
+    sent = time.monotonic()
+    out, err = proc.communicate(timeout=30)
+    ended = time.monotonic() - sent
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, seen + err), ended
+
+
+@needs_posix_signals
+@pytest.mark.parametrize("path", ["linger", "linger-bounded"])
+def test_sigint_lets_an_async_handlers_finally_await_before_the_run_ends(path: str) -> None:
+    """``linger`` has no timeout, so the handler runs on the main thread, which the
+    signal interrupts; ``linger-bounded`` runs on a worker (#355)"""
+    proc, _ = _interrupted(path, "--cleanup", "0.2")
+    assert proc.returncode == 130, proc.stderr
+    envelope = json.loads(proc.stdout.splitlines()[-1])
+    spec_validator("response-envelope").validate(envelope)
+    assert envelope["error"]["code"] == "CANCELLED" and envelope["warnings"] == []
+    assert "lingerctl: cleaned up" in proc.stderr
+
+
+@needs_posix_signals
+@pytest.mark.parametrize("path", ["linger", "linger-bounded"])
+def test_a_finally_that_outlasts_the_grace_ends_the_run_cancelled_anyway(path: str) -> None:
+    proc, ended = _interrupted(path, "--cleanup", "30")
+    assert proc.returncode == 130, proc.stderr
+    assert ended < GRACE_SECONDS + 3, ended
+    envelope = json.loads(proc.stdout.splitlines()[-1])
+    assert envelope["error"]["code"] == "CANCELLED"
+    assert envelope["error"]["context"]["cleanup_failed"] == "RuntimeError"
+    [warning] = envelope["warnings"]
+    assert warning["code"] == "CLEANUP_FAILED" and warning["context"]["hook"] == "async handler"
+    assert f"still running {GRACE_SECONDS}s after its cancellation" in proc.stderr
+    assert "lingerctl: cleaned up" not in proc.stderr
 
 
 def test_an_async_operation_started_but_not_awaited_is_detected() -> None:

@@ -39,6 +39,17 @@ Apps built on treaty keep their own, structured schema changelog with
   command confirmed and dry run, and a handler that ignored its dry-run flag applied for
   real on the kit's machine (#373)
 
+### Fixed
+
+- An `async def` handler cancelled by SIGINT or its timeout now gets the same 2 s grace
+  as an async generator's source to finish its `finally` blocks and `async with` exits,
+  which can await, before the run answers `CANCELLED` or `TIMEOUT`; the process used to
+  exit first when the handler ran on the main thread, and a timed-out one was abandoned at
+  the deadline. A handler still running past the grace, one that swallows
+  `CancelledError` or whose cleanup is slow, no longer delays the answer: stderr says it
+  was still running after its cancellation, and the envelope carries a `CLEANUP_FAILED`
+  warning for the `async handler` hook (#355)
+
 ## [1.0.0rc35] - 2026-10-06
 
 The 35th 1.0 release candidate: 3 breaking changes, 3 changes, 4 fixes, and 4 additions.
