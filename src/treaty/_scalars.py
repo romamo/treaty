@@ -129,8 +129,44 @@ def check_pattern_publishable(pattern: str, where: str) -> None:
 
 
 def anchored(pattern: str) -> str:
-    """A ``re.fullmatch`` pattern as the anchored form JSON Schema and FlagEntry expect"""
-    return f"^(?:{pattern})$"
+    """A ``re.fullmatch`` pattern as the anchored form JSON Schema and FlagEntry expect;
+    one its author anchored already is kept as written, not wrapped twice (#388)"""
+    return pattern if _whole_anchored(pattern) else f"^(?:{pattern})$"
+
+
+def _whole_anchored(pattern: str) -> bool:
+    """True when ``pattern`` is ``^...$`` with no ``|`` outside a group or class, so a
+    search with it matches what ``re.fullmatch`` does"""
+    if len(pattern) < 2 or not pattern.startswith("^"):
+        return False
+    depth = 0
+    in_class = False
+    index = 1
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            if index == len(pattern) - 2:
+                return False  # the closing $ is escaped: a literal dollar
+            index += 2
+            continue
+        if in_class:
+            if char == "]":
+                in_class = False
+        elif char == "[":
+            in_class = True
+            # A ] first in the class, after an optional ^, is a literal
+            index += 2 if pattern[index + 1 : index + 2] == "^" else 1
+            if pattern[index : index + 1] == "]":
+                index += 1
+            continue
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "|" and depth == 0:
+            return False
+        index += 1
+    return pattern.endswith("$") and depth == 0 and not in_class
 
 
 def matches_preset(preset: str, value: str) -> bool:

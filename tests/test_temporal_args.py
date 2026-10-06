@@ -411,3 +411,84 @@ def test_an_idempotency_fingerprint_of_date_arguments_is_stable() -> None:
         "2024-02-29",
         "2024-01-01T10:00:00+02:00",
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class CostInput:
+    date: dt.date | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PostingInput:
+    account: str
+    cost: CostInput | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AddArgs:
+    date: dt.date = Flag(description="Date")
+    postings: tuple[PostingInput, ...] = Flag(default=(), description="Postings")
+
+
+def ledger_app(*, own_date: bool) -> App:
+    app = App("ledger", version="1.0.0")
+    if own_date:
+        # beancount-cli's registration: a pattern its author anchored already
+        app.scalar(
+            dt.date,
+            parse=dt.date.fromisoformat,
+            pattern=r"^\d{4}-\d{2}-\d{2}$",
+            serialize=dt.date.isoformat,
+        )
+
+    @app.command(
+        "add", description="Add", danger_level="safe", supports_raw_payload=True, exit_codes=()
+    )
+    def add(args: AddArgs, ctx: Ctx) -> dict[str, object]:
+        return {"dates": [str(p.cost.date) for p in args.postings if p.cost is not None]}
+
+    return app
+
+
+@pytest.mark.parametrize("own_date", [False, True])
+def test_a_date_nested_in_a_list_of_objects_has_the_top_level_shape(own_date: bool) -> None:
+    """#388: postings[].cost.date publishes the node the top-level date does, its pattern
+    anchored once and no title naming the stdlib class"""
+    out = io.StringIO()
+    code = ledger_app(own_date=own_date).run(
+        ["add", "--schema"], stdout=out, stderr=io.StringIO(), env={}, isatty=False
+    )
+    assert code == 0
+    data = json.loads(out.getvalue())["data"]
+    top = {k: v for k, v in data["raw_payload_schema"]["properties"]["date"].items()}
+    del top["description"]
+    cost = data["flags"]["postings"]["schema"]["properties"]["cost"]["anyOf"][0]
+    nested = cost["properties"]["date"]["anyOf"][0]
+    assert nested == top
+    if own_date:
+        # The app's own scalar: its pattern as written, and no format, as its text is its own
+        assert nested == {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$"}
+        assert data["flags"]["date"]["pattern"] == r"^\d{4}-\d{2}-\d{2}$"
+    else:
+        assert nested == {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+        }
+    assert re.search(nested["pattern"], "2024-01-01")
+    assert not re.search(nested["pattern"], "2024-1-1")
+
+
+@pytest.mark.parametrize("own_date", [False, True])
+@pytest.mark.parametrize(("value", "ok"), [("2024-01-01", True), ("2024-1-1", False)])
+def test_a_nested_date_validates_as_before(own_date: bool, value: str, ok: bool) -> None:
+    posting = json.dumps({"account": "Assets:Cash", "cost": {"date": value}})
+    for argv in (
+        ["add", "--date", value],
+        ["add", "--date", "2024-01-01", "--postings", posting],
+    ):
+        out = io.StringIO()
+        code = ledger_app(own_date=own_date).run(
+            argv, stdout=out, stderr=io.StringIO(), env={}, isatty=False
+        )
+        assert (code == 0) is ok, out.getvalue()

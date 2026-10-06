@@ -144,6 +144,14 @@ Apps built on treaty keep their own, structured schema changelog with
   reported as a `CLEANUP_FAILED` warning naming its `release`, and the run answers
   `CANCELLED` or `TIMEOUT` as it would without the resource. A release that cannot start is
   cancelled, so it never runs late; once started, a release still runs to its end (#383)
+- A pattern its author already anchored as `^...$`, such as `app.scalar(datetime.date,
+  pattern=r"^\d{4}-\d{2}-\d{2}$")`, is published as written instead of wrapped again into
+  `^(?:^...$)$`, in the manifest's flags and in argument schemas, nested object fields
+  among them; one with a top-level `|` is still wrapped. A `datetime.date`,
+  `datetime.datetime`, or `datetime.time` an app registers with `app.scalar` no longer
+  carries `"title": "date"` in argument schemas, at the top level or nested. Validation is
+  unchanged. A schema lock or saved MCP tool list of such an app shows the shorter pattern
+  and the dropped title once (#388)
 
 ## [1.0.0rc36] - 2026-10-06
 
