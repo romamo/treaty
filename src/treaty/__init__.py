@@ -72,6 +72,11 @@ def __getattr__(name: str) -> object:
     return found
 
 
+def __dir__() -> list[str]:
+    """The module's names with the deferred ones, before their first use too"""
+    return sorted({*globals(), "__version__", *_LAZY_MCP})
+
+
 __all__ = [
     "Affects",
     "App",

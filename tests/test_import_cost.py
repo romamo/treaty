@@ -49,6 +49,16 @@ def test_version_and_star_import_resolve_the_deferred_names() -> None:
     assert set(treaty.__all__) <= set(scope)
 
 
+def test_dir_lists_the_deferred_names_before_their_first_use() -> None:
+    done = subprocess.run(
+        [sys.executable, "-c", "import treaty; print(*dir(treaty))"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert {"__version__", "McpServe", "McpTool", "App"} <= set(done.stdout.split())
+
+
 def test_an_unknown_name_is_an_attribute_error() -> None:
     with pytest.raises(AttributeError, match="NoSuchName"):
         treaty.NoSuchName  # noqa: B018
