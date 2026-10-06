@@ -49,6 +49,14 @@ class _Job:
     exc: BaseException | None = None
     cancelled: bool = False
     """``Loop.cancel`` reached it; one still queued is then cancelled as it starts"""
+    ended: bool = False
+    """Set as it ends, before ``done`` is released: a waiter that took ``done`` keeps it"""
+    disarm: Callable[[], bool] | None = None
+    """Called on the loop as ``Loop.cancel`` lands: turns off the job's own deadline, so
+    it does not cancel the job a second time inside its ``finally``; True when that
+    deadline already fired, so the signal's cancel would be the second one (#355)"""
+    signalled: bool = False
+    """On the loop: the signal's cancel was issued, by ``_tracked`` or ``_cancel_running``"""
 
     def wait(self, seconds: float) -> bool:
         """Whether the job ended within ``seconds``; sliced as ``Loop.run``'s wait is"""
@@ -88,6 +96,7 @@ class Loop:
                     job.result = runner.run(self._tracked(job), context=job.context)
                 except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
                     job.exc = exc
+                job.ended = True
                 job.done.release()
         self._drain()
 
@@ -101,6 +110,7 @@ class Loop:
             if job is not None:
                 job.coro.close()
                 job.exc = RuntimeError("the run's event loop is closed")
+                job.ended = True
                 job.done.release()
 
     def _refuse(self, exc: BaseException) -> None:
@@ -109,6 +119,7 @@ class Loop:
         while (job := self._jobs.get()) is not None:
             job.coro.close()
             job.exc = exc
+            job.ended = True
             job.done.release()
 
     async def _tracked(self, job: _Job) -> object:
@@ -119,6 +130,7 @@ class Loop:
         self._running, self._task = job, asyncio.current_task()
         try:
             if job.cancelled and self._task is not None:
+                job.signalled = True
                 # Cancelled while queued: it ends at its first await, as if cancelled
                 # there; closing it unstarted would leave an async generator's step
                 # marked running, so its aclose() would fail
@@ -128,9 +140,26 @@ class Loop:
             self._running = self._task = None
 
     def _cancel_running(self, job: _Job) -> None:
-        """On the loop: cancel ``job``'s task if it is still the one running"""
-        if self._running is job and self._task is not None:
-            self._task.cancel()
+        """On the loop: cancel ``job``'s task if it is still the one running, unless this
+        run already did, or its deadline did: either would land this cancel in its
+        ``finally`` (#355). A cancel of the handler's own, such as its ``asyncio.timeout``
+        unwinding, does not count: the signal's still lands"""
+        if self._running is not job or self._task is None or job.signalled:
+            return
+        job.signalled = True
+        if job.disarm is not None and job.disarm():
+            return
+        self._task.cancel()
+
+    def on_cancel(self, disarm: Callable[[], bool] | None) -> None:
+        """On the loop, from the running job: call ``disarm`` as ``cancel`` lands on it,
+        None for no longer; a job cancelled before it got here is disarmed at once"""
+        job = self._running
+        if job is None:
+            return
+        job.disarm = disarm
+        if disarm is not None and job.cancelled:
+            disarm()
 
     def cancel(self, job: _Job | None = None) -> None:
         """Cancel ``job``, or the one running, so its ``finally`` blocks run now and the
@@ -262,27 +291,51 @@ class AsyncEvents(Iterator[object]):
                 self._loop.close()
 
 
+def unfinished(job: _Job, grace: float) -> None:
+    """Raise when ``job``, an async handler's, still runs as the run tears down: it
+    outlived its cancellation's grace, so its ``finally`` blocks may not finish (#355)"""
+    if not job.ended:
+        raise RuntimeError(
+            f"the async handler was still running {grace}s after its cancellation; its "
+            "finally blocks may not finish: let CancelledError propagate from its awaits"
+        ) from None  # raised as the run ends, often beside the signal: not because of it
+
+
 async def within[T](
     remaining: float | None,
     timeout: Timeout,
     acquire: Callable[[], Awaitable[list[Any]]],
     handler: Callable[[list[Any]], Awaitable[T]],
     warn: Callable[[str, str, dict[str, object]], None],
+    loop: Loop,
 ) -> T:
     """Acquire the resources, then await the handler, until the deadline; then cancel
-    and raise ``TimeoutExpired``. Tasks the handler started and left running are
-    cancelled, so they never outlive it into its resources' release: on a return they are
-    reported as ``UNAWAITED_TASKS``, as their work would otherwise stop silently when the
-    loop closes. A resource's own tasks, such as a pool's, stay."""
+    and raise ``TimeoutExpired``. Once ``loop`` cancelled it, on a signal, the deadline is
+    off: a second cancel would cut its ``finally`` blocks short (#355). Tasks the handler
+    started and left running are cancelled, so they never outlive it into its resources'
+    release: on a return they are reported as ``UNAWAITED_TASKS``, as their work would
+    otherwise stop silently when the loop closes. A resource's own tasks, such as a
+    pool's, stay."""
     import asyncio
 
     current = asyncio.current_task()
     before: set[asyncio.Task[Any]] | None = None
     try:
         async with asyncio.timeout(remaining) as scope:
-            resources = await acquire()
-            before = asyncio.all_tasks()
-            result = await handler(resources)
+
+            def disarm() -> bool:
+                if scope.expired():
+                    return True
+                scope.reschedule(None)
+                return False
+
+            loop.on_cancel(disarm)
+            try:
+                resources = await acquire()
+                before = asyncio.all_tasks()
+                result = await handler(resources)
+            finally:
+                loop.on_cancel(None)  # past the scope, rescheduling it raises
     except BaseException as exc:  # noqa: BLE001 - re-raised once the handler's tasks stop
         if before is not None:
             await _stop(_strays(before, current))

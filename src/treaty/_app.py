@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import IO, Any, Literal, NoReturn, TextIO, TypeGuard, cast
 
 from ._adapters import OutputAdapter
-from ._aio import AsyncEvents, Loop, within
+from ._aio import AsyncEvents, Loop, unfinished, within
 from ._args_adapter import ArgsAdapter, ArgsAdapters
 from ._atomic import write_atomic, write_atomic_bytes
 from ._auth import (
@@ -2811,24 +2811,37 @@ def _call_async(
     command: Command, args: object, ctx: Ctx, provided: Mapping[type, object]
 ) -> object:
     """Run an ``async def`` handler and its resources on a loop of the run's own; the
-    teardown releases async resources on it, then closes it (REQ-F-049)"""
+    teardown releases async resources on it, then closes it (REQ-F-049)
+
+    Cancelled by a signal or its timeout, the handler gets ``GRACE_SECONDS`` to finish its
+    ``finally`` blocks before the run tears down and answers; one still running then is
+    reported as a teardown failure (#355)."""
     loop = Loop()
     teardown = ctx._teardown
+    resolver = Resolver(command.resource_graph, args, ctx, provided, loop)
+    job = loop.job(
+        within(
+            ctx.remaining,
+            ctx.timeout,
+            lambda: resolver.aall((*command.resources, *_output_deps(command, ctx))),
+            lambda resources: _located(command, args, ctx, resources),
+            lambda code, message, context: ctx.warn(code, message, **context),
+            loop,
+        )
+    )
     if teardown is not None:
         teardown.add(EVENT_LOOP_HOOK, loop.close, last=True)
+        # Added before the resources, so it runs after their releases; not last, so the
+        # timeout path gives the handler its grace (Teardown.pending)
+        teardown.add(ASYNC_HANDLER_HOOK, lambda: unfinished(job, GRACE_SECONDS))
         teardown.on_interrupt(loop.cancel)
-    resolver = Resolver(command.resource_graph, args, ctx, provided, loop)
     try:
-        return loop.run(
-            within(
-                ctx.remaining,
-                ctx.timeout,
-                lambda: resolver.aall((*command.resources, *_output_deps(command, ctx))),
-                lambda resources: _located(command, args, ctx, resources),
-                lambda code, message, context: ctx.warn(code, message, **context),
-            )
-        )
+        return loop.run_job(job)
     finally:
+        if not job.ended:
+            # A signal raised on this thread while it waited cancelled the handler: its
+            # finally blocks get the grace before the teardown releases what they use
+            job.wait(GRACE_SECONDS)
         if teardown is None:
             loop.close()
 
@@ -2856,6 +2869,7 @@ def _call_async_stream(
                 lambda: resolver.aall((*command.resources, *_output_deps(command, ctx))),
                 source,
                 lambda code, message, context: ctx.warn(code, message, **context),
+                loop,
             )
         )
         if not inspect.isasyncgen(made):
@@ -2921,6 +2935,7 @@ def _answers_over(error: ParseError, path: str) -> bool:
 CWD_CHANGED = "CWD_CHANGED"
 SESSION_HOOK = "session temp dir"
 EVENT_LOOP_HOOK = "event loop"
+ASYNC_HANDLER_HOOK = "async handler"
 
 
 def _process_cwd() -> str | None:
