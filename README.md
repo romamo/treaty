@@ -952,7 +952,8 @@ session.verify = True if bundle is None else str(bundle)
 - A client configured this way, from `ctx.network`'s `proxies`, `proxy_for()`, or
   `ca_bundle` anywhere the handler reaches, gets only advice from `http-client`, so
   `treaty audit --strict` passes: the flags reach it, and the gap left is that its failure
-  carries no `error.network_context`, which `ctx.http` adds
+  carries no `error.network_context`, which `ctx.http` adds. The read is not traced into
+  the client, so a direct call elsewhere on the path, left unconfigured, gets the same advice
 
 The same client keeps its own timeout and retries, which may not fit `--timeout`: a
 `timeout=30` with three retries can outlast a 60 s limit, and the run then answers `TIMEOUT`

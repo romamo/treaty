@@ -1157,15 +1157,17 @@ def _http_client(app: App) -> Iterator[Finding]:
         )
         if found is not None and configured:
             # The README's pattern: the client takes ctx.network's proxies and CA bundle,
-            # so the flags reach it; only ctx.http's failure context is missing (#356)
+            # so the flags reach it; only ctx.http's failure context is missing (#356).
+            # The read is not traced into the call, so the message says what is assumed
             unit, calls = found
             yield Finding(
                 "http-client",
                 Severity.ADVICE,
                 c.path.value,
-                f"{calls[0]}() is configured from ctx.network, but a failure in it ends the "
-                "run with no error.network_context, which ctx.http adds "
-                f"(REQ-F-037, heuristic){unit.where}",
+                f"{calls[0]}() is taken to be configured from ctx.network, whose proxies or "
+                "CA bundle the handler's code reads; if it is not, --proxy and --no-proxy "
+                "do not reach it, and either way a failure in it ends the run with no "
+                f"error.network_context, which ctx.http adds (REQ-F-037, heuristic){unit.where}",
                 "response = ctx.http.get(url)",
             )
         elif found is not None:

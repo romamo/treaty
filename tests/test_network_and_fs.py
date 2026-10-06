@@ -996,14 +996,43 @@ def test_http_client_only_advises_a_direct_client_configured_from_ctx_network() 
         "bare": Severity.WARNING,
     }
     assert own["session"].message.startswith(
-        "requests.Session() is configured from ctx.network, but a failure in it ends the run "
-        "with no error.network_context, which ctx.http adds (REQ-F-037, heuristic)"
+        "requests.Session() is taken to be configured from ctx.network, whose proxies or CA "
+        "bundle the handler's code reads; if it is not, --proxy and --no-proxy do not reach "
+        "it, and either way a failure in it ends the run with no error.network_context, "
+        "which ctx.http adds (REQ-F-037, heuristic)"
     )
     assert "found via fixture_net_helpers.get" in own["helper"].message
     assert "--proxy, --no-proxy, and the CA bundle variables do not reach it" in (
         found["bare"].message
     )
     assert {f.fix for f in (*own.values(), *found.values())} == {"response = ctx.http.get(url)"}
+
+
+def _log_proxies(ctx: Ctx) -> None:
+    print(ctx.network.proxies)
+
+
+def _fetch_unconfigured(url: str) -> int:
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return int(r.status)
+
+
+def test_http_client_advice_does_not_claim_an_unrelated_call_is_configured() -> None:
+    """A ctx.network.proxies read in one helper and a bare urlopen in another still only
+    advise, as the read is not traced into the call; the advice says it assumes the client
+    is configured and names what is lost if it is not (#356)"""
+    app = App("t", version="1.0.0")
+
+    @app.command("mixed", description="m", danger_level="safe", exit_codes=(), has_network_io=True)
+    def mixed(args: Fetch, ctx: Ctx) -> dict[str, int]:
+        _log_proxies(ctx)
+        return {"status": _fetch_unconfigured(args.url)}
+
+    [found] = [f for f in findings(app) if f.rule == "http-client"]
+    assert found.severity is Severity.ADVICE
+    assert "is configured from ctx.network" not in found.message
+    assert "taken to be configured" in found.message
+    assert "if it is not, --proxy and --no-proxy do not reach it" in found.message
 
 
 def settings_with(left: float | None) -> NetworkSettings:
