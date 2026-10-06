@@ -85,6 +85,10 @@ def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[s
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
     for command in user_commands(app):
+        if command.passthrough:
+            # Its tool owns stdout and its envelope is on stderr, so the kit's json_envelope
+            # check, which reads stdout, would fail every probe of it (#386)
+            continue
         argv = _argv_from_example(app, command)
         if argv is None:
             if any(f.required for f in command.fields):
