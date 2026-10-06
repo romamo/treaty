@@ -10,6 +10,11 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0rc36] - 2026-10-06
+
+The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see
+Breaking.
+
 ### Breaking
 
 - An app whose `argument_order` came from a destructive example with only its dry-run
@@ -2237,7 +2242,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc35...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc36...HEAD
+[1.0.0rc36]: https://github.com/romamo/treaty/compare/v1.0.0rc35...v1.0.0rc36
 [1.0.0rc35]: https://github.com/romamo/treaty/compare/v1.0.0rc34...v1.0.0rc35
 [1.0.0rc34]: https://github.com/romamo/treaty/compare/v1.0.0rc33...v1.0.0rc34
 [1.0.0rc33]: https://github.com/romamo/treaty/compare/v1.0.0rc32...v1.0.0rc33
