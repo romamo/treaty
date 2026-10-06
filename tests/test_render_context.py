@@ -166,6 +166,27 @@ def test_no_stream_renders_the_buffered_events_with_the_context() -> None:
     assert code == 0 and out == "a color=False width=None\nb color=False width=None\n"
 
 
+def test_a_two_parameter_frame_renderer_gets_the_context() -> None:
+    app = App("showctl", version="1.0.0")
+
+    @app.command(
+        "tick",
+        description="Events",
+        streaming=True,
+        danger_level="safe",
+        exit_codes=(),
+        renderers={Format.PLAIN: FormatRenderer(colored, frame=True)},
+    )
+    def tick(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, str]]:
+        yield {"tag": "a"}
+        yield {"tag": "b"}
+
+    code, out, _ = run(app, ["tick"], env={"COLUMNS": "50"})
+    # At a terminal each frame is drawn over the last, told it may color
+    assert code == 0 and f"{RED}a color=True width=50" in out
+    assert f"{RED}b color=True width=50" in out and "\x1b[J" in out
+
+
 def test_a_one_parameter_stream_renderer_still_gets_data_alone() -> None:
     assert run(app_with(plain=one), ["tick"])[1] == "a\nb\n"
 
