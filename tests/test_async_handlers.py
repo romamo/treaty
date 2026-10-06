@@ -214,6 +214,35 @@ def test_a_handler_is_cancelled_once_by_a_signal_and_its_deadline_together(
     assert done == ["finally"], job.exc
 
 
+def test_a_signal_still_cancels_a_handler_whose_own_timeout_is_unwinding() -> None:
+    """The handler's own ``asyncio.timeout`` cancels its task too; a signal landing while
+    that one unwinds still cancels it, or a retry loop would swallow the signal (#355)"""
+    loop = Loop()
+    unwinding = threading.Event()
+    attempts: list[int] = []
+
+    async def retrying(resources: list[Any]) -> None:
+        for attempt in range(50):
+            attempts.append(attempt)
+            try:
+                async with asyncio.timeout(0.05):
+                    try:
+                        await asyncio.sleep(3600)
+                    finally:
+                        unwinding.set()
+                        await asyncio.sleep(0.5)
+            except TimeoutError:
+                pass
+
+    job = loop.submit(within(None, Timeout(1), _no_resources, retrying, _warn, loop))
+    assert unwinding.wait(5)
+    loop.cancel(job)
+    ended = job.wait(5)
+    loop.close()
+    assert ended and isinstance(job.exc, asyncio.CancelledError), job.exc
+    assert attempts == [0]
+
+
 def _interrupted(path: str, *flags: str) -> tuple[subprocess.CompletedProcess[str], float]:
     """Run ``path`` until its handler awaits, SIGINT it; the result, and seconds to exit"""
     proc = subprocess.Popen(

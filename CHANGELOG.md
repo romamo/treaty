@@ -38,9 +38,6 @@ Apps built on treaty keep their own, structured schema changelog with
   moves to the next example or the built-in `manifest --etag`, where it used to run the
   command confirmed and dry run, and a handler that ignored its dry-run flag applied for
   real on the kit's machine (#373)
-
-### Fixed
-
 - An `async def` handler cancelled by SIGINT or its timeout now gets the same 2 s grace
   as an async generator's source to finish its `finally` blocks and `async with` exits,
   which can await, before the run answers `CANCELLED` or `TIMEOUT`; the process used to

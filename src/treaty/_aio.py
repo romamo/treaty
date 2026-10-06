@@ -51,9 +51,12 @@ class _Job:
     """``Loop.cancel`` reached it; one still queued is then cancelled as it starts"""
     ended: bool = False
     """Set as it ends, before ``done`` is released: a waiter that took ``done`` keeps it"""
-    disarm: Callable[[], None] | None = None
+    disarm: Callable[[], bool] | None = None
     """Called on the loop as ``Loop.cancel`` lands: turns off the job's own deadline, so
-    it does not cancel the job a second time inside its ``finally`` (#355)"""
+    it does not cancel the job a second time inside its ``finally``; True when that
+    deadline already fired, so the signal's cancel would be the second one (#355)"""
+    signalled: bool = False
+    """On the loop: the signal's cancel was issued, by ``_tracked`` or ``_cancel_running``"""
 
     def wait(self, seconds: float) -> bool:
         """Whether the job ended within ``seconds``; sliced as ``Loop.run``'s wait is"""
@@ -127,6 +130,7 @@ class Loop:
         self._running, self._task = job, asyncio.current_task()
         try:
             if job.cancelled and self._task is not None:
+                job.signalled = True
                 # Cancelled while queued: it ends at its first await, as if cancelled
                 # there; closing it unstarted would leave an async generator's step
                 # marked running, so its aclose() would fail
@@ -136,15 +140,18 @@ class Loop:
             self._running = self._task = None
 
     def _cancel_running(self, job: _Job) -> None:
-        """On the loop: cancel ``job``'s task if it is still the one running, unless its
-        deadline already did, which would land this cancel in its ``finally`` (#355)"""
-        if self._running is job and self._task is not None:
-            if job.disarm is not None:
-                job.disarm()
-            if not self._task.cancelling():
-                self._task.cancel()
+        """On the loop: cancel ``job``'s task if it is still the one running, unless this
+        run already did, or its deadline did: either would land this cancel in its
+        ``finally`` (#355). A cancel of the handler's own, such as its ``asyncio.timeout``
+        unwinding, does not count: the signal's still lands"""
+        if self._running is not job or self._task is None or job.signalled:
+            return
+        job.signalled = True
+        if job.disarm is not None and job.disarm():
+            return
+        self._task.cancel()
 
-    def on_cancel(self, disarm: Callable[[], None] | None) -> None:
+    def on_cancel(self, disarm: Callable[[], bool] | None) -> None:
         """On the loop, from the running job: call ``disarm`` as ``cancel`` lands on it,
         None for no longer; a job cancelled before it got here is disarmed at once"""
         job = self._running
@@ -316,9 +323,11 @@ async def within[T](
     try:
         async with asyncio.timeout(remaining) as scope:
 
-            def disarm() -> None:
-                if not scope.expired():
-                    scope.reschedule(None)
+            def disarm() -> bool:
+                if scope.expired():
+                    return True
+                scope.reschedule(None)
+                return False
 
             loop.on_cancel(disarm)
             try:
