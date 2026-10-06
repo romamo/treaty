@@ -10,11 +10,11 @@
   ],
   "argument_order": {
     "command_path": [
-      "purge"
+      "manifest"
     ],
     "local_args": [
-      "--dry-run",
-      "--confirm-destructive"
+      "--etag",
+      "sha256:00000000000000000000000000000000"
     ],
     "global_flag": "--format",
     "value": "json",

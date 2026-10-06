@@ -172,8 +172,9 @@ def _without_stream_flags(argv: tuple[str, ...]) -> tuple[str, ...]:
 
 def argument_order_for(app: App) -> dict[str, object] | None:
     """The first example whose tokens after its positionals start with an option, so the kit
-    can move ``--format`` around it (REQ-F-079); destructive ones are run with their dry-run
-    flag. Without one, the built-in ``manifest --etag``"""
+    can move ``--format`` around it (REQ-F-079). A destructive one runs with its dry-run flag
+    and never ``--confirm-destructive``, so one whose only option is that flag is skipped.
+    Without one, the built-in ``manifest --etag``"""
     for command in user_commands(app):
         if command.danger_level is DangerLevel.MUTATING or command.streaming:
             continue
@@ -187,10 +188,10 @@ def argument_order_for(app: App) -> dict[str, object] | None:
             head += 1
         local = list(argv[head:])
         if command.danger_level is DangerLevel.DESTRUCTIVE:
+            # Never confirmed: a handler that ignores its dry-run flag would apply for real
+            # on the kit's machine (#373). The kit needs two tokens, so the dry-run flag
+            # alone moves the search on
             local.append(_dry_run_flag(command))
-            if len(local) < 2:
-                # Still a preview: the handler sees dry_run=True; the kit needs two tokens
-                local.append("--confirm-destructive")
         if len(local) < 2 or "--" in local:
             continue
         return _order(list(argv[:head]), local)

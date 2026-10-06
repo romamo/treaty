@@ -292,8 +292,8 @@ def test_agents_md_matches_the_cli() -> None:
   "timeout_seconds": 10,
   "manifest": ["manifest"],
   "argument_order": {{
-    "command_path": ["delete", "widget"],
-    "local_args": ["--dry-run", "--confirm-destructive"],
+    "command_path": ["manifest"],
+    "local_args": ["--etag", "sha256:00000000000000000000000000000000"],
     "global_flag": "--format",
     "value": "json",
     "alternate_value": "plain"
