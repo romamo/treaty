@@ -154,9 +154,9 @@ async resources, so a pool opened in `acquire` works in the handler and closes i
 run, and the run answers `TIMEOUT`. Tasks the handler started but did not await are
 cancelled and reported in an `UNAWAITED_TASKS` warning. An async resource needs an async
 handler, and a sync resource cannot depend on one. `ctx.http`, `ctx.run`, and `ctx.lock`
-block, so an async handler calls its own async clients instead. Streaming handlers,
-`cleanup=`, `cursor_check=`, and other hooks stay plain `def`: `async def` there is a
-`RegistrationError` instead of a body that never runs.
+block, so an async handler calls its own async clients instead. A streaming handler may
+be an async generator (see Streaming). `cleanup=`, `cursor_check=`, and other hooks stay
+plain `def`: `async def` there is a `RegistrationError` instead of a body that never runs.
 
 A `ParseError` or `Exit.ARG_ERROR` raised by a handler or a resource's `acquire` comes
 after user code ran, so it exits `1` with `VALIDATION_AFTER_START` and `phase: execution`,
@@ -1653,6 +1653,26 @@ which returns one envelope with every event in `data` and `meta.total`; a failur
 `_line` and `_cmd`. In a text format the renderer gets one event per call.
 Summary lines carry `meta.pagination`; `--stream` on a command that cannot stream answers
 with one envelope and a `STREAMING_NOT_SUPPORTED` warning.
+
+A stream whose source is async, such as a WebSocket feed, is an async generator annotated
+`AsyncIterator[T]`; it may take async resources, as an `async def` handler does:
+
+```python
+@app.command("quotes.watch", description="Stream quotes", streaming=True,
+             danger_level="safe", exit_codes=(), timeout=None)
+async def watch(args: WatchArgs, ctx: Ctx, feed: Feed) -> AsyncIterator[Quote]:
+    async with feed.subscribe(args.symbol) as quotes:
+        async for quote in quotes:
+            yield quote
+```
+
+Each event is awaited on the run's event loop, in one context, so what the generator sets
+survives between events. A signal, the idle timeout, or a reader that stops cancels the
+pending step, then closes the generator, so its `finally` blocks and `async with` exits
+run before its async resources are released, and the run ends `CANCELLED` or `TIMEOUT`
+as a plain generator's does. A generator that catches the `CancelledError` and keeps
+running gets 2 seconds to finish; then the run ends anyway, with the reason on stderr.
+`--no-stream`, `App.call`, and MCP collect it as they do any stream.
 
 A stream is `safe` or `mutating`; a `destructive` one is refused at registration, since a
 stream cannot ask confirmation for each action. A mutating stream, such as a watch loop

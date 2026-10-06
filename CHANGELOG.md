@@ -38,6 +38,15 @@ Apps built on treaty keep their own, structured schema changelog with
   appended as before. `frame=True` is refused at registration off `streaming=True` or on a
   format other than `plain`, and `FormatRenderer`'s `media_type=` is now optional (#350)
 
+- A streaming handler may be an async generator (`async def ... -> AsyncIterator[T]`),
+  with async resources, stepped on the run's event loop. A signal, the idle timeout, or a
+  reader that stops cancels the pending step before closing the generator, so its
+  `finally` runs and the run ends `CANCELLED` (exit 130, `meta.partial: true`) or
+  `TIMEOUT`, where a hand-made bridge over an async source ended `HANDLER_CRASHED`.
+  `--no-stream`, `App.call`, and MCP collect it as any stream; an async generator without
+  `streaming=True`, and an `async def` that returns with it, are still a
+  `RegistrationError` (#347)
+
 ## [1.0.0rc34] - 2026-10-04
 
 The 34th 1.0 release candidate: 2 breaking changes, 5 additions, 2 changes, and 3 fixes.

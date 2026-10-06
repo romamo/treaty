@@ -64,14 +64,19 @@ def refuse_async_generator(fn: object, where: str) -> None:
 
 
 def dependency_params(
-    fn: Callable[..., object], where: str, *, allow_async: bool = False
+    fn: Callable[..., object],
+    where: str,
+    *,
+    allow_async: bool = False,
+    allow_async_generator: bool = False,
 ) -> tuple[type, ...]:
     """Resource classes named by the parameters after ``(args, ctx)``; validates that prefix.
-    ``allow_async`` lets a coroutine function through, for handlers and ``acquire``."""
-    if allow_async:
-        refuse_async_generator(fn, where)
-    else:
+    ``allow_async`` lets a coroutine function through, for handlers and ``acquire``;
+    ``allow_async_generator`` an async generator, for a streaming handler."""
+    if not allow_async:
         refuse_async(fn, where)
+    elif not allow_async_generator:
+        refuse_async_generator(fn, where)
     params = list(signature(fn).parameters.values())
     if len(params) < 2 or any(
         p.kind not in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) for p in params
