@@ -120,3 +120,41 @@ def test_context_values_print_as_text_not_a_python_repr() -> None:
     assert code == 2
     assert "  allowed: fast, slow" in err.splitlines()
     assert "['" not in err
+
+
+@dataclass(frozen=True, slots=True)
+class StrictArgs:
+    count: int = Flag(description="Attempts")
+    child: tuple[str, ...] = Arg(description="Passed to the child")
+
+
+def test_a_strict_command_usage_puts_the_options_before_the_positionals() -> None:
+    app = App("bean", version="1.0.0")
+
+    @app.command(
+        "wrap",
+        description="Wrap",
+        danger_level="safe",
+        exit_codes=(),
+        option_placement="strict",
+    )
+    def wrap(args: StrictArgs, ctx: Ctx) -> None:
+        return None
+
+    err = io.StringIO()
+    code = app.run(
+        ["wrap"], stdin=io.StringIO(), stdout=io.StringIO(), stderr=err, env={}, isatty=True
+    )
+    assert code == 2
+    usage = err.getvalue().splitlines()[-2]
+    assert usage == "usage: bean wrap --count <count> [options] <child>"
+    # The usage line, followed, runs: strict takes every token from <child> on verbatim
+    code = app.run(
+        ["wrap", "--count", "1", "x"],
+        stdin=io.StringIO(),
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        env={},
+        isatty=True,
+    )
+    assert code == 0

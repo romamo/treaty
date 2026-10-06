@@ -5,7 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 
-from ._command import Command, DangerLevel
+from ._command import Command, DangerLevel, OptionPlacement
 from ._envelope import visible
 from ._envnames import declared_text
 from ._flags import FieldInfo, object_shape
@@ -218,12 +218,18 @@ def missing_lines(
     width = max(len(label) for label, _ in shown)
     rows = [_shown(f"  {label:<{width}}  {text}") for label, text in shown]
     path = [name, *command.path.parts]
-    usage = [*path, *(f.shown for f in command.fields if f.required and f.positional)]
-    for f in command.fields:
-        if f.required and not f.positional:
-            usage.append(f"--{f.env_flag} <var>" if f.secret else f"--{f.flag} <{f.flag}>")
+    positionals = [f.shown for f in command.fields if f.required and f.positional]
+    options = [
+        f"--{f.env_flag} <var>" if f.secret else f"--{f.flag} <{f.flag}>"
+        for f in command.fields
+        if f.required and not f.positional
+    ]
+    options.append("[options]")
+    # REQ-C-027: a strict command reads options only before its first positional
+    strict = command.option_placement is OptionPlacement.STRICT
+    usage = [*path, *(options + positionals if strict else positionals + options)]
     tail = [
-        f"usage: {' '.join([*usage, '[options]'])}",
+        f"usage: {' '.join(usage)}",
         f"Run '{' '.join([*path, '--help'])}' for all options.",
     ]
     return rows, [_shown(line) for line in tail]
