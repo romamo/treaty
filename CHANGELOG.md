@@ -48,6 +48,14 @@ Apps built on treaty keep their own, structured schema changelog with
   `CancelledError` or whose cleanup is slow, no longer delays the answer: stderr says it
   was still running after its cancellation, and the envelope carries a `CLEANUP_FAILED`
   warning for the `async handler` hook (#355)
+- A `FormatRenderer(frame=True)` stream at a terminal no longer erases text that reached
+  the terminal between frames outside a stderr line: a `ctx.prompt` or `ctx.confirm`
+  question and its typed answer, and what a child or C code wrote to descriptor 1, which
+  treaty passes on to stderr before the next frame. The next frame is written below it,
+  as after a stderr line. After a resize, the last frame's rows are counted at the new
+  width, so a terminal that reflows its lines is redrawn without the old frame's tail
+  left on screen; one that does not reflow can still be off by the rows the resize
+  changed (#365)
 
 ## [1.0.0rc35] - 2026-10-06
 

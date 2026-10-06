@@ -150,6 +150,24 @@ def _unchanged(text: str) -> str:
     return text
 
 
+class Writes:
+    """Writes that reached stderr, or the terminal through it: a run's diagnostics, a
+    prompt, and what descriptor 1 passes on. A frame is not drawn over the last once the
+    count moved (#350, #365). One count for the process, as descriptor 1's reader serves
+    every run. Bumped without a lock: two bumps that race may count once, and the count
+    still moved"""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def bump(self) -> None:
+        self.count += 1
+
+
+stderr_writes = Writes()
+"""What a terminal frame checks before it clears the last one"""
+
+
 _redact: Callable[[str], str] = _unchanged
 """The secrets of every attached run out of a line, as ``redact_with`` set it"""
 
@@ -446,6 +464,8 @@ class Interceptor:
 
     def _emit(self, shown: str) -> None:
         view = memoryview(shown.encode("utf-8", "surrogateescape"))
+        if view:
+            stderr_writes.bump()  # before the write: a frame drawn as it lands is not cleared
         while view:
             view = view[os.write(2, view) :]
 

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from ._errors import CliExit, RegistrationError
-from ._stdout import reconfigure_wrapped
+from ._stdout import reconfigure_wrapped, stderr_writes
 from ._values import ExitCodeName
 
 
@@ -221,6 +221,8 @@ class Prompter:
             )
 
     def _ask(self, question: str, *, flag: str) -> str:
+        # The question and the echoed answer take rows a terminal frame did not count (#365)
+        stderr_writes.bump()
         self.stderr.write(question)
         self.stderr.flush()
         answer = self.stdin.readline()

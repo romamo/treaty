@@ -326,6 +326,7 @@ from ._stdout import (
     quote,
     reconfigure_wrapped,
     redact_with,
+    stderr_writes,
 )
 from ._stdout import active as active_interceptor
 from ._stdout import finish as finish_stdout
@@ -3190,8 +3191,6 @@ class _Stderr:
         self._lines = threading.RLock()
         """Holds a child's line whole against another ``ctx.run``'s on another thread;
         reentrant, so a signal handler that writes on the same thread cannot deadlock"""
-        self.writes = 0
-        """Writes that reached the stream: a terminal frame is not cleared over one (#350)"""
 
     @property
     def stream(self) -> IO[str]:
@@ -3203,7 +3202,7 @@ class _Stderr:
     def write(self, text: str, level: Level = Level.ERROR) -> None:
         if not self.shows(level) or not text:
             return
-        self.writes += 1
+        stderr_writes.bump()  # a terminal frame is not cleared over it (#350)
         try:
             self._stream.write(text)
         except OSError as exc:
@@ -3217,7 +3216,7 @@ class _Stderr:
         if self.verbosity is Verbosity.QUIET:
             return
         with self._lines:
-            self.writes += 1
+            stderr_writes.bump()
             try:
                 self._stream.write(line + "\n")
             except OSError as exc:
@@ -3249,28 +3248,43 @@ class _Frames:
     end of the screen, so what the terminal showed above the frames stays; clear-screen
     and home would erase it, and the shell prompt with it. A frame taller than the
     terminal redraws from its top row, as the cursor stops there; its rows that scrolled
-    off stay in the scrollback. After anything reached stderr, which shares the
-    terminal, the next frame is written below rather than over it, so no warning or
-    progress line is erased. Nothing is cleared after the last frame: it stays on screen
-    when the stream ends, is cancelled, or fails, with the error lines below it"""
+    off stay in the scrollback. Nothing is cleared after the last frame: it stays on
+    screen when the stream ends, is cancelled, or fails, with the error lines below it.
 
-    def __init__(self, out: IO[str], env: Mapping[str, str], err: _Stderr) -> None:
+    After anything else reached the terminal, the next frame is written below rather
+    than over it, so nothing is erased: a stderr line, a prompt and its answer, or what
+    descriptor 1 passed on to stderr, a child's or C code's write (#365); what reached
+    descriptor 1 before the frame is passed on first. A write that bypasses all of them
+    is not seen: one to descriptor 2 directly, or, once descriptor 1 is no longer
+    intercepted, to descriptor 1.
+
+    The last frame's rows are counted at the width the terminal has when the next one
+    is drawn, so after a resize the cursor moves up the rows a terminal that reflows its
+    lines now shows (#365). One that does not reflow keeps the rows the old width wrapped
+    to, and a redraw after it narrowed or widened can leave part of the last frame on
+    screen or clear a row above it"""
+
+    def __init__(self, out: IO[str], env: Mapping[str, str]) -> None:
         self._out = out
         self._env = env
-        self._err = err
-        self._up: int | None = None
-        """Rows from the cursor back to the last frame's first line; None before one"""
+        self._last: str | None = None
+        """The last frame's text; None before one"""
         self._mark = 0
-        """``err.writes`` when the last frame was written"""
+        """``stderr_writes.count`` when the last frame was drawn"""
 
     def draw(self, text: str) -> None:
-        if self._up is not None and self._err.writes == self._mark:
+        below = active_interceptor()
+        if below is not None:
+            below.sync()  # descriptor 1's writes before this frame reach stderr, counted
+        if self._last is not None and stderr_writes.count == self._mark:
+            rows = frame_rows(self._last, _terminal_columns(self._out, self._env))
             # CR to the first column, up to the frame's first row, clear to screen end
-            up = f"\x1b[{self._up}A" if self._up else ""
+            up = f"\x1b[{rows}A" if rows else ""
             self._out.write(f"\r{up}\x1b[J")
+        # Before the frame is written: a write that lands while it is counts
+        self._mark = stderr_writes.count
         self._out.write(text)
-        self._up = frame_rows(text, _terminal_columns(self._out, self._env))
-        self._mark = self._err.writes
+        self._last = text
 
 
 def _terminal_columns(out: IO[str], env: Mapping[str, str]) -> int | None:
@@ -7304,7 +7318,7 @@ class _Run:
         # Only where the run may color is stdout a terminal that acts on escapes: a pipe,
         # a file, NO_COLOR, TERM=dumb, and CI get every frame appended (#350)
         drawn = frame and mode is Format.PLAIN and color_allowed(self.env, self.tty)
-        self.frames = _Frames(self.out, self.env, self.err) if drawn else None
+        self.frames = _Frames(self.out, self.env) if drawn else None
         # Closed on any exit, so a dead reader (BrokenPipeError) still runs the handler's
         # finally blocks instead of leaving them to garbage collection
         with contextlib.closing(envelopes):
