@@ -230,7 +230,9 @@ class AsyncEvents(Iterator[object]):
     the pending step and queues ``aclose()`` behind it without waiting: a signal, a
     timeout, or a reader that stops ends the stream at once, and the source's ``finally``
     still runs, before the run's async releases and the loop's close, which queue behind
-    it. ``close`` stops it, then waits up to ``grace`` seconds for ``aclose()``."""
+    it. ``close`` stops it, then waits for ``aclose()`` until ``grace`` seconds after the
+    stop. A source still running then is raised by ``close``, or, when a teardown owns the
+    loop, by ``unfinished``, its hook, so the envelope reports it (D-9, #382)."""
 
     def __init__(
         self, source: AsyncGenerator[object, Any], loop: Loop, *, grace: float, owns_loop: bool
@@ -243,6 +245,8 @@ class AsyncEvents(Iterator[object]):
         self._stopped = False
         """A flag, not a lock: the stream's thread may be interrupted anywhere by a signal"""
         self._closing: _Job | None = None
+        self._deadline = 0.0
+        """When the source's grace ends: ``grace`` seconds after ``stop``"""
         self._step: _Job | None = None
         """The pending ``__anext__()``, held before it is queued so ``stop`` can cancel it"""
 
@@ -265,30 +269,45 @@ class AsyncEvents(Iterator[object]):
         """Cancel the pending step, then ``aclose()`` the source once it ended; once only"""
         if self._stopped:
             return
+        self._deadline = time.monotonic() + self._grace  # before the flag another reads
         self._stopped = True
         if self._step is not None:
             self._loop.cancel(self._step)
         self._closing = self._loop.submit(self._source.aclose(), self._context)
 
-    def close(self) -> None:
-        """Stop the source and wait for its ``finally`` blocks; what they raised, or a
-        source still running past the grace, is raised here"""
-        self.stop()
+    def _closed(self) -> bool:
+        """Whether ``aclose()`` ended, waiting for it until the grace ends"""
         job = self._closing
+        return job is None or job.wait(max(0.0, self._deadline - time.monotonic()))
+
+    def close(self) -> None:
+        """Stop the source and wait for its ``finally`` blocks; what they raised is raised
+        here, and so is a source still running past the grace unless a teardown owns the
+        loop: its ``unfinished`` hook reports that one"""
+        self.stop()
         try:
-            if job is None:
+            if not self._closed():
+                if self._owns_loop:
+                    self.unfinished()
                 return
-            if not job.wait(self._grace):
-                raise RuntimeError(
-                    f"the stream's async generator was still running {self._grace}s after "
-                    "its cancellation; its finally blocks may not run: let CancelledError "
-                    "propagate from its awaits"
-                )
-            if job.exc is not None:
+            job = self._closing
+            if job is not None and job.exc is not None:
                 raise job.exc
         finally:
             if self._owns_loop:
                 self._loop.close()
+
+    def unfinished(self) -> None:
+        """Stop the source, then raise once it is still running as its grace ends: its
+        ``finally`` blocks may not run. The run's teardown calls it, so the CLEANUP_FAILED
+        warning reaches the envelope (D-9, #382)"""
+        self.stop()
+        if not self._closed():
+            raise RuntimeError(
+                f"the stream's async generator was still running {self._grace}s after "
+                "its cancellation; its finally blocks may not run: let CancelledError "
+                "propagate from its awaits"
+            ) from None  # raised as the run ends, often beside the signal: not because of it
 
 
 def unfinished(job: _Job, grace: float) -> None:

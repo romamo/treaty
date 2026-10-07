@@ -72,6 +72,13 @@ Apps built on treaty keep their own, structured schema changelog with
   hash seed picks, so the output changed from run to run. A set's schema node
   (`"uniqueItems": true`) loses its `"x-ordered": true`, which a schema lock reports as a
   change; an explicit per-property `x-ordered: true` on a set still keeps its order (#387)
+- An async generator stream whose source is still running after its cancellation grace,
+  as when it swallows `CancelledError`, now reports it in the stream's end envelope: a
+  `CLEANUP_FAILED` warning for the `async stream` hook, and `error.context.cleanup_failed`
+  on `CANCELLED`, as an `async def` handler does since rc36 (D-9). It used to be only a
+  stderr note, and on a timeout not even that, since the timeout answered without
+  waiting for the source; it now gives the source its grace first. The stream's lines
+  are unchanged (#382)
 
 ## [1.0.0rc36] - 2026-10-06
 
