@@ -223,6 +223,16 @@ def _describe(app: App) -> Iterator[Finding]:
                     f"the example {given.command!r} does not parse: {problem}",
                     "fix the example, which agents copy verbatim, so it passes --validate-only",
                 )
+            probe = given.probe
+            problem = None if not isinstance(probe, str) else _example_problem(app, c, probe)
+            if problem is not None:
+                yield Finding(
+                    "describe",
+                    Severity.ERROR,
+                    c.path.value,
+                    f"the probe {probe!r} of example {given.command!r} does not parse: {problem}",
+                    "fix the probe, which treaty conformance runs, so it passes --validate-only",
+                )
 
 
 # Framework flags whose value is checked against the world the example runs in, not its
@@ -2786,16 +2796,21 @@ def _explicit_timeout(app: App) -> Iterator[Finding]:
     if default is None:
         return
     for c in user_commands(app):
-        if c.danger_level is DangerLevel.SAFE or c.timeout is not None:
+        if c.timeout is not None:
             continue
         if c.streaming or c.async_job:
             continue  # an idle limit, or a job that returns at once
+        if c.danger_level is DangerLevel.SAFE:
+            # A retryable TIMEOUT: a run whose length depends on its input loops (#394)
+            outcome = "and a retry of a run whose length depends on its input times out again"
+        else:
+            outcome = "with its work half done"
         yield Finding(
             "explicit-timeout",
             Severity.ADVICE,
             c.path.value,
             f"a {c.danger_level.value} command inherits the app's {default:g} s default, "
-            "so a run that takes longer ends in TIMEOUT with its work half done",
+            f"so a run that takes longer ends in TIMEOUT {outcome}",
             f"timeout=<seconds it may really take> on {c.path.value}, or timeout=None to run "
             "unbounded, either of which gives callers --timeout to bound one run; "
             f"timeout={default:g} keeps the default as a decision",
@@ -3292,7 +3307,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         "explicit-timeout",
-        "Mutating commands declare their own timeout",
+        "Commands declare their own timeout",
         Severity.ADVICE,
         _explicit_timeout,
     ),
