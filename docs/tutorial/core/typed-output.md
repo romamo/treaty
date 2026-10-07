@@ -112,7 +112,8 @@ come back `"10.00"` first. Declare `lines: list[Line] = Out(sort_key="line_no")`
 a field, or `Out(ordered=True)` to keep the order the handler built, for a ranking or any
 list whose order is the data. A command that returns the list itself takes the same
 `sort_key=` or `ordered=True`; a command's `ordered=True` keeps the order of every array in
-its output, nested ones and those inside models too. The audit rule `stable-order` reports an array of objects
+its output, nested ones and those inside models too, but a set's, which has no order of its
+own and stays sorted. The audit rule `stable-order` reports an array of objects
 with neither as a warning, so `treaty audit --strict` fails until it is declared. A list of
 scalars, such as `list[str]`, needs nothing: strings and numbers sort by value. An array
 nested in another list or a dict, such as `dict[str, list[Line]]`, cannot take a declared
