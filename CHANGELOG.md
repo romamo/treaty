@@ -10,14 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
-### Fixed
+### Breaking
 
 - `treaty conformance` no longer probes a passthrough command: its tool owns stdout and its
   envelope is on stderr, so the kit's `json_envelope` check read the tool's output and
   failed its read and `--proxy` probes. The `unknown flag` probe of an app whose first
   command is passthrough is now based on another command or `version`. A committed profile
   with such probes differs from the generated one, so `treaty conformance` exits
-  `CONFLICT` until rerun once with `--force` (#386)
+  `CONFLICT`: rerun `treaty conformance --force` once to update it (#386)
 
 ## [1.0.0rc36] - 2026-10-06
 
