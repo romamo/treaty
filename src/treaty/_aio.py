@@ -59,6 +59,10 @@ class _Job:
     """On the loop: the signal's cancel was issued, by ``_tracked`` or ``_cancel_running``"""
     started: bool = False
     """Set on the loop as it starts: it no longer waits behind the jobs before it"""
+    dropped: str | None = None
+    """Set by a waiter that gave up on it before it started: then it never starts, its
+    coroutine is closed unrun and a RuntimeError with this message is raised instead, so
+    none of its body runs late"""
 
     def wait(self, seconds: float) -> bool:
         """Whether the job ended within ``seconds``; sliced as ``Loop.run``'s wait is"""
@@ -134,8 +138,12 @@ class Loop:
         # Running before the check, as cancel() sets the flag before it reads _running:
         # one of the two sees the other
         self._running, self._task = job, asyncio.current_task()
+        # Started before the check, as Loop.release sets dropped before it reads started
         job.started = True
         try:
+            if job.dropped is not None:
+                job.coro.close()
+                raise RuntimeError(job.dropped)
             if job.cancelled and self._task is not None:
                 job.signalled = True
                 # Cancelled while queued: it ends at its first await, as if cancelled
@@ -234,14 +242,18 @@ class Loop:
             self._releases_by = time.monotonic() + bound
         if self._held:
             coro.close()
-            raise _held_loop(bound)
+            raise RuntimeError(_held_loop(bound))
         job = self.job(coro)
         try:
             self.enqueue(job)
             while not job.done.acquire(timeout=SIGNAL_POLL_SECONDS):
                 if not job.started and time.monotonic() >= self._releases_by:
-                    self._held = True
-                    raise _held_loop(bound)  # cancelled below: it never runs late
+                    job.dropped = _held_loop(bound)
+                    # One of the two sees the other: started now, the loop raises dropped
+                    # or runs it to its end; not, it never starts
+                    if not job.started:
+                        self._held = True
+                        raise RuntimeError(job.dropped)
         except BaseException:  # noqa: BLE001 - Cancelled, KeyboardInterrupt, or the bound
             self.cancel(job)
             raise
@@ -324,8 +336,8 @@ class AsyncEvents(Iterator[object]):
                 self._loop.close()
 
 
-def _held_loop(bound: float) -> RuntimeError:
-    return RuntimeError(
+def _held_loop(bound: float) -> str:
+    return (
         f"the release could not start within {bound}s: the run's event loop is still held "
         "by its async handler or stream source past their cancellation grace, so what the "
         "resource holds may not be released: let CancelledError propagate from its awaits"

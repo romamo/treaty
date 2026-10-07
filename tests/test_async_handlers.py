@@ -378,6 +378,39 @@ def test_a_release_waits_for_a_held_loop_only_until_its_bound() -> None:
     assert ran == []
 
 
+def test_a_release_cut_off_by_its_bound_runs_none_of_its_body_once_the_loop_frees() -> None:
+    """Not even the code before its first await: the run already reported it unreleased,
+    so the release must not start once the stuck job ends (#383)"""
+    loop = Loop()
+    let_go = threading.Event()
+    started = threading.Event()
+    ran: list[str] = []
+
+    async def stuck() -> None:
+        started.set()
+        while not let_go.is_set():
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                pass
+
+    async def release() -> None:
+        ran.append("released")  # before its first await
+        await asyncio.sleep(0)
+
+    job = loop.submit(stuck())
+    try:
+        assert started.wait(5)
+        with pytest.raises(RuntimeError, match="could not start"):
+            loop.release(release(), 0.1)
+    finally:
+        let_go.set()
+        loop.close()
+    assert job.wait(5)
+    loop._thread.join(5)
+    assert ran == []
+
+
 def test_a_release_on_a_free_loop_runs_to_its_end_past_the_bound() -> None:
     """The bound is on the wait to start, not on the release itself"""
     loop = Loop()
