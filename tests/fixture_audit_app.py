@@ -45,6 +45,7 @@ def create_item(args: Wide, ctx: Ctx) -> dict[str, object]:
     cleanup=lambda: None,
     danger_level="safe",
     exit_codes=(),
+    timeout=30,
 )
 def good(args: Name, ctx: Ctx) -> Name:
     return lookup(args, proxies=ctx.network.proxies, timeout=ctx.network.timeout(30))

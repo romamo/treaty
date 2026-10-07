@@ -1477,7 +1477,9 @@ def test_a_walk_that_cannot_follow_a_symlink_is_advice_not_a_loop_warning() -> N
         "rmtree": advice,
         "copytree": warning,
     }
-    by_command = {f.command: f.message for f in findings(traversal_app())}
+    by_command = {
+        f.command: f.message for f in findings(traversal_app()) if f.rule == "recursive-traversal"
+    }
     assert "no --max-depth bounds this walk" in by_command["rglob"]
     assert "circular symlink can loop" not in by_command["rglob"]
     assert "circular symlink can loop" in by_command["rglob-on"]

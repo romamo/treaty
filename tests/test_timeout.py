@@ -65,6 +65,39 @@ def test_timeout_emits_envelope_and_exit_10() -> None:
     assert env["meta"]["timeout_ms"] == 50 and env["meta"]["duration_ms"] >= 50
 
 
+def timed_out(app: App, argv: list[str]) -> dict[str, object]:
+    """The TIMEOUT error of ``argv``, without the spec checkout ``run_json`` needs"""
+    out = io.StringIO()
+    code = app.run(argv, stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+    error = json.loads(out.getvalue())["error"]
+    assert code == 10 and error["code"] == "TIMEOUT"
+    return error
+
+
+def test_a_read_only_timeout_hint_names_a_larger_timeout_and_no_limit() -> None:
+    """Issue 394: a run whose length depends on its input times out again on a plain
+    retry, so the hint of a safe command that takes --timeout also names the flag"""
+    error = timed_out(make_app(), ["fetch", "--seconds", "0.5"])
+    assert error["retryable"] is True
+    assert error["suggestion"] == (
+        "retry the same command; it had no side effects; if the run needs longer than "
+        "0.05 s, pass a larger --timeout <seconds>, or --timeout 0 for no limit"
+    )
+
+
+def test_a_timeout_hint_names_no_flag_the_command_lacks() -> None:
+    # quick keeps a limit under the default and has no network I/O: no --timeout to name
+    error = timed_out(make_app(default_timeout=5), ["quick", "--seconds", "0.2"])
+    assert error["retryable"] is True
+    assert error["suggestion"] == "retry the same command; it had no side effects"
+
+
+def test_a_mutating_timeout_gets_no_timeout_hint() -> None:
+    error = timed_out(unbounded_app(), ["play", "--seconds", "5", "--timeout", "0.2"])
+    assert error["retryable"] is False
+    assert "--timeout" not in str(error.get("suggestion", ""))
+
+
 def test_timeout_flag_overrides_default_and_reaches_ctx() -> None:
     code, env = run_json(make_app(), ["fetch", "--timeout", "1", "--seconds", "0.1"])
     assert code == 0 and env["data"]["timeout_s"] == 1.0 and env["meta"]["timeout_ms"] == 1000

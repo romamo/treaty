@@ -6479,12 +6479,23 @@ class _Run:
 
     def _timed_out(self, command: Command, timeout: Timeout, what: str) -> tuple[int, ErrorDetail]:
         """The exit code and ``TIMEOUT`` error of a handler or stream past ``timeout``: a
-        read-only command's is retryable, as it changed nothing (REQ-C-014)"""
-        entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
+        read-only command's is retryable, as it changed nothing (REQ-C-014). Its hint also
+        names ``--timeout`` when the command takes it: a run whose length depends on its
+        input times out again on a plain retry (#394)"""
+        read_only = command.danger_level is DangerLevel.SAFE
+        entry = self.app.exits.timeout(read_only=read_only)
+        suggestion = None
+        if read_only and entry.retryable and command.accepts_timeout:
+            span = "the run" if what == "timeout" else "an event"
+            suggestion = (
+                f"{RETRY_SUGGESTION}; if {span} needs longer than {timeout.seconds:g} s, "
+                "pass a larger --timeout <seconds>, or --timeout 0 for no limit"
+            )
         error = ErrorDetail(
             code="TIMEOUT",
             message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
             retryable=entry.retryable,
+            suggestion=suggestion,
             retry_strategy=entry.retry_strategy,
             context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
             phase="execution",
