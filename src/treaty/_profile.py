@@ -49,24 +49,47 @@ class Probe:
 
 
 def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
+    """The first example's probe argv: its ``probe=``, else its command. An example with
+    ``probe=False`` is left out (#392)"""
     for example in command.examples:
-        tokens = shlex.split(example.command)
-        if tokens and tokens[0] == app.name:
-            tokens = tokens[1:]
-        if command.passthrough:
-            # The words after the path are its tool's, verbatim: only the globals before it
-            # are dropped. An example with the command's own flags there is not one (#367)
-            split = delegated_argv(tokens, {command.path: command})
-            if split is not None and split.argv[-len(command.path.parts) :] == list(
-                command.path.parts
-            ):
-                return (*command.path.parts, *split.rest)
+        if example.probe is False:
             continue
-        # Globals may come before the path (tool --format json show x); drop them first
-        preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
-        tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
-        if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
-            return tuple(tokens)
+        argv = example_argv(
+            command, example.command if example.probe is None else example.probe, app.name
+        )
+        if argv is not None:
+            return argv
+    return None
+
+
+def _opted_out(command: Command) -> bool:
+    """Every example of the command says ``probe=False``: the author keeps the command out
+    of the profile, so no probe falls back to its bare path either (#392)"""
+    return bool(command.examples) and all(e.probe is False for e in command.examples)
+
+
+def example_argv(
+    command: Command, text: str, app_name: str | None = None
+) -> tuple[str, ...] | None:
+    """The argv a probe of ``command`` runs for the shell words ``text``, without the app's
+    name, its globals, and preview flags; None when they do not run the command. A probe's
+    words start with the app's name, which registration checked, so ``app_name`` None drops
+    the first word"""
+    tokens = shlex.split(text)
+    if app_name is None or (tokens and tokens[0] == app_name):
+        tokens = tokens[1:]
+    if command.passthrough:
+        # The words after the path are its tool's, verbatim: only the globals before it
+        # are dropped. An example with the command's own flags there is not one (#367)
+        split = delegated_argv(tokens, {command.path: command})
+        if split is not None and split.argv[-len(command.path.parts) :] == list(command.path.parts):
+            return (*command.path.parts, *split.rest)
+        return None
+    # Globals may come before the path (tool --format json show x); drop them first
+    preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
+    tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
+    if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
+        return tuple(tokens)
     return None
 
 
@@ -85,6 +108,8 @@ def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[s
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
     for command in user_commands(app):
+        if _opted_out(command):
+            continue
         argv = _argv_from_example(app, command)
         if argv is None:
             if any(f.required for f in command.fields):

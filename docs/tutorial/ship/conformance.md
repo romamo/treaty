@@ -144,6 +144,25 @@ Point the sandbox at whatever else your CLI touches:
 - **Things a probe names**: when a probe needs something to exist, such as a destructive
   command's example `restore 3`, the launcher seeds the sandbox with it; otherwise the dry
   run fails with your not-found code instead of previewing
+- **A file a probe reads**: when an example names a file of the user's, give the probe its
+  own argv on the example, pointing at a fixture you commit; agents still see the example's
+  command. `probe=False` keeps an example out of the profile, and a command whose every
+  example says so gets no probe at all:
+
+```python
+examples=[
+    Example(
+        "Import a list",
+        "todo import ~/Downloads/list.json",
+        probe="todo import conformance/fixtures/list.json",
+    )
+]
+```
+
+  The probe starts with the app's name like the command, and registration refuses one that
+  does not parse or runs another command. Edit the probe here, not in the profile: the
+  profile stays what treaty generates, so the next `treaty conformance` rewrites it without a
+  `CONFLICT` and picks up new built-in probes
 
 Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`. Under
 `uv run`, `PATH` starts with the project's environment, so the kit finds your `todo` there

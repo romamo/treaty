@@ -2320,7 +2320,11 @@ from each command's first example and danger level, writes the profile, and with
 executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. An existing
 profile that differs from the generated one as JSON, such as one with hand-written probes,
 is left alone: the command exits `6` with `CONFLICT`, naming the changed keys and probes,
-and `--force` replaces it. An equal profile is not rewritten (`effect: noop`). The kit is found
+and `--force` replaces it. To point a probe at a fixture, set it on the example rather than
+in the profile: `Example("Profile a lease", "demo profile lease.pdf",
+probe="demo profile conformance/fixtures/lease.pdf")` probes that argv instead of the
+command, and `probe=False` keeps the example out of the profile, so regenerating never
+conflicts. An equal profile is not rewritten (`effect: noop`). The kit is found
 via `--spec-dir`, then `TREATY_SPEC_DIR`, then `../cli-agent-ergonomics` relative to the
 current directory; a named location without `conformance/run.py` exits `4` instead of
 falling through. `--out`, `--spec-dir`, and `--directory` reject `..` segments,

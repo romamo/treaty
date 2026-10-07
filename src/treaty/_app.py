@@ -996,7 +996,7 @@ class App:
         danger_level: str | _Unset = UNSET,
         required_scopes: Sequence[str] = (),
         exit_codes: Sequence[str] | _Unset = UNSET,
-        examples: Sequence[tuple[str, str]] = (),
+        examples: Sequence[Example | tuple[str, str]] = (),
         has_network_io: bool = False,
         timeout: float | None | _Inherit = INHERIT,
         supports_raw_payload: bool = False,
@@ -1315,7 +1315,9 @@ class App:
             )
             if problem is not None:
                 raise RegistrationError(f"{cmd_path}: fix_commands[{error_code!r}]: {problem}")
-        pairs = _example_pairs(cmd_path, examples, f"{self.name} {' '.join(cmd_path.parts)}")
+        listed = _examples(cmd_path, examples, f"{self.name} {' '.join(cmd_path.parts)}")
+        for example in listed:
+            _check_probe_head(cmd_path, example, self.name)
 
         def register(fn: H) -> H:
             # A type with no schema is a registration mistake of this command: name it
@@ -1330,7 +1332,7 @@ class App:
                             danger_level=DangerLevel(danger_level),
                             required_scopes=[Scope(s) for s in required_scopes],
                             exit_codes=[ExitCodeName(n) for n in exit_codes],
-                            examples=[Example(d, c) for d, c in pairs],
+                            examples=listed,
                             has_network_io=has_network_io,
                             timeout=command_timeout,
                             outlasts_default=outlasts_default,
@@ -1442,6 +1444,7 @@ class App:
         return tuple(self._shadowed)
 
     def _register(self, command: Command) -> None:
+        _check_probes(command)
         path = command.path
         self._yield_to(path)
         taken = framework_collisions(command)
@@ -3821,27 +3824,68 @@ def _machine_text(mode: Format) -> Rendering:
     return _NDJSON_LINE if mode is Format.NDJSON else _JSON_TEXT
 
 
-def _example_pairs(path: CommandPath, examples: object, usage: str) -> list[tuple[str, str]]:
-    """``examples=`` as (description, command) pairs, refused at registration with the
-    shape to write: a bare string would otherwise unpack character by character"""
+def _examples(path: CommandPath, examples: object, usage: str) -> list[Example]:
+    """``examples=`` as ``Example`` objects, given as them or as (description, command)
+    pairs, refused at registration with the shape to write: a bare string would otherwise
+    unpack character by character"""
     if isinstance(examples, tuple) and _is_pair(examples):
         raise RegistrationError(
             f"{path}: examples= takes a list of (description, command) pairs, got the "
             f"single pair {examples!r}; write examples=[{examples!r}]"
         )
+    if isinstance(examples, Example):
+        raise RegistrationError(
+            f"{path}: examples= takes a list of examples, got the single example "
+            f"{examples!r}; write examples=[{examples!r}]"
+        )
     items = (
         examples if isinstance(examples, Sequence) and not isinstance(examples, str) else [examples]
     )
-    pairs = []
+    out: list[Example] = []
     for item in items:
+        if isinstance(item, Example):
+            out.append(item)
+            continue
         if not _is_pair(item):
             command = item if isinstance(item, str) else usage
             raise RegistrationError(
                 f"{path}: examples= takes (description, command) pairs, got {item!r}; "
                 f'write examples=[("Typical call", {json.dumps(command)})]'
             )
-        pairs.append((item[0], item[1]))
-    return pairs
+        out.append(Example(item[0], item[1]))
+    return out
+
+
+def _check_probes(command: Command) -> Command:
+    """Each ``probe=`` argv names the command it belongs to, after the app's name and
+    any globals, as ``treaty conformance`` reads it (#392)"""
+    probes = [e for e in command.examples if isinstance(e.probe, str)]
+    if not probes:
+        return command
+    from ._profile import example_argv  # the profile's reader, loaded only when a probe is set
+
+    for example in probes:
+        assert isinstance(example.probe, str)
+        if example_argv(command, example.probe) is None:
+            raise RegistrationError(
+                f"{command.path}: the probe {example.probe!r} of example "
+                f"{example.command!r} does not run {' '.join(command.path.parts)!r}; a "
+                "probe is an argv of the command its example belongs to"
+            )
+    return command
+
+
+def _check_probe_head(path: CommandPath, example: Example, app_name: str) -> None:
+    """An example's ``probe=`` argv starts with the app's name, like its command (#392)"""
+    if not isinstance(example.probe, str):
+        return
+    head = shlex.split(example.probe)[0]  # Example refused an empty or unbalanced one
+    if head != app_name:
+        raise RegistrationError(
+            f"{path}: the probe {example.probe!r} of example {example.command!r} starts "
+            f"with {head!r}; a probe starts with the app's name, {app_name!r}, like the "
+            "example's command"
+        )
 
 
 def _is_pair(item: object) -> TypeGuard[tuple[str, str] | list[str]]:

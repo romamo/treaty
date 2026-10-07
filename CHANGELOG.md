@@ -10,6 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Added
+
+- `Example(description, command, probe=...)` sets the argv a generated conformance probe
+  runs instead of the example's command, such as one pointing at a committed fixture, and
+  `probe=False` keeps the example out of the profile; a command whose every example says
+  so gets no probe. The probe starts with the app's name and is checked at registration
+  and by `treaty audit` like the example, so a profile with fixtures regenerates without
+  `CONFLICT` and picks up new built-in probes. `examples=` now accepts `Example` objects
+  beside `(description, command)` pairs. An app that sets no `probe` generates the same
+  profile (#392)
+
 ## [1.0.0rc36] - 2026-10-06
 
 The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see
