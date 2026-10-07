@@ -12,6 +12,12 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Breaking
 
+- `treaty conformance` no longer probes a passthrough command: its tool owns stdout and its
+  envelope is on stderr, so the kit's `json_envelope` check read the tool's output and
+  failed its read and `--proxy` probes. The `unknown flag` probe of an app whose first
+  command is passthrough is now based on another command or `version`. A committed profile
+  with such probes differs from the generated one, so `treaty conformance` exits
+  `CONFLICT`: rerun `treaty conformance --force` once to update it (#386)
 - An app with an `output_file` command whose example passes `--output PATH` now generates
   a conformance profile without it, in the read and `unknown flag` probes and the
   `argument_order` run, so a committed profile with the old `--output` differs from the
@@ -34,7 +40,8 @@ Apps built on treaty keep their own, structured schema changelog with
   beside `(description, command)` pairs. An app that sets no `probe` generates the same
   profile. A `has_network_io` command whose probe comes from `probe=`, such as one
   pointing at a local stub, keeps its `read` probe and can give `argument_order`; an
-  `output_file` command's `--output` is dropped from a probe as from an example (#392)
+  `output_file` command's `--output` is dropped from a probe as from an example. A
+  passthrough command gets no probe either way (#392)
 
 ### Fixed
 

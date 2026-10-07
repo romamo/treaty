@@ -98,7 +98,8 @@ Probes run the real CLI. treaty derives them from your commands:
   `manifest --etag` with an etag no manifest has
 
 Mutating commands are never run: the only probes built from them are `invalid` ones, such as
-a network command's malformed `--proxy`, which exit 2 before anything runs. Destructive ones
+a network command's malformed `--proxy`, which exit 2 before anything runs. A passthrough
+command gets no probe at all: its tool owns stdout, where the kit looks for the envelope. Destructive ones
 are, and the kit is there to check exactly the safety you might have got wrong. If `purge`
 ignored `--dry-run`, a run against your real `~/.todo.json` would delete your completed
 items.

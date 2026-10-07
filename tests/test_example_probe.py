@@ -149,8 +149,8 @@ def test_a_probe_argv_replaces_the_example_command_in_the_profile() -> None:
         "kind": "destructive",
         "dry_run_flag": "--dry-run",
     }
-    # A passthrough command keeps the words after its path verbatim (#367)
-    assert got["ingest"]["argv"] == ["ingest", "extract", "fixtures/statement.csv"]
+    # A passthrough command gets no probe, a probe= of its own included (#386)
+    assert not [name for name in got if name.startswith("ingest")]
     order = argument_order_for(demo_app(probed=True))
     assert order is not None and order["command_path"] == ["count"]
 
