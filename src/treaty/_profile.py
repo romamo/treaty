@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._audit import user_commands
-from ._command import Command, DangerLevel
+from ._command import OUTPUT_FLAG, Command, DangerLevel
 from ._parse import VALUED_GLOBALS, delegated_argv
 from ._values import CommandPath
 
@@ -65,6 +65,9 @@ def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
         # Globals may come before the path (tool --format json show x); drop them first
         preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
         tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
+        if command.output_file:
+            # Every kit run of the probe would write the file (#391)
+            tokens = list(_without_output(tuple(tokens)))
         if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
             return tuple(tokens)
     return None
@@ -149,6 +152,24 @@ def _without_globals(argv: tuple[str, ...]) -> tuple[str, ...]:
         elif name in VALUED_GLOBALS:
             skip = "=" not in tok
         elif tok not in ("--help", "-h", "--schema"):
+            out.append(tok)
+    return tuple(out)
+
+
+def _without_output(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """An ``output_file`` command's ``--output PATH`` or ``--output=PATH``, with its value,
+    so a probe returns the data in its envelope instead of writing a file (#391)"""
+    out: list[str] = []
+    skip = False
+    flag = f"--{OUTPUT_FLAG}"
+    for i, tok in enumerate(argv):
+        if skip:
+            skip = False
+        elif tok == "--":
+            return (*out, *argv[i:])  # after it, an --output token is a positional
+        elif tok == flag:
+            skip = True
+        elif not tok.startswith(f"{flag}="):
             out.append(tok)
     return tuple(out)
 

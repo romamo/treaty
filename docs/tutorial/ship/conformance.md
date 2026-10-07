@@ -78,7 +78,9 @@ Probes run the real CLI. treaty derives them from your commands:
 
 - one `read` probe per safe command, from its first example: `todo list --all`. A
   streaming command's probe adds `--no-stream --timeout 5`, so it ends with one envelope,
-  the collected events or `TIMEOUT`, within the kit's 10-second limit on each run
+  the collected events or `TIMEOUT`, within the kit's 10-second limit on each run. An
+  `output_file` command's probe drops the example's `--output PATH`, so it returns the
+  data instead of writing the file on every run
 - one `destructive` probe per destructive command, from its first example with the
   confirmation removed: `todo purge`. The kit runs it with `--dry-run`, and again with no
   flags to check that it is refused
