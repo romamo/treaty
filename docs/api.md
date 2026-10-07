@@ -28,7 +28,7 @@ review), **rename**, **remove**.
 | `FormatName` | value object | keep | One `--format` value: a `Format` member's or an app's own (`app.format("html", ...)`); `App.formats` lists them; a member's equals and hashes like the member; `ctx.format_name` is the one the CLI caller asked for (`jsonl` stays `jsonl` though `ctx.mode` is `JSON`), and `json` for an `exec` line or `App.call` |
 | `FormatRenderer` | value object | keep | A command's renderer with the media type it writes: `renderers={"html": FormatRenderer(render, media_type="text/html")}`; with `frame=True`, a streaming command's `plain` renderer redraws in place at a terminal (#350); a bare callable stays accepted beside it |
 | `DangerLevel` | enum | keep | `SAFE`, `MUTATING`, `DESTRUCTIVE` |
-| `Example` | class | keep | Also accepted as `(description, command)` tuples |
+| `Example` | class | keep | Also accepted as `(description, command)` tuples; `probe=` sets the argv `treaty conformance` probes instead of `command`, and `probe=False` keeps the example out of the profile (#392) |
 | `Renderer` | type alias | keep | `Callable[[Any], str]`, or `Callable[[Any, RenderContext], str]` to the type checker (#357) |
 | `RenderContext` | value object | keep | What a two-parameter renderer gets beside `data`: `color` and `width` (#357) |
 | `table` | function | keep | Delimited renderer factory |

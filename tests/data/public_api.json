@@ -420,7 +420,8 @@
     "Example": {
       "fields": [
         "description",
-        "command"
+        "command",
+        "probe"
       ],
       "kind": "class",
       "methods": [

@@ -89,7 +89,8 @@ Probes run the real CLI. treaty derives them from your commands:
   dry-run checks still run: the kit only ever previews it or sees it refused, and nothing
   is removed
 - for each network command, an `invalid` probe with a malformed `--proxy`, and no `read`
-  probe: each run of one would make the command's real requests
+  probe: each run of one would make the command's real requests. One whose example sets
+  `probe=`, such as an argv pointing at a local stub (below), keeps its `read` probe
 - two `invalid` probes: `manifest --etag x`, a malformed etag, and the first command's
   probe with `--no-such-flag` added, which exits 2 before anything runs
 - for `argument_order`, the first example with a command-local option to move `--format`
@@ -145,10 +146,30 @@ Point the sandbox at whatever else your CLI touches:
 - **An API**: a CLI that calls one needs a server running for the whole kit run; start a
   fake one (the `http.server` fixture from [Declare network
   commands](../core/network-io.md) works as a script too) before `--run`, and point the
-  launcher's environment at it
+  launcher's environment at it. A network command gets a `read` probe only when its
+  example's `probe=` names such a stub, as below
 - **Things a probe names**: when a probe needs something to exist, such as a destructive
   command's example `restore 3`, the launcher seeds the sandbox with it; otherwise the dry
   run fails with your not-found code instead of previewing
+- **A file a probe reads**: when an example names a file of the user's, give the probe its
+  own argv on the example, pointing at a fixture you commit; agents still see the example's
+  command. `probe=False` keeps an example out of the profile, and a command whose every
+  example says so gets no probe at all:
+
+```python
+examples=[
+    Example(
+        "Import a list",
+        "todo import ~/Downloads/list.json",
+        probe="todo import conformance/fixtures/list.json",
+    )
+]
+```
+
+  The probe starts with the app's name like the command, and registration refuses one that
+  does not parse or runs another command. Edit the probe here, not in the profile: the
+  profile stays what treaty generates, so the next `treaty conformance` rewrites it without a
+  `CONFLICT` and picks up new built-in probes
 
 Without a launcher, the profile's command is the app's name, `todo`, found on `PATH`. Under
 `uv run`, `PATH` starts with the project's environment, so the kit finds your `todo` there

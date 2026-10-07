@@ -29,6 +29,20 @@ Apps built on treaty keep their own, structured schema changelog with
   old probe differs from the generated one and `treaty conformance` exits `CONFLICT`:
   rerun `treaty conformance --force` once to update it (#390)
 
+### Added
+
+- `Example(description, command, probe=...)` sets the argv a generated conformance probe
+  runs instead of the example's command, such as one pointing at a committed fixture, and
+  `probe=False` keeps the example out of the profile; a command whose every example says
+  so gets no probe. The probe starts with the app's name and is checked at registration
+  and by `treaty audit` like the example, so a profile with fixtures regenerates without
+  `CONFLICT` and picks up new built-in probes. `examples=` now accepts `Example` objects
+  beside `(description, command)` pairs. An app that sets no `probe` generates the same
+  profile. A `has_network_io` command whose probe comes from `probe=`, such as one
+  pointing at a local stub, keeps its `read` probe and can give `argument_order`; an
+  `output_file` command's `--output` is dropped from a probe as from an example. A
+  passthrough command gets no probe either way (#392)
+
 ### Fixed
 
 - `treaty conformance` drops an `output_file` command's `--output PATH` and

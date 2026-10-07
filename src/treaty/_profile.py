@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._audit import user_commands
-from ._command import OUTPUT_FLAG, Command, DangerLevel
+from ._command import OUTPUT_FLAG, Command, DangerLevel, Example
 from ._parse import VALUED_GLOBALS
 from ._values import CommandPath
 
@@ -46,20 +46,59 @@ class Probe:
 
 
 def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
-    """The argv of the command's first example that names it; never a passthrough
-    command's, which gets no probe and no argument_order run (#386)"""
+    """The first example's probe argv: its ``probe=``, else its command. An example with
+    ``probe=False`` is left out (#392). Never a passthrough command's, which gets no probe
+    and no argument_order run (#386)"""
+    chosen = _chosen_example(app, command)
+    return None if chosen is None else chosen[0]
+
+
+def _chosen_example(app: App, command: Command) -> tuple[tuple[str, ...], Example] | None:
+    """The probe argv of ``command`` and the example it comes from, the first one whose
+    ``probe=`` or command runs it; an example with ``probe=False`` is left out (#392)"""
     for example in command.examples:
-        tokens = shlex.split(example.command)
-        if tokens and tokens[0] == app.name:
-            tokens = tokens[1:]
-        # Globals may come before the path (tool --format json show x); drop them first
-        preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
-        tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
-        if command.output_file:
-            # Every kit run of the probe would write the file (#391)
-            tokens = list(_without_output(tuple(tokens)))
-        if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
-            return tuple(tokens)
+        if example.probe is False:
+            continue
+        argv = example_argv(
+            command, example.command if example.probe is None else example.probe, app.name
+        )
+        if argv is not None:
+            return argv, example
+    return None
+
+
+def _probed_explicitly(app: App, command: Command) -> bool:
+    """The command's probe argv is an author's ``probe=``, such as one pointing a network
+    command at a local stub: its read runs, where an example's would make real requests
+    (#390, #392)"""
+    chosen = _chosen_example(app, command)
+    return chosen is not None and isinstance(chosen[1].probe, str)
+
+
+def _opted_out(command: Command) -> bool:
+    """Every example of the command says ``probe=False``: the author keeps the command out
+    of the profile, so no probe falls back to its bare path either (#392)"""
+    return bool(command.examples) and all(e.probe is False for e in command.examples)
+
+
+def example_argv(
+    command: Command, text: str, app_name: str | None = None
+) -> tuple[str, ...] | None:
+    """The argv a probe of ``command`` runs for the shell words ``text``, without the app's
+    name, its globals, preview flags, and an ``output_file`` command's ``--output``; None
+    when they do not run the command. A probe's words start with the app's name, which
+    registration checked, so ``app_name`` None drops the first word"""
+    tokens = shlex.split(text)
+    if app_name is None or (tokens and tokens[0] == app_name):
+        tokens = tokens[1:]
+    # Globals may come before the path (tool --format json show x); drop them first
+    preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
+    tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
+    if command.output_file:
+        # Every kit run of the probe would write the file, an explicit probe= too (#391)
+        tokens = list(_without_output(tuple(tokens)))
+    if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
+        return tuple(tokens)
     return None
 
 
@@ -86,9 +125,10 @@ def probes_for(app: App) -> list[Probe]:
     # The first probe that runs a command: the unknown-flag probe adds its flag to it
     unknown_from: Probe | None = None
     for command in user_commands(app):
-        if command.passthrough:
-            # Its tool owns stdout and its envelope is on stderr, so the kit's json_envelope
-            # check, which reads stdout, would fail every probe of it (#386)
+        if command.passthrough or _opted_out(command):
+            # A passthrough command's tool owns stdout and its envelope is on stderr, so the
+            # kit's json_envelope check, which reads stdout, would fail every probe of it
+            # (#386). A command whose every example says probe=False is the author's (#392)
             continue
         argv = _argv_from_example(app, command)
         if argv is None:
@@ -130,9 +170,10 @@ def probes_for(app: App) -> list[Probe]:
             # An unknown flag exits 2 before anything runs, so a network command's run is
             # one to add it to, though the profile has no read probe of it
             unknown_from = run
-        if run.kind == "read" and command.has_network_io:
+        if run.kind == "read" and command.has_network_io and not _probed_explicitly(app, command):
             # Each kit run of a read would make the command's real, perhaps paid, requests:
-            # its probes are the ones above, which end before the network (#390)
+            # its probes are the ones above, which end before the network (#390). An
+            # author's probe= points it somewhere safe, such as a local stub (#392)
             continue
         probes.append(run)
     probes.append(VERSION_PROBE)
@@ -214,11 +255,14 @@ def argument_order_for(app: App) -> dict[str, object] | None:
             continue
         if command.passthrough:
             continue  # the kit moves --format after the path, where the tool would get it
-        if command.has_network_io and (
-            command.danger_level is DangerLevel.SAFE or command.safe_default
+        if (
+            command.has_network_io
+            and (command.danger_level is DangerLevel.SAFE or command.safe_default)
+            and not _probed_explicitly(app, command)
         ):
             # Each run would make its real requests, as a read probe would (#390); a
-            # safe_default command previews unconfirmed, so it runs as the read it is probed as
+            # safe_default command previews unconfirmed, so it runs as the read it is probed as.
+            # An author's probe= runs as its read probe does (#392)
             continue
         argv = _argv_from_example(app, command)
         if argv is None:
