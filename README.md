@@ -603,7 +603,9 @@ Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 long work (`--timeout 0` disables it; at most one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
 caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
-response. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to
+response; a read-only command's `TIMEOUT` is retryable, and when the command takes
+`--timeout` its hint also names a larger `--timeout` and `--timeout 0`, since a run whose
+length depends on its input times out again on a plain retry. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to
 pass the same deadline to their network calls, and `ctx.expired` to stop a long loop
 with the work done so far rather than run on after `TIMEOUT`. `ctx.remaining` ends a
 reserve before the hard limit (a tenth of the timeout, from 100 ms to 2 s, and at most
@@ -616,7 +618,7 @@ the `network-timeout` audit rule flags `urlopen`, `http.client` connections,
 commands (REQ-C-012). The `timeout-budget` rule warns when a command's `retry=Retry(...)`
 may wait longer in all than its timeout, with a `timeout=` sized to the waits, and when a
 `heartbeat=True` command inherits the app default; the `explicit-timeout` advice asks a
-mutating or destructive command on the app default to declare `timeout=` (the default
+command on the app default, read-only ones included, to declare `timeout=` (the default
 itself counts, `None` runs unbounded). An
 idempotency key stays locked until a timed-out or cancelled handler really finishes, so a
 retry never runs beside it: it waits up to its own timeout, then replays the recorded

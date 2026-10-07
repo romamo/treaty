@@ -2418,7 +2418,7 @@ class App:
             ):
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
             return buffer_stream(
-                run.stream(command, invocation, Format.JSON, meta=meta, whole=True),
+                run.stream(command, invocation, Format.JSON, meta=meta, whole=True, finite=True),
                 run.counted_effects,
             )
         return run.execute(command, invocation, Format.JSON, meta=meta)
@@ -6322,13 +6322,15 @@ class _Run:
         *,
         meta: Mapping[str, object] | None = None,
         whole: bool = False,
+        finite: bool = False,
     ) -> Generator[Envelope]:
         """Run a generator handler: one envelope per event, then a terminal one (REQ-O-004)
 
         The timeout limits the wait for each event, so a stream runs as long as it keeps
         producing (REQ-F-011); ``whole`` makes it a deadline for the whole stream, for a
-        caller that sees nothing until the stream ends. A failure after some events keeps
-        their count in ``meta.seq`` and marks the response ``partial``.
+        caller that sees nothing until the stream ends. ``finite`` marks a caller that
+        refuses timeout 0, so a ``TIMEOUT`` hint never names it. A failure after some
+        events keeps their count in ``meta.seq`` and marks the response ``partial``.
         """
         self.args, self.invocation = invocation.args, invocation
         self.stream_effects = None
@@ -6468,7 +6470,7 @@ class _Run:
             self._stop_children()
             self._grace(running)
             what = "timeout" if whole else "timeout waiting for its next event"
-            code, error = self._timed_out(command, timeout, what)
+            code, error = self._timed_out(command, timeout, what, unbounded=not finite)
             terminal = functools.partial(
                 self._envelope, code, error=error, started=started, meta=partial()
             )
@@ -6523,14 +6525,29 @@ class _Run:
             last = _after_live_effects(last)
         yield self._present(command, last)
 
-    def _timed_out(self, command: Command, timeout: Timeout, what: str) -> tuple[int, ErrorDetail]:
+    def _timed_out(
+        self, command: Command, timeout: Timeout, what: str, *, unbounded: bool = True
+    ) -> tuple[int, ErrorDetail]:
         """The exit code and ``TIMEOUT`` error of a handler or stream past ``timeout``: a
-        read-only command's is retryable, as it changed nothing (REQ-C-014)"""
-        entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
+        read-only command's is retryable, as it changed nothing (REQ-C-014). Its hint also
+        names ``--timeout`` when the command takes it: a run whose length depends on its
+        input times out again on a plain retry (#394). ``unbounded`` is whether the caller
+        takes ``--timeout 0``; a stream buffered in-process refuses it"""
+        read_only = command.danger_level is DangerLevel.SAFE
+        entry = self.app.exits.timeout(read_only=read_only)
+        suggestion = None
+        if read_only and entry.retryable and command.accepts_timeout:
+            span = "the run" if what == "timeout" else "an event"
+            no_limit = ", or --timeout 0 for no limit" if unbounded else ""
+            suggestion = (
+                f"{RETRY_SUGGESTION}; if {span} needs longer than {timeout.seconds:g} s, "
+                f"pass a larger --timeout <seconds>{no_limit}"
+            )
         error = ErrorDetail(
             code="TIMEOUT",
             message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
             retryable=entry.retryable,
+            suggestion=suggestion,
             retry_strategy=entry.retry_strategy,
             context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
             phase="execution",

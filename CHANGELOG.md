@@ -43,6 +43,16 @@ Apps built on treaty keep their own, structured schema changelog with
   `output_file` command's `--output` is dropped from a probe as from an example. A
   passthrough command gets no probe either way (#392)
 
+### Changed
+
+- A read-only command's `TIMEOUT` stays retryable, and when the command takes `--timeout`
+  its hint now also names a larger `--timeout` and `--timeout 0` (no limit; not on a
+  stream `App.call` or MCP buffers, which refuse it): a run whose length depends on its
+  input timed out again on the plain retry the hint suggested. The
+  `explicit-timeout` advice now covers a safe command on the app's default timeout too, so
+  an app sees more advice; `--strict` is unaffected. `treaty init`'s scaffold and
+  treaty's own `audit`, `check-docs`, and `rules` declare their timeout (#394)
+
 ### Fixed
 
 - `treaty conformance` drops an `output_file` command's `--output PATH` and

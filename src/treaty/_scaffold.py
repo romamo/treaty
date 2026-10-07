@@ -189,6 +189,7 @@ class Deletion:
     danger_level="safe",
     exit_codes=(),
     examples=[("Check an item", "{n} show widget")],
+    timeout=30,
 )
 def show(args: ItemArgs, ctx: Ctx) -> Item:
     return Item(name=args.name, note=None, exists=False)
