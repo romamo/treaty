@@ -29,6 +29,23 @@ async def linger(args: LingerArgs, ctx: Ctx) -> None:
         note("cleaned up")
 
 
+class Pool:
+    """An async resource released on the run's loop, behind the handler (#383)"""
+
+    @classmethod
+    async def acquire(cls, args: object, ctx: Ctx) -> Pool:
+        await asyncio.sleep(0)
+        return cls()
+
+    async def release(self) -> None:
+        await asyncio.sleep(0)
+        note("pool released")
+
+
+async def linger_held(args: LingerArgs, ctx: Ctx, pool: Pool) -> None:
+    await linger(args, ctx)
+
+
 # No timeout, so the handler runs on the main thread; with one, on a worker
 app.command(
     "linger", description="Wait until stopped", danger_level="safe", exit_codes=(), timeout=None
@@ -40,6 +57,14 @@ app.command(
     exit_codes=(),
     timeout=60,
 )(linger)
+
+app.command(
+    "linger-held",
+    description="Wait until stopped, holding a pool",
+    danger_level="safe",
+    exit_codes=(),
+    timeout=None,
+)(linger_held)
 
 
 if __name__ == "__main__":

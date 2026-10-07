@@ -45,7 +45,11 @@ def test_audit_finds_each_planted_problem(tmp_path) -> None:
     assert [f.command for f in by_rule["raw-payload"].findings] == ["create-item"]
     assert [f.command for f in by_rule["cleanup"].findings] == []
     assert [f.command for f in by_rule["already-exists"].findings] == ["create-item"]
-    assert [f.command for f in by_rule["explicit-timeout"].findings] == ["create-item"]
+    # delete-item is declared safe: its TIMEOUT is retryable, and the advice covers it (#394)
+    assert {f.command for f in by_rule["explicit-timeout"].findings} == {
+        "create-item",
+        "delete-item",
+    }
     assert not by_rule["profile"].passed
     # The fixture's findings are warnings and advice: warnings lead, in rule order
     assert [f.rule for f in report.next_steps] == ["danger-level", "retryable", "network-io"]
@@ -65,6 +69,7 @@ def test_audit_passes_a_clean_app(tmp_path) -> None:
         examples=[("Ping", "clean ping")],
         danger_level="safe",
         exit_codes=(),
+        timeout=5,
     )
     def ping(args: NoArgs, ctx: Ctx) -> NoArgs:
         return args
@@ -90,7 +95,7 @@ def test_cli_audit_json_and_plain(tmp_path) -> None:
     assert code == 0
     assert "Next steps" in out and "1. (warning) danger-level [" in out
     assert "(advice) describe [create-item]" in out
-    assert out.count("fix:") == 15
+    assert out.count("fix:") == 16
 
 
 def test_cli_audit_bad_targets() -> None:
@@ -2028,18 +2033,42 @@ def test_explicit_timeout_is_silent_once_timeout_is_declared_even_at_the_default
     assert _timeout_app(timeout=None)["explicit-timeout"] == []
 
 
-def test_explicit_timeout_is_advice_and_skips_safe_commands() -> None:
+def _safe_timeout_findings(**declared: object) -> list[tuple[str | None, str, str]]:
+    """``scan``, safe, registered with ``declared``; its explicit-timeout findings"""
     from treaty import App, Ctx, NoArgs
 
-    rule = next(r for r in RULES if r.id == "explicit-timeout")
-    assert rule.severity.value == "advice"
     app = App("ops", version="1.0.0")
 
-    @app.command("show", description="Show", danger_level="safe", exit_codes=())
-    def show(args: NoArgs, ctx: Ctx) -> NoArgs:
+    @app.command(
+        "scan",
+        description="Scan",
+        danger_level="safe",
+        exit_codes=(),
+        **declared,  # type: ignore[arg-type]
+    )
+    def scan(args: NoArgs, ctx: Ctx) -> NoArgs:
         return args
 
-    assert [r for r in audit(app, "ops", limit=5).rules if r.id == rule.id][0].passed
+    [rule] = [r for r in audit(app, "ops", limit=5).rules if r.id == "explicit-timeout"]
+    return [(f.command, f.message, f.fix) for f in rule.findings]
+
+
+def test_explicit_timeout_advises_a_safe_command_on_the_default() -> None:
+    """Issue 394: a read-only TIMEOUT is retryable, so a run whose length depends on its
+    input loops on retries; the advice now covers safe commands too"""
+    rule = next(r for r in RULES if r.id == "explicit-timeout")
+    assert rule.severity.value == "advice"  # never fails --strict
+    [(command, message, fix)] = _safe_timeout_findings()
+    assert command == "scan"
+    assert message.startswith("a safe command inherits the app's 60 s default")
+    assert "a retry of a run whose length depends on its input times out again" in message
+    assert "timeout=None" in fix and "timeout=60 keeps the default" in fix
+
+
+def test_explicit_timeout_is_silent_on_a_safe_command_that_declares_one() -> None:
+    assert _safe_timeout_findings(timeout=600) == []
+    assert _safe_timeout_findings(timeout=60) == []
+    assert _safe_timeout_findings(timeout=None) == []
 
 
 def test_timeout_budget_flags_retry_waits_over_the_timeout() -> None:

@@ -118,6 +118,26 @@ def test_empty_stream_is_only_the_summary_line() -> None:
     assert summary["_summary"] is True and summary["total"] == 0 and summary["_count"] == 0
 
 
+def test_a_cleanup_failure_after_the_stream_is_on_its_summary_line() -> None:
+    # An end-of-stream warning stays on the terminal line, not stderr alone (D-9, #389)
+    app = App("cleanctl", version="1.0.0")
+
+    def cleanup() -> None:
+        raise OSError("gone")
+
+    @app.command("tail", description="d", streaming=True, danger_level="safe", exit_codes=(),
+                 cleanup=cleanup)  # fmt: skip
+    def tail(args: NoArgs, ctx: Ctx) -> Iterator[Event]:
+        yield Event(1, "x")
+
+    code, lines, _ = run(["tail"], app=app)
+    assert code == 0 and lines[0] == {"n": 1, "text": "x", "_seq": 1}
+    summary = lines[-1]
+    assert summary["_summary"] is True and len(lines) == 2
+    [warning] = summary["warnings"]
+    assert warning["code"] == "CLEANUP_FAILED" and warning["context"]["hook"] == "cleanup"
+
+
 def test_validate_only_answers_one_envelope_not_a_summary_line() -> None:
     # Nothing streams under --validate-only: REQ-O-009's answer is the envelope
     code, lines, _ = run(["tail", "2", "--validate-only"])

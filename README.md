@@ -603,7 +603,9 @@ Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 long work (`--timeout 0` disables it; at most one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
 caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
-response. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to
+response; a read-only command's `TIMEOUT` is retryable, and when the command takes
+`--timeout` its hint also names a larger `--timeout` and `--timeout 0`, since a run whose
+length depends on its input times out again on a plain retry. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to
 pass the same deadline to their network calls, and `ctx.expired` to stop a long loop
 with the work done so far rather than run on after `TIMEOUT`. `ctx.remaining` ends a
 reserve before the hard limit (a tenth of the timeout, from 100 ms to 2 s, and at most
@@ -616,7 +618,7 @@ the `network-timeout` audit rule flags `urlopen`, `http.client` connections,
 commands (REQ-C-012). The `timeout-budget` rule warns when a command's `retry=Retry(...)`
 may wait longer in all than its timeout, with a `timeout=` sized to the waits, and when a
 `heartbeat=True` command inherits the app default; the `explicit-timeout` advice asks a
-mutating or destructive command on the app default to declare `timeout=` (the default
+command on the app default, read-only ones included, to declare `timeout=` (the default
 itself counts, `None` runs unbounded). An
 idempotency key stays locked until a timed-out or cancelled handler really finishes, so a
 retry never runs beside it: it waits up to its own timeout, then replays the recorded
@@ -1552,7 +1554,7 @@ schema. A property declares the `Out` options as schema keys, for pydantic throu
 optional: an undeclared array is sorted by its items' JSON text and `treaty audit` advises
 declaring its order. `ordered=True` on the command keeps the handler's order of every array
 in its output, inside models too, so `x-ordered` is the finer-grained route for one
-property; an `x-sort-key` property is still sorted. A `list[Model]` or `tuple[Model, ...]` a command returns or a dataclass
+property; an `x-sort-key` property and a set (`"uniqueItems": true`) are still sorted. A `list[Model]` or `tuple[Model, ...]` a command returns or a dataclass
 field holds is ordered as a list of dataclasses is, by `sort_key=` or `ordered=True` (or
 `Out(...)` on the field), and `stable-order` warns when it declares neither. A
 credential-named or `format: password` string is masked unless `--unmask`. A field type
@@ -1715,7 +1717,9 @@ survives between events. A signal, the idle timeout, or a reader that stops canc
 pending step, then closes the generator, so its `finally` blocks and `async with` exits
 run before its async resources are released, and the run ends `CANCELLED` or `TIMEOUT`
 as a plain generator's does. A generator that catches the `CancelledError` and keeps
-running gets 2 seconds to finish; then the run ends anyway, with the reason on stderr.
+running gets 2 seconds to finish, also on a timeout; then the run ends anyway, with the
+traceback on stderr and a `CLEANUP_FAILED` warning for the `async stream` hook in the last
+envelope.
 `--no-stream`, `App.call`, and MCP collect it as they do any stream.
 
 A stream is `safe` or `mutating`; a `destructive` one is refused at registration, since a
@@ -1995,8 +1999,9 @@ a name may be a fact of the record, such as when a trade happened, so there it i
   `treaty.Out(sort_key="id")` does the same for a field. `ordered=True` on a command keeps
   the handler's order of every array in its output, whatever the return type: nested
   arrays, arrays in dataclasses and adapted models, and untyped content such as a
-  `list[dict[str, object]]` from `model_dump()`; only a field's or property's own sort key
-  still sorts. `Out(ordered=True)` keeps a field's array, and every array inside untyped
+  `list[dict[str, object]]` from `model_dump()`; only a field's or property's own sort key,
+  and a set or frozenset (`"uniqueItems": true`, which has no order of its own), still
+  sort. `Out(ordered=True)` keeps a field's array, and every array inside untyped
   content in it. The schema says `"x-ordered": true` on each kept array (and, for the
   command, at its root). Fixed tuples keep their order. Rule `stable-order`,
   a warning for an array of objects with neither, so `--strict` fails on it
@@ -2340,7 +2345,11 @@ from each command's first example and danger level, writes the profile, and with
 executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. An existing
 profile that differs from the generated one as JSON, such as one with hand-written probes,
 is left alone: the command exits `6` with `CONFLICT`, naming the changed keys and probes,
-and `--force` replaces it. An equal profile is not rewritten (`effect: noop`). The kit is found
+and `--force` replaces it. To point a probe at a fixture, set it on the example rather than
+in the profile: `Example("Profile a lease", "demo profile lease.pdf",
+probe="demo profile conformance/fixtures/lease.pdf")` probes that argv instead of the
+command, and `probe=False` keeps the example out of the profile, so regenerating never
+conflicts. An equal profile is not rewritten (`effect: noop`). The kit is found
 via `--spec-dir`, then `TREATY_SPEC_DIR`, then `../cli-agent-ergonomics` relative to the
 current directory; a named location without `conformance/run.py` exits `4` instead of
 falling through. `--out`, `--spec-dir`, and `--directory` reject `..` segments,

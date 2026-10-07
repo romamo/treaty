@@ -794,8 +794,9 @@ class App:
         ``x-sort-key``, ``x-ordered``, ``x-volatile``, ``x-high-entropy``, and
         ``x-external``, for pydantic through ``Field(json_schema_extra={"x-ordered":
         True})``; ``ordered=True`` on a command keeps the order of every array in its
-        output instead. An output list or dict is never null; ``none_as_empty=True`` writes
-        a null one as ``[]`` or ``{}``, so a ``list[T] | None`` field is allowed.
+        output instead, but a set's (``uniqueItems``), which stays sorted. An output list
+        or dict is never null; ``none_as_empty=True`` writes a null one as ``[]`` or
+        ``{}``, so a ``list[T] | None`` field is allowed.
         """
         for fn, name in ((schema, "schema"), (dump, "dump")):
             refuse_async(fn, f"output_adapter {name}")
@@ -996,7 +997,7 @@ class App:
         danger_level: str | _Unset = UNSET,
         required_scopes: Sequence[str] = (),
         exit_codes: Sequence[str] | _Unset = UNSET,
-        examples: Sequence[tuple[str, str]] = (),
+        examples: Sequence[Example | tuple[str, str]] = (),
         has_network_io: bool = False,
         timeout: float | None | _Inherit = INHERIT,
         supports_raw_payload: bool = False,
@@ -1094,7 +1095,8 @@ class App:
         enables ``ctx.retry`` with ``--retries`` and ``--retry-delay``.
         Arrays in ``data`` are sorted (REQ-F-020): ``sort_key="id"`` orders an output
         list of objects by that field; ``ordered=True`` keeps the handler's order of every
-        array in the output, whatever the return type, for a ranking. ``treaty.Out``
+        array in the output, whatever the return type, for a ranking, but a set's
+        (``uniqueItems``), which stays sorted. ``treaty.Out``
         declares either for a field of an output dataclass, and an adapted model's
         property ``x-sort-key`` or ``x-ordered``.
         ``fix_commands={"STORE_MISSING": "tool init"}`` gives ``error.fix_command`` for an
@@ -1319,7 +1321,9 @@ class App:
             )
             if problem is not None:
                 raise RegistrationError(f"{cmd_path}: fix_commands[{error_code!r}]: {problem}")
-        pairs = _example_pairs(cmd_path, examples, f"{self.name} {' '.join(cmd_path.parts)}")
+        listed = _examples(cmd_path, examples, f"{self.name} {' '.join(cmd_path.parts)}")
+        for example in listed:
+            _check_probe_head(cmd_path, example, self.name)
 
         def register(fn: H) -> H:
             # A type with no schema is a registration mistake of this command: name it
@@ -1334,7 +1338,7 @@ class App:
                             danger_level=DangerLevel(danger_level),
                             required_scopes=[Scope(s) for s in required_scopes],
                             exit_codes=[ExitCodeName(n) for n in exit_codes],
-                            examples=[Example(d, c) for d, c in pairs],
+                            examples=listed,
                             has_network_io=has_network_io,
                             timeout=command_timeout,
                             outlasts_default=outlasts_default,
@@ -1447,6 +1451,7 @@ class App:
         return tuple(self._shadowed)
 
     def _register(self, command: Command) -> None:
+        _check_probes(command)
         path = command.path
         self._yield_to(path)
         taken = framework_collisions(command)
@@ -2418,7 +2423,7 @@ class App:
             ):
                 invocation = dataclasses.replace(invocation, timeout=self.default_timeout)
             return buffer_stream(
-                run.stream(command, invocation, Format.JSON, meta=meta, whole=True),
+                run.stream(command, invocation, Format.JSON, meta=meta, whole=True, finite=True),
                 run.counted_effects,
             )
         return run.execute(command, invocation, Format.JSON, meta=meta)
@@ -2894,6 +2899,10 @@ def _call_async_stream(
             loop.close()  # the events would have closed it
     if teardown is not None:
         teardown.on_interrupt(events.stop)
+        # Added after the resources, so it runs before their releases, which wait behind
+        # the source's aclose() on the loop; not last, so the timeout path gives the
+        # source its grace (Teardown.pending). A source past its grace warns (D-9, #382)
+        teardown.add(ASYNC_STREAM_HOOK, events.unfinished)
     return events
 
 
@@ -2946,6 +2955,7 @@ CWD_CHANGED = "CWD_CHANGED"
 SESSION_HOOK = "session temp dir"
 EVENT_LOOP_HOOK = "event loop"
 ASYNC_HANDLER_HOOK = "async handler"
+ASYNC_STREAM_HOOK = "async stream"
 
 
 def _process_cwd() -> str | None:
@@ -3830,27 +3840,68 @@ def _machine_text(mode: Format) -> Rendering:
     return _NDJSON_LINE if mode is Format.NDJSON else _JSON_TEXT
 
 
-def _example_pairs(path: CommandPath, examples: object, usage: str) -> list[tuple[str, str]]:
-    """``examples=`` as (description, command) pairs, refused at registration with the
-    shape to write: a bare string would otherwise unpack character by character"""
+def _examples(path: CommandPath, examples: object, usage: str) -> list[Example]:
+    """``examples=`` as ``Example`` objects, given as them or as (description, command)
+    pairs, refused at registration with the shape to write: a bare string would otherwise
+    unpack character by character"""
     if isinstance(examples, tuple) and _is_pair(examples):
         raise RegistrationError(
             f"{path}: examples= takes a list of (description, command) pairs, got the "
             f"single pair {examples!r}; write examples=[{examples!r}]"
         )
+    if isinstance(examples, Example):
+        raise RegistrationError(
+            f"{path}: examples= takes a list of examples, got the single example "
+            f"{examples!r}; write examples=[{examples!r}]"
+        )
     items = (
         examples if isinstance(examples, Sequence) and not isinstance(examples, str) else [examples]
     )
-    pairs = []
+    out: list[Example] = []
     for item in items:
+        if isinstance(item, Example):
+            out.append(item)
+            continue
         if not _is_pair(item):
             command = item if isinstance(item, str) else usage
             raise RegistrationError(
                 f"{path}: examples= takes (description, command) pairs, got {item!r}; "
                 f'write examples=[("Typical call", {json.dumps(command)})]'
             )
-        pairs.append((item[0], item[1]))
-    return pairs
+        out.append(Example(item[0], item[1]))
+    return out
+
+
+def _check_probes(command: Command) -> Command:
+    """Each ``probe=`` argv names the command it belongs to, after the app's name and
+    any globals, as ``treaty conformance`` reads it (#392)"""
+    probes = [e for e in command.examples if isinstance(e.probe, str)]
+    if not probes:
+        return command
+    from ._profile import example_argv  # the profile's reader, loaded only when a probe is set
+
+    for example in probes:
+        assert isinstance(example.probe, str)
+        if example_argv(command, example.probe) is None:
+            raise RegistrationError(
+                f"{command.path}: the probe {example.probe!r} of example "
+                f"{example.command!r} does not run {' '.join(command.path.parts)!r}; a "
+                "probe is an argv of the command its example belongs to"
+            )
+    return command
+
+
+def _check_probe_head(path: CommandPath, example: Example, app_name: str) -> None:
+    """An example's ``probe=`` argv starts with the app's name, like its command (#392)"""
+    if not isinstance(example.probe, str):
+        return
+    head = shlex.split(example.probe)[0]  # Example refused an empty or unbalanced one
+    if head != app_name:
+        raise RegistrationError(
+            f"{path}: the probe {example.probe!r} of example {example.command!r} starts "
+            f"with {head!r}; a probe starts with the app's name, {app_name!r}, like the "
+            "example's command"
+        )
 
 
 def _is_pair(item: object) -> TypeGuard[tuple[str, str] | list[str]]:
@@ -6316,13 +6367,15 @@ class _Run:
         *,
         meta: Mapping[str, object] | None = None,
         whole: bool = False,
+        finite: bool = False,
     ) -> Generator[Envelope]:
         """Run a generator handler: one envelope per event, then a terminal one (REQ-O-004)
 
         The timeout limits the wait for each event, so a stream runs as long as it keeps
         producing (REQ-F-011); ``whole`` makes it a deadline for the whole stream, for a
-        caller that sees nothing until the stream ends. A failure after some events keeps
-        their count in ``meta.seq`` and marks the response ``partial``.
+        caller that sees nothing until the stream ends. ``finite`` marks a caller that
+        refuses timeout 0, so a ``TIMEOUT`` hint never names it. A failure after some
+        events keeps their count in ``meta.seq`` and marks the response ``partial``.
         """
         self.args, self.invocation = invocation.args, invocation
         self.stream_effects = None
@@ -6462,7 +6515,7 @@ class _Run:
             self._stop_children()
             self._grace(running)
             what = "timeout" if whole else "timeout waiting for its next event"
-            code, error = self._timed_out(command, timeout, what)
+            code, error = self._timed_out(command, timeout, what, unbounded=not finite)
             terminal = functools.partial(
                 self._envelope, code, error=error, started=started, meta=partial()
             )
@@ -6517,14 +6570,29 @@ class _Run:
             last = _after_live_effects(last)
         yield self._present(command, last)
 
-    def _timed_out(self, command: Command, timeout: Timeout, what: str) -> tuple[int, ErrorDetail]:
+    def _timed_out(
+        self, command: Command, timeout: Timeout, what: str, *, unbounded: bool = True
+    ) -> tuple[int, ErrorDetail]:
         """The exit code and ``TIMEOUT`` error of a handler or stream past ``timeout``: a
-        read-only command's is retryable, as it changed nothing (REQ-C-014)"""
-        entry = self.app.exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
+        read-only command's is retryable, as it changed nothing (REQ-C-014). Its hint also
+        names ``--timeout`` when the command takes it: a run whose length depends on its
+        input times out again on a plain retry (#394). ``unbounded`` is whether the caller
+        takes ``--timeout 0``; a stream buffered in-process refuses it"""
+        read_only = command.danger_level is DangerLevel.SAFE
+        entry = self.app.exits.timeout(read_only=read_only)
+        suggestion = None
+        if read_only and entry.retryable and command.accepts_timeout:
+            span = "the run" if what == "timeout" else "an event"
+            no_limit = ", or --timeout 0 for no limit" if unbounded else ""
+            suggestion = (
+                f"{RETRY_SUGGESTION}; if {span} needs longer than {timeout.seconds:g} s, "
+                f"pass a larger --timeout <seconds>{no_limit}"
+            )
         error = ErrorDetail(
             code="TIMEOUT",
             message=f"Command {command.path} exceeded its {timeout.seconds}s {what}",
             retryable=entry.retryable,
+            suggestion=suggestion,
             retry_strategy=entry.retry_strategy,
             context={"timeout_ms": timeout.milliseconds, "command": command.path.value},
             phase="execution",

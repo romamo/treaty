@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._audit import user_commands
-from ._command import OUTPUT_FLAG, Command, DangerLevel
-from ._parse import VALUED_GLOBALS, delegated_argv
+from ._command import OUTPUT_FLAG, Command, DangerLevel, Example
+from ._parse import VALUED_GLOBALS
 from ._values import CommandPath
 
 if TYPE_CHECKING:
@@ -37,9 +37,6 @@ class Probe:
     argv: tuple[str, ...]
     kind: str
     dry_run_flag: str | None = None
-    passthrough: bool = False
-    """The probed command hands every token after its path to its tool, so a flag added
-    for treaty goes before the path (#367); not part of the profile"""
     deadline_seconds: int | None = None
     """A ``stream`` probe's limit on the whole stream"""
     sigint_after: int | None = None
@@ -58,27 +55,59 @@ class Probe:
 
 
 def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
+    """The first example's probe argv: its ``probe=``, else its command. An example with
+    ``probe=False`` is left out (#392). Never a passthrough command's, which gets no probe
+    and no argument_order run (#386)"""
+    chosen = _chosen_example(app, command)
+    return None if chosen is None else chosen[0]
+
+
+def _chosen_example(app: App, command: Command) -> tuple[tuple[str, ...], Example] | None:
+    """The probe argv of ``command`` and the example it comes from, the first one whose
+    ``probe=`` or command runs it; an example with ``probe=False`` is left out (#392)"""
     for example in command.examples:
-        tokens = shlex.split(example.command)
-        if tokens and tokens[0] == app.name:
-            tokens = tokens[1:]
-        if command.passthrough:
-            # The words after the path are its tool's, verbatim: only the globals before it
-            # are dropped. An example with the command's own flags there is not one (#367)
-            split = delegated_argv(tokens, {command.path: command})
-            if split is not None and split.argv[-len(command.path.parts) :] == list(
-                command.path.parts
-            ):
-                return (*command.path.parts, *split.rest)
+        if example.probe is False:
             continue
-        # Globals may come before the path (tool --format json show x); drop them first
-        preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
-        tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
-        if command.output_file:
-            # Every kit run of the probe would write the file (#391)
-            tokens = list(_without_output(tuple(tokens)))
-        if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
-            return tuple(tokens)
+        argv = example_argv(
+            command, example.command if example.probe is None else example.probe, app.name
+        )
+        if argv is not None:
+            return argv, example
+    return None
+
+
+def _probed_explicitly(app: App, command: Command) -> bool:
+    """The command's probe argv is an author's ``probe=``, such as one pointing a network
+    command at a local stub: its read runs, where an example's would make real requests
+    (#390, #392)"""
+    chosen = _chosen_example(app, command)
+    return chosen is not None and isinstance(chosen[1].probe, str)
+
+
+def _opted_out(command: Command) -> bool:
+    """Every example of the command says ``probe=False``: the author keeps the command out
+    of the profile, so no probe falls back to its bare path either (#392)"""
+    return bool(command.examples) and all(e.probe is False for e in command.examples)
+
+
+def example_argv(
+    command: Command, text: str, app_name: str | None = None
+) -> tuple[str, ...] | None:
+    """The argv a probe of ``command`` runs for the shell words ``text``, without the app's
+    name, its globals, preview flags, and an ``output_file`` command's ``--output``; None
+    when they do not run the command. A probe's words start with the app's name, which
+    registration checked, so ``app_name`` None drops the first word"""
+    tokens = shlex.split(text)
+    if app_name is None or (tokens and tokens[0] == app_name):
+        tokens = tokens[1:]
+    # Globals may come before the path (tool --format json show x); drop them first
+    preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
+    tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
+    if command.output_file:
+        # Every kit run of the probe would write the file, an explicit probe= too (#391)
+        tokens = list(_without_output(tuple(tokens)))
+    if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
+        return tuple(tokens)
     return None
 
 
@@ -86,12 +115,6 @@ def _dry_run_flag(command: Command) -> str:
     """The flag that previews the command: ``--dry-run``, or its ``Flag(dry_run=True)``"""
     field = command.dry_run_field
     return "--dry-run" if field is None else f"--{field.flag}"
-
-
-def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
-    """``argv`` with framework ``flags`` where treaty reads them: after it, or before the
-    path of a passthrough command, whose tool gets every token after the path (#367)"""
-    return (*flags, *argv) if command.passthrough else _before_separator(argv, *flags)
 
 
 def _before_separator(argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
@@ -117,13 +140,22 @@ def _probe_argv(app: App, command: Command) -> tuple[str, ...] | None:
     return argv
 
 
-def _runnable_stream(command: Command) -> bool:
-    """A stream the kit may run: safe, and with no network I/O, whose every run would make
-    the command's real, perhaps paid, requests, as a read probe would (#390)"""
+def _probed(command: Command) -> bool:
+    """Whether ``probes_for`` probes the command at all: a passthrough command's tool owns
+    stdout and its envelope is on stderr, so the kit's json_envelope check, which reads
+    stdout, would fail every probe of it (#386); a command whose every example says
+    probe=False is the author's (#392)"""
+    return not command.passthrough and not _opted_out(command)
+
+
+def _runnable_stream(app: App, command: Command) -> bool:
+    """A stream the kit may run: safe, and without network I/O, whose every run would make
+    the command's real, perhaps paid, requests, as a read probe would (#390), unless an
+    author's probe= points it somewhere safe, such as a local stub, as for a read (#392)"""
     return (
         command.streaming
         and command.danger_level is DangerLevel.SAFE
-        and not command.has_network_io
+        and (not command.has_network_io or _probed_explicitly(app, command))
     )
 
 
@@ -135,25 +167,27 @@ def probes_for(app: App) -> list[Probe]:
     # The SIGINT probe goes to the first endless stream, which only a signal ends, else
     # to the first stream the kit may run (#389)
     endless = any(
-        _runnable_stream(c) and c.endless and _probe_argv(app, c) is not None
+        _probed(c) and _runnable_stream(app, c) and c.endless and _probe_argv(app, c) is not None
         for c in user_commands(app)
     )
     for command in user_commands(app):
+        if not _probed(command):
+            continue
         argv = _probe_argv(app, command)
         if argv is None:
             continue
         label = " ".join(command.path.parts)
         if command.resumable:
             # REQ-O-010: a step the command does not declare exits 2 before anything runs
-            bad = _with_flags(command, argv, "--resume-from", "no-such-step")
+            bad = _before_separator(argv, "--resume-from", "no-such-step")
             probes.append(Probe(f"{label} --resume-from unknown step", bad, "invalid"))
         if command.has_network_io:
             # REQ-O-019: urllib has no SOCKS, so --proxy refuses one before anything runs
-            socks = _with_flags(command, argv, "--proxy", "socks5://127.0.0.1:1080")
+            socks = _before_separator(argv, "--proxy", "socks5://127.0.0.1:1080")
             probes.append(Probe(f"{label} --proxy socks5", socks, "invalid"))
         if command.recursive_traversal:
             # REQ-O-040: a walk of no levels is not a limit
-            shallow = _with_flags(command, argv, "--max-depth", "0")
+            shallow = _before_separator(argv, "--max-depth", "0")
             probes.append(Probe(f"{label} --max-depth 0", shallow, "invalid"))
         run: Probe | None = None
         streams: list[Probe] = []
@@ -166,11 +200,11 @@ def probes_for(app: App) -> list[Probe]:
             if command.danger_level is DangerLevel.SAFE:
                 bounded = (*streamed, "--no-stream", "--timeout")
                 run = Probe(label, (*bounded, str(STREAM_SECONDS)), "read")
-            if _runnable_stream(command):
+            if _runnable_stream(app, command):
                 # REQ-O-004's lines, within the kit's limit, unless the stream never ends
                 # on its own; one stream is also interrupted after its first line, for
-                # REQ-F-069's CANCELLED line (#389). A network stream gets neither, as it
-                # gets no read probe (#390)
+                # REQ-F-069's CANCELLED line (#389). A network stream gets neither unless
+                # its probe is an author's probe=, as with its read probe (#390, #392)
                 deadline = TIMEOUT_SECONDS
                 if not command.endless:
                     streams.append(
@@ -194,16 +228,17 @@ def probes_for(app: App) -> list[Probe]:
         elif command.danger_level is DangerLevel.DESTRUCTIVE:
             run = Probe(label, argv, "destructive", dry_run_flag=_dry_run_flag(command))
         elif command.danger_level is DangerLevel.SAFE:
-            run = Probe(label, argv, "read", passthrough=command.passthrough)
+            run = Probe(label, argv, "read")
         if run is None:
             continue
         if unknown_from is None:
             # An unknown flag exits 2 before anything runs, so a network command's run is
             # one to add it to, though the profile has no read probe of it
             unknown_from = run
-        if run.kind == "read" and command.has_network_io:
+        if run.kind == "read" and command.has_network_io and not _probed_explicitly(app, command):
             # Each kit run of a read would make the command's real, perhaps paid, requests:
-            # its probes are the ones above, which end before the network (#390)
+            # its probes are the ones above, which end before the network (#390). An
+            # author's probe= points it somewhere safe, such as a local stub (#392)
             continue
         probes.append(run)
         probes.extend(streams)
@@ -221,8 +256,6 @@ def probes_for(app: App) -> list[Probe]:
     probes.append(Probe("manifest malformed etag", ("manifest", "--etag", "x"), "invalid"))
     first = VERSION_PROBE if unknown_from is None else unknown_from
     unknown = _before_separator(first.argv, "--no-such-flag")
-    if first.passthrough:
-        unknown = ("--no-such-flag", *first.argv)  # after the path, the tool would get it
     probes.append(Probe("unknown flag", unknown, "invalid"))
     return probes
 
@@ -288,11 +321,14 @@ def argument_order_for(app: App) -> dict[str, object] | None:
             continue
         if command.passthrough:
             continue  # the kit moves --format after the path, where the tool would get it
-        if command.has_network_io and (
-            command.danger_level is DangerLevel.SAFE or command.safe_default
+        if (
+            command.has_network_io
+            and (command.danger_level is DangerLevel.SAFE or command.safe_default)
+            and not _probed_explicitly(app, command)
         ):
             # Each run would make its real requests, as a read probe would (#390); a
-            # safe_default command previews unconfirmed, so it runs as the read it is probed as
+            # safe_default command previews unconfirmed, so it runs as the read it is probed as.
+            # An author's probe= runs as its read probe does (#392)
             continue
         argv = _argv_from_example(app, command)
         if argv is None:

@@ -150,9 +150,36 @@ def test_a_source_that_ignores_cancellation_delays_the_end_only_by_the_grace() -
     out, err = proc.communicate(timeout=15)
     err = seen + err
     assert proc.returncode == 130, err
-    assert json.loads(out.splitlines()[-1])["error"]["code"] == "CANCELLED"
+    last = json.loads(out.splitlines()[-1])
+    spec_validator("response-envelope").validate(last)
+    assert last["error"]["code"] == "CANCELLED"
     assert "tickctl: cancellation ignored" in err
-    assert "still running 2.0s after its cancellation" in err
+    assert err.count("still running 2.0s after its cancellation") == 1, err
+    # Reported in the envelope too, not only on stderr (D-9, #382)
+    assert last["error"]["context"]["cleanup_failed"] == "RuntimeError"
+    [warning] = last["warnings"]
+    assert warning["code"] == "CLEANUP_FAILED" and warning["context"]["hook"] == "async stream"
+
+
+def test_a_source_that_ignores_its_timeouts_cancellation_warns_in_the_timeout_envelope() -> None:
+    """The timeout path gives the source its grace, then the end envelope reports the
+    source still running as CLEANUP_FAILED (D-9, #382)"""
+    started = time.monotonic()
+    proc = subprocess.run(
+        [sys.executable, str(TICKCTL), "stubborn", "--timeout", "0.5", "--format", "json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 10, proc.stderr
+    assert time.monotonic() - started < 0.5 + 2.0 + 5
+    last = json.loads(proc.stdout.splitlines()[-1])
+    spec_validator("response-envelope").validate(last)
+    assert last["error"]["code"] == "TIMEOUT" and last["meta"]["items_emitted"] == 1
+    [warning] = last["warnings"]
+    assert warning["code"] == "CLEANUP_FAILED" and warning["context"]["hook"] == "async stream"
+    assert "tickctl: cancellation ignored" in proc.stderr
+    assert proc.stderr.count("still running 2.0s after its cancellation") == 1
 
 
 def test_a_loop_job_is_cancelled_once_so_its_finally_can_await() -> None:

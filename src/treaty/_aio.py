@@ -57,6 +57,12 @@ class _Job:
     deadline already fired, so the signal's cancel would be the second one (#355)"""
     signalled: bool = False
     """On the loop: the signal's cancel was issued, by ``_tracked`` or ``_cancel_running``"""
+    started: bool = False
+    """Set on the loop as it starts: it no longer waits behind the jobs before it"""
+    dropped: str | None = None
+    """Set by a waiter that gave up on it before it started: then it never starts, its
+    coroutine is closed unrun and a RuntimeError with this message is raised instead, so
+    none of its body runs late"""
 
     def wait(self, seconds: float) -> bool:
         """Whether the job ended within ``seconds``; sliced as ``Loop.run``'s wait is"""
@@ -80,6 +86,10 @@ class Loop:
         self._closed = False
         """Set before the ``None`` that stops the loop; no lock, as a signal raised while
         one is held could leave it held"""
+        self._releases_by: float | None = None
+        """When the run's releases stop waiting for the loop: set by the first (#383)"""
+        self._held = False
+        """A release found the loop still held past that bound: the rest do not wait"""
         self._thread = threading.Thread(target=self._serve, name="treaty-loop", daemon=True)
         self._thread.start()
 
@@ -128,7 +138,12 @@ class Loop:
         # Running before the check, as cancel() sets the flag before it reads _running:
         # one of the two sees the other
         self._running, self._task = job, asyncio.current_task()
+        # Started before the check, as Loop.release sets dropped before it reads started
+        job.started = True
         try:
+            if job.dropped is not None:
+                job.coro.close()
+                raise RuntimeError(job.dropped)
             if job.cancelled and self._task is not None:
                 job.signalled = True
                 # Cancelled while queued: it ends at its first await, as if cancelled
@@ -215,6 +230,36 @@ class Loop:
             raise job.exc
         return job.result
 
+    def release(self, coro: Coroutine[Any, Any, object], bound: float) -> None:
+        """Run ``coro``, an async resource's release, once the jobs before it ended; like
+        ``run``, but it waits to start only until ``bound`` seconds after the run's first
+        release did. An async handler or stream source still running past its grace holds
+        the loop, so a release behind it would wait forever: past the bound it is cancelled
+        and raises instead, and the releases after it raise at once, so the teardown
+        reports each one and the run answers (D-9, #383). Once started, a release runs to
+        its end, as a sync one does."""
+        if self._releases_by is None:
+            self._releases_by = time.monotonic() + bound
+        if self._held:
+            coro.close()
+            raise RuntimeError(_held_loop(bound))
+        job = self.job(coro)
+        try:
+            self.enqueue(job)
+            while not job.done.acquire(timeout=SIGNAL_POLL_SECONDS):
+                if not job.started and time.monotonic() >= self._releases_by:
+                    job.dropped = _held_loop(bound)
+                    # One of the two sees the other: started now, the loop raises dropped
+                    # or runs it to its end; not, it never starts
+                    if not job.started:
+                        self._held = True
+                        raise RuntimeError(job.dropped)
+        except BaseException:  # noqa: BLE001 - Cancelled, KeyboardInterrupt, or the bound
+            self.cancel(job)
+            raise
+        if job.exc is not None:
+            raise job.exc
+
     def close(self) -> None:
         """Stop the loop once the jobs queued before this one are done"""
         if not self._closed:
@@ -230,7 +275,9 @@ class AsyncEvents(Iterator[object]):
     the pending step and queues ``aclose()`` behind it without waiting: a signal, a
     timeout, or a reader that stops ends the stream at once, and the source's ``finally``
     still runs, before the run's async releases and the loop's close, which queue behind
-    it. ``close`` stops it, then waits up to ``grace`` seconds for ``aclose()``."""
+    it. ``close`` stops it, then waits for ``aclose()`` until ``grace`` seconds after the
+    stop. A source still running then is raised by ``close``, or, when a teardown owns the
+    loop, by ``unfinished``, its hook, so the envelope reports it (D-9, #382)."""
 
     def __init__(
         self, source: AsyncGenerator[object, Any], loop: Loop, *, grace: float, owns_loop: bool
@@ -243,6 +290,8 @@ class AsyncEvents(Iterator[object]):
         self._stopped = False
         """A flag, not a lock: the stream's thread may be interrupted anywhere by a signal"""
         self._closing: _Job | None = None
+        self._deadline = 0.0
+        """When the source's grace ends: ``grace`` seconds after ``stop``"""
         self._step: _Job | None = None
         """The pending ``__anext__()``, held before it is queued so ``stop`` can cancel it"""
 
@@ -265,30 +314,53 @@ class AsyncEvents(Iterator[object]):
         """Cancel the pending step, then ``aclose()`` the source once it ended; once only"""
         if self._stopped:
             return
+        self._deadline = time.monotonic() + self._grace  # before the flag another reads
         self._stopped = True
         if self._step is not None:
             self._loop.cancel(self._step)
         self._closing = self._loop.submit(self._source.aclose(), self._context)
 
-    def close(self) -> None:
-        """Stop the source and wait for its ``finally`` blocks; what they raised, or a
-        source still running past the grace, is raised here"""
-        self.stop()
+    def _closed(self) -> bool:
+        """Whether ``aclose()`` ended, waiting for it until the grace ends"""
         job = self._closing
+        return job is None or job.wait(max(0.0, self._deadline - time.monotonic()))
+
+    def close(self) -> None:
+        """Stop the source and wait for its ``finally`` blocks; what they raised is raised
+        here, and so is a source still running past the grace unless a teardown owns the
+        loop: its ``unfinished`` hook reports that one"""
+        self.stop()
         try:
-            if job is None:
+            if not self._closed():
+                if self._owns_loop:
+                    self.unfinished()
                 return
-            if not job.wait(self._grace):
-                raise RuntimeError(
-                    f"the stream's async generator was still running {self._grace}s after "
-                    "its cancellation; its finally blocks may not run: let CancelledError "
-                    "propagate from its awaits"
-                )
-            if job.exc is not None:
+            job = self._closing
+            if job is not None and job.exc is not None:
                 raise job.exc
         finally:
             if self._owns_loop:
                 self._loop.close()
+
+    def unfinished(self) -> None:
+        """Stop the source, then raise once it is still running as its grace ends: its
+        ``finally`` blocks may not run. The run's teardown calls it, so the CLEANUP_FAILED
+        warning reaches the envelope (D-9, #382)"""
+        self.stop()
+        if not self._closed():
+            raise RuntimeError(
+                f"the stream's async generator was still running {self._grace}s after "
+                "its cancellation; its finally blocks may not run: let CancelledError "
+                "propagate from its awaits"
+            ) from None  # raised as the run ends, often beside the signal: not because of it
+
+
+def _held_loop(bound: float) -> str:
+    return (
+        f"the release could not start within {bound}s: the run's event loop is still held "
+        "by its async handler or stream source past their cancellation grace, so what the "
+        "resource holds may not be released: let CancelledError propagate from its awaits"
+    )
 
 
 def unfinished(job: _Job, grace: float) -> None:

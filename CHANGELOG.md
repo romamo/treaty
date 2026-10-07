@@ -25,12 +25,18 @@ Apps built on treaty keep their own, structured schema changelog with
   built-in `audit-log` is such a stream: in `json` and `jsonl` it writes each entry as a
   bare JSON line and a `"_summary": true` line last, so a reader of `.data` on each line
   reads the line itself. `treaty conformance` adds a `stream` probe for each safe stream
-  command without `has_network_io` and a SIGINT one, so the kit's `stream_contract` and
-  `stream_sigint` checks run: a committed profile differs from the generated one, so
-  rerun `treaty conformance --force` once. Register a stream that never ends on its own
-  with the new `endless=True`: it gets the SIGINT probe and no `stream` probe, and
-  `--schema`, `--help`, and its skill file say a signal ends it. CI checks against
-  cli-agent-spec v1.13.0 (#389)
+  command without `has_network_io` (or whose probe comes from `probe=`) and a SIGINT one,
+  so the kit's `stream_contract` and `stream_sigint` checks run: a committed profile
+  differs from the generated one, so rerun `treaty conformance --force` once. Register a
+  stream that never ends on its own with the new `endless=True`: it gets the SIGINT probe
+  and no `stream` probe, and `--schema`, `--help`, and its skill file say a signal ends
+  it. CI checks against cli-agent-spec v1.13.0 (#389)
+- `treaty conformance` no longer probes a passthrough command: its tool owns stdout and its
+  envelope is on stderr, so the kit's `json_envelope` check read the tool's output and
+  failed its read and `--proxy` probes. The `unknown flag` probe of an app whose first
+  command is passthrough is now based on another command or `version`. A committed profile
+  with such probes differs from the generated one, so `treaty conformance` exits
+  `CONFLICT`: rerun `treaty conformance --force` once to update it (#386)
 - An app with an `output_file` command whose example passes `--output PATH` now generates
   a conformance profile without it, in the read and `unknown flag` probes and the
   `argument_order` run, so a committed profile with the old `--output` differs from the
@@ -41,6 +47,30 @@ Apps built on treaty keep their own, structured schema changelog with
   comes from another example or the `manifest --etag` one, so a committed profile with the
   old probe differs from the generated one and `treaty conformance` exits `CONFLICT`:
   rerun `treaty conformance --force` once to update it (#390)
+
+### Added
+
+- `Example(description, command, probe=...)` sets the argv a generated conformance probe
+  runs instead of the example's command, such as one pointing at a committed fixture, and
+  `probe=False` keeps the example out of the profile; a command whose every example says
+  so gets no probe. The probe starts with the app's name and is checked at registration
+  and by `treaty audit` like the example, so a profile with fixtures regenerates without
+  `CONFLICT` and picks up new built-in probes. `examples=` now accepts `Example` objects
+  beside `(description, command)` pairs. An app that sets no `probe` generates the same
+  profile. A `has_network_io` command whose probe comes from `probe=`, such as one
+  pointing at a local stub, keeps its `read` probe and can give `argument_order`; an
+  `output_file` command's `--output` is dropped from a probe as from an example. A
+  passthrough command gets no probe either way (#392)
+
+### Changed
+
+- A read-only command's `TIMEOUT` stays retryable, and when the command takes `--timeout`
+  its hint now also names a larger `--timeout` and `--timeout 0` (no limit; not on a
+  stream `App.call` or MCP buffers, which refuse it): a run whose length depends on its
+  input timed out again on the plain retry the hint suggested. The
+  `explicit-timeout` advice now covers a safe command on the app's default timeout too, so
+  an app sees more advice; `--strict` is unaffected. `treaty init`'s scaffold and
+  treaty's own `audit`, `check-docs`, and `rules` declare their timeout (#394)
 
 ### Fixed
 
@@ -56,6 +86,24 @@ Apps built on treaty keep their own, structured schema changelog with
   malformed `--proxy`, and the `unknown flag` probe, which still goes on the first
   command's example when that command is a network one. Both go before an example's `--`,
   where they no longer become positionals that run the command (#390)
+- A command with `ordered=True` sorts a `set` or `frozenset` field of an output model by
+  its canonical JSON again, as before rc34: it kept the set's iteration order, which the
+  hash seed picks, so the output changed from run to run. A set's schema node
+  (`"uniqueItems": true`) loses its `"x-ordered": true`, which a schema lock reports as a
+  change; an explicit per-property `x-ordered: true` on a set still keeps its order (#387)
+- An async generator stream whose source is still running after its cancellation grace,
+  as when it swallows `CancelledError`, now reports it in the stream's end envelope: a
+  `CLEANUP_FAILED` warning for the `async stream` hook, and `error.context.cleanup_failed`
+  on `CANCELLED`, as an `async def` handler does since rc36 (D-9). It used to be only a
+  stderr note, and on a timeout not even that, since the timeout answered without
+  waiting for the source; it now gives the source its grace first. The stream's lines
+  are unchanged (#382)
+- An `async def release` no longer waits forever behind an `async def` handler or async
+  stream source still running after its cancellation grace, which holds the run's event
+  loop: the run's async releases wait to start for one grace more in all, then each is
+  reported as a `CLEANUP_FAILED` warning naming its `release`, and the run answers
+  `CANCELLED` or `TIMEOUT` as it would without the resource. A release that cannot start is
+  cancelled, so it never runs late; once started, a release still runs to its end (#383)
 
 ## [1.0.0rc36] - 2026-10-06
 

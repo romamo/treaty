@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ._args_adapter import ArgsAdapters, ArgsModel
 from ._auth import AuthKind, check_declaration
@@ -165,8 +165,14 @@ class DangerLevel(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Example:
+    """One invocation agents copy verbatim. ``probe`` is the argv ``treaty conformance``
+    runs for it instead of ``command``, starting with the app's name like ``command``:
+    ``probe="demo profile conformance/fixtures/lease.pdf"`` points the probe at a fixture.
+    ``probe=False`` keeps the example out of the conformance profile (#392)"""
+
     description: str
     command: str
+    probe: str | Literal[False] | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -175,6 +181,25 @@ class Example:
             raise RegistrationError(
                 f"example {self.command!r} is not a valid shell command: {exc}"
             ) from None
+        if self.probe is None or self.probe is False:
+            return
+        if not isinstance(self.probe, str):
+            raise RegistrationError(
+                f"example {self.command!r}: probe= takes the probe's argv as a string, or "
+                f"False to leave the example out of the conformance profile; got {self.probe!r}"
+            )
+        try:
+            tokens = shlex.split(self.probe)
+        except ValueError as exc:
+            raise RegistrationError(
+                f"example {self.command!r}: probe {self.probe!r} is not a valid shell "
+                f"command: {exc}"
+            ) from None
+        if not tokens:
+            raise RegistrationError(
+                f"example {self.command!r}: probe= is empty; write the probe's argv, or "
+                "probe=False to leave the example out of the conformance profile"
+            )
 
     def to_json(self) -> dict[str, str]:
         return {"description": self.description, "command": self.command}

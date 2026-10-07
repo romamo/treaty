@@ -11,7 +11,7 @@ import pytest
 from conftest import SPEC_DIR, needs_posix_signals, needs_sh_launcher, spec_validator
 
 from examples.tutorial import todo_exit_codes
-from treaty import App, Arg, Ctx, Flag, NoArgs
+from treaty import App, Arg, Ctx, Example, Flag, NoArgs
 from treaty._profile import (
     STREAM_SECONDS,
     TIMEOUT_SECONDS,
@@ -201,6 +201,34 @@ def test_a_network_stream_gets_no_stream_or_sigint_probe() -> None:
     probes = {p.name: p for p in probes_for(stream_app())}
     assert "watch stream" not in probes and "watch SIGINT" not in probes
     assert probes["tail SIGINT"].sigint_after == 1
+
+
+def test_a_network_stream_probed_by_its_authors_probe_gets_its_stream_probes() -> None:
+    # probe= points it somewhere safe, such as a local stub, so it runs as its read does
+    # (#392), and its stream lines are checked too (#389)
+    app = App("feedctl", version="1.0.0")
+
+    @app.command(
+        "watch",
+        description="Watch a feed",
+        streaming=True,
+        has_network_io=True,
+        danger_level="safe",
+        exit_codes=(),
+        examples=[Example("Watch", "feedctl watch", probe="feedctl watch --url stub")],
+    )
+    def watch(args: WatchArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        yield {"n": 1}
+
+    probes = {p.name: p for p in probes_for(app)}
+    assert probes["watch"].kind == "read"
+    assert probes["watch stream"].argv == ("watch", "--url", "stub")
+    assert probes["watch SIGINT"].argv == ("watch", "--url", "stub")
+
+
+@dataclass(frozen=True, slots=True)
+class WatchArgs:
+    url: str = Flag(default="https://example.com", description="Feed URL")
 
 
 def test_a_network_endless_stream_does_not_take_the_sigint_probe() -> None:

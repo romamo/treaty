@@ -259,7 +259,10 @@ def _interrupted(path: str, *flags: str) -> tuple[subprocess.CompletedProcess[st
         seen += line
     proc.send_signal(signal.SIGINT)
     sent = time.monotonic()
-    out, err = proc.communicate(timeout=30)
+    try:
+        out, err = proc.communicate(timeout=30)
+    finally:
+        proc.kill()  # a run that never answers must not outlive the test
     ended = time.monotonic() - sent
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, seen + err), ended
 
@@ -290,6 +293,138 @@ def test_a_finally_that_outlasts_the_grace_ends_the_run_cancelled_anyway(path: s
     assert warning["code"] == "CLEANUP_FAILED" and warning["context"]["hook"] == "async handler"
     assert f"still running {GRACE_SECONDS}s after its cancellation" in proc.stderr
     assert "lingerctl: cleaned up" not in proc.stderr
+
+
+def _release_cut_short(envelope: dict[str, Any], stderr: str) -> None:
+    """The pool's release could not run behind the stuck handler: both are reported"""
+    hooks = [w["context"]["hook"] for w in envelope["warnings"]]
+    assert hooks == ["Pool.release", "async handler"], envelope["warnings"]
+    assert {w["code"] for w in envelope["warnings"]} == {"CLEANUP_FAILED"}
+    assert f"the release could not start within {GRACE_SECONDS}s" in stderr
+    assert "lingerctl: pool released" not in stderr
+
+
+@needs_posix_signals
+def test_an_async_release_behind_a_handler_stuck_past_its_grace_is_bounded() -> None:
+    """The release waits for the loop the stuck handler holds only its own grace, then
+    is reported, and the run answers (#383)"""
+    proc, ended = _interrupted("linger-held", "--cleanup", "30")
+    assert proc.returncode == 130, proc.stderr
+    assert ended < 2 * GRACE_SECONDS + 3, ended
+    envelope = json.loads(proc.stdout.splitlines()[-1])
+    spec_validator("response-envelope").validate(envelope)
+    assert envelope["error"]["code"] == "CANCELLED"
+    assert envelope["error"]["context"]["cleanup_failed"] == "RuntimeError"
+    _release_cut_short(envelope, proc.stderr)
+
+
+def test_an_async_release_behind_a_timed_out_stuck_handler_is_bounded() -> None:
+    proc = subprocess.Popen(
+        [sys.executable, str(LINGERCTL), "linger-held", "--cleanup", "30"]
+        + ["--timeout", "0.5", "--format", "json"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    started = time.monotonic()
+    try:
+        out, err = proc.communicate(timeout=30)
+    finally:
+        proc.kill()  # a run that never answers must not outlive the test
+    assert time.monotonic() - started < 0.5 + 2 * GRACE_SECONDS + 5
+    assert proc.returncode == 10, err
+    envelope = json.loads(out.splitlines()[-1])
+    spec_validator("response-envelope").validate(envelope)
+    assert envelope["error"]["code"] == "TIMEOUT"
+    _release_cut_short(envelope, err)
+
+
+def test_a_release_waits_for_a_held_loop_only_until_its_bound() -> None:
+    """The first release past the bound is cancelled, so it never runs late; the next
+    one raises at once; once the loop is free nothing more of theirs runs (#383)"""
+    loop = Loop()
+    let_go = threading.Event()
+    started = threading.Event()
+    ran: list[str] = []
+
+    async def stuck() -> None:
+        started.set()
+        while not let_go.is_set():
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                pass  # swallowed, as a handler stuck past its grace does
+
+    async def release(name: str) -> None:
+        await asyncio.sleep(0)
+        ran.append(name)
+
+    job = loop.submit(stuck())
+    try:
+        assert started.wait(5)
+        began = time.monotonic()
+        with pytest.raises(RuntimeError, match=r"could not start within 0\.2s"):
+            loop.release(release("first"), 0.2)
+        assert 0.2 <= time.monotonic() - began < 2
+        began = time.monotonic()
+        with pytest.raises(RuntimeError, match="still held"):
+            loop.release(release("second"), 0.2)
+        assert time.monotonic() - began < 0.1
+    finally:
+        let_go.set()
+        loop.close()
+    assert job.wait(5)
+    time.sleep(0.05)  # the cancelled first release would have run by now
+    assert ran == []
+
+
+def test_a_release_cut_off_by_its_bound_runs_none_of_its_body_once_the_loop_frees() -> None:
+    """Not even the code before its first await: the run already reported it unreleased,
+    so the release must not start once the stuck job ends (#383)"""
+    loop = Loop()
+    let_go = threading.Event()
+    started = threading.Event()
+    ran: list[str] = []
+
+    async def stuck() -> None:
+        started.set()
+        while not let_go.is_set():
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                pass
+
+    async def release() -> None:
+        ran.append("released")  # before its first await
+        await asyncio.sleep(0)
+
+    job = loop.submit(stuck())
+    try:
+        assert started.wait(5)
+        with pytest.raises(RuntimeError, match="could not start"):
+            loop.release(release(), 0.1)
+    finally:
+        let_go.set()
+        loop.close()
+    assert job.wait(5)
+    loop._thread.join(5)
+    assert ran == []
+
+
+def test_a_release_on_a_free_loop_runs_to_its_end_past_the_bound() -> None:
+    """The bound is on the wait to start, not on the release itself"""
+    loop = Loop()
+    ran: list[str] = []
+
+    async def slow() -> None:
+        await asyncio.sleep(0.3)
+        ran.append("released")
+
+    try:
+        loop.release(slow(), 0.05)
+    finally:
+        loop.close()
+    assert ran == ["released"]
 
 
 def test_an_async_operation_started_but_not_awaited_is_detected() -> None:
