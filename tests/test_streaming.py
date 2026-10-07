@@ -118,6 +118,16 @@ def test_empty_stream_is_only_the_summary_line() -> None:
     assert summary["_summary"] is True and summary["total"] == 0 and summary["_count"] == 0
 
 
+def test_validate_only_answers_one_envelope_not_a_summary_line() -> None:
+    # Nothing streams under --validate-only: REQ-O-009's answer is the envelope
+    code, lines, _ = run(["tail", "2", "--validate-only"])
+    assert code == 0
+    (envelope,) = lines
+    spec_validator("response-envelope").validate(envelope)
+    assert envelope["ok"] is True and envelope["meta"]["validation_only"] is True
+    assert "_summary" not in envelope
+
+
 def test_no_stream_buffers_events_into_one_envelope() -> None:
     code, lines, _ = run(["tail", "2", "--no-stream"])
     assert code == 0

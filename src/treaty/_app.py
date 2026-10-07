@@ -7381,6 +7381,10 @@ class _Run:
                 if self._write_item(envelope, items + 1 if numbered else None):
                     items += 1
                 continue
+            if envelope.meta.seq is None:
+                # A whole response, not a stream's end: nothing streamed, as under
+                # --validate-only (REQ-O-009), so it is the one envelope
+                return self._write(envelope)
             return self._write_stream_end(envelope, items if numbered else None)
         raise AssertionError("a stream always ends with a terminal envelope")
 
