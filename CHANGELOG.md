@@ -10,6 +10,24 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Breaking
+
+- A streaming command writes REQ-O-004's lines on stdout in `json` and `jsonl` instead
+  of one envelope per event: each event is its bare item object, with `_seq` from 1 when
+  the event type is a closed object without its own `_seq`, then exactly one terminal
+  line, a `"_summary": true` line with the meta fields (`total`, `pagination`, `effects`,
+  `dry_run`, `_count` when numbered) or the error envelope, with `meta.items_emitted`
+  when numbered. A cancelled stream ends on a `CANCELLED` envelope with
+  `data: {"partial": true}` and `error.context.signal`. An event's warnings go to stderr
+  as JSON lines. A consumer that read `.data` and `meta.seq` from each line reads the
+  line itself and `_seq`; a `stdin_records=` command reads both shapes. `exec` lines,
+  `App.call`, MCP tool calls, `--no-stream`, and the plain format are unchanged.
+  `treaty conformance` adds a `stream` probe for each safe stream command and a SIGINT
+  one for the first, so the kit's `stream_contract` and `stream_sigint` checks run: a
+  committed profile differs from the generated one, so rerun `treaty conformance --force`
+  once, and drop the probe of a stream that never ends on its own. CI checks against
+  cli-agent-spec v1.13.0 (#389)
+
 ## [1.0.0rc36] - 2026-10-06
 
 The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see

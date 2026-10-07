@@ -161,8 +161,8 @@ The default file is `$XDG_STATE_HOME/todo/audit.jsonl`, else
 `~/.local/state/todo/audit.jsonl`. It rotates at 10 MiB, keeps 5 rotated files, and drops
 entries older than 30 days. `meta.audit_log_path` names it on every response while it is
 on, and the `audit-log` built-in reads it back, filtered by `--since`, `--command`, or
-`--trace-id`, one envelope per entry; while it is off, `audit-log` exits 4 with
-`AUDIT_LOG_DISABLED`.
+`--trace-id`, one JSON line per entry and a `"_summary": true` line last; while it is off,
+`audit-log` exits 4 with `AUDIT_LOG_DISABLED`.
 
 **Check:** an `add` run is in the audit log under its request id; the refused `import` runs
 are there too, exit 12 among them; an `import` with a token is logged, and the token is not
@@ -170,7 +170,7 @@ are there too, exit 12 among them; an `import` with a token is logged, and the t
 <!-- check -->
 ```bash
 request=$(todo add "Buy milk" --db tmp/tutorial/todo.json | jq -r .meta.request_id)
-todo audit-log --since 1h | jq -se --arg r "$request" '[.[] | .data | select(. != null)]
+todo audit-log --since 1h | jq -se --arg r "$request" '[.[] | select(._summary | not)]
   | (map(select(.request_id == $r)) | .[0].command == "add")
   and (map(select(.command == "import")) | any(.exit_code == 12))'
 logged=$(grep -c '"command":"import"' tmp/tutorial/audit.jsonl)

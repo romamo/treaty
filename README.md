@@ -1647,9 +1647,19 @@ beside it. The `resource-release` audit rule flags a resource class with `close`
 ## Streaming
 
 A command declared `streaming=True` has a generator handler annotated `Iterator[T]`, and
-every yield is one JSONL envelope line with `meta.seq` counting from 1. The stream ends
-with a terminal envelope that has `data: null`, `meta.end: true`, and `meta.total`, so an
-agent can tell a clean end from a killed process:
+in `json` and `jsonl` every yield is one line: the bare item object, as REQ-O-004 writes
+it. When `T` is a dataclass (a closed object without a `_seq` field of its own), each line
+carries `_seq`, counting from 1, so an agent can tell a dropped line. The stream ends with
+exactly one terminal line, so an agent can tell a clean end from a killed process: on
+success a `"_summary": true` line with the meta fields an envelope would carry (`total`,
+`pagination`, `duration_ms`, `request_id`, and the rest), `_count` when numbered, and the
+run's `warnings` when it has some:
+
+```
+{"_seq":1,"n":1}
+{"_seq":2,"n":2}
+{"_count":2,"_summary":true,"command":"count","exit_code":0,"pagination":{...},"total":2,...}
+```
 
 ```python
 @app.command("dashboard.serve", description="Serve the dashboard", streaming=True,
@@ -1665,8 +1675,13 @@ def serve(args: ServeArgs, ctx: Ctx) -> Iterator[ServeEvent]:
 ```
 
 A `CliExit`, `ParseError`, timeout, or signal after some events writes the matching failure
-envelope as the last line, with `meta.seq` at the last delivered event and `meta.partial`.
-A stream's timeout, the app default unless `timeout=` or `--timeout` says otherwise, limits
+envelope as the last line instead of the summary, with `meta.partial` and, in a numbered
+stream, `meta.items_emitted` at the last `_seq` written. A cancelled stream's envelope is
+REQ-F-069's: `data: {"partial": true}`, `error.code: "CANCELLED"`, and the signal in
+`error.context.signal`. An event's warnings, which an item line has no room for, are JSON
+lines on stderr, as in `ndjson`; an item line over `--max-output` is left out and reported
+there. `exec` lines and `App.call` keep one envelope per event, `meta.seq` counting them
+and a terminal envelope with `meta.end`. A stream's timeout, the app default unless `timeout=` or `--timeout` says otherwise, limits
 the wait for each event, so a stream runs as long as it keeps producing and one that goes
 silent ends with `TIMEOUT` (REQ-F-011); `--schema` says `timeout_kind: idle`. Under
 `--no-stream` and in `App.call` it is a deadline for the whole stream. Cancellation runs `cleanup=` and the handler's `finally`
@@ -1675,8 +1690,10 @@ The manifest declares `streaming_default: true` and a `--no-stream` flag (REQ-O-
 which returns one envelope with every event in `data` and `meta.total`; a failure under
 `--no-stream` keeps the events seen so far in `data`. In `exec`, each event line carries
 `_line` and `_cmd`. In a text format the renderer gets one event per call.
-Summary lines carry `meta.pagination`; `--stream` on a command that cannot stream answers
-with one envelope and a `STREAMING_NOT_SUPPORTED` warning.
+`--stream` on a command that cannot stream answers with one envelope and a
+`STREAMING_NOT_SUPPORTED` warning. A `stdin_records=` command reads a stream's lines as
+they come: it drops `_seq`, stops at the summary line, and fails with `UPSTREAM_FAILED`
+on an error envelope, or `UPSTREAM_INCOMPLETE` when numbered lines stop without one.
 
 A stream whose source is async, such as a WebSocket feed, is an async generator annotated
 `AsyncIterator[T]`; it may take async resources, as an `async def` handler does:
@@ -1700,11 +1717,11 @@ running gets 2 seconds to finish; then the run ends anyway, with the reason on s
 
 A stream is `safe` or `mutating`; a `destructive` one is refused at registration, since a
 stream cannot ask confirmation for each action. A mutating stream, such as a watch loop
-that acts on what it sees, reports what it did event by event: each event's `data` carries
-its own `effect`, checked as a single response's is, and the terminal envelope counts them
-in `meta.effects` (`{"created": 2, "noop": 1}`), as does `--no-stream`. Its dry-run flag
-covers the whole stream: every event reports a `would_*` effect (`would_noop` for one that
-changes nothing), and every line carries `meta.dry_run: true`. A stream has no idempotency
+that acts on what it sees, reports what it did event by event: each event carries its own
+`effect`, checked as a single response's is, and the summary line counts them in
+`effects` (`{"created": 2, "noop": 1}`), as `meta.effects` does under `--no-stream`. Its
+dry-run flag covers the whole stream: every event reports a `would_*` effect (`would_noop`
+for one that changes nothing), and the terminal line carries `dry_run: true`. A stream has no idempotency
 replay, so it takes no `--idempotency-key` and an `<APP>_SESSION` repeat runs again; a
 mutating stream that fails after a live effect other than `noop` ends with `retryable:
 false`, since its events already applied. The audit log writes one entry per run, with the

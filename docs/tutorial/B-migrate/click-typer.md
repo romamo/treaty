@@ -971,7 +971,7 @@ The migrated app, once [Declare exit codes](../core/exit-codes.md) has named its
 $ uv run treaty conformance examples.tutorial.todo_exit_codes:app \
     --out examples/tutorial/conformance/todo.json --run --format plain
 Profile: examples/tutorial/conformance/todo.json (6 probes)
-Levels: level_1 pass, level_2 pass, level_3 pass
+Levels: level_1 pass, level_2 pass, level_3 incomplete
 
   pass  L3 argument_order
   pass  L2 destructive_refuses_unconfirmed
@@ -985,7 +985,11 @@ Levels: level_1 pass, level_2 pass, level_3 pass
   pass  L1 no_hang_stdin_closed
   pass  L1 no_hang_stdin_open
   pass  L1 stdout_no_ansi
+  skip  L3 stream_contract
+  skip  L3 stream_sigint
 ```
+
+The stream checks skip because `todo` has no streaming command.
 
 Five checks passed before: click already exits 2 on a bad value and writes no colour to a
 pipe. The seven that failed map to the steps that fixed them:

@@ -12,14 +12,18 @@ it stops passing
 ```bash
 uv run treaty conformance examples.tutorial.todo_exit_codes:app \
   --out examples/tutorial/conformance/todo.json --run \
-  | jq -e '.data.levels == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}'
+  | jq -e '.data.levels == {"level_1": "pass", "level_2": "pass", "level_3": "incomplete"}
+    and ([.data.checks[] | select(.status != "pass") | .id]
+      == ["stream_contract", "stream_sigint"])'
 ```
 
 The kit groups its checks in three levels. Level 1 is what every CLI an agent calls must do:
 never wait for input, write one JSON envelope, use the spec's exit codes, keep colour and
 help text off stdout, exit 2 on a bad argument, and preview a destructive command under
 `--dry-run`. Level 2 adds refusing a destructive call that is not confirmed. Level 3 adds a valid
-manifest and flags that work in any position. The table below gives each check's level.
+manifest, flags that work in any position, and a stream's lines. `todo` has no streaming
+command, so the two stream checks have no probe to run and level 3 reads `incomplete`
+rather than `pass`. The table below gives each check's level.
 
 In your own project, drop `--out`: the profile goes to `conformance/<name>.json`, where
 the audit's `profile` rule looks for it. The tutorial keeps its files under
@@ -46,6 +50,8 @@ set, arguments wrong on purpose) and checks what comes back:
 | `destructive_refuses_unconfirmed` | 2 | a destructive command runs without confirmation |
 | `manifest_valid` | 3 | `manifest` does not validate against the spec's schema |
 | `argument_order` | 3 | `--format` stops working when moved before the command path |
+| `stream_contract` | 3 | a stream line is not a JSON object, or the stream does not end on exactly one `"_summary": true` line or error envelope |
+| `stream_sigint` | 3 | SIGINT mid-stream does not end it on a `CANCELLED` envelope with `data.partial` and exit 130 |
 
 treaty builds most of this in, so a treaty app passes a lot of it without any work. The
 kit still earns its place: it tests the executable people actually install, including its
@@ -79,6 +85,11 @@ Probes run the real CLI. treaty derives them from your commands:
 - one `read` probe per safe command, from its first example: `todo list --all`. A
   streaming command's probe adds `--no-stream --timeout 5`, so it ends with one envelope,
   the collected events or `TIMEOUT`, within the kit's 10-second limit on each run
+- for each safe streaming command, a `stream` probe that reads its lines as they come, with
+  a 10-second `deadline_seconds`, and for the first one, a second probe that sends SIGINT
+  after its first line, for the kit's `stream_contract` and `stream_sigint` checks. A
+  stream that never ends on its own fails the first within that deadline: give it an
+  example whose arguments bound it, or edit the probe
 - one `destructive` probe per destructive command, from its first example with the
   confirmation removed: `todo purge`. The kit runs it with `--dry-run`, and again with no
   flags to check that it is refused
@@ -166,16 +177,18 @@ examples/tutorial/conformance/todo list | jq -e '.ok and .data == []'
 $ uv run treaty conformance examples.tutorial.todo_exit_codes:app \
     --out examples/tutorial/conformance/todo.json --run --format plain
 Profile: examples/tutorial/conformance/todo.json (6 probes)
-Levels: level_1 pass, level_2 pass, level_3 pass
+Levels: level_1 pass, level_2 pass, level_3 incomplete
 
   pass  L3 argument_order
   pass  L2 destructive_refuses_unconfirmed
   pass  L1 dry_run_preview
   ...
   pass  L1 stdout_no_ansi
+  skip  L3 stream_contract
+  skip  L3 stream_sigint
 ```
 
-The kit lists any failures first, then the passing checks by id.
+The kit lists any failures first, then the passing checks by id, then the skipped ones.
 
 The probe count is `todo`'s; yours follows your commands and examples.
 

@@ -265,7 +265,7 @@ class Command:
     session_env_var: str
     """``<APP>_SESSION``, whose value deduplicates repeated mutating calls"""
     streaming: bool
-    """The handler is a generator; every yield is one envelope line (REQ-O-004)"""
+    """The handler is a generator; every yield is one item line (REQ-O-004)"""
     resources: tuple[type, ...]
     """Resource classes the handler takes after ``ctx``, in parameter order"""
     resource_graph: Mapping[type, ResourceSpec]

@@ -159,7 +159,6 @@ EXEC = '{"_cmd": "ls"}\n{"_cmd": "log"}\n'
         # A list keeps whole items: at most one item and its comma short of the cap
         (["ls"], "", None),
         (["ls", "--warnings-as-errors"], "", None),
-        (["tail"], "", None),
         (["exec"], EXEC, None),
     ],
 )
@@ -179,6 +178,24 @@ def test_the_written_line_newline_included_never_exceeds_the_cap(
         room = width + 3 if slack is None else slack
         for line in cut:
             assert CAP - room <= len(line.encode()), (argv, width, len(line.encode()))
+
+
+def test_a_stream_item_line_over_the_cap_is_left_out_and_reported() -> None:
+    """A stream's item line has no meta to say it was cut, so one over the cap is left out,
+    as an ndjson record is, and the summary line and stderr say so (#389)"""
+    out, err = io.StringIO(), io.StringIO()
+    code = sized_app(10).run(
+        ["tail"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env={"SIZECTL_MAX_OUTPUT_BYTES": str(CAP)},
+        isatty=False,
+    )
+    (summary,) = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert code == 0 and summary["_summary"] is True
+    assert [w["code"] for w in summary["warnings"]] == ["FIELD_TRUNCATED"]
+    assert '"truncation"' in err.getvalue()
 
 
 def test_total_bytes_counts_the_line_as_written() -> None:

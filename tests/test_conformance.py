@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import SPEC_DIR, needs_sh_launcher, spec_validator
+from conftest import SPEC_DIR, needs_posix_signals, needs_sh_launcher, spec_validator
 
 from examples.tutorial import todo_exit_codes
 from treaty import App, Ctx, Flag, NoArgs
@@ -26,22 +26,101 @@ VENV_PYTHON = Path(sys.executable)
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
-@needs_sh_launcher
-def test_example_cli_passes_conformance_kit() -> None:
+STREAM_CHECKS = frozenset({"stream_contract", "stream_sigint"})
+TICKS = Path(__file__).resolve().parent / "fixture_ticks_app.py"
+
+
+def run_kit(profile: Path, *only: str) -> dict:
     if not KIT.is_file():
         pytest.skip(f"conformance kit not found at {KIT}; set TREATY_SPEC_DIR")
+    argv = ["uv", "run", "--project", str(SPEC_DIR), str(KIT), str(profile)]
+    if only:
+        argv += ["--only", *only]
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report: dict = json.loads(result.stdout)["data"]
+    return report
+
+
+def only_streams_skipped(report: dict) -> None:
+    """An app with no stream: level 3 is incomplete only because the kit's stream checks
+    have no probe to run"""
+    assert report["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "incomplete"}
+    skipped = {c["id"] for c in report["checks"] if c["status"] == "skip"}
+    assert skipped == STREAM_CHECKS
+    assert all(c["status"] == "pass" for c in report["checks"] if c["id"] not in skipped)
+
+
+@needs_sh_launcher
+def test_example_cli_passes_conformance_kit() -> None:
     if not VENV_PYTHON.is_file():
         pytest.skip("launcher needs the project venv")
-    result = subprocess.run(
-        ["uv", "run", "--project", str(SPEC_DIR), str(KIT), str(PROFILE)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    report = json.loads(result.stdout)["data"]
-    assert report["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}
+    only_streams_skipped(run_kit(PROFILE))
+
+
+@needs_posix_signals
+def test_the_issues_stream_profile_passes_the_kits_stream_checks(tmp_path: Path) -> None:
+    """#389: item lines, one terminal line, and SIGINT's CANCELLED line with data.partial"""
+    profile = {
+        "schema_version": "1.0",
+        "tool": "ticks 0.1.0",
+        "command": [sys.executable, str(TICKS)],
+        "timeout_seconds": 10,
+        "manifest": ["manifest"],
+        "probes": [
+            {"name": "count", "argv": ["count"], "kind": "stream", "deadline_seconds": 15},
+            {
+                "name": "forever sigint",
+                "argv": ["forever"],
+                "kind": "stream",
+                "deadline_seconds": 15,
+                "signal": "INT",
+                "after_lines": 2,
+            },
+        ],
+    }
+    path = tmp_path / "ticks.json"
+    path.write_text(json.dumps(profile))
+    report = run_kit(path, *sorted(STREAM_CHECKS))
+    assert {c["id"]: c["status"] for c in report["checks"]} == dict.fromkeys(STREAM_CHECKS, "pass")
+    assert all(c["runs_checked"] > 0 for c in report["checks"])
+
+
+@needs_posix_signals
+def test_a_generated_profile_runs_the_kits_stream_checks(tmp_path: Path) -> None:
+    """``treaty conformance`` probes a safe stream as a stream, and once with SIGINT, so the
+    checks no longer skip; ``forever``'s probes are left out, as it never ends on its own"""
+    from fixture_ticks_app import app
+
+    probes = [p for p in probes_for(app) if not p.argv or p.argv[0] != "forever"]
+    path = tmp_path / "ticks.json"
+    path.write_text(json.dumps(build_profile(app, [sys.executable, str(TICKS)], probes)))
+    report = run_kit(path)
+    assert report["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}, report
     assert report["summary"]["failed"] == 0 and report["summary"]["skipped"] == 0
+
+
+def test_a_safe_stream_gets_a_stream_probe_and_the_first_one_a_sigint_probe() -> None:
+    from fixture_ticks_app import app
+
+    probes = {p.name: p.to_json() for p in probes_for(app)}
+    assert probes["count stream"] == {
+        "name": "count stream",
+        "argv": ["count"],
+        "kind": "stream",
+        "deadline_seconds": TIMEOUT_SECONDS,
+    }
+    assert probes["count SIGINT"] == {
+        "name": "count SIGINT",
+        "argv": ["count"],
+        "kind": "stream",
+        "deadline_seconds": TIMEOUT_SECONDS,
+        "signal": "INT",
+        "after_lines": 1,
+    }
+    assert probes["forever stream"]["kind"] == "stream" and "forever SIGINT" not in probes
+    # The read probe stays: --no-stream ends in one envelope
+    assert probes["count"]["kind"] == "read" and "--no-stream" in probes["count"]["argv"]
 
 
 def stream_app() -> App:
@@ -83,7 +162,8 @@ def test_streaming_commands_keep_the_probes_that_end_in_one_envelope() -> None:
     assert probes["watch"].argv == ("watch", "--no-stream", "--timeout", str(STREAM_SECONDS))
     assert 0 < STREAM_SECONDS < TIMEOUT_SECONDS
     # Nothing runs a mutating stream for real
-    assert "trade" not in probes
+    assert "trade" not in probes and "trade stream" not in probes
+    assert probes["watch stream"].argv == ("watch",)
 
 
 def test_a_streaming_read_probe_profile_validates_against_the_spec() -> None:

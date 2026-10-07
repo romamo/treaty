@@ -435,7 +435,7 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         NO_STREAM_FLAG,
         "no_stream",
         lambda c: c.streaming,
-        "Return one envelope with every event in data instead of one envelope line per event",
+        "Return one envelope with every event in data instead of one JSON line per event",
     ),
     FrameworkFlag(
         LIMIT_FLAG,

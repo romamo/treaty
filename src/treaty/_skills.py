@@ -94,8 +94,8 @@ def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) ->
             )
         if command.streaming:
             rails.append(
-                "Mutating stream: each event's effect says what it did and the summary's "
-                "meta.effects counts them; it takes no --idempotency-key, so a rerun is a new "
+                "Mutating stream: each event's effect says what it did and the _summary "
+                "line's effects counts them; it takes no --idempotency-key, so a rerun is a new "
                 "run, and a failure after a live effect is not retryable"
             )
         else:

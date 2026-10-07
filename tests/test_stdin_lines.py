@@ -38,6 +38,11 @@ def run(
     return code, [json.loads(line) for line in out.getvalue().splitlines()]
 
 
+def item(line: dict) -> dict:
+    """A stream's item line without its ``_seq``"""
+    return {k: v for k, v in line.items() if k != "_seq"}
+
+
 def piped(data: bytes) -> io.TextIOWrapper:
     """A text stdin over bytes, as ``sys.stdin`` is over its pipe"""
     return io.TextIOWrapper(io.BytesIO(data), encoding="utf-8")
@@ -74,12 +79,12 @@ def test_crlf_a_final_line_without_newline_and_a_bom() -> None:
     for stdin in (io.StringIO("﻿a\r\nb\nc"), piped(b"\xef\xbb\xbfa\r\nb\nc")):
         code, events = run(["upper"], stdin)
         assert code == 0
-        assert [e["data"] for e in events[:-1]] == [
+        assert [item(e) for e in events[:-1]] == [
             {"n": 1, "text": "A"},
             {"n": 2, "text": "B"},
             {"n": 3, "text": "C"},
         ]
-        assert events[-1]["meta"]["end"] is True
+        assert events[-1]["_summary"] is True
 
 
 def test_empty_lines_are_kept_and_empty_input_has_none() -> None:
@@ -103,7 +108,7 @@ def test_a_line_over_the_cap_exits_1_with_its_number(stdin) -> None:  # type: ig
 
 def test_a_stream_ends_with_the_line_error_after_its_events() -> None:
     code, events = run(["upper"], io.StringIO("a\n" + "z" * 65 + "\n"))
-    assert code == 1 and events[0]["data"] == {"n": 1, "text": "A"}
+    assert code == 1 and item(events[0]) == {"n": 1, "text": "A"}
     assert events[-1]["error"]["code"] == "LINE_TOO_LARGE"
     assert events[-1]["meta"]["partial"] is True
 
@@ -123,7 +128,7 @@ def test_input_file_is_read_line_by_line(tmp_path: Path) -> None:
     source = tmp_path / "in.ndjson"
     source.write_bytes(b"one\r\ntwo\n" + b"q" * 65 + b"\n")
     code, events = run(["upper", "--input-file", str(source)])
-    assert [e["data"]["text"] for e in events[:2]] == ["ONE", "TWO"]
+    assert [e["text"] for e in events[:2]] == ["ONE", "TWO"]
     assert code == 1 and events[-1]["error"]["context"] == {
         "line": 3,
         "limit_bytes": 64,
@@ -212,7 +217,7 @@ class Count:
 def test_streaming_payload_command_reads_its_payload() -> None:
     # A streaming stdin_input=True command used to see ctx.stdin_text as None
     code, events = run(["events"], io.StringIO("a\nb\n"))
-    assert code == 0 and [e["data"]["text"] for e in events[:-1]] == ["a", "b"]
+    assert code == 0 and [e["text"] for e in events[:-1]] == ["a", "b"]
 
 
 def _feed(write: int, lines: list[bytes], pause: float) -> threading.Thread:
@@ -236,7 +241,7 @@ def test_each_line_read_restarts_a_streams_idle_timeout() -> None:
     with os.fdopen(read, "r", encoding="utf-8") as stdin:
         code, events = run(["tally", "--timeout", "1"], stdin)  # type: ignore[arg-type]
     feeder.join()
-    assert code == 0 and events[0]["data"] == {"lines": 10, "first": "0"}, events
+    assert code == 0 and item(events[0]) == {"lines": 10, "first": "0"}, events
 
 
 def test_a_stalled_producer_times_the_stream_out() -> None:
@@ -263,7 +268,7 @@ def test_a_line_mode_stream_is_a_filter_in_a_real_pipe() -> None:
             proc.stdin.write(word + b"\n")
             proc.stdin.flush()
             event = json.loads(proc.stdout.readline())
-            assert event["data"] == {"n": n, "text": word.decode().upper()}, event
+            assert event == {"n": n, "text": word.decode().upper(), "_seq": n}, event
         proc.stdin.write(b"\xff\n")  # not UTF-8, read through sys.stdin's bytes
         proc.stdin.close()
         last = json.loads(proc.stdout.readline())

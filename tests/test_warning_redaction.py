@@ -76,14 +76,27 @@ def test_jsonl() -> None:
     assert_redacted(json.loads(line)["warnings"])
 
 
-@pytest.mark.parametrize("extra", [["--stream"], ["--no-stream"]])
-def test_stream_events_and_the_buffered_stream(extra: list[str]) -> None:
-    out = run(["tail", "--token-from-env", "PROBE_TOKEN", *extra])
+def test_the_buffered_stream() -> None:
+    out = run(["tail", "--token-from-env", "PROBE_TOKEN", "--no-stream"])
     assert SECRET not in out
     for line in out.splitlines():
         warnings = json.loads(line)["warnings"]
         assert warnings, line
         assert_redacted(warnings)
+
+
+def test_stream_lines_and_their_stderr_warning_lines() -> None:
+    # Item lines carry no warnings: they go to stderr as JSON lines, and the summary
+    # line carries the run's (#389)
+    out, err = io.StringIO(), io.StringIO()
+    argv = ["tail", "--token-from-env", "PROBE_TOKEN", "--stream"]
+    probe_app().run(argv, stdin=io.StringIO(), stdout=out, stderr=err, env=ENV)
+    assert SECRET not in out.getvalue() and SECRET not in err.getvalue()
+    *items, summary = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert items and all("warnings" not in item for item in items)
+    assert_redacted(summary["warnings"])
+    on_stderr = [json.loads(line) for line in err.getvalue().splitlines() if '"TOK"' in line]
+    assert_redacted(on_stderr)
 
 
 def test_exec_lines() -> None:

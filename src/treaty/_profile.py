@@ -40,11 +40,20 @@ class Probe:
     passthrough: bool = False
     """The probed command hands every token after its path to its tool, so a flag added
     for treaty goes before the path (#367); not part of the profile"""
+    deadline_seconds: int | None = None
+    """A ``stream`` probe's limit on the whole stream"""
+    sigint_after: int | None = None
+    """A ``stream`` probe's SIGINT, sent after this many stdout lines"""
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {"name": self.name, "argv": list(self.argv), "kind": self.kind}
         if self.dry_run_flag is not None:
             out["dry_run_flag"] = self.dry_run_flag
+        if self.deadline_seconds is not None:
+            out["deadline_seconds"] = self.deadline_seconds
+        if self.sigint_after is not None:
+            out["signal"] = "INT"
+            out["after_lines"] = self.sigint_after
         return out
 
 
@@ -84,6 +93,7 @@ def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[s
 
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
+    interrupted = False
     for command in user_commands(app):
         argv = _argv_from_example(app, command)
         if argv is None:
@@ -104,12 +114,31 @@ def probes_for(app: App) -> list[Probe]:
             shallow = _with_flags(command, argv, "--max-depth", "0")
             probes.append(Probe(f"{label} --max-depth 0", shallow, "invalid"))
         if command.streaming:
-            # JSONL, and possibly endless, while the kit expects one envelope: the probes
-            # above end before the stream starts, and a read is bounded (#349). A stream is
-            # safe or mutating, and a mutating one, as elsewhere, gets no probe that runs it
+            # JSONL, and possibly endless, while a read probe expects one envelope: the
+            # probes above end before the stream starts, and a read is bounded (#349). A
+            # stream is safe or mutating, and a mutating one, as elsewhere, gets no probe
+            # that runs it
             if command.danger_level is DangerLevel.SAFE:
-                bounded = (*_without_stream_flags(argv), "--no-stream", "--timeout")
+                streamed = _without_stream_flags(argv)
+                bounded = (*streamed, "--no-stream", "--timeout")
                 probes.append(Probe(label, (*bounded, str(STREAM_SECONDS)), "read"))
+                # REQ-O-004's lines, within the kit's limit; the first stream also once
+                # interrupted after its first line, for REQ-F-069's CANCELLED line (#389)
+                deadline = TIMEOUT_SECONDS
+                probes.append(
+                    Probe(f"{label} stream", streamed, "stream", deadline_seconds=deadline)
+                )
+                if not interrupted:
+                    interrupted = True
+                    probes.append(
+                        Probe(
+                            f"{label} SIGINT",
+                            streamed,
+                            "stream",
+                            deadline_seconds=deadline,
+                            sigint_after=1,
+                        )
+                    )
         elif command.danger_level is DangerLevel.DESTRUCTIVE and command.safe_default:
             # Unconfirmed, a safe_default command previews and exits 0, and --live alone is
             # its confirmation: nothing refuses, so it is probed as the read its default is

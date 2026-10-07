@@ -86,7 +86,7 @@ def test_handler_and_stream_see_the_callers_contextvars() -> None:
         TENANT.reset(token)
     assert isinstance(envelope, Envelope) and envelope.data == {"tenant": "host"}
     code, lines, _ = run(app, ["events", "--timeout", "5"])
-    assert [line["data"] for line in lines[:2]] == [{"tenant": "acme"}, {"tenant": "acme"}]
+    assert lines[:2] == [{"tenant": "acme"}, {"tenant": "acme"}]
 
 
 def test_failure_before_any_event_is_not_partial() -> None:

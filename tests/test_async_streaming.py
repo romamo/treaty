@@ -32,17 +32,17 @@ def run(argv: list[str]) -> tuple[int, list[dict[str, Any]]]:
     code = app.run(argv, stdout=out, stderr=io.StringIO(), env={}, isatty=False)
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     for line in lines:
-        spec_validator("response-envelope").validate(line)
+        if "ok" in line:  # item and summary lines are bare objects (REQ-O-004)
+            spec_validator("response-envelope").validate(line)
     return code, lines
 
 
-def test_an_async_generator_streams_one_envelope_per_event_with_its_context() -> None:
+def test_an_async_generator_streams_one_item_line_per_event_with_its_context() -> None:
     code, lines = run(["ticks", "--count", "3", "--interval", "0"])
     assert code == 0
     # TENANT was set once inside the generator: one context serves every step
-    assert [line["data"] for line in lines[:-1]] == [{"n": n, "tenant": "acme"} for n in (1, 2, 3)]
-    assert [line["meta"]["seq"] for line in lines[:-1]] == [1, 2, 3]
-    assert lines[-1]["meta"]["end"] is True and lines[-1]["meta"]["total"] == 3
+    assert lines[:-1] == [{"n": n, "tenant": "acme", "_seq": n} for n in (1, 2, 3)]
+    assert lines[-1]["_summary"] is True and lines[-1]["total"] == lines[-1]["_count"] == 3
     # the async resource opens on the stream's loop and closes after the source's finally
     assert EVENTS == ["feed open", "source finally", "feed closed"]
 
@@ -53,7 +53,8 @@ def test_an_async_stream_past_its_idle_limit_is_cancelled_and_answers_timeout(pa
     assert code == 10
     last = lines[-1]
     assert last["error"]["code"] == "TIMEOUT"
-    assert last["meta"]["seq"] == 1 and last["meta"]["partial"] is True
+    assert last["meta"]["items_emitted"] == 1 and last["meta"]["partial"] is True
+    assert lines[:-1] == [{"n": 1, "tenant": "acme", "_seq": 1}]
     assert EVENTS == ["feed open", "source finally", "feed closed"]
 
 
@@ -96,8 +97,8 @@ def test_an_mcp_tool_call_collects_an_async_stream() -> None:
 def test_a_mutating_async_stream_counts_its_effects() -> None:
     code, lines = run(["apply", "--count", "3"])
     assert code == 0
-    assert [line["data"]["effect"] for line in lines[:-1]] == ["created", "noop", "created"]
-    assert lines[-1]["meta"]["effects"] == {"created": 2, "noop": 1}
+    assert [line["effect"] for line in lines[:-1]] == ["created", "noop", "created"]
+    assert lines[-1]["_summary"] is True and lines[-1]["effects"] == {"created": 2, "noop": 1}
 
 
 @needs_posix_signals
@@ -120,8 +121,10 @@ def test_sigint_ends_an_async_stream_cancelled_after_its_finally(path: str) -> N
     last = lines[-1]
     spec_validator("response-envelope").validate(last)
     assert last["error"]["code"] == "CANCELLED", last
-    assert last["meta"]["partial"] is True
-    assert last["meta"]["seq"] == len(lines) - 1
+    assert last["data"] == {"partial": True} and last["meta"]["partial"] is True
+    assert last["error"]["context"]["signal"] == "SIGINT"
+    assert last["meta"]["items_emitted"] == len(lines) - 1
+    assert [line["_seq"] for line in lines[:-1]] == list(range(1, len(lines)))
     assert "already running" not in err
     assert err.index("tickctl: source finally") < err.index("tickctl: feed closed")
 

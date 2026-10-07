@@ -136,10 +136,11 @@ Before `1.0.0` (the open tasks of `plans/1.0/15-release-readiness.md`):
   `Resolver` acquires each class once per run inside `_invoke`, which runs under the
   timeout so a `CliExit` or `ParseError` from `acquire` takes the normal envelope path. A
   wrong return type from `acquire` is a `TypeError`, reported as `HANDLER_CRASHED`
-- **Streams are envelope lines, not bare items.** REQ-O-004 shows bare items plus a
-  summary line; treaty writes one full envelope per yield with `meta.seq`, then a
-  terminal envelope (`end`, `total`), because `exec` already speaks envelope lines and a
-  mid-stream failure needs an `error`. `_Run.stream` is a generator; `drain()` throws a
+- **Streams are envelopes inside, spec lines on stdout (D-10, #389).** `_Run.stream`
+  yields one envelope per event with `meta.seq`, then a terminal envelope (`end`,
+  `total`), which `exec` lines and `App.call` keep; `_write_item_stream` turns them into
+  REQ-O-004's lines on stdout in `json`/`jsonl`: bare items (`_seq` when `_numbered`),
+  then a `_summary` line or the error envelope. `_Run.stream` is a generator; `drain()` throws a
   signal that lands between events back into it so the CANCELLED envelope is produced in
   one place; a timeout is an idle limit, the wait for each `next()` on a worker thread
   (REQ-F-011), and a whole-stream deadline only when buffered (`whole=True`: `--no-stream`,
