@@ -1554,7 +1554,7 @@ schema. A property declares the `Out` options as schema keys, for pydantic throu
 optional: an undeclared array is sorted by its items' JSON text and `treaty audit` advises
 declaring its order. `ordered=True` on the command keeps the handler's order of every array
 in its output, inside models too, so `x-ordered` is the finer-grained route for one
-property; an `x-sort-key` property is still sorted. A `list[Model]` or `tuple[Model, ...]` a command returns or a dataclass
+property; an `x-sort-key` property and a set (`"uniqueItems": true`) are still sorted. A `list[Model]` or `tuple[Model, ...]` a command returns or a dataclass
 field holds is ordered as a list of dataclasses is, by `sort_key=` or `ordered=True` (or
 `Out(...)` on the field), and `stable-order` warns when it declares neither. A
 credential-named or `format: password` string is masked unless `--unmask`. A field type
@@ -1977,8 +1977,9 @@ a name may be a fact of the record, such as when a trade happened, so there it i
   `treaty.Out(sort_key="id")` does the same for a field. `ordered=True` on a command keeps
   the handler's order of every array in its output, whatever the return type: nested
   arrays, arrays in dataclasses and adapted models, and untyped content such as a
-  `list[dict[str, object]]` from `model_dump()`; only a field's or property's own sort key
-  still sorts. `Out(ordered=True)` keeps a field's array, and every array inside untyped
+  `list[dict[str, object]]` from `model_dump()`; only a field's or property's own sort key,
+  and a set or frozenset (`"uniqueItems": true`, which has no order of its own), still
+  sort. `Out(ordered=True)` keeps a field's array, and every array inside untyped
   content in it. The schema says `"x-ordered": true` on each kept array (and, for the
   command, at its root). Fixed tuples keep their order. Rule `stable-order`,
   a warning for an array of objects with neither, so `--strict` fails on it
@@ -2322,7 +2323,11 @@ from each command's first example and danger level, writes the profile, and with
 executes the spec kit, exiting with `CONFORMANCE_FAILED` when checks fail. An existing
 profile that differs from the generated one as JSON, such as one with hand-written probes,
 is left alone: the command exits `6` with `CONFLICT`, naming the changed keys and probes,
-and `--force` replaces it. An equal profile is not rewritten (`effect: noop`). The kit is found
+and `--force` replaces it. To point a probe at a fixture, set it on the example rather than
+in the profile: `Example("Profile a lease", "demo profile lease.pdf",
+probe="demo profile conformance/fixtures/lease.pdf")` probes that argv instead of the
+command, and `probe=False` keeps the example out of the profile, so regenerating never
+conflicts. An equal profile is not rewritten (`effect: noop`). The kit is found
 via `--spec-dir`, then `TREATY_SPEC_DIR`, then `../cli-agent-ergonomics` relative to the
 current directory; a named location without `conformance/run.py` exits `4` instead of
 falling through. `--out`, `--spec-dir`, and `--directory` reject `..` segments,

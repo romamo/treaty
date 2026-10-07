@@ -223,6 +223,16 @@ def _describe(app: App) -> Iterator[Finding]:
                     f"the example {given.command!r} does not parse: {problem}",
                     "fix the example, which agents copy verbatim, so it passes --validate-only",
                 )
+            probe = given.probe
+            problem = None if not isinstance(probe, str) else _example_problem(app, c, probe)
+            if problem is not None:
+                yield Finding(
+                    "describe",
+                    Severity.ERROR,
+                    c.path.value,
+                    f"the probe {probe!r} of example {given.command!r} does not parse: {problem}",
+                    "fix the probe, which treaty conformance runs, so it passes --validate-only",
+                )
 
 
 # Framework flags whose value is checked against the world the example runs in, not its
