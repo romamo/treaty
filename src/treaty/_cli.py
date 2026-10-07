@@ -324,6 +324,7 @@ def render_audit(data: Any) -> str:
             "treaty audit myapp.cli:app --baseline manifest.json --strict",
         ),
     ],
+    timeout=60,
     renderers={Format.PLAIN: render_audit},
     danger_level="safe",
 )
@@ -354,6 +355,7 @@ def audit_command(args: AuditArgs, ctx: Ctx) -> AuditOut:
     examples=[("See what treaty audit checks, and in which order", "treaty rules")],
     default_limit=0,  # a short, fixed list
     ordered=True,
+    timeout=60,
 )
 def rules_command(args: NoArgs, ctx: Ctx) -> list[dict[str, str]]:
     return [
@@ -551,6 +553,7 @@ def _doc_files(path: Path) -> list[Path]:
         ("Check AGENTS.md in CI", "treaty check-docs myapp.cli:app AGENTS.md"),
         ("Check the skill files too", "treaty check-docs myapp.cli:app AGENTS.md skills"),
     ],
+    timeout=60,
     renderers={Format.PLAIN: render_check_docs},
 )
 def check_docs_command(args: CheckDocsArgs, ctx: Ctx) -> CheckDocsOut:

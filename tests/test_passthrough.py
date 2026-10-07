@@ -12,18 +12,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import needs_posix_signals, spec_validator
+from conftest import SPEC_DIR, needs_posix_signals, spec_validator
 from fixture_passthrough_app import app as ledger
+from fixture_passthrough_read_app import app as wrapper
 
 from treaty import App, Ctx, Flag, NoArgs, RegistrationError
 from treaty._agents_md import render_block
 from treaty._audit import audit
 from treaty._completion import tree
 from treaty._mcp import call_tool, tool_entries
-from treaty._profile import argument_order_for, probes_for
+from treaty._profile import argument_order_for, build_profile, has_kit, probes_for, run_kit
 from treaty._skills import render
 
 LEDGER = Path(__file__).resolve().parent / "fixture_passthrough_app.py"
+WRAPPER = LEDGER.with_name("fixture_passthrough_read_app.py")
 BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
 
 
@@ -396,8 +398,8 @@ def test_the_skill_file_puts_treaty_flags_before_the_path() -> None:
 
 
 def wrapper_app(ran: list[tuple[str, ...]]) -> App:
-    """A network passthrough command, the unknown-flag probe's base, whose example has
-    options after the path that argument_order could pick"""
+    """A network passthrough command whose example has options after the path that
+    argument_order could pick"""
     app = App("gitw", version="1.0.0")
 
     @app.command(
@@ -416,21 +418,24 @@ def wrapper_app(ran: list[tuple[str, ...]]) -> App:
     return app
 
 
-def test_the_example_after_the_path_reaches_the_probe_verbatim() -> None:
-    """Only the globals before the path are dropped: --format oneline is git's (#367)"""
+def test_no_probe_runs_a_passthrough_command() -> None:
+    """Its tool owns stdout and its envelope is on stderr, where the kit's json_envelope
+    check does not read it: the read and --proxy probes of one failed that check (#386).
+    The unknown-flag probe's base is then the version built-in"""
     probes = {p.name: p for p in probes_for(wrapper_app([]))}
-    assert probes["git"].argv == ("git", "log", "--format", "oneline", "--max-count", "3")
+    assert [p for p in probes.values() if "git" in p.argv] == []
+    assert probes["unknown flag"].argv == ("version", "--no-such-flag")
 
 
-def test_conformance_probes_put_treatys_flags_before_a_passthrough_path() -> None:
-    """After the path, the tool got --no-such-flag and the handler ran with exit 0 (#367)"""
-    ran: list[tuple[str, ...]] = []
-    app = wrapper_app(ran)
-    invalid = [p for p in probes_for(app) if p.kind == "invalid" and "git" in p.argv]
-    assert {p.name for p in invalid} == {"git --proxy socks5", "unknown flag"}
-    for probe in invalid:
-        assert run(list(probe.argv), app=app).code == 2, probe
-    assert ran == []
+def test_a_passthrough_only_app_passes_the_conformance_kit(tmp_path: Path) -> None:
+    """The kit on an app whose one command is a safe network passthrough (#386)"""
+    if not has_kit(SPEC_DIR):
+        pytest.skip(f"conformance kit not found at {SPEC_DIR}; set TREATY_SPEC_DIR")
+    profile = build_profile(wrapper, [sys.executable, str(WRAPPER)], probes_for(wrapper))
+    path = tmp_path / "gitw.json"
+    path.write_text(json.dumps(profile))
+    kit = run_kit(SPEC_DIR, path, 300, os.environ)
+    assert kit.exit_code == 0, (kit.envelope, kit.stderr)
 
 
 def test_argument_order_skips_a_passthrough_command() -> None:
