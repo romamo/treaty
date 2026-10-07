@@ -212,15 +212,19 @@ def argument_order_for(app: App) -> dict[str, object] | None:
     """The first example whose tokens after its positionals start with an option, so the kit
     can move ``--format`` around it (REQ-F-079). A destructive one runs with its dry-run flag
     and never ``--confirm-destructive``, so one whose only option is that flag is skipped,
-    as is a safe network command's, which would make its real requests (#390). Without one,
-    the built-in ``manifest --etag``"""
+    as is a network command's that has no read probe, safe or ``safe_default``, which would
+    make its real requests (#390). Without one, the built-in ``manifest --etag``"""
     for command in user_commands(app):
         if command.danger_level is DangerLevel.MUTATING or command.streaming:
             continue
         if command.passthrough:
             continue  # the kit moves --format after the path, where the tool would get it
-        if command.has_network_io and command.danger_level is DangerLevel.SAFE:
-            continue  # each run would make its real requests, as a read probe would (#390)
+        if command.has_network_io and (
+            command.danger_level is DangerLevel.SAFE or command.safe_default
+        ):
+            # Each run would make its real requests, as a read probe would (#390); a
+            # safe_default command previews unconfirmed, so it runs as the read it is probed as
+            continue
         argv = _argv_from_example(app, command)
         if argv is None:
             continue

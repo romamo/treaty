@@ -300,3 +300,31 @@ def test_no_probe_runs_a_network_command(with_local: bool) -> None:
     order = argument_order_for(app)
     assert order is not None
     assert order["command_path"] == (["tally", "lease.pdf"] if with_local else ["manifest"])
+
+
+@dataclass(frozen=True, slots=True)
+class PurgeArgs:
+    bucket: str = Flag(default="logs", description="Remote bucket to purge")
+    dry_run: bool = Flag(default=False, description="Preview only")
+
+
+def test_argument_order_does_not_run_a_safe_default_network_command() -> None:
+    """Unconfirmed, a safe_default command previews, a read with its real requests: it has
+    no read probe, so argument_order must not run it either (#390)"""
+    app = App("s3ctl", version="1.0.0")
+
+    @app.command(
+        "purge",
+        description="Purge a remote bucket",
+        examples=[("Preview a purge", "s3ctl purge --bucket logs")],
+        danger_level="destructive",
+        safe_default=True,
+        exit_codes=(),
+        has_network_io=True,
+    )
+    def purge(args: PurgeArgs, ctx: Ctx) -> dict[str, str]:
+        return {"bucket": args.bucket}
+
+    assert "purge" not in {p.name for p in probes_for(app)}
+    order = argument_order_for(app)
+    assert order is not None and order["command_path"] == ["manifest"]

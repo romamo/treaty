@@ -93,8 +93,8 @@ Probes run the real CLI. treaty derives them from your commands:
 - two `invalid` probes: `manifest --etag x`, a malformed etag, and the first command's
   probe with `--no-such-flag` added, which exits 2 before anything runs
 - for `argument_order`, the first example with a command-local option to move `--format`
-  around, skipping safe network commands; without one, the built-in `manifest --etag`
-  with an etag no manifest has
+  around, skipping network commands that get no `read` probe; without one, the built-in
+  `manifest --etag` with an etag no manifest has
 
 Mutating commands are never run: the only probes built from them are `invalid` ones, such as
 a network command's malformed `--proxy`, which exit 2 before anything runs. Destructive ones
