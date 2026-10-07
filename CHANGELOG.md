@@ -21,13 +21,41 @@ Apps built on treaty keep their own, structured schema changelog with
   `data: {"partial": true}` and `error.context.signal`. An event's warnings go to stderr
   as JSON lines. A consumer that read `.data` and `meta.seq` from each line reads the
   line itself and `_seq`; a `stdin_records=` command reads both shapes. `exec` lines,
-  `App.call`, MCP tool calls, `--no-stream`, and the plain format are unchanged.
-  `treaty conformance` adds a `stream` probe for each safe stream command and a SIGINT
-  one, so the kit's `stream_contract` and `stream_sigint` checks run: a committed profile
-  differs from the generated one, so rerun `treaty conformance --force` once. Register a
-  stream that never ends on its own with the new `endless=True`: it gets the SIGINT probe
-  and no `stream` probe, and `--schema`, `--help`, and its skill file say a signal ends
-  it. CI checks against cli-agent-spec v1.13.0 (#389)
+  `App.call`, MCP tool calls, `--no-stream`, and the plain format are unchanged. The
+  built-in `audit-log` is such a stream: in `json` and `jsonl` it writes each entry as a
+  bare JSON line and a `"_summary": true` line last, so a reader of `.data` on each line
+  reads the line itself. `treaty conformance` adds a `stream` probe for each safe stream
+  command without `has_network_io` and a SIGINT one, so the kit's `stream_contract` and
+  `stream_sigint` checks run: a committed profile differs from the generated one, so
+  rerun `treaty conformance --force` once. Register a stream that never ends on its own
+  with the new `endless=True`: it gets the SIGINT probe and no `stream` probe, and
+  `--schema`, `--help`, and its skill file say a signal ends it. CI checks against
+  cli-agent-spec v1.13.0 (#389)
+- An app with an `output_file` command whose example passes `--output PATH` now generates
+  a conformance profile without it, in the read and `unknown flag` probes and the
+  `argument_order` run, so a committed profile with the old `--output` differs from the
+  generated one and `treaty conformance` exits `CONFLICT`: rerun
+  `treaty conformance --force` once to update it (#391)
+- An app with a safe, streaming, or `safe_default` `has_network_io` command now generates
+  a conformance profile without that command's `read` probe, and whose `argument_order`
+  comes from another example or the `manifest --etag` one, so a committed profile with the
+  old probe differs from the generated one and `treaty conformance` exits `CONFLICT`:
+  rerun `treaty conformance --force` once to update it (#390)
+
+### Fixed
+
+- `treaty conformance` drops an `output_file` command's `--output PATH` and
+  `--output=PATH` from the argv it takes from the command's example, so the kit's runs of
+  its probes return the data in the envelope instead of writing the file on every run. An
+  example whose only option was `--output` no longer gives `argument_order`, which moves
+  to the next example or the built-in `manifest --etag` (#391)
+- `treaty conformance` no longer generates a `read` probe for a `has_network_io` command,
+  or takes such a command's example for `argument_order`, `safe_default` ones included
+  (a destructive one keeps its `--dry-run` probe): each kit run made the command's real,
+  and perhaps paid, requests. Its probes are the ones that exit 2 before the network: the
+  malformed `--proxy`, and the `unknown flag` probe, which still goes on the first
+  command's example when that command is a network one. Both go before an example's `--`,
+  where they no longer become positionals that run the command (#390)
 
 ## [1.0.0rc36] - 2026-10-06
 
