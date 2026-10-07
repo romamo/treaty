@@ -555,6 +555,7 @@ def test_a_stream_that_changes_directory_is_changed_back(tmp_path: Path) -> None
     app.run(["tail"], stdout=out, stderr=io.StringIO(), env=BASE_ENV)
     last = json.loads(out.getvalue().splitlines()[-1])
     assert os.getcwd() == before
+    assert last["_summary"] is True
     assert [w["code"] for w in last["warnings"]] == ["CWD_CHANGED"]
 
 

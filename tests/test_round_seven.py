@@ -253,7 +253,7 @@ def test_stream_return_type_may_be_an_alias() -> None:
 
     out = io.StringIO()
     app.run(["rows"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
-    assert json.loads(out.getvalue().splitlines()[0])["data"] == {"n": 1}
+    assert json.loads(out.getvalue().splitlines()[0]) == {"n": 1, "_seq": 1}
 
 
 def test_a_command_cannot_also_be_a_group() -> None:

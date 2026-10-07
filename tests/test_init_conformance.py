@@ -254,8 +254,16 @@ def test_conformance_runs_kit_against_example(tmp_path: Path) -> None:
     )
     assert code == 0, env
     assert env["data"]["ran"] is True
-    assert env["data"]["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}
-    assert all(c["status"] == "pass" for c in env["data"]["checks"])
+    # deployctl has no stream, so the kit's stream checks have no probe to run (#389)
+    assert env["data"]["levels"] == {
+        "level_1": "pass",
+        "level_2": "pass",
+        "level_3": "incomplete",
+    }
+    streams = {"stream_contract", "stream_sigint"}
+    assert all(
+        c["status"] == ("skip" if c["id"] in streams else "pass") for c in env["data"]["checks"]
+    )
 
 
 def test_default_command_is_the_launcher_beside_the_profile_on_posix(tmp_path: Path) -> None:

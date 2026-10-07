@@ -152,10 +152,11 @@ class Ctx:
         """The input of a ``stdin_records=T`` command, one ``T`` per record as it arrives,
         read as ``ctx.stdin_lines`` reads lines. A line is a bare JSON object or another
         treaty command's envelope: an envelope gives its ``data`` (an array, each item),
-        and its stream's terminal envelope ends the input. An upstream ``ok: false`` ends
-        the run with exit 1 ``UPSTREAM_FAILED``, the upstream error in
-        ``context.upstream``; envelopes that stop before their terminal one with
-        ``UPSTREAM_INCOMPLETE``; a record that fails ``T``'s fields with
+        and a stream's ``"_summary": true`` line or terminal envelope ends the input; a
+        numbered item line loses its ``_seq``. An upstream ``ok: false`` ends the run with
+        exit 1 ``UPSTREAM_FAILED``, the upstream error in ``context.upstream``; a stream
+        that stops before its terminal line with ``UPSTREAM_INCOMPLETE``; a record that
+        fails ``T``'s fields with
         ``RECORD_INVALID``, ``context.line`` and ``context.field`` naming it"""
         if self._stdin_records is None:
             raise RegistrationError("ctx.stdin_records needs stdin_records= on the command")

@@ -377,10 +377,13 @@ def test_no_injection_protection_is_documented_with_a_security_warning_in_help(
 def test_list_items_stream_events_and_exec_lines_are_tagged(app: App) -> None:
     _, env, _ = run(app, ["docs"])
     assert all(i["_trusted"] is False for i in env["data"])
-    out = io.StringIO()
-    app.run(["tail"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
+    out, err = io.StringIO(), io.StringIO()
+    app.run(["tail"], stdout=out, stderr=err, env={}, isatty=False)
     event = json.loads(out.getvalue().splitlines()[0])
-    assert event["data"]["_trusted"] is False and event["data"]["content"].startswith("[JWT")
+    assert event["_trusted"] is False and event["content"].startswith("[JWT")
+    # The item line has no room for them: the warnings are JSON lines on stderr
+    codes = {json.loads(line)["code"] for line in err.getvalue().splitlines() if '"code"' in line}
+    assert {"UNTRUSTED_CONTENT", "HIGH_ENTROPY_MASKED"} <= codes
     _, env, _ = run(app, ["tail", "--no-stream"])
     assert env["data"][0]["_trusted"] is False
     assert {w["code"] for w in env["warnings"]} == {"UNTRUSTED_CONTENT", "HIGH_ENTROPY_MASKED"}

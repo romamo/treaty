@@ -273,10 +273,15 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
     lines += _section("Global flags", globals_)
     lines.append(f"Danger level: {command.danger_level.value}")
     if command.streaming:
-        lines.append("Streams one JSONL envelope per event; --no-stream returns a single envelope")
+        lines.append(
+            "Streams one JSON object per event, then a _summary line; --no-stream returns a "
+            "single envelope"
+        )
+        if command.endless:
+            lines.append("Runs until interrupted: SIGINT ends it on a CANCELLED line")
         if command.danger_level is not DangerLevel.SAFE:
             lines.append(
-                "Each event reports its own effect; the last line counts them in meta.effects"
+                "Each event reports its own effect; the _summary line counts them in effects"
             )
     if command.examples:
         lines.append("")

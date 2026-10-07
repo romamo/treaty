@@ -89,9 +89,25 @@ def run(
 
 
 def valid(lines: list[dict]) -> None:
+    """Envelopes validate (exec's lines are all envelopes); a stream's item lines are bare
+    and its summary line is last"""
     validator = spec_validator("response-envelope")
-    for line in lines:
-        validator.validate(line)
+    for n, line in enumerate(lines, 1):
+        if "ok" in line:
+            validator.validate(line)
+        elif line.get("_summary") is True:
+            assert n == len(lines), "the summary line ends the stream"
+        else:
+            assert "error" not in line and "meta" not in line
+
+
+def items(lines: list[dict]) -> list[dict]:
+    """The item lines without their ``_seq``"""
+    return [
+        {k: v for k, v in line.items() if k != "_seq"}
+        for line in lines
+        if "ok" not in line and "_summary" not in line
+    ]
 
 
 # Registration
@@ -170,13 +186,13 @@ def test_each_event_carries_its_effect_and_the_summary_counts_them() -> None:
     code, lines = run(["sync", "u1,u2*,u3"])
     assert code == 0
     valid(lines)
-    assert [line["data"] for line in lines[:3]] == [
+    assert items(lines) == [
         {"id": "u1", "effect": "created"},
         {"id": "u2", "effect": "noop"},
         {"id": "u3", "effect": "created"},
     ]
-    summary = lines[3]["meta"]
-    assert summary["end"] is True and summary["total"] == 3
+    summary = lines[3]
+    assert summary["_summary"] is True and summary["total"] == 3
     assert summary["effects"] == {"created": 2, "noop": 1}
     assert "dry_run" not in summary
     assert RAN == ["u1", "u3"]
@@ -196,19 +212,19 @@ def test_an_empty_mutating_stream_counts_no_effects() -> None:
     out = io.StringIO()
     assert app.run(["x"], stdout=out, stderr=io.StringIO(), env={}, isatty=False) == 0
     (summary,) = [json.loads(line) for line in out.getvalue().splitlines()]
-    assert summary["meta"]["effects"] == {}
+    assert summary["_summary"] is True and summary["effects"] == {}
 
 
 def test_dry_run_covers_the_whole_stream() -> None:
     code, lines = run(["sync", "u1,u2*,u3", "--dry-run"])
     assert code == 0
     valid(lines)
-    assert [line["data"]["effect"] for line in lines[:3]] == [
+    assert [line["effect"] for line in items(lines)] == [
         "would_create",
         "would_noop",
         "would_create",
     ]
-    summary = lines[3]["meta"]
+    summary = lines[3]
     assert summary["dry_run"] is True
     assert summary["effects"] == {"would_create": 2, "would_noop": 1}
     assert RAN == []
@@ -228,11 +244,11 @@ def test_a_stream_failing_after_a_live_effect_is_not_retryable() -> None:
     code, lines = run(["sync", "u1,u2", "--fail-after", "1"])
     assert code == 80
     valid(lines)
-    assert lines[0]["data"]["effect"] == "created"
+    assert lines[0]["effect"] == "created"
     error = lines[-1]["error"]
     assert error["code"] == "UPSTREAM" and error["retryable"] is False
     assert "retry_strategy" not in error and "no side effects" not in error["suggestion"]
-    assert lines[-1]["meta"]["partial"] is True and lines[-1]["meta"]["seq"] == 1
+    assert lines[-1]["meta"]["partial"] is True and lines[-1]["meta"]["items_emitted"] == 1
     assert "effects" not in lines[-1]["meta"]
 
 
@@ -266,7 +282,7 @@ def test_an_event_with_a_wrong_effect_ends_the_stream(argv: list[str], problem: 
     error = lines[0]["error"]
     assert error["code"] == "INVALID_EFFECT" and error["retryable"] is False
     assert "event 1" in error["message"] and problem in error["message"]
-    assert lines[0]["meta"]["seq"] == 0
+    assert lines[0]["meta"]["items_emitted"] == 0
 
 
 def test_an_event_without_an_effect_ends_the_stream() -> None:
@@ -281,7 +297,7 @@ def test_an_event_without_an_effect_ends_the_stream() -> None:
     code = app.run(["x", "a"], stdout=out, stderr=io.StringIO(), env={}, isatty=False)
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert code == 1
-    assert lines[0]["data"] == {"id": "u1", "effect": "created"}
+    assert items(lines) == [{"id": "u1", "effect": "created"}]
     assert lines[1]["error"]["code"] == "INVALID_EFFECT"
     assert "event 2" in lines[1]["error"]["message"]
     assert "no string 'effect' field" in lines[1]["error"]["message"]
@@ -290,8 +306,9 @@ def test_an_event_without_an_effect_ends_the_stream() -> None:
 def test_a_safe_stream_gains_no_effect_keys() -> None:
     code, lines = run(["tail", "a,b"])
     assert code == 0
-    assert lines[0]["data"] == {"id": "a", "effect": "seen"}
-    assert "effects" not in lines[-1]["meta"] and "dry_run" not in lines[-1]["meta"]
+    assert items(lines)[0] == {"id": "a", "effect": "seen"}
+    assert lines[-1]["_summary"] is True
+    assert "effects" not in lines[-1] and "dry_run" not in lines[-1]
 
 
 # Buffered answers
@@ -354,17 +371,15 @@ def test_app_call_puts_the_stream_keys_on_meta_not_extra_meta() -> None:
         assert not STREAM_KEYS & set(env.extra_meta)
 
 
-def test_the_stream_keys_serialize_as_before() -> None:
-    # #348: moving the keys onto Meta leaves every line's meta as it was
+def test_the_stream_keys_serialize_on_the_summary_line() -> None:
+    # #348's keys on Meta; on stdout the summary line carries them, not seq or end (#389)
     code, lines = run(["sync", "u1,u2*", "--stable-output"])
     assert code == 0
     valid(lines)
-    assert [STREAM_KEYS & set(line["meta"]) for line in lines] == [
-        {"seq"},
-        {"seq"},
-        {"seq", "end", "total", "effects"},
-    ]
-    assert lines[2]["meta"]["seq"] == 2 and lines[2]["meta"]["pagination"]["total"] == 2
+    assert [line["_seq"] for line in lines[:2]] == [1, 2]
+    summary = lines[2]
+    assert STREAM_KEYS & set(summary) == {"total", "effects"}
+    assert summary["_count"] == 2 and summary["pagination"]["total"] == 2
     code, lines = run(["sync", "u1,u2", "--no-stream", "--fail-after", "1", "--dry-run"])
     assert code == 80
     valid(lines)
@@ -492,9 +507,9 @@ def test_a_session_never_replays_a_stream() -> None:
     second = run(["sync", "u1"], env=env)
     assert RAN == ["u1"]  # the handler ran again: a repeated loop is a new loop
     for _, lines in (first, second):
-        assert lines[0]["data"]["effect"] == "created"
-        assert "idempotency_key" not in lines[-1]["meta"]
-        assert "idempotency_hit" not in lines[-1]["meta"]
+        assert lines[0]["effect"] == "created"
+        assert "idempotency_key" not in lines[-1]
+        assert "idempotency_hit" not in lines[-1]
 
 
 # Docs

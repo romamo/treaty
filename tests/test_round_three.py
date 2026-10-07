@@ -689,7 +689,7 @@ def test_exec_file_with_a_bom_and_physical_line_numbers(tmp_path: Path) -> None:
 
 def test_streaming_handler_may_return_an_iterable() -> None:
     code, lines, _ = run(echo_app(), ["items"])
-    assert code == 0 and [line["data"] for line in lines[:2]] == [{"a": 1}, {"a": 2}]
+    assert code == 0 and lines[:2] == [{"a": 1}, {"a": 2}]
 
 
 def test_profile_keeps_explicit_relative_commands_absolute_without_resolving_symlinks(

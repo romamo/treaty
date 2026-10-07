@@ -1303,7 +1303,8 @@ def test_framework_warnings_count_toward_warnings_as_errors() -> None:
 def test_warnings_as_errors_applies_to_a_stream_terminal_and_to_exec_lines() -> None:
     code, out, _ = run(make_app(), ["tail", "--n", "1", "--warnings-as-errors"])
     lines = [json.loads(line) for line in out.splitlines()]
-    assert code == 1 and [line["ok"] for line in lines] == [True, True, False]
+    # Two item lines, then the error envelope in place of the summary line
+    assert code == 1 and [line.get("ok") for line in lines] == [None, None, False]
     assert lines[-1]["error"]["code"] == "WARNINGS_AS_ERRORS"
     plan = '{"_cmd":"warn","n":1}\n{"_cmd":"warn","n":0}\n'
     out, err = io.StringIO(), io.StringIO()
@@ -1888,7 +1889,8 @@ def query(tmp_path: Path, argv: list[str]) -> tuple[int, list[dict[str, Any]]]:
 
 
 def events(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [line["data"] for line in lines if "seq" in line["meta"] and not line["meta"].get("end")]
+    """The item lines of the audit-log stream, before its terminal line"""
+    return [line for line in lines if "_summary" not in line and "ok" not in line]
 
 
 def old_entry(tmp_path: Path, **fields: object) -> None:
@@ -1912,7 +1914,7 @@ def test_audit_log_since_1h_format_jsonl_returns_invocations_of_the_past_hour_on
         handle.write("\n".join([old, *lines]) + "\n")
     code, found = query(tmp_path, ["--since", "1h"])
     assert code == 0 and [e["command"] for e in events(found)] == ["warn", "missing"]
-    assert found[-1]["meta"]["end"] is True and found[-1]["meta"]["total"] == 2
+    assert found[-1]["_summary"] is True and found[-1]["total"] == 2
 
 
 def test_audit_log_since_takes_an_iso_time_with_an_offset(tmp_path: Path) -> None:

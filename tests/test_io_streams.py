@@ -84,6 +84,11 @@ def lines(text: str) -> list[dict]:
     return [json.loads(line) for line in text.splitlines()]
 
 
+def item(line: dict) -> dict:
+    """A stream's item line without its ``_seq``"""
+    return {k: v for k, v in line.items() if k != "_seq"}
+
+
 # REQ-F-011
 
 
@@ -92,14 +97,14 @@ def test_f011_a_stream_silent_past_the_idle_limit_ends_with_timeout() -> None:
     code, out, _ = run(["once"])
     events = lines(out)
     assert code == 10 and time.monotonic() - started < 1.5
-    assert events[0]["data"] == {"n": 1}
-    assert events[-1]["error"]["code"] == "TIMEOUT" and events[-1]["meta"]["seq"] == 1
-    assert all(e["meta"]["timeout_ms"] == 300 for e in events)
+    assert item(events[0]) == {"n": 1}
+    assert events[-1]["error"]["code"] == "TIMEOUT" and events[-1]["meta"]["timeout_ms"] == 300
+    assert len(events) == 2
 
 
 def test_f011_a_stream_that_keeps_producing_runs_past_the_limit() -> None:
     code, out, _ = run(["ticks"])
-    assert code == 0 and lines(out)[-1]["meta"]["total"] == 6
+    assert code == 0 and lines(out)[-1]["total"] == 6
 
 
 def test_f011_schema_names_the_idle_timeout() -> None:
@@ -136,7 +141,7 @@ def test_f014_head_after_a_complete_event_exits_0_silently(tmp_path: Path) -> No
     proc.stdout.close()
     flag.touch()
     code = proc.wait(timeout=10)
-    assert first["data"] == {"n": 1}
+    assert item(first) == {"n": 1}
     assert code == 0 and proc.stderr.read() == b""
 
 
@@ -159,9 +164,9 @@ def test_f053_each_event_reaches_the_reader_before_the_process_ends(tmp_path: Pa
         env=BASE_ENV,
     )
     assert proc.stdout is not None
-    assert json.loads(proc.stdout.readline())["data"] == {"n": 1}
+    assert item(json.loads(proc.stdout.readline())) == {"n": 1}
     flag.touch()
-    assert json.loads(proc.stdout.readline())["data"] == {"n": 2}
+    assert item(json.loads(proc.stdout.readline())) == {"n": 2}
     proc.stdout.close()
     assert proc.wait(timeout=10) == 0
 
@@ -263,8 +268,10 @@ def test_o001_jsonl_is_one_object_per_line_everywhere() -> None:
         code, out, _ = run(argv, stdin=io.StringIO(stdin))
         parsed = lines(out)
         assert code == 0 and parsed, argv
-        for envelope in parsed:
-            spec_validator("response-envelope").validate(envelope)
+        for line in parsed:
+            assert isinstance(line, dict)
+            if "ok" in line:  # a stream's item and summary lines are no envelopes
+                spec_validator("response-envelope").validate(line)
 
 
 def test_o001_tsv_is_built_in_with_a_header_row() -> None:

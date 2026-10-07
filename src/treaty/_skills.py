@@ -94,12 +94,17 @@ def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) ->
             )
         if command.streaming:
             rails.append(
-                "Mutating stream: each event's effect says what it did and the summary's "
-                "meta.effects counts them; it takes no --idempotency-key, so a rerun is a new "
+                "Mutating stream: each event's effect says what it did and the _summary "
+                "line's effects counts them; it takes no --idempotency-key, so a rerun is a new "
                 "run, and a failure after a live effect is not retryable"
             )
         else:
             rails.append("Mutating: pass --idempotency-key so a retry cannot apply it twice")
+    if command.endless:
+        rails.append(
+            "Endless stream: it runs until interrupted, so read its lines as they come and "
+            "send SIGINT to stop it; it ends on a CANCELLED line, not a _summary line"
+        )
     if command.required_scopes:
         scopes = ", ".join(str(s) for s in command.required_scopes)
         rails.append(f"Needs the credential scopes {scopes}")

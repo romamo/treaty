@@ -212,7 +212,10 @@ def test_fields_is_available_on_every_command() -> None:
 
 def test_fields_applies_to_each_stream_event_and_each_exec_line() -> None:
     _, out, _ = run(["tail", "2", "--fields", "nothing"])
-    assert [line["data"] for line in lines_of(out)[:2]] == [{}, {}]
+    assert [{k: v for k, v in line.items() if k != "_seq"} for line in lines_of(out)[:2]] == [
+        {},
+        {},
+    ]
     plan = (
         '{"_cmd": "user", "id": "u2", "_opts": {"fields": "email"}}\n{"_cmd": "user", "id": "u3"}\n'
     )
@@ -271,22 +274,28 @@ def test_each_line_of_streaming_output_is_a_valid_self_contained_json_object() -
     _, out, _ = run(["tail", "3", "--stream"])
     lines = out.splitlines()
     assert len(lines) == 4
-    for line in lines:
-        spec_validator("response-envelope").validate(json.loads(line))
+    parsed = [json.loads(line) for line in lines]
+    assert all(isinstance(line, dict) for line in parsed)
+    # REQ-O-004: an item line is never an envelope, nor a summary line
+    assert parsed[:3] == [{"id": n, "_seq": n} for n in (1, 2, 3)]
 
 
 def test_the_final_line_of_streaming_output_is_a_summary_object_containing_pagination() -> None:
     _, out, _ = run(["tail", "3", "--stream"])
     last = lines_of(out)[-1]
-    assert last["meta"]["end"] is True
-    assert last["meta"]["pagination"] == {
+    assert last["_summary"] is True and last["_count"] == 3
+    assert last["pagination"] == {
         "total": 3,
         "returned": 3,
         "truncated": False,
         "has_more": False,
         "next_cursor": None,
     }
-    spec_validator("response-envelope").validate(last)
+    # The ResponseMeta fields an envelope's meta would carry
+    meta = {k: v for k, v in last.items() if k not in ("_summary", "_count")}
+    spec_validator("response-envelope").validate(
+        {"ok": True, "data": None, "error": None, "warnings": [], "meta": meta}
+    )
 
 
 def test_a_command_that_does_not_declare_supports_streaming_warns_when_stream_is_passed() -> None:
@@ -298,7 +307,9 @@ def test_a_command_that_does_not_declare_supports_streaming_warns_when_stream_is
 
 def test_a_command_that_declares_streaming_default_emits_jsonl_without_any_flags() -> None:
     code, out, _ = run(["tail", "2"])
-    assert code == 0 and [line["data"] for line in lines_of(out)] == [{"id": 1}, {"id": 2}, None]
+    lines = lines_of(out)
+    assert code == 0 and lines[:2] == [{"id": 1, "_seq": 1}, {"id": 2, "_seq": 2}]
+    assert lines[2]["_summary"] is True and len(lines) == 3
 
 
 def test_passing_no_stream_to_a_streaming_default_command_returns_a_valid_response_envelope() -> (
@@ -611,7 +622,10 @@ def test_all_three_flags_are_available_on_every_command_without_per_command_impl
         for flags in (["--token-limit", "50"], ["--token-offset", "0"], ["--token-count"]):
             code, out, _ = run([*argv, *flags, "--format", "json"], app=app)
             assert code == 0, out
-            assert json.loads(out.splitlines()[-1])["meta"]["tokenizer"] == "approx"
+            last = json.loads(out.splitlines()[-1])
+            # A stream's summary line carries the meta fields itself (REQ-O-004)
+            meta = last if last.get("_summary") else last["meta"]
+            assert meta["tokenizer"] == "approx"
 
 
 def test_meta_token_count_is_present_in_every_response_regardless_of_format() -> None:

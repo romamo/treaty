@@ -272,7 +272,7 @@ from ._protect import (
     tagged,
     untagged,
 )
-from ._records import Records, RecordSpec
+from ._records import COUNT_KEY, ITEMS_EMITTED_KEY, SEQ_KEY, SUMMARY_KEY, Records, RecordSpec
 from ._redact import (
     NAME_CONTEXT,
     OMITTED,
@@ -1004,6 +1004,7 @@ class App:
         cleanup: Cleanup | None = None,
         renderers: Mapping[Format | str, Renderer | FormatRenderer] | None = None,
         streaming: bool = False,
+        endless: bool = False,
         safe_default: bool = False,
         gui_operations: Sequence[str] = (),
         headless_behavior: str | None = None,
@@ -1192,6 +1193,9 @@ class App:
         ``mcp=False`` keeps the command off every MCP server, ``mcp serve`` and
         ``treaty-mcp`` alike, whatever ``McpServe(commands=)`` selects: a command a person
         must run, such as an approval. The manifest's description says so (#281).
+        ``endless=True`` on a ``streaming=True`` command says the stream runs until
+        interrupted, such as a follow mode: ``--schema`` says ``endless: true``, and
+        ``treaty conformance`` probes it with SIGINT rather than waiting for its end (#389).
         """
         cmd_path = CommandPath(path)
         if not isinstance(mcp, bool):
@@ -1346,6 +1350,7 @@ class App:
                             scalars=self.scalars,
                             args_adapters=self.args_adapters,
                             streaming=streaming,
+                            endless=endless,
                             safe_default=safe_default,
                             gui_operations=gui_operations,
                             headless_behavior=None
@@ -2703,7 +2708,11 @@ class App:
                 envelopes = run.stream(command, invocation, mode)
                 run.in_flight = command
                 return run.emit_stream(
-                    mode, envelopes, render=render, frame=selected in command.frames
+                    mode,
+                    envelopes,
+                    render=render,
+                    frame=selected in command.frames,
+                    numbered=_numbered(command),
                 )
             envelope = run.execute(command, invocation, mode)
             if globals_.stream:
@@ -3983,6 +3992,37 @@ def _still_running(running: Sequence[Pending]) -> Pending | None:
 def _terminal(envelope: Envelope) -> bool:
     """Whether an envelope ends its invocation: anything but a stream's event"""
     return not envelope.ok or envelope.meta.seq is None or bool(envelope.meta.end)
+
+
+_EVENT_META = frozenset({"seq", "end"})
+"""``meta`` keys of the envelope a stream's events are carried in, which its stdout lines
+replace with ``_seq``, ``_count``, and ``items_emitted`` (REQ-O-004)"""
+
+
+def _numbered(command: Command) -> bool:
+    """Whether a stream's item lines carry ``_seq`` (REQ-O-004): its events are objects
+    of a closed type that has no ``_seq`` of its own, so the key can never be the item's"""
+    schema = command.output_schema
+    properties = schema.get("properties")
+    return (
+        schema.get("type") == "object"
+        and isinstance(properties, dict)
+        and SEQ_KEY not in properties
+        and schema.get("additionalProperties", False) is False
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ItemLine:
+    """A stream event's item line on stdout: the bare object, ``_seq`` added when numbered"""
+
+    seq: int | None
+
+    def __call__(self, data: object) -> str:
+        if self.seq is None:
+            return ndjson_line(data)
+        assert isinstance(data, dict), "a numbered stream's events are objects"
+        return ndjson_line({**data, SEQ_KEY: self.seq})
 
 
 def _mode_meta(command: Command) -> dict[str, object]:
@@ -7382,10 +7422,13 @@ class _Run:
         *,
         render: Rendering | None,
         frame: bool = False,
+        numbered: bool = False,
     ) -> int:
         """Write each envelope as it arrives; the exit code is the terminal envelope's,
         or GENERAL_ERROR when the renderer failed on a successful stream. ``frame``: the
-        renderer draws a whole frame per event, which replaces the last at a terminal"""
+        renderer draws a whole frame per event, which replaces the last at a terminal.
+        In ``json`` an event is its bare item line, with ``_seq`` when ``numbered``, and
+        the stream ends on a summary line or an error envelope (REQ-O-004, D-10)"""
         # Only where the run may color is stdout a terminal that acts on escapes: a pipe,
         # a file, NO_COLOR, TERM=dumb, and CI get every frame appended (#350)
         drawn = frame and mode is Format.PLAIN and color_allowed(self.env, self.tty)
@@ -7393,7 +7436,77 @@ class _Run:
         # Closed on any exit, so a dead reader (BrokenPipeError) still runs the handler's
         # finally blocks instead of leaving them to garbage collection
         with contextlib.closing(envelopes):
+            if mode is Format.JSON:
+                return self._write_item_stream(envelopes, numbered)
             return self._write_stream(mode, envelopes, render)
+
+    def _write_item_stream(self, envelopes: Generator[Envelope], numbered: bool) -> int:
+        """REQ-O-004's lines: one bare item object per event, then exactly one terminal
+        line. ``items`` counts the item lines written, which ``_seq`` numbers from 1"""
+        items = 0
+        for envelope in drain(envelopes):
+            if not _terminal(envelope):
+                if self._write_item(envelope, items + 1 if numbered else None):
+                    items += 1
+                continue
+            if envelope.meta.seq is None:
+                # A whole response, not a stream's end: nothing streamed, as under
+                # --validate-only (REQ-O-009), so it is the one envelope
+                return self._write(envelope)
+            return self._write_stream_end(envelope, items if numbered else None)
+        raise AssertionError("a stream always ends with a terminal envelope")
+
+    def _write_item(self, envelope: Envelope, seq: int | None) -> bool:
+        """One event's ``data`` as a bare JSON line, ``_seq`` added when numbered; its
+        warnings go to stderr as JSON lines, as no envelope carries them. Over
+        ``--max-output`` it is left out, as ``ndjson``'s record is. Whether it was written"""
+        envelope = self._budgeted_text(self._reported_stray(envelope))
+        line, envelope = self._capped_records(envelope, Rendering(_ItemLine(seq), False), True)
+        self._warning_records(envelope)
+        if not line:
+            return False
+        self.out.write(line)
+        self.out.flush()
+        self.delivered = True
+        return True
+
+    def _write_stream_end(self, envelope: Envelope, count: int | None) -> int:
+        """The stream's terminal line: on success the ``"_summary": true`` line with the
+        ``meta`` fields, ``_count`` when numbered, and the run's ``warnings`` when it has
+        some; on failure the error envelope, whose
+        ``meta.items_emitted`` is the last ``_seq``. A cancelled stream's ``data`` is
+        ``{"partial": true}`` (REQ-F-069)"""
+        envelope = self._reported_stray(envelope)
+        settle = True
+        if envelope.ok:
+            if self.budget is not None:
+                envelope = self._budgeted(self.budget, envelope)  # its meta keys, as before
+            envelope, settle = self.settle(envelope), False
+        if envelope.ok:
+            whole = envelope.to_json()
+            meta = whole["meta"]
+            assert isinstance(meta, dict)
+            summary: dict[str, object] = {SUMMARY_KEY: True}
+            summary.update((k, v) for k, v in meta.items() if k not in _EVENT_META)
+            if count is not None:
+                summary[COUNT_KEY] = count
+            if envelope.warnings:
+                # What the envelope would carry, such as CLEANUP_FAILED (D-9)
+                summary["warnings"] = whole["warnings"]
+            self.out.write(json.dumps(summary, separators=(",", ":"), sort_keys=True) + "\n")
+            self.out.flush()
+            self.delivered = True
+            return 0
+        failed = dataclasses.replace(
+            envelope, meta=dataclasses.replace(envelope.meta, seq=None, end=None)
+        )
+        if count is not None:
+            failed = dataclasses.replace(
+                failed, extra_meta={**failed.extra_meta, ITEMS_EMITTED_KEY: count}
+            )
+        if failed.error is not None and failed.error.code == "CANCELLED":
+            failed = dataclasses.replace(failed, data={"partial": True})
+        return self._write(failed, settle=settle)
 
     def _write_stream(
         self,
@@ -7404,9 +7517,6 @@ class _Run:
         code = 0
         render_failed = False
         for envelope in drain(envelopes):
-            if mode is Format.JSON:
-                code = self._write(envelope, settle=_terminal(envelope))
-                continue
             fallback = ndjson_line if mode is Format.NDJSON else render_event
             code = self._emit_text(
                 mode, envelope, render, fallback=fallback, settle=_terminal(envelope), event=True
@@ -7430,16 +7540,7 @@ class _Run:
     ) -> int:
         """Data through the renderer on stdout, errors as prose on stderr, or as one JSON
         line there in ``ndjson``; ``event`` for each envelope of a stream"""
-        if self.budget is not None:
-            before = len(envelope.warnings)
-            envelope = self._budgeted(self.budget, envelope)
-            if envelope.extra_meta.get("truncated"):
-                # The text carries no meta: the cut and the way on go to stderr
-                after = envelope.extra_meta.get("next_token_offset")
-                rest = "" if after is None else f"; next: --token-offset {after}"
-                self.err.write(f"cut to --token-limit {self.budget.limit}{rest}\n", Level.WARN)
-                # That line reports the budget's cuts: their warnings are not written again
-                self.warnings_shown += envelope.warnings[before:]
+        envelope = self._budgeted_text(envelope)
         records = ""
         if mode is Format.NDJSON:
             records, envelope = self._capped_records(
@@ -7451,22 +7552,12 @@ class _Run:
         if settle:
             envelope = self.settle(envelope)
         if mode is Format.NDJSON:
-            fresh = []
-            held: collections.Counter[str] = collections.Counter()
-            for warning in envelope.warnings:
-                key = json.dumps(warning.to_json(), sort_keys=True)
-                held[key] += 1
-                if held[key] > self.ndjson_shown[key]:
-                    fresh.append(warning)
-                    self.ndjson_shown[key] += 1
+            self._warning_records(envelope)
         else:
             fresh = list(envelope.warnings[before:]) if settle else []
             # That line says it: the warning lines after the result skip it (#152)
             self.warnings_shown += fresh
-        for warning in fresh:
-            # No envelope carries it here: one WarningDetail line on stderr (REQ-O-030)
-            line = json.dumps(warning.to_json(), separators=(",", ":"))
-            self.err.write(line + "\n", Level.WARN)
+            self._warning_records(envelope, fresh)
         code = envelope.exit_code
         pagination = envelope.extra_meta.get("pagination")
         if isinstance(pagination, dict) and pagination.get("has_more"):
@@ -7599,6 +7690,41 @@ class _Run:
             if fields and len(fields) == len(missing):
                 return missing_lines(self.app.name, command, fields)
         return [], []
+
+    def _budgeted_text(self, envelope: Envelope) -> Envelope:
+        """The token budget applied to output that carries no ``meta``: the cut and the
+        way on go to stderr instead (REQ-O-049)"""
+        if self.budget is None:
+            return envelope
+        before = len(envelope.warnings)
+        envelope = self._budgeted(self.budget, envelope)
+        if envelope.extra_meta.get("truncated"):
+            after = envelope.extra_meta.get("next_token_offset")
+            rest = "" if after is None else f"; next: --token-offset {after}"
+            self.err.write(f"cut to --token-limit {self.budget.limit}{rest}\n", Level.WARN)
+            # That line reports the budget's cuts: their warnings are not written again
+            self.warnings_shown += envelope.warnings[before:]
+        return envelope
+
+    def _warning_records(
+        self, envelope: Envelope, fresh: Sequence[WarningDetail] | None = None
+    ) -> None:
+        """One ``WarningDetail`` JSON line on stderr per warning no envelope carries
+        (REQ-O-030): ``fresh``, else each of ``envelope``'s not written yet. A stream's
+        envelopes repeat the run's warnings, so one is new only where an envelope holds it
+        more often than the lines written so far did"""
+        if fresh is None:
+            fresh = []
+            held: collections.Counter[str] = collections.Counter()
+            for warning in envelope.warnings:
+                key = json.dumps(warning.to_json(), sort_keys=True)
+                held[key] += 1
+                if held[key] > self.ndjson_shown[key]:
+                    fresh.append(warning)
+                    self.ndjson_shown[key] += 1
+        for warning in fresh:
+            line = json.dumps(warning.to_json(), separators=(",", ":"))
+            self.err.write(line + "\n", Level.WARN)
 
     def _warning_lines(self, envelope: Envelope) -> None:
         """The envelope's warnings, which a text format's stdout has no room for: one

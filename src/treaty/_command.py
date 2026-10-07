@@ -290,7 +290,7 @@ class Command:
     session_env_var: str
     """``<APP>_SESSION``, whose value deduplicates repeated mutating calls"""
     streaming: bool
-    """The handler is a generator; every yield is one envelope line (REQ-O-004)"""
+    """The handler is a generator; every yield is one item line (REQ-O-004)"""
     resources: tuple[type, ...]
     """Resource classes the handler takes after ``ctx``, in parameter order"""
     resource_graph: Mapping[type, ResourceSpec]
@@ -316,6 +316,9 @@ class Command:
     """Validates the handler's own cursor from a ``--cursor`` token; raises ``ParseError``"""
     heartbeat: bool = False
     """JSON runs write heartbeat lines to stdout while the handler runs (REQ-F-053)"""
+    endless: bool = False
+    """A stream that runs until interrupted, such as a follow mode: it never writes its
+    ``_summary`` line on its own (#389)"""
     stdin_input: StdinInput | None = None
     """The handler reads stdin or ``--input-file``: the payload in ``ctx.stdin_text``, or
     its lines through ``ctx.stdin_lines``"""
@@ -565,6 +568,7 @@ def build_command(
     frames: frozenset[FormatName] = frozenset(),
     outlasts_default: bool = False,
     streaming: bool = False,
+    endless: bool = False,
     safe_default: bool = False,
     gui_operations: Sequence[str] = (),
     headless_behavior: HeadlessBehavior | None = None,
@@ -685,6 +689,11 @@ def build_command(
     if heartbeat and streaming:
         raise RegistrationError(
             f"{path}: a stream's events show it is alive; drop heartbeat=True or streaming=True"
+        )
+    if endless and not streaming:
+        raise RegistrationError(
+            f"{path}: endless=True says a stream runs until interrupted; declare "
+            "streaming=True or drop endless=True"
         )
     paginated_asked = bool(paginated)
     if passthrough:
@@ -968,6 +977,7 @@ def build_command(
         default_limit=Limit(default_limit or None),
         cursor_check=cursor_check,
         heartbeat=heartbeat,
+        endless=endless,
         stdin_input=stdin_input,
         stdin_records=stdin_records,
         output_file=out_root is not None,

@@ -43,14 +43,31 @@ VWRL = {"isin": "IE00B3RBWM25", "figi": "BBG000BDTF76", "ticker": "VWRL"}
 GOLD = {"isin": "LU1900066033", "figi": "BBG00MGQZSP1", "ticker": "LYXGOLD"}
 
 
-def test_a_streams_envelopes_are_unwrapped() -> None:
-    # The repro of #32: the terminal envelope is not a third record
+def test_a_treaty_stream_feeds_a_records_consumer() -> None:
+    # The repro of #32: the summary line is not a third record, and _seq is no field (#389)
     stream = produce(["securities"])
-    assert len(stream.splitlines()) == 3
+    lines = [json.loads(line) for line in stream.splitlines()]
+    assert [line.get("_seq") for line in lines] == [1, 2, None] and lines[2]["_summary"]
     code, [envelope] = run(["summary"], stream)
     assert code == 0 and envelope["data"] == {"count": 2, "tickers": ["LYXGOLD", "VWRL"]}
     code, events = run(["resolve"], stream)
-    assert code == 0 and [e["data"]["ticker"] for e in events[:-1]] == ["VWRL", "LYXGOLD"]
+    assert code == 0 and [e["ticker"] for e in events[:-1]] == ["VWRL", "LYXGOLD"]
+    assert events[-1]["_summary"] is True
+
+
+def test_exec_stream_envelopes_still_feed_a_records_consumer() -> None:
+    # exec keeps one envelope per event (D-10); a consumer still reads those lines
+    plan = json.dumps({"_cmd": "securities"}) + "\n"
+    stream = _exec(plan)
+    assert all(json.loads(line)["ok"] is True for line in stream.splitlines())
+    code, [envelope] = run(["summary"], stream)
+    assert code == 0 and envelope["data"] == {"count": 2, "tickers": ["LYXGOLD", "VWRL"]}
+
+
+def _exec(plan: str) -> str:
+    out = io.StringIO()
+    app.run(["exec"], stdin=io.StringIO(plan), stdout=out, stderr=io.StringIO(), env={})
+    return out.getvalue()
 
 
 def test_bare_json_lines_are_records() -> None:
@@ -86,7 +103,7 @@ def test_one_page_of_more_warns() -> None:
 def test_an_upstream_failure_fails_the_run_with_its_error() -> None:
     failed = produce(["securities", "--fail"])
     code, events = run(["resolve"], failed)
-    assert events[0]["data"] == {"isin": "IE00B3RBWM25", "ticker": "VWRL"}
+    assert events[0] == {"isin": "IE00B3RBWM25", "ticker": "VWRL", "_seq": 1}
     error = events[-1]["error"]
     assert code == 1 and error["code"] == "UPSTREAM_FAILED"
     assert events[-1]["meta"]["partial"] is True
@@ -100,13 +117,23 @@ def test_an_upstream_failure_fails_the_run_with_its_error() -> None:
     assert code == 1 and envelope["error"]["code"] == "UPSTREAM_FAILED"
 
 
-def test_a_stream_cut_before_its_terminal_envelope_is_not_success() -> None:
-    # The producer was killed: its events arrived, its terminal envelope never did
+def test_a_stream_cut_before_its_terminal_line_is_not_success() -> None:
+    # The producer was killed: its numbered items arrived, its summary line never did
     cut = "".join(produce(["securities"]).splitlines(keepends=True)[:2])
     code, [envelope] = run(["summary"], cut)
     error = envelope["error"]
     assert code == 1 and error["code"] == "UPSTREAM_INCOMPLETE"
     assert error["context"] == {"line": 2, "events": 2}
+    # So were exec's envelope events before their terminal envelope
+    events = _exec(json.dumps({"_cmd": "securities"}) + "\n").splitlines(keepends=True)
+    code, [envelope] = run(["summary"], "".join(events[:2]))
+    assert code == 1 and envelope["error"]["code"] == "UPSTREAM_INCOMPLETE"
+
+
+def test_a_numbered_item_line_loses_its_seq_before_it_is_built() -> None:
+    summary = {"_summary": True, "total": 1, "_count": 1}
+    code, [envelope] = run(["summary"], bare({**VWRL, "_seq": 1}, summary))
+    assert code == 0 and envelope["data"] == {"count": 1, "tickers": ["VWRL"]}
 
 
 @pytest.mark.parametrize(
@@ -151,6 +178,31 @@ def test_a_heartbeat_naming_its_step_is_skipped() -> None:
     beat = json.dumps({"status": "running", "heartbeat": True, "elapsed_ms": 10, "step": "1"})
     code, [envelope] = run(["summary"], beat + "\n" + bare(VWRL))
     assert code == 0 and envelope["data"]["tickers"] == ["VWRL"]
+
+
+def test_a_record_type_with_its_own_seq_keeps_it() -> None:
+    # Its producer's stream is not numbered, so _seq is the record's field, not a position:
+    # kept, and its ndjson records end at EOF without UPSTREAM_INCOMPLETE (#389)
+    target = App("own", version="1.0.0")
+
+    @dataclass(frozen=True, slots=True)
+    class Own:
+        _seq: int
+
+    @dataclass(frozen=True, slots=True)
+    class Seen:
+        seqs: list[int]
+
+    @target.command("read", description="R", danger_level="safe", exit_codes=(),
+                    stdin_records=Own)  # fmt: skip
+    def read(args: NoArgs, ctx: Ctx) -> Seen:
+        return Seen([r._seq for r in ctx.stdin_records])
+
+    out = io.StringIO()
+    stdin = io.StringIO(bare({"_seq": 10}, {"_seq": 20}))
+    code = target.run(["read"], stdin=stdin, stdout=out, stderr=io.StringIO(), env={})
+    envelope = json.loads(out.getvalue())
+    assert code == 0 and envelope["data"] == {"seqs": [10, 20]}
 
 
 def test_call_and_exec_take_records_as_input_lines() -> None:
@@ -221,6 +273,6 @@ def test_a_real_pipeline_streams_records_between_processes() -> None:
     producer.stdout.close()
     assert producer.wait(timeout=10) == 4
     events = [json.loads(line) for line in consumer.stdout.splitlines()]
-    assert events[0]["data"]["ticker"] == "VWRL"
+    assert events[0]["ticker"] == "VWRL"
     assert consumer.returncode == 1 and events[-1]["error"]["code"] == "UPSTREAM_FAILED"
     assert isinstance(Sec("IE00B3RBWM25", "f", "t"), Sec)

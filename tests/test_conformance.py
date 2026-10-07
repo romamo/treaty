@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import SPEC_DIR, needs_sh_launcher, spec_validator
+from conftest import SPEC_DIR, needs_posix_signals, needs_sh_launcher, spec_validator
 
 from examples.tutorial import todo_exit_codes
-from treaty import App, Arg, Ctx, Flag, NoArgs
+from treaty import App, Arg, Ctx, Example, Flag, NoArgs
 from treaty._profile import (
     STREAM_SECONDS,
     TIMEOUT_SECONDS,
@@ -26,22 +26,118 @@ VENV_PYTHON = Path(sys.executable)
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
-@needs_sh_launcher
-def test_example_cli_passes_conformance_kit() -> None:
+STREAM_CHECKS = frozenset({"stream_contract", "stream_sigint"})
+TICKS = Path(__file__).resolve().parent / "fixture_ticks_app.py"
+
+
+def run_kit(profile: Path, *only: str) -> dict:
     if not KIT.is_file():
         pytest.skip(f"conformance kit not found at {KIT}; set TREATY_SPEC_DIR")
+    argv = ["uv", "run", "--project", str(SPEC_DIR), str(KIT), str(profile)]
+    if only:
+        argv += ["--only", *only]
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report: dict = json.loads(result.stdout)["data"]
+    return report
+
+
+def only_streams_skipped(report: dict) -> None:
+    """An app with no stream: level 3 is incomplete only because the kit's stream checks
+    have no probe to run"""
+    assert report["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "incomplete"}
+    skipped = {c["id"] for c in report["checks"] if c["status"] == "skip"}
+    assert skipped == STREAM_CHECKS
+    assert all(c["status"] == "pass" for c in report["checks"] if c["id"] not in skipped)
+
+
+@needs_sh_launcher
+def test_example_cli_passes_conformance_kit() -> None:
     if not VENV_PYTHON.is_file():
         pytest.skip("launcher needs the project venv")
-    result = subprocess.run(
-        ["uv", "run", "--project", str(SPEC_DIR), str(KIT), str(PROFILE)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    report = json.loads(result.stdout)["data"]
-    assert report["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}
+    only_streams_skipped(run_kit(PROFILE))
+
+
+@needs_posix_signals
+def test_the_issues_stream_profile_passes_the_kits_stream_checks(tmp_path: Path) -> None:
+    """#389: item lines, one terminal line, and SIGINT's CANCELLED line with data.partial"""
+    profile = {
+        "schema_version": "1.0",
+        "tool": "ticks 0.1.0",
+        "command": [sys.executable, str(TICKS)],
+        "timeout_seconds": 10,
+        "manifest": ["manifest"],
+        "probes": [
+            {"name": "count", "argv": ["count"], "kind": "stream", "deadline_seconds": 15},
+            {
+                "name": "forever sigint",
+                "argv": ["forever"],
+                "kind": "stream",
+                "deadline_seconds": 15,
+                "signal": "INT",
+                "after_lines": 2,
+            },
+        ],
+    }
+    path = tmp_path / "ticks.json"
+    path.write_text(json.dumps(profile))
+    report = run_kit(path, *sorted(STREAM_CHECKS))
+    assert {c["id"]: c["status"] for c in report["checks"]} == dict.fromkeys(STREAM_CHECKS, "pass")
+    assert all(c["runs_checked"] > 0 for c in report["checks"])
+
+
+@needs_posix_signals
+def test_a_generated_profile_runs_the_kits_stream_checks(tmp_path: Path) -> None:
+    """``treaty conformance`` probes a safe stream as a stream, and the endless one with
+    SIGINT, so the checks no longer skip and none waits for a stream that never ends"""
+    from fixture_ticks_app import app
+
+    probes = probes_for(app)
+    path = tmp_path / "ticks.json"
+    path.write_text(json.dumps(build_profile(app, [sys.executable, str(TICKS)], probes)))
+    report = run_kit(path)
+    assert report["levels"] == {"level_1": "pass", "level_2": "pass", "level_3": "pass"}, report
     assert report["summary"]["failed"] == 0 and report["summary"]["skipped"] == 0
+
+
+def test_an_endless_stream_gets_the_sigint_probe_and_no_stream_probe() -> None:
+    from fixture_ticks_app import app
+
+    probes = {p.name: p.to_json() for p in probes_for(app)}
+    assert probes["count stream"] == {
+        "name": "count stream",
+        "argv": ["count"],
+        "kind": "stream",
+        "deadline_seconds": TIMEOUT_SECONDS,
+    }
+    # forever is endless=True: only a signal ends it, so it takes the SIGINT probe, though
+    # count comes first, and no probe waits for its end
+    assert probes["forever SIGINT"] == {
+        "name": "forever SIGINT",
+        "argv": ["forever"],
+        "kind": "stream",
+        "deadline_seconds": TIMEOUT_SECONDS,
+        "signal": "INT",
+        "after_lines": 1,
+    }
+    assert "forever stream" not in probes and "count SIGINT" not in probes
+    # The read probes stay: --no-stream ends in one envelope
+    assert probes["count"]["kind"] == probes["forever"]["kind"] == "read"
+    assert "--no-stream" in probes["forever"]["argv"]
+
+
+def test_without_an_endless_stream_the_first_safe_stream_gets_the_sigint_probe() -> None:
+    app = App("pair", version="1.0.0")
+
+    for path in ("first", "second"):
+
+        @app.command(path, description=path, streaming=True, danger_level="safe", exit_codes=())
+        def stream(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+            yield {"n": 1}
+
+    probes = {p.name: p.to_json() for p in probes_for(app)}
+    assert probes["first SIGINT"]["signal"] == "INT" and "second SIGINT" not in probes
+    assert probes["first stream"]["kind"] == probes["second stream"]["kind"] == "stream"
 
 
 def stream_app() -> App:
@@ -95,6 +191,62 @@ def test_streaming_commands_keep_the_probes_that_end_in_one_envelope() -> None:
     assert 0 < STREAM_SECONDS < TIMEOUT_SECONDS
     # Nothing runs a mutating stream for real, nor a network one, whose reads go out (#390)
     assert "trade" not in probes and "watch" not in probes
+    assert "trade stream" not in probes
+    assert probes["tail stream"].argv == ("tail",)
+
+
+def test_a_network_stream_gets_no_stream_or_sigint_probe() -> None:
+    # Each kit run of either would make its real, perhaps paid, requests, as a read probe
+    # would (#390): the SIGINT probe goes to the first stream the kit may run (#389)
+    probes = {p.name: p for p in probes_for(stream_app())}
+    assert "watch stream" not in probes and "watch SIGINT" not in probes
+    assert probes["tail SIGINT"].sigint_after == 1
+
+
+def test_a_network_stream_probed_by_its_authors_probe_gets_its_stream_probes() -> None:
+    # probe= points it somewhere safe, such as a local stub, so it runs as its read does
+    # (#392), and its stream lines are checked too (#389)
+    app = App("feedctl", version="1.0.0")
+
+    @app.command(
+        "watch",
+        description="Watch a feed",
+        streaming=True,
+        has_network_io=True,
+        danger_level="safe",
+        exit_codes=(),
+        examples=[Example("Watch", "feedctl watch", probe="feedctl watch --url stub")],
+    )
+    def watch(args: WatchArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        yield {"n": 1}
+
+    probes = {p.name: p for p in probes_for(app)}
+    assert probes["watch"].kind == "read"
+    assert probes["watch stream"].argv == ("watch", "--url", "stub")
+    assert probes["watch SIGINT"].argv == ("watch", "--url", "stub")
+
+
+@dataclass(frozen=True, slots=True)
+class WatchArgs:
+    url: str = Flag(default="https://example.com", description="Feed URL")
+
+
+def test_a_network_endless_stream_does_not_take_the_sigint_probe() -> None:
+    app = App("netctl", version="1.0.0")
+
+    @app.command("follow", description="Follow a remote feed", streaming=True, endless=True,
+                 has_network_io=True, danger_level="safe", exit_codes=())  # fmt: skip
+    def follow(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        yield {"n": 1}
+
+    @app.command("tail", description="Tail a local log", streaming=True, danger_level="safe",
+                 exit_codes=())  # fmt: skip
+    def tail(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        yield {"n": 1}
+
+    names = [p.name for p in probes_for(app)]
+    assert not any(n.startswith("follow") and n != "follow --proxy socks5" for n in names)
+    assert "tail stream" in names and "tail SIGINT" in names
 
 
 def test_a_streaming_read_probe_profile_validates_against_the_spec() -> None:

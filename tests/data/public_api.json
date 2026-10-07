@@ -1008,6 +1008,7 @@
       "cleanup",
       "renderers",
       "streaming",
+      "endless",
       "safe_default",
       "gui_operations",
       "headless_behavior",

@@ -12,6 +12,25 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Breaking
 
+- A streaming command writes REQ-O-004's lines on stdout in `json` and `jsonl` instead
+  of one envelope per event: each event is its bare item object, with `_seq` from 1 when
+  the event type is a closed object without its own `_seq`, then exactly one terminal
+  line, a `"_summary": true` line with the meta fields (`total`, `pagination`, `effects`,
+  `dry_run`, `_count` when numbered) or the error envelope, with `meta.items_emitted`
+  when numbered. A cancelled stream ends on a `CANCELLED` envelope with
+  `data: {"partial": true}` and `error.context.signal`. An event's warnings go to stderr
+  as JSON lines. A consumer that read `.data` and `meta.seq` from each line reads the
+  line itself and `_seq`; a `stdin_records=` command reads both shapes. `exec` lines,
+  `App.call`, MCP tool calls, `--no-stream`, and the plain format are unchanged. The
+  built-in `audit-log` is such a stream: in `json` and `jsonl` it writes each entry as a
+  bare JSON line and a `"_summary": true` line last, so a reader of `.data` on each line
+  reads the line itself. `treaty conformance` adds a `stream` probe for each safe stream
+  command without `has_network_io` (or whose probe comes from `probe=`) and a SIGINT one,
+  so the kit's `stream_contract` and `stream_sigint` checks run: a committed profile
+  differs from the generated one, so rerun `treaty conformance --force` once. Register a
+  stream that never ends on its own with the new `endless=True`: it gets the SIGINT probe
+  and no `stream` probe, and `--schema`, `--help`, and its skill file say a signal ends
+  it. CI checks against cli-agent-spec v1.13.0 (#389)
 - `treaty conformance` no longer probes a passthrough command: its tool owns stdout and its
   envelope is on stderr, so the kit's `json_envelope` check read the tool's output and
   failed its read and `--proxy` probes. The `unknown flag` probe of an app whose first

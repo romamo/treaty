@@ -1,18 +1,21 @@
 """Typed stdin records: ``stdin_records=Sec`` reads another command's output as ``Sec`` (#32).
 
 Built on line mode (#33): each non-blank input line is one JSON object, either a bare record
-(as ``--format ndjson`` writes) or a treaty envelope (as ``--format json`` or ``jsonl``
-writes, a stream's events included). An envelope is unwrapped here, so no consumer
-reimplements it, and so none can mistake a failed upstream run for short valid input:
+(as ``--format ndjson`` and a stream's item lines write) or a treaty envelope (as
+``--format json`` or ``jsonl`` writes; an exec line's stream events too). An envelope is
+unwrapped here, so no consumer reimplements it, and so none can mistake a failed upstream
+run for short valid input:
 
 - ``ok: true`` yields its ``data``: an object is one record, an array one record per item,
   ``null`` none
 - a stream's terminal envelope (``meta.end``), a whole response (no ``meta.seq``), or
   REQ-O-004's ``{"_summary": true, ...}`` line after bare records ends the input; nothing
   after it is read
+- a numbered item line loses its ``_seq`` before it is built
 - ``ok: false`` ends the run with ``UPSTREAM_FAILED``, the upstream error in ``context``
-- envelopes that stop before their terminal one (the producer was killed) end the run with
-  ``UPSTREAM_INCOMPLETE``, rather than look like the end of the input
+- stream events or numbered item lines that stop before their terminal line (the producer
+  was killed) end the run with ``UPSTREAM_INCOMPLETE``, rather than look like the end of
+  the input
 - a heartbeat line is skipped
 
 Each record is checked as an exec line's argument values are, field by field against the
@@ -51,9 +54,15 @@ UPSTREAM_TRUNCATED = "UPSTREAM_TRUNCATED"
 ENVELOPE_KEYS = frozenset({"ok", "data", "error", "meta", "warnings"})
 _HEARTBEAT_KEYS = frozenset({"status", "heartbeat", "elapsed_ms"})
 _HEARTBEAT_STEP = "step"
+"""A heartbeat inside ``ctx.step`` names the step in progress (REQ-C-008)"""
 SUMMARY_KEY = "_summary"
 """``"_summary": true`` marks REQ-O-004's terminal line of a stream of bare items"""
-"""A heartbeat inside ``ctx.step`` names the step in progress (REQ-C-008)"""
+SEQ_KEY = "_seq"
+"""A numbered stream's item line position, from 1: framework metadata, never a field"""
+COUNT_KEY = "_count"
+"""A numbered stream's item lines, on its summary line"""
+ITEMS_EMITTED_KEY = "items_emitted"
+"""``meta`` of a numbered stream's error envelope: the last ``_seq`` it wrote"""
 _TRUST_KEYS = frozenset({SOURCE_KEY, TRUSTED_KEY})
 """Trust tags an external upstream adds (REQ-F-035); not fields of the record"""
 _GENERAL = ExitCodeName("GENERAL_ERROR")
@@ -104,6 +113,10 @@ class RecordSpec:
             )
             fields.append(RecordField(f.name, target, not defaulted and not target.optional))
         return cls(record, tuple(fields), schema_for(record, scalars))
+
+    def has(self, name: str) -> bool:
+        """Whether the record type has a field of that name"""
+        return any(f.name == name for f in self.fields)
 
     def build(self, value: object, line: int) -> object:
         """One record from a JSON value, or ``RECORD_INVALID`` naming the line and field"""
@@ -248,6 +261,12 @@ class Records(Iterator[object]):
                 self._ended = True
                 self._lines.close()
                 return
+            if isinstance(value, dict) and SEQ_KEY in value and not self._spec.has(SEQ_KEY):
+                # A numbered stream's item line: _seq is the stream's, not the record's,
+                # and the stream owes its terminal line (REQ-O-004). A record type with a
+                # _seq field of its own is never numbered, so there it is the field
+                value = {k: v for k, v in value.items() if k != SEQ_KEY}
+                self._events += 1
             self._queue.append((line, value))
             return
         self._envelope(value, line)

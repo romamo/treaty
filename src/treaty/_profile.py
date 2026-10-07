@@ -37,11 +37,20 @@ class Probe:
     argv: tuple[str, ...]
     kind: str
     dry_run_flag: str | None = None
+    deadline_seconds: int | None = None
+    """A ``stream`` probe's limit on the whole stream"""
+    sigint_after: int | None = None
+    """A ``stream`` probe's SIGINT, sent after this many stdout lines"""
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {"name": self.name, "argv": list(self.argv), "kind": self.kind}
         if self.dry_run_flag is not None:
             out["dry_run_flag"] = self.dry_run_flag
+        if self.deadline_seconds is not None:
+            out["deadline_seconds"] = self.deadline_seconds
+        if self.sigint_after is not None:
+            out["signal"] = "INT"
+            out["after_lines"] = self.sigint_after
         return out
 
 
@@ -120,21 +129,53 @@ def _before_separator(argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
 VERSION_PROBE = Probe("version", ("version",), "read")
 
 
+def _probe_argv(app: App, command: Command) -> tuple[str, ...] | None:
+    """The argv a probe runs ``command`` with: its first example, else its bare path when
+    it needs no argument; None when it cannot be probed"""
+    argv = _argv_from_example(app, command)
+    if argv is None:
+        if any(f.required for f in command.fields):
+            return None
+        argv = command.path.parts
+    return argv
+
+
+def _probed(command: Command) -> bool:
+    """Whether ``probes_for`` probes the command at all: a passthrough command's tool owns
+    stdout and its envelope is on stderr, so the kit's json_envelope check, which reads
+    stdout, would fail every probe of it (#386); a command whose every example says
+    probe=False is the author's (#392)"""
+    return not command.passthrough and not _opted_out(command)
+
+
+def _runnable_stream(app: App, command: Command) -> bool:
+    """A stream the kit may run: safe, and without network I/O, whose every run would make
+    the command's real, perhaps paid, requests, as a read probe would (#390), unless an
+    author's probe= points it somewhere safe, such as a local stub, as for a read (#392)"""
+    return (
+        command.streaming
+        and command.danger_level is DangerLevel.SAFE
+        and (not command.has_network_io or _probed_explicitly(app, command))
+    )
+
+
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
     # The first probe that runs a command: the unknown-flag probe adds its flag to it
     unknown_from: Probe | None = None
+    interrupted = False
+    # The SIGINT probe goes to the first endless stream, which only a signal ends, else
+    # to the first stream the kit may run (#389)
+    endless = any(
+        _probed(c) and _runnable_stream(app, c) and c.endless and _probe_argv(app, c) is not None
+        for c in user_commands(app)
+    )
     for command in user_commands(app):
-        if command.passthrough or _opted_out(command):
-            # A passthrough command's tool owns stdout and its envelope is on stderr, so the
-            # kit's json_envelope check, which reads stdout, would fail every probe of it
-            # (#386). A command whose every example says probe=False is the author's (#392)
+        if not _probed(command):
             continue
-        argv = _argv_from_example(app, command)
+        argv = _probe_argv(app, command)
         if argv is None:
-            if any(f.required for f in command.fields):
-                continue
-            argv = command.path.parts
+            continue
         label = " ".join(command.path.parts)
         if command.resumable:
             # REQ-O-010: a step the command does not declare exits 2 before anything runs
@@ -149,13 +190,37 @@ def probes_for(app: App) -> list[Probe]:
             shallow = _before_separator(argv, "--max-depth", "0")
             probes.append(Probe(f"{label} --max-depth 0", shallow, "invalid"))
         run: Probe | None = None
+        streams: list[Probe] = []
         if command.streaming:
-            # JSONL, and possibly endless, while the kit expects one envelope: the probes
-            # above end before the stream starts, and a read is bounded (#349). A stream is
-            # safe or mutating, and a mutating one, as elsewhere, gets no probe that runs it
+            # JSONL, and possibly endless, while a read probe expects one envelope: the
+            # probes above end before the stream starts, and a read is bounded (#349). A
+            # stream is safe or mutating, and a mutating one, as elsewhere, gets no probe
+            # that runs it
+            streamed = _without_stream_flags(argv)
             if command.danger_level is DangerLevel.SAFE:
-                bounded = (*_without_stream_flags(argv), "--no-stream", "--timeout")
+                bounded = (*streamed, "--no-stream", "--timeout")
                 run = Probe(label, (*bounded, str(STREAM_SECONDS)), "read")
+            if _runnable_stream(app, command):
+                # REQ-O-004's lines, within the kit's limit, unless the stream never ends
+                # on its own; one stream is also interrupted after its first line, for
+                # REQ-F-069's CANCELLED line (#389). A network stream gets neither unless
+                # its probe is an author's probe=, as with its read probe (#390, #392)
+                deadline = TIMEOUT_SECONDS
+                if not command.endless:
+                    streams.append(
+                        Probe(f"{label} stream", streamed, "stream", deadline_seconds=deadline)
+                    )
+                if not interrupted and (command.endless or not endless):
+                    interrupted = True
+                    streams.append(
+                        Probe(
+                            f"{label} SIGINT",
+                            streamed,
+                            "stream",
+                            deadline_seconds=deadline,
+                            sigint_after=1,
+                        )
+                    )
         elif command.danger_level is DangerLevel.DESTRUCTIVE and command.safe_default:
             # Unconfirmed, a safe_default command previews and exits 0, and --live alone is
             # its confirmation: nothing refuses, so it is probed as the read its default is
@@ -176,6 +241,7 @@ def probes_for(app: App) -> list[Probe]:
             # author's probe= points it somewhere safe, such as a local stub (#392)
             continue
         probes.append(run)
+        probes.extend(streams)
     probes.append(VERSION_PROBE)
     if CommandPath("status") in app.builtins:
         probes.append(Probe("status built-in", ("status",), "read"))  # REQ-O-028: always 0

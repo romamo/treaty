@@ -100,7 +100,8 @@ def run(
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     validator = spec_validator("response-envelope")
     for line in lines:
-        validator.validate(line)
+        if "ok" in line:  # a stream's item lines are bare objects (REQ-O-004)
+            validator.validate(line)
     return code, lines, err.getvalue()
 
 
@@ -132,7 +133,7 @@ def test_exec_continues_past_a_crashing_line_with_ignore_errors() -> None:
 
 def test_stream_crash_ends_with_a_terminal_envelope() -> None:
     code, lines, _ = run(crash_app(), ["tail"])
-    assert code == 1 and lines[0]["data"] == {"n": 1}
+    assert code == 1 and lines[0] == {"n": 1} and len(lines) == 2
     assert lines[-1]["error"]["code"] == "HANDLER_CRASHED" and lines[-1]["meta"]["partial"]
 
 

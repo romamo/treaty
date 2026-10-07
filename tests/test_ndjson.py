@@ -268,11 +268,12 @@ def test_the_format_variable_selects_ndjson() -> None:
     assert code == 0 and lines(out) == [{"isin": "IE00B3RBWM25", "ticker": "VWRL"}]
 
 
-def test_jsonl_stays_the_envelope_stream() -> None:
+def test_jsonl_writes_the_spec_stream_lines() -> None:
+    # Unlike ndjson, the item lines end on a terminal line (REQ-O-004)
     _, out, _ = run(["tick", "--format", "jsonl"])
-    envelopes = lines(out)
-    assert all(isinstance(e, dict) and "meta" in e for e in envelopes)
-    assert len(envelopes) == 3  # two events and the terminal envelope
+    written = lines(out)
+    assert all(isinstance(e, dict) and "meta" not in e for e in written)
+    assert len(written) == 3 and written[-1]["_summary"] is True  # two events and the summary
 
 
 def test_help_writes_nothing_on_stdout() -> None:
