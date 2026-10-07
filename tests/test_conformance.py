@@ -88,11 +88,11 @@ def test_the_issues_stream_profile_passes_the_kits_stream_checks(tmp_path: Path)
 
 @needs_posix_signals
 def test_a_generated_profile_runs_the_kits_stream_checks(tmp_path: Path) -> None:
-    """``treaty conformance`` probes a safe stream as a stream, and once with SIGINT, so the
-    checks no longer skip; ``forever``'s probes are left out, as it never ends on its own"""
+    """``treaty conformance`` probes a safe stream as a stream, and the endless one with
+    SIGINT, so the checks no longer skip and none waits for a stream that never ends"""
     from fixture_ticks_app import app
 
-    probes = [p for p in probes_for(app) if not p.argv or p.argv[0] != "forever"]
+    probes = probes_for(app)
     path = tmp_path / "ticks.json"
     path.write_text(json.dumps(build_profile(app, [sys.executable, str(TICKS)], probes)))
     report = run_kit(path)
@@ -100,7 +100,7 @@ def test_a_generated_profile_runs_the_kits_stream_checks(tmp_path: Path) -> None
     assert report["summary"]["failed"] == 0 and report["summary"]["skipped"] == 0
 
 
-def test_a_safe_stream_gets_a_stream_probe_and_the_first_one_a_sigint_probe() -> None:
+def test_an_endless_stream_gets_the_sigint_probe_and_no_stream_probe() -> None:
     from fixture_ticks_app import app
 
     probes = {p.name: p.to_json() for p in probes_for(app)}
@@ -110,17 +110,34 @@ def test_a_safe_stream_gets_a_stream_probe_and_the_first_one_a_sigint_probe() ->
         "kind": "stream",
         "deadline_seconds": TIMEOUT_SECONDS,
     }
-    assert probes["count SIGINT"] == {
-        "name": "count SIGINT",
-        "argv": ["count"],
+    # forever is endless=True: only a signal ends it, so it takes the SIGINT probe, though
+    # count comes first, and no probe waits for its end
+    assert probes["forever SIGINT"] == {
+        "name": "forever SIGINT",
+        "argv": ["forever"],
         "kind": "stream",
         "deadline_seconds": TIMEOUT_SECONDS,
         "signal": "INT",
         "after_lines": 1,
     }
-    assert probes["forever stream"]["kind"] == "stream" and "forever SIGINT" not in probes
-    # The read probe stays: --no-stream ends in one envelope
-    assert probes["count"]["kind"] == "read" and "--no-stream" in probes["count"]["argv"]
+    assert "forever stream" not in probes and "count SIGINT" not in probes
+    # The read probes stay: --no-stream ends in one envelope
+    assert probes["count"]["kind"] == probes["forever"]["kind"] == "read"
+    assert "--no-stream" in probes["forever"]["argv"]
+
+
+def test_without_an_endless_stream_the_first_safe_stream_gets_the_sigint_probe() -> None:
+    app = App("pair", version="1.0.0")
+
+    for path in ("first", "second"):
+
+        @app.command(path, description=path, streaming=True, danger_level="safe", exit_codes=())
+        def stream(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+            yield {"n": 1}
+
+    probes = {p.name: p.to_json() for p in probes_for(app)}
+    assert probes["first SIGINT"]["signal"] == "INT" and "second SIGINT" not in probes
+    assert probes["first stream"]["kind"] == probes["second stream"]["kind"] == "stream"
 
 
 def stream_app() -> App:

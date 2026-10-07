@@ -277,6 +277,8 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
             "Streams one JSON object per event, then a _summary line; --no-stream returns a "
             "single envelope"
         )
+        if command.endless:
+            lines.append("Runs until interrupted: SIGINT ends it on a CANCELLED line")
         if command.danger_level is not DangerLevel.SAFE:
             lines.append(
                 "Each event reports its own effect; the _summary line counts them in effects"

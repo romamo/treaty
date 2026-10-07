@@ -124,7 +124,7 @@ that no app or example called.
 `introduced_in`, `deprecated`, `steps`, `resumable`, `rollback`, `external`,
 `subprocess`, `platform`, `required_tools`, `filesystem_side_effects`, `background`,
 `preserve_locale`, `cache`, `recursive_traversal`, `id_field`, `passthrough`, `help_command`,
-`idempotent`, `mcp` (added in 1.0, #281).
+`idempotent`, `mcp` (added in 1.0, #281), `endless` (added in 1.0, #389).
 `Group.command` takes the
 same keywords.
 

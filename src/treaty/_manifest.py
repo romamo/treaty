@@ -607,6 +607,9 @@ def command_schema(
         entry["heartbeat_ms"] = DEFAULT_HEARTBEAT_MS
     if command.streaming:
         entry["timeout_kind"] = "idle"  # REQ-F-011: the limit restarts with every event
+    if command.endless:
+        # #389: the stream ends only when interrupted; not a ManifestResponse key
+        entry["endless"] = True
     if command.paginated:
         # REQ-F-019; not ManifestResponse keys, whose --limit flag shows the same default
         entry["paginated"] = True

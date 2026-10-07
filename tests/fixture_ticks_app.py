@@ -35,6 +35,7 @@ def count(args: NoArgs, ctx: Ctx) -> Iterator[Tick]:
     danger_level="safe",
     exit_codes=(),
     streaming=True,
+    endless=True,
     timeout=None,
 )
 def forever(args: NoArgs, ctx: Ctx) -> Iterator[Tick]:

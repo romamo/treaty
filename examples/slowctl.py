@@ -60,6 +60,7 @@ class Serve:
     "serve",
     description="Announce a URL, then heartbeat until stopped",
     streaming=True,
+    endless=True,
     danger_level="safe",
     exit_codes=(),
 )

@@ -1663,7 +1663,7 @@ run's `warnings` when it has some:
 
 ```python
 @app.command("dashboard.serve", description="Serve the dashboard", streaming=True,
-             danger_level="safe", exit_codes=(), cleanup=stop_server)
+             endless=True, danger_level="safe", exit_codes=(), cleanup=stop_server)
 def serve(args: ServeArgs, ctx: Ctx) -> Iterator[ServeEvent]:
     server = start(args.port)
     yield Listening(url=server.url)
@@ -1694,6 +1694,9 @@ which returns one envelope with every event in `data` and `meta.total`; a failur
 `STREAMING_NOT_SUPPORTED` warning. A `stdin_records=` command reads a stream's lines as
 they come: it drops `_seq`, stops at the summary line, and fails with `UPSTREAM_FAILED`
 on an error envelope, or `UPSTREAM_INCOMPLETE` when numbered lines stop without one.
+`endless=True`, as on `dashboard.serve`, says the stream runs until interrupted, a follow
+mode: `--schema` says `endless: true`, `--help` and the skill file say a signal ends it,
+and `treaty conformance` interrupts it rather than waiting for its summary line.
 
 A stream whose source is async, such as a WebSocket feed, is an async generator annotated
 `AsyncIterator[T]`; it may take async resources, as an `async def` handler does:

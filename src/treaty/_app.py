@@ -1003,6 +1003,7 @@ class App:
         cleanup: Cleanup | None = None,
         renderers: Mapping[Format | str, Renderer | FormatRenderer] | None = None,
         streaming: bool = False,
+        endless: bool = False,
         safe_default: bool = False,
         gui_operations: Sequence[str] = (),
         headless_behavior: str | None = None,
@@ -1190,6 +1191,9 @@ class App:
         ``mcp=False`` keeps the command off every MCP server, ``mcp serve`` and
         ``treaty-mcp`` alike, whatever ``McpServe(commands=)`` selects: a command a person
         must run, such as an approval. The manifest's description says so (#281).
+        ``endless=True`` on a ``streaming=True`` command says the stream runs until
+        interrupted, such as a follow mode: ``--schema`` says ``endless: true``, and
+        ``treaty conformance`` probes it with SIGINT rather than waiting for its end (#389).
         """
         cmd_path = CommandPath(path)
         if not isinstance(mcp, bool):
@@ -1342,6 +1346,7 @@ class App:
                             scalars=self.scalars,
                             args_adapters=self.args_adapters,
                             streaming=streaming,
+                            endless=endless,
                             safe_default=safe_default,
                             gui_operations=gui_operations,
                             headless_behavior=None

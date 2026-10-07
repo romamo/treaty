@@ -524,3 +524,53 @@ def test_iterator_annotation_without_streaming_is_refused() -> None:
         @app.command("x", description="x", danger_level="safe", exit_codes=())
         def handler(args: TailArgs, ctx: Ctx) -> Iterator[Event]:
             yield Event(1, "x")
+
+
+# endless=True (#389)
+
+
+def endless_app() -> App:
+    app = App("logctl", version="1.0.0")
+
+    @app.command(
+        "follow",
+        description="Follow the log",
+        streaming=True,
+        endless=True,
+        danger_level="safe",
+        exit_codes=(),
+    )
+    def follow(args: NoArgs, ctx: Ctx) -> Iterator[Event]:
+        yield Event(1, "x")
+
+    return app
+
+
+def test_endless_needs_streaming() -> None:
+    app = App("logctl", version="1.0.0")
+    with pytest.raises(RegistrationError, match="declare streaming=True or drop endless=True"):
+
+        @app.command("x", description="x", endless=True, danger_level="safe", exit_codes=())
+        def handler(args: NoArgs, ctx: Ctx) -> Event:
+            return Event(1, "x")
+
+
+def test_endless_shows_in_schema_help_and_skills_only() -> None:
+    from treaty._skills import render
+
+    app = endless_app()
+    manifest = app.manifest()
+    spec_validator("manifest-response").validate(manifest)
+    # Not a ManifestResponse key: the manifest entry stays the spec's
+    assert "endless" not in manifest["commands"]["follow"]
+    out = io.StringIO()
+    assert app.run(["follow", "--schema"], stdout=out, stderr=io.StringIO(), env={}) == 0
+    assert json.loads(out.getvalue())["data"]["endless"] is True
+    code, _, text = run(["follow", "--help"], app=app, plain=True)
+    assert code == 0 and "Runs until interrupted" in text
+    assert "Endless stream" in render(app)["SKILL-follow.md"]
+    # A stream without it publishes nothing new
+    out = io.StringIO()
+    assert stream_app().run(["tail", "--schema"], stdout=out, stderr=io.StringIO(), env={}) == 0
+    assert "endless" not in json.loads(out.getvalue())["data"]
+    assert "Endless stream" not in render(stream_app())["SKILL-tail.md"]

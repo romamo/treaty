@@ -86,10 +86,10 @@ Probes run the real CLI. treaty derives them from your commands:
   streaming command's probe adds `--no-stream --timeout 5`, so it ends with one envelope,
   the collected events or `TIMEOUT`, within the kit's 10-second limit on each run
 - for each safe streaming command, a `stream` probe that reads its lines as they come, with
-  a 10-second `deadline_seconds`, and for the first one, a second probe that sends SIGINT
-  after its first line, for the kit's `stream_contract` and `stream_sigint` checks. A
-  stream that never ends on its own fails the first within that deadline: give it an
-  example whose arguments bound it, or edit the probe
+  a 10-second `deadline_seconds`, and one probe that sends SIGINT after the first line, for
+  the kit's `stream_contract` and `stream_sigint` checks. Register a stream that never ends
+  on its own with `endless=True`: it gets no `stream` probe, which would fail at the
+  deadline, and takes the SIGINT probe; without one, the first safe stream takes it
 - one `destructive` probe per destructive command, from its first example with the
   confirmation removed: `todo purge`. The kit runs it with `--dry-run`, and again with no
   flags to check that it is refused

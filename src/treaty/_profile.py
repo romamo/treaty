@@ -91,15 +91,34 @@ def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[s
     return (*flags, *argv) if command.passthrough else (*argv, *flags)
 
 
+def _probe_argv(app: App, command: Command) -> tuple[str, ...] | None:
+    """The argv a probe runs ``command`` with: its first example, else its bare path when
+    it needs no argument; None when it cannot be probed"""
+    argv = _argv_from_example(app, command)
+    if argv is None:
+        if any(f.required for f in command.fields):
+            return None
+        argv = command.path.parts
+    return argv
+
+
+def _safe_stream(command: Command) -> bool:
+    return command.streaming and command.danger_level is DangerLevel.SAFE
+
+
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
     interrupted = False
+    # The SIGINT probe goes to the first endless stream, which only a signal ends, else
+    # to the first safe stream (#389)
+    endless = any(
+        _safe_stream(c) and c.endless and _probe_argv(app, c) is not None
+        for c in user_commands(app)
+    )
     for command in user_commands(app):
-        argv = _argv_from_example(app, command)
+        argv = _probe_argv(app, command)
         if argv is None:
-            if any(f.required for f in command.fields):
-                continue
-            argv = command.path.parts
+            continue
         label = " ".join(command.path.parts)
         if command.resumable:
             # REQ-O-010: a step the command does not declare exits 2 before anything runs
@@ -122,13 +141,15 @@ def probes_for(app: App) -> list[Probe]:
                 streamed = _without_stream_flags(argv)
                 bounded = (*streamed, "--no-stream", "--timeout")
                 probes.append(Probe(label, (*bounded, str(STREAM_SECONDS)), "read"))
-                # REQ-O-004's lines, within the kit's limit; the first stream also once
-                # interrupted after its first line, for REQ-F-069's CANCELLED line (#389)
+                # REQ-O-004's lines, within the kit's limit, unless the stream never ends
+                # on its own; one stream is also interrupted after its first line, for
+                # REQ-F-069's CANCELLED line (#389)
                 deadline = TIMEOUT_SECONDS
-                probes.append(
-                    Probe(f"{label} stream", streamed, "stream", deadline_seconds=deadline)
-                )
-                if not interrupted:
+                if not command.endless:
+                    probes.append(
+                        Probe(f"{label} stream", streamed, "stream", deadline_seconds=deadline)
+                    )
+                if not interrupted and (command.endless or not endless):
                     interrupted = True
                     probes.append(
                         Probe(

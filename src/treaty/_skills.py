@@ -100,6 +100,11 @@ def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) ->
             )
         else:
             rails.append("Mutating: pass --idempotency-key so a retry cannot apply it twice")
+    if command.endless:
+        rails.append(
+            "Endless stream: it runs until interrupted, so read its lines as they come and "
+            "send SIGINT to stop it; it ends on a CANCELLED line, not a _summary line"
+        )
     if command.required_scopes:
         scopes = ", ".join(str(s) for s in command.required_scopes)
         rails.append(f"Needs the credential scopes {scopes}")

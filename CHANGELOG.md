@@ -23,10 +23,11 @@ Apps built on treaty keep their own, structured schema changelog with
   line itself and `_seq`; a `stdin_records=` command reads both shapes. `exec` lines,
   `App.call`, MCP tool calls, `--no-stream`, and the plain format are unchanged.
   `treaty conformance` adds a `stream` probe for each safe stream command and a SIGINT
-  one for the first, so the kit's `stream_contract` and `stream_sigint` checks run: a
-  committed profile differs from the generated one, so rerun `treaty conformance --force`
-  once, and drop the probe of a stream that never ends on its own. CI checks against
-  cli-agent-spec v1.13.0 (#389)
+  one, so the kit's `stream_contract` and `stream_sigint` checks run: a committed profile
+  differs from the generated one, so rerun `treaty conformance --force` once. Register a
+  stream that never ends on its own with the new `endless=True`: it gets the SIGINT probe
+  and no `stream` probe, and `--schema`, `--help`, and its skill file say a signal ends
+  it. CI checks against cli-agent-spec v1.13.0 (#389)
 
 ## [1.0.0rc36] - 2026-10-06
 
