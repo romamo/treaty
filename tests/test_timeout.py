@@ -3,6 +3,7 @@ import json
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import pytest
@@ -90,6 +91,29 @@ def test_a_timeout_hint_names_no_flag_the_command_lacks() -> None:
     error = timed_out(make_app(default_timeout=5), ["quick", "--seconds", "0.2"])
     assert error["retryable"] is True
     assert error["suggestion"] == "retry the same command; it had no side effects"
+
+
+def test_a_buffered_stream_timeout_hint_names_no_timeout_0() -> None:
+    """A stream buffered in-process refuses timeout 0, so its TIMEOUT hint names only a
+    larger timeout (#394)"""
+    app = App("inf", version="1.0.0", default_timeout=0.1)
+
+    @app.command(
+        "forever", description="Never ends", streaming=True, danger_level="safe", exit_codes=()
+    )
+    def forever(args: NoArgs, ctx: Ctx) -> Iterator[dict[str, int]]:
+        while True:
+            time.sleep(0.01)
+            yield {"n": 1}
+
+    error = app.call("forever", {}, env={}).error
+    assert error is not None and error.code == "TIMEOUT" and error.retryable is True
+    assert error.suggestion == (
+        "retry the same command; it had no side effects; if the run needs longer than "
+        "0.1 s, pass a larger --timeout <seconds>"
+    )
+    refused = app.call("forever", {"timeout": 0}, env={}).error
+    assert refused is not None and refused.code != "TIMEOUT"
 
 
 def test_a_mutating_timeout_gets_no_timeout_hint() -> None:
