@@ -419,7 +419,10 @@ def wrapper_app(ran: list[tuple[str, ...]]) -> App:
 def test_the_example_after_the_path_reaches_the_probe_verbatim() -> None:
     """Only the globals before the path are dropped: --format oneline is git's (#367)"""
     probes = {p.name: p for p in probes_for(wrapper_app([]))}
-    assert probes["git"].argv == ("git", "log", "--format", "oneline", "--max-count", "3")
+    tail = ("git", "log", "--format", "oneline", "--max-count", "3")
+    # A network command gets no read probe (#390): its argv is the unknown flag probe's
+    assert "git" not in probes
+    assert probes["unknown flag"].argv == ("--no-such-flag", *tail)
 
 
 def test_conformance_probes_put_treatys_flags_before_a_passthrough_path() -> None:

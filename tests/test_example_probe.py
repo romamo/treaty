@@ -256,3 +256,79 @@ def test_the_audit_checks_a_probe_as_it_checks_an_example() -> None:
     assert [f.message.split(" does not parse")[0] for f in errors] == [
         "the probe 'demo show --n many' of example 'demo show --n 2'"
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class Pages:
+    path: str = Arg(description="The document")
+    pages: int = Flag(default=1, description="Pages to read")
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        "demo profile fixtures/lease.pdf --output bundle.json --pages 2",
+        "demo profile fixtures/lease.pdf --output=bundle.json --pages 2",
+    ],
+    ids=["spaced", "inline"],
+)
+def test_a_probe_of_an_output_file_command_writes_no_file(probe: str) -> None:
+    """An explicit probe= loses --output as an example does: every kit run would write the
+    file (#391, #392)"""
+    app = App("demo", version="1.0.0")
+
+    @app.command(
+        "profile",
+        description="Profile a document and save it",
+        danger_level="safe",
+        exit_codes=(),
+        output_file=True,
+        examples=[Example("Profile", "demo profile lease.pdf --output out.json", probe=probe)],
+    )
+    def profile(args: Pages, ctx: Ctx) -> dict[str, int]:
+        return {"pages": args.pages}
+
+    got = {p.name: p.argv for p in probes_for(app)}
+    assert got["profile"] == ("profile", "fixtures/lease.pdf", "--pages", "2")
+    assert got["unknown flag"] == (*got["profile"], "--no-such-flag")
+    order = argument_order_for(app)
+    assert order is not None and order["local_args"] == ["--pages", "2"]
+
+
+def network_app(given: Example) -> App:
+    app = App("demo", version="1.0.0")
+
+    @app.command(
+        "summarize",
+        description="Summarize a document with a remote API",
+        danger_level="safe",
+        exit_codes=(),
+        has_network_io=True,
+        examples=[given],
+    )
+    def summarize(args: Pages, ctx: Ctx) -> dict[str, int]:
+        return {"pages": args.pages}
+
+    return app
+
+
+def test_a_probe_gives_a_network_command_back_its_read_probe() -> None:
+    """The author's probe= points the command at a local stub, so its read runs and it may
+    give argument_order; without probe= neither runs the real requests (#390, #392)"""
+    stubbed = network_app(
+        Example(
+            "Summarize",
+            "demo summarize lease.pdf --pages 2",
+            probe="demo summarize stub.pdf --pages 3",
+        )
+    )
+    got = {p.name: p for p in probes_for(stubbed)}
+    assert got["summarize"].kind == "read"
+    assert got["summarize"].argv == ("summarize", "stub.pdf", "--pages", "3")
+    order = argument_order_for(stubbed)
+    assert order is not None and order["command_path"] == ["summarize", "stub.pdf"]
+
+    real = network_app(Example("Summarize", "demo summarize lease.pdf --pages 2"))
+    assert "summarize" not in {p.name for p in probes_for(real)}
+    order = argument_order_for(real)
+    assert order is not None and order["command_path"] == ["manifest"]
