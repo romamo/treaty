@@ -303,6 +303,36 @@ def test_no_probe_runs_a_network_command(with_local: bool) -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class FetchArgs:
+    names: list[str] = Arg(description="Remote objects to fetch")
+
+
+def test_an_invalid_probe_of_an_example_with_a_separator_exits_before_the_network() -> None:
+    """After ``--`` an added flag is a positional: the probe ran the command (#390)"""
+    calls: list[list[str]] = []
+    app = App("objctl", version="1.0.0")
+
+    @app.command(
+        "fetch",
+        description="Fetch remote objects",
+        examples=[("Fetch an object named with a dash", "objctl fetch -- -weird")],
+        danger_level="safe",
+        exit_codes=(),
+        has_network_io=True,
+    )
+    def fetch(args: FetchArgs, ctx: Ctx) -> dict[str, list[str]]:
+        calls.append(args.names)
+        return {"names": args.names}
+
+    invalid = [p for p in probes_for(app) if p.kind == "invalid" and p.argv[0] == "fetch"]
+    assert {p.name for p in invalid} == {"fetch --proxy socks5", "unknown flag"}
+    for probe in invalid:
+        assert probe.argv[-2:] == ("--", "-weird"), probe
+        assert app.run(list(probe.argv), env={}, isatty=False) == 2, probe
+    assert calls == []
+
+
+@dataclass(frozen=True, slots=True)
 class PurgeArgs:
     bucket: str = Flag(default="logs", description="Remote bucket to purge")
     dry_run: bool = Flag(default=False, description="Preview only")

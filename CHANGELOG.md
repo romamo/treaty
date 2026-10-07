@@ -35,7 +35,8 @@ Apps built on treaty keep their own, structured schema changelog with
   (a destructive one keeps its `--dry-run` probe): each kit run made the command's real,
   and perhaps paid, requests. Its probes are the ones that exit 2 before the network: the
   malformed `--proxy`, and the `unknown flag` probe, which still goes on the first
-  command's example when that command is a network one (#390)
+  command's example when that command is a network one. Both go before an example's `--`,
+  where they no longer become positionals that run the command (#390)
 
 ## [1.0.0rc36] - 2026-10-06
 

@@ -82,7 +82,16 @@ def _dry_run_flag(command: Command) -> str:
 def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
     """``argv`` with framework ``flags`` where treaty reads them: after it, or before the
     path of a passthrough command, whose tool gets every token after the path (#367)"""
-    return (*flags, *argv) if command.passthrough else (*argv, *flags)
+    return (*flags, *argv) if command.passthrough else _before_separator(argv, *flags)
+
+
+def _before_separator(argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
+    """``argv`` with ``flags`` at its end, or before its ``--``: after it they would be
+    positionals, and the probe would run the command instead of exiting 2 (#390)"""
+    if "--" not in argv:
+        return (*argv, *flags)
+    cut = argv.index("--")
+    return (*argv[:cut], *flags, *argv[cut:])
 
 
 VERSION_PROBE = Probe("version", ("version",), "read")
@@ -151,7 +160,7 @@ def probes_for(app: App) -> list[Probe]:
     # REQ-O-041: an etag that is not sha256:<32 hex> exits 2 before anything runs
     probes.append(Probe("manifest malformed etag", ("manifest", "--etag", "x"), "invalid"))
     first = VERSION_PROBE if unknown_from is None else unknown_from
-    unknown = (*first.argv, "--no-such-flag")
+    unknown = _before_separator(first.argv, "--no-such-flag")
     if first.passthrough:
         unknown = ("--no-such-flag", *first.argv)  # after the path, the tool would get it
     probes.append(Probe("unknown flag", unknown, "invalid"))
