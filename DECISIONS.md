@@ -52,6 +52,7 @@ entry that supersedes it, never by editing an old one.
 - Why: A typed return must not be less expressive than a dict return, and one command-level switch avoids a second API for the same thing
 - Applies to: src/treaty/_out.py, src/treaty/_app.py, ordered, output arrays
 - Enforced by: review
+- Superseded by: D-11
 
 ## D-7: Output unions must be tagged, by a Literal or an enum
 
@@ -77,3 +78,20 @@ entry that supersedes it, never by editing an old one.
 - Why: An agent reads the JSON envelope, not stderr; it has to learn that cleanup (a connection, a lock, a flush) may not have finished
 - Applies to: src/treaty/_aio.py, src/treaty/_app.py, cancellation, timeouts, async handlers
 - Enforced by: review
+
+## D-10: Streams on stdout use the spec's line shape
+
+- Decided: 2026-10-07, in romamo/treaty#389
+- Rule: A stream on stdout writes bare item lines (_seq when numbered), then exactly one terminal line: a "_summary": true line with the ResponseMeta fields, or an error envelope on failure; cancellation ends CANCELLED with data {"partial": true} and error.context.signal; exec lines and App.call keep one envelope per event
+- Why: REQ-O-004 and REQ-F-069 define stream lines this way, and a spec-reading agent stopped at treaty's first envelope line; changing the wire format after 1.0 would need a major version
+- Applies to: src/treaty/_app.py, streams, jsonl, stdin_records
+- Enforced by: review; the spec kit's stream_contract and stream_sigint checks
+
+## D-11: ordered=True leaves set arrays sorted
+
+- Decided: 2026-10-07, in romamo/treaty#387
+- Rule: ordered=True keeps handler order for every array in a command's output except one whose field declares its own sort (Out(sort_key=) or x-sort-key) or one with uniqueItems: true (a set or frozenset), which keeps its canonical sort and gets no x-ordered; an explicit per-property x-ordered: true on a set still wins
+- Why: A set has no order of its own, so following handler order made output follow the hash seed
+- Applies to: src/treaty/_out.py, src/treaty/_app.py, ordered, output arrays, sets
+- Enforced by: review
+- Supersedes: D-6
