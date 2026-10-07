@@ -3,10 +3,15 @@ whatever the return type holds (#329)"""
 
 import io
 import json
+import os
+import subprocess
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import pytest
+from fixture_sets_app import TAGS, bag, sets_app
 from jsonschema import Draft7Validator
 from pydantic import BaseModel, Field
 
@@ -325,3 +330,60 @@ def test_a_union_without_ordered_still_sorts_and_publishes_no_marks() -> None:
     assert run(app, ["tree"])["data"]["names"] == ["a", "b"]
     schema = run(app, ["many", "--output-schema"])["data"]
     assert "x-ordered" not in json.dumps(schema) and "x-sort-key" not in json.dumps(schema)
+
+
+# A set has no order of its own: under ordered=True it keeps its canonical sort, and its
+# schema node, uniqueItems: true, has no x-ordered (#387, D-11)
+SETS_APP = Path(__file__).resolve().parent / "fixture_sets_app.py"
+
+
+def test_an_ordered_command_prints_a_set_the_same_under_any_hash_seed() -> None:
+    outputs = {
+        subprocess.run(
+            [sys.executable, str(SETS_APP)],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            check=True,
+        ).stdout
+        for seed in ("1", "2")
+    }
+    assert len(outputs) == 1
+    data = json.loads(outputs.pop())
+    assert data["tags"] == data["frozen"] == sorted(TAGS)
+
+
+def test_an_ordered_command_sorts_its_sets_and_keeps_its_lists() -> None:
+    data = run(sets_app(True), ["bag"])["data"]
+    assert data["tags"] == data["frozen"] == sorted(TAGS)
+    assert data["names"] == ["b", "c", "a"]  # a list keeps the handler's order
+    # A set inside a list item, and a set as a list's item, sort; the lists hold their order
+    assert [i["name"] for i in data["items"]] == ["y", "x"]
+    assert [i["tags"] for i in data["items"]] == [sorted(TAGS), ["p", "q"]]
+    assert data["groups"] == [sorted(TAGS), ["m", "n"]]
+    # An explicit x-ordered on a set still wins: the handler's order, as pydantic dumps it
+    assert data["pinned"] == bag().model_dump(mode="json")["pinned"]
+
+
+def test_an_ordered_command_marks_no_set_x_ordered() -> None:
+    app = sets_app(True)
+    schema = run(app, ["bag", "--output-schema"])["data"]
+    Draft7Validator(schema).validate(run(app, ["bag"])["data"])
+    arrays = array_nodes(schema)
+    sets = [a for a in arrays if a.get("uniqueItems") is True]
+    # tags, frozen, items[].tags, groups[] and pinned
+    assert len(sets) == 5
+    assert [a for a in sets if a.get("x-ordered")] == [schema["properties"]["pinned"]]
+    lists = [a for a in arrays if a.get("uniqueItems") is not True]
+    assert lists and all(a.get("x-ordered") is True for a in lists)
+
+
+def test_an_unordered_command_still_sorts_every_array_of_sets() -> None:
+    app = sets_app(False)
+    data = run(app, ["bag"])["data"]
+    assert data["tags"] == data["frozen"] == sorted(TAGS)
+    assert data["names"] == ["a", "b", "c"]
+    schema = run(app, ["bag", "--output-schema"])["data"]
+    assert [a for a in array_nodes(schema) if a.get("x-ordered")] == [
+        schema["properties"]["pinned"]
+    ]

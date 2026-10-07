@@ -10,6 +10,14 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+### Fixed
+
+- A command with `ordered=True` sorts a `set` or `frozenset` field of an output model by
+  its canonical JSON again, as before rc34: it kept the set's iteration order, which the
+  hash seed picks, so the output changed from run to run. A set's schema node
+  (`"uniqueItems": true`) loses its `"x-ordered": true`, which a schema lock reports as a
+  change; an explicit per-property `x-ordered: true` on a set still keeps its order (#387)
+
 ## [1.0.0rc36] - 2026-10-06
 
 The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see

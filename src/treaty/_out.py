@@ -363,7 +363,7 @@ def arrange_node(
     """``arrange`` by a JSON Schema: a property's ``x-sort-key`` and ``x-ordered`` order
     its array, and ``x-volatile`` drops it under ``stable``; ``defs`` is the root's
     ``$defs``, which a ``$ref`` names. ``keep`` keeps every array's order but one an
-    ``x-sort-key`` orders."""
+    ``x-sort-key`` orders and a set's (``uniqueItems``), which an ``x-ordered`` keeps."""
     node = deref(node, defs)
     sort_key = node.get("x-sort-key")
     if isinstance(sort_key, str):
@@ -387,7 +387,7 @@ def arrange_node(
         arranged = [
             arrange_node(v, item, inner, stable=stable, defs=defs, keep=keep) for v in value
         ]
-        if spec.ordered or (keep and spec.sort_key is None):
+        if spec.ordered or (keep and spec.sort_key is None and not is_set(node)):
             return arranged
         return [arranged[i] for i in sorted_indices(arranged, spec.sort_key)]
     if not isinstance(value, dict) or is_binary(value):
@@ -416,7 +416,8 @@ _NAMED = ("properties", "patternProperties", "$defs", "definitions")
 
 def keep_order(node: Mapping[str, Any]) -> dict[str, Any]:
     """``node``, an output schema, with ``"x-ordered": true`` on every array node a
-    ``x-sort-key`` does not order: what a command's ``ordered=True`` keeps"""
+    ``x-sort-key`` does not order and that is not a set: what a command's ``ordered=True``
+    keeps"""
     out = dict(node)
     for key in _ONE:
         if isinstance(out.get(key), Mapping):
@@ -431,9 +432,15 @@ def keep_order(node: Mapping[str, Any]) -> dict[str, Any]:
             }
     kind = out.get("type")
     is_array = kind == "array" or (isinstance(kind, list) and "array" in kind)
-    if is_array and "x-sort-key" not in out:
+    if is_array and "x-sort-key" not in out and not is_set(out):
         out["x-ordered"] = True
     return out
+
+
+def is_set(node: Mapping[str, Any]) -> bool:
+    """A set's or frozenset's array node: ``uniqueItems`` with no order of its own, so a
+    command's ``ordered=True`` keeps its canonical sort (#387, D-11)"""
+    return node.get("uniqueItems") is True
 
 
 def _untyped(tp: object) -> bool:
