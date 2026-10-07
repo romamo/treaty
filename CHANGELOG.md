@@ -79,6 +79,12 @@ Apps built on treaty keep their own, structured schema changelog with
   stderr note, and on a timeout not even that, since the timeout answered without
   waiting for the source; it now gives the source its grace first. The stream's lines
   are unchanged (#382)
+- An `async def release` no longer waits forever behind an `async def` handler or async
+  stream source still running after its cancellation grace, which holds the run's event
+  loop: the run's async releases wait to start for one grace more in all, then each is
+  reported as a `CLEANUP_FAILED` warning naming its `release`, and the run answers
+  `CANCELLED` or `TIMEOUT` as it would without the resource. A release that cannot start is
+  cancelled, so it never runs late; once started, a release still runs to its end (#383)
 
 ## [1.0.0rc36] - 2026-10-06
 
