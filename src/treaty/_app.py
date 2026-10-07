@@ -794,8 +794,9 @@ class App:
         ``x-sort-key``, ``x-ordered``, ``x-volatile``, ``x-high-entropy``, and
         ``x-external``, for pydantic through ``Field(json_schema_extra={"x-ordered":
         True})``; ``ordered=True`` on a command keeps the order of every array in its
-        output instead. An output list or dict is never null; ``none_as_empty=True`` writes
-        a null one as ``[]`` or ``{}``, so a ``list[T] | None`` field is allowed.
+        output instead, but a set's (``uniqueItems``), which stays sorted. An output list
+        or dict is never null; ``none_as_empty=True`` writes a null one as ``[]`` or
+        ``{}``, so a ``list[T] | None`` field is allowed.
         """
         for fn, name in ((schema, "schema"), (dump, "dump")):
             refuse_async(fn, f"output_adapter {name}")
@@ -1093,7 +1094,8 @@ class App:
         enables ``ctx.retry`` with ``--retries`` and ``--retry-delay``.
         Arrays in ``data`` are sorted (REQ-F-020): ``sort_key="id"`` orders an output
         list of objects by that field; ``ordered=True`` keeps the handler's order of every
-        array in the output, whatever the return type, for a ranking. ``treaty.Out``
+        array in the output, whatever the return type, for a ranking, but a set's
+        (``uniqueItems``), which stays sorted. ``treaty.Out``
         declares either for a field of an output dataclass, and an adapted model's
         property ``x-sort-key`` or ``x-ordered``.
         ``fix_commands={"STORE_MISSING": "tool init"}`` gives ``error.fix_command`` for an
