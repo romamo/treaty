@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._audit import user_commands
 from ._command import OUTPUT_FLAG, Command, DangerLevel
-from ._parse import VALUED_GLOBALS, delegated_argv
+from ._parse import VALUED_GLOBALS
 from ._values import CommandPath
 
 if TYPE_CHECKING:
@@ -37,9 +37,6 @@ class Probe:
     argv: tuple[str, ...]
     kind: str
     dry_run_flag: str | None = None
-    passthrough: bool = False
-    """The probed command hands every token after its path to its tool, so a flag added
-    for treaty goes before the path (#367); not part of the profile"""
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {"name": self.name, "argv": list(self.argv), "kind": self.kind}
@@ -49,19 +46,12 @@ class Probe:
 
 
 def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
+    """The argv of the command's first example that names it; never a passthrough
+    command's, which gets no probe and no argument_order run (#386)"""
     for example in command.examples:
         tokens = shlex.split(example.command)
         if tokens and tokens[0] == app.name:
             tokens = tokens[1:]
-        if command.passthrough:
-            # The words after the path are its tool's, verbatim: only the globals before it
-            # are dropped. An example with the command's own flags there is not one (#367)
-            split = delegated_argv(tokens, {command.path: command})
-            if split is not None and split.argv[-len(command.path.parts) :] == list(
-                command.path.parts
-            ):
-                return (*command.path.parts, *split.rest)
-            continue
         # Globals may come before the path (tool --format json show x); drop them first
         preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
         tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
@@ -77,12 +67,6 @@ def _dry_run_flag(command: Command) -> str:
     """The flag that previews the command: ``--dry-run``, or its ``Flag(dry_run=True)``"""
     field = command.dry_run_field
     return "--dry-run" if field is None else f"--{field.flag}"
-
-
-def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
-    """``argv`` with framework ``flags`` where treaty reads them: after it, or before the
-    path of a passthrough command, whose tool gets every token after the path (#367)"""
-    return (*flags, *argv) if command.passthrough else _before_separator(argv, *flags)
 
 
 def _before_separator(argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
@@ -102,6 +86,10 @@ def probes_for(app: App) -> list[Probe]:
     # The first probe that runs a command: the unknown-flag probe adds its flag to it
     unknown_from: Probe | None = None
     for command in user_commands(app):
+        if command.passthrough:
+            # Its tool owns stdout and its envelope is on stderr, so the kit's json_envelope
+            # check, which reads stdout, would fail every probe of it (#386)
+            continue
         argv = _argv_from_example(app, command)
         if argv is None:
             if any(f.required for f in command.fields):
@@ -110,15 +98,15 @@ def probes_for(app: App) -> list[Probe]:
         label = " ".join(command.path.parts)
         if command.resumable:
             # REQ-O-010: a step the command does not declare exits 2 before anything runs
-            bad = _with_flags(command, argv, "--resume-from", "no-such-step")
+            bad = _before_separator(argv, "--resume-from", "no-such-step")
             probes.append(Probe(f"{label} --resume-from unknown step", bad, "invalid"))
         if command.has_network_io:
             # REQ-O-019: urllib has no SOCKS, so --proxy refuses one before anything runs
-            socks = _with_flags(command, argv, "--proxy", "socks5://127.0.0.1:1080")
+            socks = _before_separator(argv, "--proxy", "socks5://127.0.0.1:1080")
             probes.append(Probe(f"{label} --proxy socks5", socks, "invalid"))
         if command.recursive_traversal:
             # REQ-O-040: a walk of no levels is not a limit
-            shallow = _with_flags(command, argv, "--max-depth", "0")
+            shallow = _before_separator(argv, "--max-depth", "0")
             probes.append(Probe(f"{label} --max-depth 0", shallow, "invalid"))
         run: Probe | None = None
         if command.streaming:
@@ -135,7 +123,7 @@ def probes_for(app: App) -> list[Probe]:
         elif command.danger_level is DangerLevel.DESTRUCTIVE:
             run = Probe(label, argv, "destructive", dry_run_flag=_dry_run_flag(command))
         elif command.danger_level is DangerLevel.SAFE:
-            run = Probe(label, argv, "read", passthrough=command.passthrough)
+            run = Probe(label, argv, "read")
         if run is None:
             continue
         if unknown_from is None:
@@ -161,8 +149,6 @@ def probes_for(app: App) -> list[Probe]:
     probes.append(Probe("manifest malformed etag", ("manifest", "--etag", "x"), "invalid"))
     first = VERSION_PROBE if unknown_from is None else unknown_from
     unknown = _before_separator(first.argv, "--no-such-flag")
-    if first.passthrough:
-        unknown = ("--no-such-flag", *first.argv)  # after the path, the tool would get it
     probes.append(Probe("unknown flag", unknown, "invalid"))
     return probes
 
