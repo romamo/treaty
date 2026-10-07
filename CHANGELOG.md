@@ -13,8 +13,9 @@ Apps built on treaty keep their own, structured schema changelog with
 ### Changed
 
 - A read-only command's `TIMEOUT` stays retryable, and when the command takes `--timeout`
-  its hint now also names a larger `--timeout` and `--timeout 0` (no limit): a run whose
-  length depends on its input timed out again on the plain retry the hint suggested. The
+  its hint now also names a larger `--timeout` and `--timeout 0` (no limit; not on a
+  stream `App.call` or MCP buffers, which refuse it): a run whose length depends on its
+  input timed out again on the plain retry the hint suggested. The
   `explicit-timeout` advice now covers a safe command on the app's default timeout too, so
   an app sees more advice; `--strict` is unaffected. `treaty init`'s scaffold and
   treaty's own `audit`, `check-docs`, and `rules` declare their timeout (#394)
