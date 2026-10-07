@@ -285,7 +285,7 @@ def arrange(
     ``stable``, its volatile fields dropped; ``spec`` declares the array ``value`` is. A
     class an output adapter writes is arranged by its schema's ``x-`` options. ``keep``,
     a command's ``ordered=True``, keeps the handler's order of every array at any depth
-    but one a field or property declares a ``sort_key`` for."""
+    but one a field or property declares a ``sort_key`` for and a set's (D-11)."""
     base, _ = strip_optional(resolve_alias(tp))
     if (members := union_of(base, adapters)) and value is not None:
         # The member the value is, which its keys and tag tell; none is a broken output
