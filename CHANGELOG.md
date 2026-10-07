@@ -61,6 +61,15 @@ Apps built on treaty keep their own, structured schema changelog with
   pointing at a local stub, keeps its `read` probe and can give `argument_order`; an
   `output_file` command's `--output` is dropped from a probe as from an example. A
   passthrough command gets no probe either way (#392)
+- The manifest is ManifestResponse 3.19, and a command's exit `6` (`CONFLICT`) entry
+  lists `error_codes`, every `error.code` the command answers under it:
+  `ALREADY_EXISTS` when its handler calls `treaty.already_exists`, `IDEMPOTENCY_KEY_REUSED`
+  when it takes `--idempotency-key`, and each code its `Exit.CONFLICT` raises name, the
+  default `CONFLICT` among them. `--schema` and the generated skill files carry the list
+  too. The list is read as complete, so it is left out when the scan cannot read a code
+  (a `code=` that is not a literal, `**kwargs`, a handler without source) and on a
+  passthrough command. `declared-exits` now reads an `already_exists(...)` call as a
+  `CONFLICT` raise (#362)
 
 ### Changed
 

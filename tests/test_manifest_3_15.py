@@ -176,8 +176,9 @@ def manifest() -> dict[str, Any]:
     return built
 
 
-def test_the_manifest_declares_3_15(manifest: dict[str, Any]) -> None:
-    assert manifest["schema_version"] == "3.15"
+def test_the_manifest_declares_3_19(manifest: dict[str, Any]) -> None:
+    """3.15 and up; 3.19 since ExitCodeEntry.error_codes (#362)"""
+    assert manifest["schema_version"] == "3.19"
 
 
 def test_3_6_output_written_by_the_handler_or_the_envelope(manifest: dict[str, Any]) -> None:

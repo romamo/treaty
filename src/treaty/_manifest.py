@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Collection, Mapping, Sequence
 from types import MappingProxyType
 
@@ -29,6 +30,7 @@ from ._env import (
 )
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import (
+    IDEMPOTENCY_FLAG,
     NO_INJECTION_FLAG,
     NO_STREAM_FLAG,
     STABLE_OUTPUT_KEY,
@@ -38,12 +40,13 @@ from ._framework import (
 from ._lines import DEFAULT_LINE_CAP, INPUT_LINES_KEY, LineCap, StdinInput
 from ._mode import Format, FormatName, MediaType, media_type_map
 from ._output_base import OutputBase
+from ._scan import command_reach, exit_raises, source_tree
 from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._types import FlagType
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "3.15"  # 3.1: CommandEntry.builtin (REQ-O-041)
+SCHEMA_VERSION = "3.19"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.2: ConditionalRule any_of and one_of (REQ-C-026)
 # 3.3: CommandEntry.output_file (REQ-O-001)
 # 3.4: FlagEntry.env_vars; 3.5: the root env_vars of variables that back no flag (REQ-F-073)
@@ -52,7 +55,8 @@ SCHEMA_VERSION = "3.15"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.10: the output side-effect kind (REQ-C-011); 3.11: stderr child_log (REQ-F-038)
 # 3.12: the format flag's media_types and output_media_types (REQ-O-001, REQ-O-049)
 # 3.13: the root secret_env_vars (REQ-F-073); 3.14: confirm_flag (REQ-O-048)
-# 3.15: CommandEntry.idempotent (REQ-C-002)
+# 3.15: CommandEntry.idempotent (REQ-C-002); 3.16 to 3.18 add optional keys treaty does not
+# emit; 3.19: ExitCodeEntry.error_codes (#362)
 
 EXEC_PATH = CommandPath("exec")
 """The ``exec`` built-in, which reads its plan from stdin as a buffered payload"""
@@ -103,6 +107,40 @@ def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
         # A step failed after one completed, or some items of a batch failed
         codes.append(FrameworkCode.PARTIAL_FAILURE)
     return tuple(codes)
+
+
+_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
+"""ErrorDetail.code; a raise with any other code exits 1 with INVALID_EXIT instead"""
+
+CONFLICT_CODE = FrameworkCode.CONFLICT
+REUSED_KEY_CODE = "IDEMPOTENCY_KEY_REUSED"
+"""The ``error.code`` of exit 6 when an ``--idempotency-key`` comes back with other arguments"""
+
+
+def conflict_error_codes(command: Command) -> list[str] | None:
+    """ExitCodeEntry 1.1 ``error_codes`` of the command's exit 6 (CONFLICT), sorted: the
+    codes its handler, its resources' ``acquire``, and the first-party helpers they call
+    raise under CONFLICT (``ALREADY_EXISTS`` for ``already_exists``, a literal ``code=``,
+    else ``CONFLICT``), and ``IDEMPOTENCY_KEY_REUSED`` when it takes ``--idempotency-key``.
+    A present list is read as complete, so it is None when the scan cannot see a code: a
+    function without source, a raise whose ``code=`` is not a literal, or a passthrough
+    command, whose tool owns its exit codes; None too when there is nothing to list"""
+    if command.passthrough:
+        return None
+    codes: set[str] = set()
+    if any(f.name == IDEMPOTENCY_FLAG for f in framework_flags(command)):
+        codes.add(REUSED_KEY_CODE)
+    for unit in command_reach(command):
+        if source_tree(unit.fn) is None:
+            return None
+        for raised in exit_raises(unit.fn):
+            if raised.name.value != CONFLICT_CODE.name:
+                continue
+            if raised.error_code is None:
+                return None
+            if _ERROR_CODE.fullmatch(raised.error_code):
+                codes.add(raised.error_code)
+    return sorted(codes) or None
 
 
 def global_flag_entries(
@@ -424,6 +462,11 @@ def command_entry(
         exit_codes.setdefault(str(entry.code.value), entry.to_json())
     timeout = exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
     exit_codes[str(timeout.code.value)] = timeout.to_json()
+    conflict = exits.framework(CONFLICT_CODE)
+    key = str(conflict.code.value)
+    if key in exit_codes and (errors := conflict_error_codes(command)) is not None:
+        # ExitCodeEntry 1.1 (ManifestResponse 3.19, #362): the error.code values of exit 6
+        exit_codes[key] = {**conflict.to_json(), "error_codes": errors}
     if shared is not None:
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
     # REQ-C-031: a passthrough command's own flags go before its path, as global options
