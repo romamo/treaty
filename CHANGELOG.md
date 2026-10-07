@@ -17,6 +17,11 @@ Apps built on treaty keep their own, structured schema changelog with
   `argument_order` run, so a committed profile with the old `--output` differs from the
   generated one and `treaty conformance` exits `CONFLICT`: rerun
   `treaty conformance --force` once to update it (#391)
+- An app with a safe, streaming, or `safe_default` `has_network_io` command now generates
+  a conformance profile without that command's `read` probe, and whose `argument_order`
+  comes from another example or the `manifest --etag` one, so a committed profile with the
+  old probe differs from the generated one and `treaty conformance` exits `CONFLICT`:
+  rerun `treaty conformance --force` once to update it (#390)
 
 ### Fixed
 
@@ -25,6 +30,13 @@ Apps built on treaty keep their own, structured schema changelog with
   its probes return the data in the envelope instead of writing the file on every run. An
   example whose only option was `--output` no longer gives `argument_order`, which moves
   to the next example or the built-in `manifest --etag` (#391)
+- `treaty conformance` no longer generates a `read` probe for a `has_network_io` command,
+  or takes such a command's example for `argument_order`, `safe_default` ones included
+  (a destructive one keeps its `--dry-run` probe): each kit run made the command's real,
+  and perhaps paid, requests. Its probes are the ones that exit 2 before the network: the
+  malformed `--proxy`, and the `unknown flag` probe, which still goes on the first
+  command's example when that command is a network one. Both go before an example's `--`,
+  where they no longer become positionals that run the command (#390)
 
 ## [1.0.0rc36] - 2026-10-06
 
