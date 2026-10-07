@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ._audit import user_commands
-from ._command import Command, DangerLevel
-from ._parse import VALUED_GLOBALS, delegated_argv
+from ._command import OUTPUT_FLAG, Command, DangerLevel
+from ._parse import VALUED_GLOBALS
 from ._values import CommandPath
 
 if TYPE_CHECKING:
@@ -37,9 +37,6 @@ class Probe:
     argv: tuple[str, ...]
     kind: str
     dry_run_flag: str | None = None
-    passthrough: bool = False
-    """The probed command hands every token after its path to its tool, so a flag added
-    for treaty goes before the path (#367); not part of the profile"""
 
     def to_json(self) -> dict[str, object]:
         out: dict[str, object] = {"name": self.name, "argv": list(self.argv), "kind": self.kind}
@@ -49,22 +46,18 @@ class Probe:
 
 
 def _argv_from_example(app: App, command: Command) -> tuple[str, ...] | None:
+    """The argv of the command's first example that names it; never a passthrough
+    command's, which gets no probe and no argument_order run (#386)"""
     for example in command.examples:
         tokens = shlex.split(example.command)
         if tokens and tokens[0] == app.name:
             tokens = tokens[1:]
-        if command.passthrough:
-            # The words after the path are its tool's, verbatim: only the globals before it
-            # are dropped. An example with the command's own flags there is not one (#367)
-            split = delegated_argv(tokens, {command.path: command})
-            if split is not None and split.argv[-len(command.path.parts) :] == list(
-                command.path.parts
-            ):
-                return (*command.path.parts, *split.rest)
-            continue
         # Globals may come before the path (tool --format json show x); drop them first
         preview = (*PREVIEW_FLAGS, _dry_run_flag(command))
         tokens = list(_without_globals(tuple(t for t in tokens if t not in preview)))
+        if command.output_file:
+            # Every kit run of the probe would write the file (#391)
+            tokens = list(_without_output(tuple(tokens)))
         if tuple(tokens[: len(command.path.parts)]) == command.path.parts:
             return tuple(tokens)
     return None
@@ -76,14 +69,22 @@ def _dry_run_flag(command: Command) -> str:
     return "--dry-run" if field is None else f"--{field.flag}"
 
 
-def _with_flags(command: Command, argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
-    """``argv`` with framework ``flags`` where treaty reads them: after it, or before the
-    path of a passthrough command, whose tool gets every token after the path (#367)"""
-    return (*flags, *argv) if command.passthrough else (*argv, *flags)
+def _before_separator(argv: tuple[str, ...], *flags: str) -> tuple[str, ...]:
+    """``argv`` with ``flags`` at its end, or before its ``--``: after it they would be
+    positionals, and the probe would run the command instead of exiting 2 (#390)"""
+    if "--" not in argv:
+        return (*argv, *flags)
+    cut = argv.index("--")
+    return (*argv[:cut], *flags, *argv[cut:])
+
+
+VERSION_PROBE = Probe("version", ("version",), "read")
 
 
 def probes_for(app: App) -> list[Probe]:
     probes: list[Probe] = []
+    # The first probe that runs a command: the unknown-flag probe adds its flag to it
+    unknown_from: Probe | None = None
     for command in user_commands(app):
         if command.passthrough:
             # Its tool owns stdout and its envelope is on stderr, so the kit's json_envelope
@@ -97,32 +98,44 @@ def probes_for(app: App) -> list[Probe]:
         label = " ".join(command.path.parts)
         if command.resumable:
             # REQ-O-010: a step the command does not declare exits 2 before anything runs
-            bad = _with_flags(command, argv, "--resume-from", "no-such-step")
+            bad = _before_separator(argv, "--resume-from", "no-such-step")
             probes.append(Probe(f"{label} --resume-from unknown step", bad, "invalid"))
         if command.has_network_io:
             # REQ-O-019: urllib has no SOCKS, so --proxy refuses one before anything runs
-            socks = _with_flags(command, argv, "--proxy", "socks5://127.0.0.1:1080")
+            socks = _before_separator(argv, "--proxy", "socks5://127.0.0.1:1080")
             probes.append(Probe(f"{label} --proxy socks5", socks, "invalid"))
         if command.recursive_traversal:
             # REQ-O-040: a walk of no levels is not a limit
-            shallow = _with_flags(command, argv, "--max-depth", "0")
+            shallow = _before_separator(argv, "--max-depth", "0")
             probes.append(Probe(f"{label} --max-depth 0", shallow, "invalid"))
+        run: Probe | None = None
         if command.streaming:
             # JSONL, and possibly endless, while the kit expects one envelope: the probes
             # above end before the stream starts, and a read is bounded (#349). A stream is
             # safe or mutating, and a mutating one, as elsewhere, gets no probe that runs it
             if command.danger_level is DangerLevel.SAFE:
                 bounded = (*_without_stream_flags(argv), "--no-stream", "--timeout")
-                probes.append(Probe(label, (*bounded, str(STREAM_SECONDS)), "read"))
+                run = Probe(label, (*bounded, str(STREAM_SECONDS)), "read")
         elif command.danger_level is DangerLevel.DESTRUCTIVE and command.safe_default:
             # Unconfirmed, a safe_default command previews and exits 0, and --live alone is
             # its confirmation: nothing refuses, so it is probed as the read its default is
-            probes.append(Probe(label, argv, "read"))
+            run = Probe(label, argv, "read")
         elif command.danger_level is DangerLevel.DESTRUCTIVE:
-            probes.append(Probe(label, argv, "destructive", dry_run_flag=_dry_run_flag(command)))
+            run = Probe(label, argv, "destructive", dry_run_flag=_dry_run_flag(command))
         elif command.danger_level is DangerLevel.SAFE:
-            probes.append(Probe(label, argv, "read", passthrough=command.passthrough))
-    probes.append(Probe("version", ("version",), "read"))
+            run = Probe(label, argv, "read")
+        if run is None:
+            continue
+        if unknown_from is None:
+            # An unknown flag exits 2 before anything runs, so a network command's run is
+            # one to add it to, though the profile has no read probe of it
+            unknown_from = run
+        if run.kind == "read" and command.has_network_io:
+            # Each kit run of a read would make the command's real, perhaps paid, requests:
+            # its probes are the ones above, which end before the network (#390)
+            continue
+        probes.append(run)
+    probes.append(VERSION_PROBE)
     if CommandPath("status") in app.builtins:
         probes.append(Probe("status built-in", ("status",), "read"))  # REQ-O-028: always 0
     if CommandPath("cleanup") in app.builtins and not any(p.kind == "destructive" for p in probes):
@@ -134,10 +147,8 @@ def probes_for(app: App) -> list[Probe]:
         probes.append(cleanup)
     # REQ-O-041: an etag that is not sha256:<32 hex> exits 2 before anything runs
     probes.append(Probe("manifest malformed etag", ("manifest", "--etag", "x"), "invalid"))
-    first = next(p for p in probes if p.kind != "invalid")
-    unknown = (*first.argv, "--no-such-flag")
-    if first.passthrough:
-        unknown = ("--no-such-flag", *first.argv)  # after the path, the tool would get it
+    first = VERSION_PROBE if unknown_from is None else unknown_from
+    unknown = _before_separator(first.argv, "--no-such-flag")
     probes.append(Probe("unknown flag", unknown, "invalid"))
     return probes
 
@@ -153,6 +164,24 @@ def _without_globals(argv: tuple[str, ...]) -> tuple[str, ...]:
         elif name in VALUED_GLOBALS:
             skip = "=" not in tok
         elif tok not in ("--help", "-h", "--schema"):
+            out.append(tok)
+    return tuple(out)
+
+
+def _without_output(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """An ``output_file`` command's ``--output PATH`` or ``--output=PATH``, with its value,
+    so a probe returns the data in its envelope instead of writing a file (#391)"""
+    out: list[str] = []
+    skip = False
+    flag = f"--{OUTPUT_FLAG}"
+    for i, tok in enumerate(argv):
+        if skip:
+            skip = False
+        elif tok == "--":
+            return (*out, *argv[i:])  # after it, an --output token is a positional
+        elif tok == flag:
+            skip = True
+        elif not tok.startswith(f"{flag}="):
             out.append(tok)
     return tuple(out)
 
@@ -177,13 +206,20 @@ def _without_stream_flags(argv: tuple[str, ...]) -> tuple[str, ...]:
 def argument_order_for(app: App) -> dict[str, object] | None:
     """The first example whose tokens after its positionals start with an option, so the kit
     can move ``--format`` around it (REQ-F-079). A destructive one runs with its dry-run flag
-    and never ``--confirm-destructive``, so one whose only option is that flag is skipped.
-    Without one, the built-in ``manifest --etag``"""
+    and never ``--confirm-destructive``, so one whose only option is that flag is skipped,
+    as is a network command's that has no read probe, safe or ``safe_default``, which would
+    make its real requests (#390). Without one, the built-in ``manifest --etag``"""
     for command in user_commands(app):
         if command.danger_level is DangerLevel.MUTATING or command.streaming:
             continue
         if command.passthrough:
             continue  # the kit moves --format after the path, where the tool would get it
+        if command.has_network_io and (
+            command.danger_level is DangerLevel.SAFE or command.safe_default
+        ):
+            # Each run would make its real requests, as a read probe would (#390); a
+            # safe_default command previews unconfirmed, so it runs as the read it is probed as
+            continue
         argv = _argv_from_example(app, command)
         if argv is None:
             continue

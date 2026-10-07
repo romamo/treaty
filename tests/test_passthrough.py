@@ -398,8 +398,8 @@ def test_the_skill_file_puts_treaty_flags_before_the_path() -> None:
 
 
 def wrapper_app(ran: list[tuple[str, ...]]) -> App:
-    """A network passthrough command, the unknown-flag probe's base, whose example has
-    options after the path that argument_order could pick"""
+    """A network passthrough command whose example has options after the path that
+    argument_order could pick"""
     app = App("gitw", version="1.0.0")
 
     @app.command(
