@@ -1695,7 +1695,9 @@ survives between events. A signal, the idle timeout, or a reader that stops canc
 pending step, then closes the generator, so its `finally` blocks and `async with` exits
 run before its async resources are released, and the run ends `CANCELLED` or `TIMEOUT`
 as a plain generator's does. A generator that catches the `CancelledError` and keeps
-running gets 2 seconds to finish; then the run ends anyway, with the reason on stderr.
+running gets 2 seconds to finish, also on a timeout; then the run ends anyway, with the
+traceback on stderr and a `CLEANUP_FAILED` warning for the `async stream` hook in the last
+envelope.
 `--no-stream`, `App.call`, and MCP collect it as they do any stream.
 
 A stream is `safe` or `mutating`; a `destructive` one is refused at registration, since a
