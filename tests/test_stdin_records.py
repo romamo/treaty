@@ -180,6 +180,31 @@ def test_a_heartbeat_naming_its_step_is_skipped() -> None:
     assert code == 0 and envelope["data"]["tickers"] == ["VWRL"]
 
 
+def test_a_record_type_with_its_own_seq_keeps_it() -> None:
+    # Its producer's stream is not numbered, so _seq is the record's field, not a position:
+    # kept, and its ndjson records end at EOF without UPSTREAM_INCOMPLETE (#389)
+    target = App("own", version="1.0.0")
+
+    @dataclass(frozen=True, slots=True)
+    class Own:
+        _seq: int
+
+    @dataclass(frozen=True, slots=True)
+    class Seen:
+        seqs: list[int]
+
+    @target.command("read", description="R", danger_level="safe", exit_codes=(),
+                    stdin_records=Own)  # fmt: skip
+    def read(args: NoArgs, ctx: Ctx) -> Seen:
+        return Seen([r._seq for r in ctx.stdin_records])
+
+    out = io.StringIO()
+    stdin = io.StringIO(bare({"_seq": 10}, {"_seq": 20}))
+    code = target.run(["read"], stdin=stdin, stdout=out, stderr=io.StringIO(), env={})
+    envelope = json.loads(out.getvalue())
+    assert code == 0 and envelope["data"] == {"seqs": [10, 20]}
+
+
 def test_call_and_exec_take_records_as_input_lines() -> None:
     lines = [json.dumps(VWRL), json.dumps(GOLD)]
     assert app.call("summary", {"input_lines": lines}).data == {

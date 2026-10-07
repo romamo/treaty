@@ -114,6 +114,10 @@ class RecordSpec:
             fields.append(RecordField(f.name, target, not defaulted and not target.optional))
         return cls(record, tuple(fields), schema_for(record, scalars))
 
+    def has(self, name: str) -> bool:
+        """Whether the record type has a field of that name"""
+        return any(f.name == name for f in self.fields)
+
     def build(self, value: object, line: int) -> object:
         """One record from a JSON value, or ``RECORD_INVALID`` naming the line and field"""
         if not isinstance(value, dict):
@@ -257,9 +261,10 @@ class Records(Iterator[object]):
                 self._ended = True
                 self._lines.close()
                 return
-            if isinstance(value, dict) and SEQ_KEY in value:
+            if isinstance(value, dict) and SEQ_KEY in value and not self._spec.has(SEQ_KEY):
                 # A numbered stream's item line: _seq is the stream's, not the record's,
-                # and the stream owes its terminal line (REQ-O-004)
+                # and the stream owes its terminal line (REQ-O-004). A record type with a
+                # _seq field of its own is never numbered, so there it is the field
                 value = {k: v for k, v in value.items() if k != SEQ_KEY}
                 self._events += 1
             self._queue.append((line, value))
