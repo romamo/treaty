@@ -2,7 +2,7 @@
 
 All notable changes to treaty. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and treaty follows
-[Semantic Versioning](https://semver.org/) from 1.0 (see "Stability" in the README).
+[Semantic Versioning](https://semver.org/) from 1.0 (see "Stability" in [docs/reference.md](docs/reference.md#stability)).
 Before 1.0 any release could break an app; the "Breaking" sections say where.
 
 Apps built on treaty keep their own, structured schema changelog with
@@ -106,6 +106,11 @@ Apps built on treaty keep their own, structured schema changelog with
   `explicit-timeout` advice now covers a safe command on the app's default timeout too, so
   an app sees more advice; `--strict` is unaffected. `treaty init`'s scaffold and
   treaty's own `audit`, `check-docs`, and `rules` declare their timeout (#394)
+- The README, also the PyPI page, is a short overview: what treaty guarantees, a quick
+  start, and what an agent sees. The full API reference it held moved unchanged to
+  `docs/reference.md`, and the tutorial links there. The repository gains
+  `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue forms, and a pull request
+  template
 
 ### Fixed
 

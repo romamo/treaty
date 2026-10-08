@@ -238,8 +238,8 @@ arguments and no example gets no probe at all, which is one more reason the audi
 examples.
 
 If you need probes treaty cannot derive, such as a bad enum value, keep them in a profile of
-your own, beside the generated one, and run the kit on it directly, as the README's
-[Conformance](../../../README.md#conformance) section does for `deployctl`.
+your own, beside the generated one, and run the kit on it directly, as the reference's
+[Conformance](../../reference.md#conformance) section does for `deployctl`.
 
 **Check:** the chapter's **Done when** command
 

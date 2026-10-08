@@ -40,7 +40,7 @@ wait until the audit names them:
   shows
 - [jq](https://jqlang.org/), which every **Done when** and **Check** pipes JSON into, and
   git, which [Run other programs](core/programs.md) runs
-- On Windows, read [Platforms](../../README.md#platforms) in the README first: the checks are
+- On Windows, read [Platforms](../reference.md#platforms) in the reference first: the checks are
   bash, the conformance launcher is a `/bin/sh` script, and signals end a run differently
 - For a new CLI, nothing else: `uvx treaty init` makes a project that depends on treaty. To
   migrate a CLI, run `uv add treaty` in its project
