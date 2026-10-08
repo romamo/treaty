@@ -27,9 +27,9 @@ WAIT = 30.0
 
 
 class Server:
-    """``servectl mcp serve`` (or ``script``'s) in a subprocess: JSON-RPC lines in on
-    stdin, out on stdout, each stdout line kept for the check that nothing else ever
-    reaches it"""
+    """``servectl mcp serve`` (or ``script``'s, or ``command``, the interpreter's
+    arguments, as for ``treaty-mcp``) in a subprocess: JSON-RPC lines in on stdin, out on
+    stdout, each stdout line kept for the check that nothing else ever reaches it"""
 
     def __init__(
         self,
@@ -38,6 +38,7 @@ class Server:
         env: dict[str, str] | None = None,
         stdout: int = subprocess.PIPE,
         script: Path = SERVECTL,
+        command: list[str] | None = None,
     ) -> None:
         self.stderr_path = tmp / "stderr.txt"
         self.audit = tmp / "audit.jsonl"
@@ -46,7 +47,7 @@ class Server:
         environ.pop("FORCE_COLOR", None)
         self._err = self.stderr_path.open("w", encoding="utf-8")
         self.proc = subprocess.Popen(
-            [sys.executable, str(script), "mcp", "serve", *args],
+            [sys.executable, *(command or [str(script), "mcp", "serve", *args])],
             stdin=subprocess.PIPE,
             stdout=stdout,
             stderr=self._err,
