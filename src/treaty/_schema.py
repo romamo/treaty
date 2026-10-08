@@ -158,7 +158,12 @@ def _schema_for_base(base: object, scalars: ScalarRegistry, output: bool) -> Jso
         if (spec := scalars.get(base)) is not None:
             # Before the built-ins it may replace, such as Decimal and an argument's date,
             # as serialization and parsing are
-            return spec.json_schema()
+            scalar_schema = spec.json_schema()
+            if base in _TEMPORAL:
+                # No title naming the stdlib class, which no built-in date node has; nor a
+                # format, as the app's text may not be RFC 3339 (#388)
+                del scalar_schema["title"]
+            return scalar_schema
         if base in _TEMPORAL:
             temporal: JsonSchema = {"type": "string", "format": _TEMPORAL[base]}
             if base not in _TEMPORAL_ARGUMENT:

@@ -574,3 +574,35 @@ def test_an_app_registered_decimal_replaces_the_built_in() -> None:
     command = app.manifest()["commands"]["pay"]
     assert command["flags"]["amount"]["type"] == "number"
     assert command["output_schema"]["properties"]["amount"]["type"] == "number"
+
+
+@pytest.mark.parametrize(
+    ("pattern", "published"),
+    [
+        (r"[a-z]+", r"^(?:[a-z]+)$"),
+        # Anchored by its author: kept as written, not ^(?:^...$)$ (#388)
+        (r"^\d{4}-\d{2}-\d{2}$", r"^\d{4}-\d{2}-\d{2}$"),
+        (r"^(?:a|b)$", r"^(?:a|b)$"),
+        (r"^[|$]x$", r"^[|$]x$"),
+        (r"^[\]|]$", r"^[\]|]$"),
+        (r"^a\\$", r"^a\\$"),
+        (r"^a\|b$", r"^a\|b$"),
+        # A search with these matches more than re.fullmatch does: wrapped
+        (r"^a|b$", r"^(?:^a|b$)$"),
+        (r"^(a)|(b)$", r"^(?:^(a)|(b)$)$"),
+        (r"^a\$", r"^(?:^a\$)$"),
+        (r"a$", r"^(?:a$)$"),
+        (r"^a", r"^(?:^a)$"),
+        # A ] first in a class is a literal to Python but closes an empty [] or an
+        # any-character [^] in ECMA, where the | is then top level: wrapped
+        (r"^[]|]$", r"^(?:^[]|]$)$"),
+        (r"^[^]|]$", r"^(?:^[^]|]$)$"),
+    ],
+)
+def test_a_pattern_is_anchored_once(pattern: str, published: str) -> None:
+    from treaty._scalars import anchored
+
+    assert anchored(pattern) == published
+    for text in ("a", "b", "ab", "x", "|", "|x", "2024-01-01", "a$", "a|b", "a\\", "c"):
+        searched = re.search(published, text) is not None
+        assert searched is (re.fullmatch(pattern, text) is not None), text
