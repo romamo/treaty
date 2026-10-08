@@ -265,14 +265,14 @@ uv run pytest -q tests/test_tutorial.py -k import_all
 ## Other shapes of long work
 
 `import-all` returns when its work is done. Work with a different shape has its own tool;
-the README covers each:
+the reference covers each:
 
-| The work | Use | README |
+| The work | Use | Reference |
 | --- | --- | --- |
-| produces results as it goes, and may never end | `streaming=True`, a generator handler; one JSON line per event; `safe` or `mutating`, never `destructive` | [Streaming](../../../README.md#streaming) |
-| goes on after the command returns | `async_job=True` returning a `treaty.Job`, and `App(jobs=...)` for `job status` and `job cancel` | [Async jobs](../../../README.md#async-jobs) |
-| is ordered steps that can be resumed | `steps=[...]`, `ctx.step(name)` before each, `resumable=True` for `--resume-from` | [Multi-step commands](../../../README.md#multi-step-commands) |
-| starts a process that outlives the run | `ctx.spawn`, declared with `background=` | [Declarations](../../../README.md#declarations) |
+| produces results as it goes, and may never end | `streaming=True`, a generator handler; one JSON line per event; `safe` or `mutating`, never `destructive` | [Streaming](../../reference.md#streaming) |
+| goes on after the command returns | `async_job=True` returning a `treaty.Job`, and `App(jobs=...)` for `job status` and `job cancel` | [Async jobs](../../reference.md#async-jobs) |
+| is ordered steps that can be resumed | `steps=[...]`, `ctx.step(name)` before each, `resumable=True` for `--resume-from` | [Multi-step commands](../../reference.md#multi-step-commands) |
+| starts a process that outlives the run | `ctx.spawn`, declared with `background=` | [Declarations](../../reference.md#declarations) |
 
 The `async-job` audit rule reports a command named `start`, `submit`, `enqueue`, `launch`,
 or `trigger` that does not return a job, since the name suggests work that goes on after

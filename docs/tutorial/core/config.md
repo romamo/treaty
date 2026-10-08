@@ -290,7 +290,7 @@ replaces the file atomically under a lock. `"global"` writes the user file,
 user file with `--global`. The audit's `config-write-scope` rule warns on a `config` command
 without the declaration. A migrated CLI that kept its settings in a file of its own, such as
 `~/.todo.toml`, reads the treaty file instead from now on: move the settings, and say so in
-the release notes. The README's [Config writes](../../../README.md#config-writes) has the
+the release notes. The reference's [Config writes](../../reference.md#config-writes) has the
 details.
 
 ## Step 6: Test it against a feed that needs the token
@@ -317,8 +317,8 @@ uv run pytest -q tests/test_tutorial.py -k "feed_setting or refused_token or wit
 
 Tokens that expire, logins, and scopes are the next step up from a static token:
 `App(credentials=...)` gives commands a credential store, `check-permissions`, and exit codes
-for expired and missing credentials. See [Credentials](../../../README.md#credentials) in the
-README.
+for expired and missing credentials. See [Credentials](../../reference.md#credentials) in the
+reference.
 
 This chapter changed a network command's flags. If your project has AGENTS.md, from `treaty
 init` or [Ship the agent docs](../ship/agent-docs.md), run `uv run treaty agents-md

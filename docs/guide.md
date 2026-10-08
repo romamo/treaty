@@ -3,7 +3,7 @@
 `treaty audit` checks the mechanics: every command declares its danger level and exit
 codes, every mutation has an effect, every list paginates. It cannot tell whether the
 names are good, whether an error helps, or whether one command should be two. This page
-covers those judgement calls. It is short on purpose; the README covers the API.
+covers those judgement calls. It is short on purpose; the [reference](reference.md) covers the API.
 
 ## Naming command paths
 

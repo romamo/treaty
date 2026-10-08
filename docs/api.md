@@ -1,7 +1,7 @@
 # Public API
 
 What treaty 1.0 freezes. Everything on this page is covered by semantic versioning from
-1.0 on (see "Stability" in the [README](../README.md#stability)); anything not on it,
+1.0 on (see [Stability](reference.md#stability) in the reference); anything not on it,
 including every `treaty._*` module, may change in any release.
 
 `tests/test_public_api.py` holds the same inventory as a snapshot
@@ -154,7 +154,7 @@ above). `Ctx.config` was already private (`_config_file`, workstream 02).
 - Envelope keys: `ok`, `data`, `error`, `warnings`, `meta`
 - `meta`: `duration_ms`, `request_id`, `command`, `timestamp`, `schema_version`,
   `tool_version`, `cwd`, `trace_id`, `project_root`, `retries`, plus the conditional keys
-  the README lists (`pagination`, `config_sources`, `update_available`, `not_modified`,
+  the reference lists (`pagination`, `config_sources`, `update_available`, `not_modified`,
   and the like); optional keys are absent, never null
 - `Meta` declares the keys above and the stream and run keys `seq`, `end`, `total`,
   `effects`, `dry_run`, and `partial` as fields, `None` when absent; `Envelope.extra_meta`

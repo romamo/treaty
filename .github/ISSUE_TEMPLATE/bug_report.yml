@@ -1,0 +1,39 @@
+name: Bug report
+description: treaty broke its contract or crashed
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What treaty did, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal app and command
+      description: The smallest app that shows the problem and the command you ran
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The JSON envelope (run with `--format json`), stderr, and the exit code
+      render: json
+  - type: input
+    id: version
+    attributes:
+      label: treaty version
+      description: "`treaty --version --format plain`"
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Python and OS
+      placeholder: Python 3.14.0, macOS 15
+    validations:
+      required: true

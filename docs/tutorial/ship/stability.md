@@ -177,7 +177,7 @@ A command's output is part of the contract too. Each command has a `schema_versi
   Bump the minor, `schema_version="1.1"`
 - **Removing, renaming, or retyping a field** is a major change. Bump the major, and give
   callers that still need the old shape a `compat=` shim, which `--schema-version 1`
-  selects; see [Response meta](../../../README.md#response-meta) in the README
+  selects; see [Response meta](../../reference.md#response-meta) in the reference
 
 `treaty schema-lock myapp.cli:app` records every command's schema version and output schema
 in `treaty-schema.lock`. Commit it; from then on the audit's `schema-version` rule compares
@@ -233,8 +233,8 @@ uv run treaty changelog-add todo.cli:app
 Run `changelog-add` once per release, after the last contract change. The entry for 1.1.0
 lists `complete`, `list.flags.include-done`, and `changelog` itself as added, and `done` as
 removed. It is marked `breaking`: a call to `done` now exits 13 instead of completing the
-item, even though the redirect says what to run instead. The README describes the file's
-format under Schema changelog, in [Response meta](../../../README.md#response-meta).
+item, even though the redirect says what to run instead. The reference describes the file's
+format under Schema changelog, in [Response meta](../../reference.md#response-meta).
 
 **Check:** seeded with the 1.0.0 manifest, the 1.1.0 entry records the rename and the new
 flag, and the `changelog` command serves it

@@ -169,7 +169,7 @@ test ! -e tmp/tutorial/todo.json
 The other failures are mapped the same way: a timeout is exit 10, a certificate that does
 not verify is exit 12 `TLS_VERIFY_FAILED` and not retryable, and 502 to 504 are exit 12
 `UPSTREAM_UNAVAILABLE`. A 401, 403, or 429 becomes exit 8, 7, or 11 when the command
-declares that code; see the [README](../../../README.md#network-and-filesystem) for the
+declares that code; see [Network and filesystem](../../reference.md#network-and-filesystem) for the
 full list.
 
 ## Step 4: Handle what the server answered
