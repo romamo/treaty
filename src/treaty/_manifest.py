@@ -16,6 +16,7 @@ from ._command import (
     Command,
     DangerLevel,
 )
+from ._completion import COMPLETION_PATH
 from ._deps import ANY_VERSION
 from ._env import (
     CONFIG,
@@ -38,6 +39,7 @@ from ._framework import (
     framework_flags,
 )
 from ._lines import DEFAULT_LINE_CAP, INPUT_LINES_KEY, LineCap, StdinInput
+from ._mcp_shared import MCP_SERVE_PATH
 from ._mode import Format, FormatName, MediaType, media_type_map
 from ._output_base import OutputBase
 from ._scan import command_reach, exit_raises, source_tree
@@ -55,15 +57,33 @@ SCHEMA_VERSION = "3.19"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.10: the output side-effect kind (REQ-C-011); 3.11: stderr child_log (REQ-F-038)
 # 3.12: the format flag's media_types and output_media_types (REQ-O-001, REQ-O-049)
 # 3.13: the root secret_env_vars (REQ-F-073); 3.14: confirm_flag (REQ-O-048)
-# 3.15: CommandEntry.idempotent (REQ-C-002); 3.16 to 3.18 add optional keys treaty does not
-# emit; 3.19: ExitCodeEntry.error_codes (#362)
+# 3.15: CommandEntry.idempotent (REQ-C-002); 3.16: CommandEntry.stdout and protocol
+# (REQ-C-032); 3.17: CommandEntry.mcp (REQ-C-032); 3.18: integer enum_values, which treaty
+# does not emit (an integer Literal's values are in the description); 3.19:
+# ExitCodeEntry.error_codes (#362)
 
 EXEC_PATH = CommandPath("exec")
 """The ``exec`` built-in, which reads its plan from stdin as a buffered payload"""
 
+PROTOCOL_STDOUT = "protocol"
+"""CommandEntry.stdout of a command that serves a protocol over stdio (ManifestResponse 3.16)"""
+
 NOT_AN_MCP_TOOL = "(not an MCP tool)"
-"""Ends the manifest description of a command registered ``mcp=False`` (#281):
-CommandEntry has no key for it, and ``additionalProperties`` is false"""
+"""Ends the manifest description of a command registered ``mcp=False`` (#281); since
+ManifestResponse 3.17 the entry says ``mcp: false`` too"""
+
+
+def never_a_tool(command: Command, *, builtin: bool) -> bool:
+    """Whether no MCP server offers the command as a tool, whatever ``McpServe(commands=)``
+    selects: ``exec``, the ``completion`` and ``mcp serve`` built-ins, a passthrough
+    command, and one registered ``mcp=False`` (#281). Its manifest entry says ``mcp: false``
+    (ManifestResponse 3.17), as absent means a server may offer it"""
+    if command.path == EXEC_PATH:
+        return True
+    if builtin and command.path in (COMPLETION_PATH, MCP_SERVE_PATH):
+        return True
+    return command.passthrough or not command.mcp
+
 
 # The --format values CommandEntry.output_formats leaves out (REQ-O-049): the spec's
 # universal ones, and ndjson, which every treaty command takes
@@ -478,7 +498,7 @@ def command_entry(
         instead = "" if old.replacement is None else f"; use {old.replacement}"
         description = f"{description} (deprecated since {old.since}{instead})"
     if not command.mcp:
-        # CommandEntry has no MCP key (#281): the description carries mcp=False
+        # The marker predates CommandEntry.mcp (#281); the entry says mcp: false below too
         description = f"{description} {NOT_AN_MCP_TOOL}"
     out: dict[str, object] = {
         "description": description,
@@ -487,8 +507,17 @@ def command_entry(
         "option_placement": command.option_placement.value,  # REQ-C-027: on every entry
         "flags": flags,
         "exit_codes": exit_codes,
-        "output_schema": command.output_schema,
     }
+    serves = command.protocol
+    if serves is None:
+        out["output_schema"] = command.output_schema
+    else:
+        # REQ-C-032 (ManifestResponse 3.16): stdout is the protocol's from the first byte,
+        # so no output_schema, output_formats, or output_media_types describe it
+        out["stdout"] = PROTOCOL_STDOUT
+        out["protocol"] = serves.value
+    if never_a_tool(command, builtin=builtin):
+        out["mcp"] = False  # REQ-C-032 (ManifestResponse 3.17): absent means it may be served
     if builtin:
         # REQ-O-041: set by who registered it; an app command is left unmarked, read as false
         out["builtin"] = True
@@ -533,6 +562,8 @@ def command_entry(
     beyond = [Format.ID.value] if command.id_field is not None else []
     beyond += (n.value for n in offered if n not in _DEFAULT_FORMATS and n.builtin is not Format.ID)
     beyond += (n.value for n in command.renderers if n not in _DEFAULT_FORMATS and n not in offered)
+    if serves is not None:
+        beyond = []  # a protocol's stdout has no --format representation
     if beyond:
         out["output_formats"] = beyond
     # ManifestResponse 3.12: what each of them writes, where the root map does not say it

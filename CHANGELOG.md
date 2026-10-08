@@ -70,6 +70,13 @@ Apps built on treaty keep their own, structured schema changelog with
   (a `code=` that is not a literal, `**kwargs`, a handler without source) and on a
   passthrough command. `declared-exits` now reads an `already_exists(...)` call as a
   `CONFLICT` raise (#362)
+- At ManifestResponse 3.19 the manifest also carries the 3.16 and 3.17 keys whose absence
+  means something: `mcp serve`'s entry says `stdout: "protocol"` and `protocol:
+  "mcp-stdio"` and lists no `output_schema` or `output_formats`, which the spec rejects
+  beside them, and every command no MCP server offers (`mcp=False`, `exec`, `completion`,
+  `mcp serve`, passthrough commands) says `mcp: false`. The `(not an MCP tool)`
+  description marker stays. `--schema` carries the same keys; the MCP tool list is
+  unchanged (#362)
 
 ### Changed
 

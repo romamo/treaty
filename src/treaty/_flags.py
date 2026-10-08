@@ -401,8 +401,8 @@ class FieldInfo:
 
     @property
     def int_choices(self) -> str | None:
-        """An integer ``Literal``'s values as the entry's description states them: an
-        entry's ``enum_values`` are an enum's strings, so an integer one is not (#327)"""
+        """An integer ``Literal``'s values as the entry's description states them (#327);
+        ManifestResponse 3.18's integer ``enum_values`` are optional, and not emitted"""
         target = self.classified.item if self.flag_type is FlagType.ARRAY else self.classified
         if target is None or not target.int_values:
             return None

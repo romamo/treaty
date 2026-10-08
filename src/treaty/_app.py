@@ -190,6 +190,7 @@ from ._mcp_shared import (
     CONFIRM_KEY,
     CONFIRMATION_REQUIRED,
     MCP_SERVE_PATH,
+    MCP_STDIO,
     protocol_command,
 )
 from ._meta import find_project_root, logical_cwd, read_trace_id, utc_timestamp
@@ -1782,7 +1783,9 @@ class App:
         if self.mcp is not None:
             from ._mcp_serve import register_mcp_serve
 
-            register_mcp_serve(self, self.mcp)
+            serve = register_mcp_serve(self, self.mcp)
+            # REQ-C-032: its stdin and stdout carry the MCP protocol from the first byte
+            self._commands[serve] = dataclasses.replace(self._commands[serve], protocol=MCP_STDIO)
 
         if self.init is not None:
             setup = self.init

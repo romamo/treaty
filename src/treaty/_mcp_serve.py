@@ -9,8 +9,8 @@ when the server stops) is a JSON line on stderr, as a passthrough command's is. 
 serves, ``sys.stdout`` and descriptor 1 still lead to stderr: a stray ``print()`` never
 reaches the protocol, which is written to a copy of the original stdout.
 
-The spec has no manifest key for a command whose stdout is a protocol rather than an
-envelope (cli-agent-spec/cli-agent-spec#51), so the command's description says so.
+Its manifest entry says ``stdout: protocol`` and ``protocol: mcp-stdio`` (REQ-C-032,
+ManifestResponse 3.16), set as ``App`` registers it, and its description says so too.
 
 Tools from runtime data (#240): ``McpServe(tools=provide)`` calls ``provide(args, ctx)``
 once as serving starts, and lists each ``McpTool`` it returns beside the command tools. A
@@ -85,8 +85,8 @@ DESCRIPTION = (
     "an envelope: a failure before serving, and the end of the run, answer with the "
     "envelope as one JSON line on stderr. --list-tools prints the tool list as JSON instead"
 )
-"""The manifest marks the command's stdout as a protocol in its description: the spec has
-no key for it yet (cli-agent-spec/cli-agent-spec#51)"""
+"""States the command's stdout is the protocol's, as its ``stdout`` and ``protocol`` manifest
+keys do (REQ-C-032)"""
 
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 """MCP's tool name characters and length (SEP-986)"""
