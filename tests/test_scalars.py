@@ -584,8 +584,7 @@ def test_an_app_registered_decimal_replaces_the_built_in() -> None:
         (r"^\d{4}-\d{2}-\d{2}$", r"^\d{4}-\d{2}-\d{2}$"),
         (r"^(?:a|b)$", r"^(?:a|b)$"),
         (r"^[|$]x$", r"^[|$]x$"),
-        (r"^[]|]$", r"^[]|]$"),
-        (r"^[^]|]$", r"^[^]|]$"),
+        (r"^[\]|]$", r"^[\]|]$"),
         (r"^a\\$", r"^a\\$"),
         (r"^a\|b$", r"^a\|b$"),
         # A search with these matches more than re.fullmatch does: wrapped
@@ -594,6 +593,10 @@ def test_an_app_registered_decimal_replaces_the_built_in() -> None:
         (r"^a\$", r"^(?:^a\$)$"),
         (r"a$", r"^(?:a$)$"),
         (r"^a", r"^(?:^a)$"),
+        # A ] first in a class is a literal to Python but closes an empty [] or an
+        # any-character [^] in ECMA, where the | is then top level: wrapped
+        (r"^[]|]$", r"^(?:^[]|]$)$"),
+        (r"^[^]|]$", r"^(?:^[^]|]$)$"),
     ],
 )
 def test_a_pattern_is_anchored_once(pattern: str, published: str) -> None:

@@ -154,10 +154,11 @@ def _whole_anchored(pattern: str) -> bool:
                 in_class = False
         elif char == "[":
             in_class = True
-            # A ] first in the class, after an optional ^, is a literal
             index += 2 if pattern[index + 1 : index + 2] == "^" else 1
             if pattern[index : index + 1] == "]":
-                index += 1
+                # A literal to Python, but ECMA closes an empty [] or an any-character
+                # [^] there, which may leave a | at its top level: wrap it
+                return False
             continue
         elif char == "(":
             depth += 1
