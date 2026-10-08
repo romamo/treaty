@@ -1086,10 +1086,22 @@ def exit_raises(fn: Callable[..., object]) -> list[ExitRaise]:
     ``treaty.Exit``), ``CliExit(ExitCodeName("NAME"), ...)``, and a call of
     ``treaty.already_exists``, each with the ``error.code`` it carries when the source says
     it. Raised or not: a code named on a branch that is never taken counts too (#211)"""
+    return _scan_exits(fn)[0]
+
+
+def unnamed_exits(fn: Callable[..., object]) -> bool:
+    """Whether ``fn``'s source builds an exit whose name the scan cannot read, so
+    ``exit_raises`` may miss one: ``CliExit(name, ...)`` with ``name`` not
+    ``ExitCodeName("NAME")``, ``Exit`` itself passed around (``getattr(Exit, name)``), or
+    ``already_exists`` referenced other than called in place"""
+    return _scan_exits(fn)[1]
+
+
+def _scan_exits(fn: Callable[..., object]) -> tuple[list[ExitRaise], bool]:
     tree = source_tree(fn)
     code = getattr(fn, "__code__", None)
     if tree is None or not isinstance(code, types.CodeType):
-        return []
+        return [], False
     scope: dict[str, object] = {**module_scope(fn), **_closure(fn), **_imported(fn, tree)}
 
     def refers(node: ast.expr | None, target: object) -> bool:
@@ -1110,16 +1122,23 @@ def exit_raises(fn: Callable[..., object]) -> list[ExitRaise]:
         path = path.relative_to(home.root)
     # The call each Exit.NAME is the callee of, whose code= says the error.code
     calls = {id(n.func): n for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    # Exit as the object of Exit.NAME, and already_exists as a callee, are read in place
+    in_place = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     found: list[ExitRaise] = []
+    unnamed = False
     for node in ast.walk(tree):
         text: str | None = None
         call: ast.Call | None = None
+        if isinstance(node, (ast.Name, ast.Attribute)) and id(node) not in in_place:
+            if refers(node, Exit) or (refers(node, already_exists) and id(node) not in calls):
+                unnamed = True
         if isinstance(node, ast.Attribute) and refers(node.value, Exit):
             text, at, call = node.attr, node.lineno, calls.get(id(node))
         elif isinstance(node, ast.Call) and refers(node.func, CliExit):
             given = node.args[0] if node.args else None
             given = next((k.value for k in node.keywords if k.arg == "name"), given)
             text, at, call = literal_name(given), node.lineno, node
+            unnamed = unnamed or text is None
         elif isinstance(node, ast.Call) and refers(node.func, already_exists):
             line = code.co_firstlineno + node.lineno - 1
             conflict = ExitCodeName("CONFLICT")
@@ -1133,7 +1152,7 @@ def exit_raises(fn: Callable[..., object]) -> list[ExitRaise]:
             continue  # not an exit code name: Exit raises AttributeError on it when it runs
         line = code.co_firstlineno + at - 1
         found.append(ExitRaise(name, path.as_posix(), line, _given_code(call, name)))
-    return sorted(found, key=lambda r: (r.line, r.name.value))
+    return sorted(found, key=lambda r: (r.line, r.name.value)), unnamed
 
 
 def command_reach(command: Command) -> list[Reached]:

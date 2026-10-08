@@ -42,7 +42,7 @@ from ._lines import DEFAULT_LINE_CAP, INPUT_LINES_KEY, LineCap, StdinInput
 from ._mcp_shared import MCP_SERVE_PATH
 from ._mode import Format, FormatName, MediaType, media_type_map
 from ._output_base import OutputBase
-from ._scan import command_reach, exit_raises, source_tree
+from ._scan import command_reach, exit_raises, source_tree, unnamed_exits
 from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._types import FlagType
@@ -143,7 +143,8 @@ def conflict_error_codes(command: Command) -> list[str] | None:
     raise under CONFLICT (``ALREADY_EXISTS`` for ``already_exists``, a literal ``code=``,
     else ``CONFLICT``), and ``IDEMPOTENCY_KEY_REUSED`` when it takes ``--idempotency-key``.
     A present list is read as complete, so it is None when the scan cannot see a code: a
-    function without source, a raise whose ``code=`` is not a literal, or a passthrough
+    function without source, a raise whose ``code=`` is not a literal, an exit whose name is
+    not a literal (``CliExit(name, ...)``, ``getattr(Exit, name)``), or a passthrough
     command, whose tool owns its exit codes; None too when there is nothing to list"""
     if command.passthrough:
         return None
@@ -151,7 +152,7 @@ def conflict_error_codes(command: Command) -> list[str] | None:
     if any(f.name == IDEMPOTENCY_FLAG for f in framework_flags(command)):
         codes.add(REUSED_KEY_CODE)
     for unit in command_reach(command):
-        if source_tree(unit.fn) is None:
+        if source_tree(unit.fn) is None or unnamed_exits(unit.fn):
             return None
         for raised in exit_raises(unit.fn):
             if raised.name.value != CONFLICT_CODE.name:

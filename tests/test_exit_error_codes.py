@@ -204,6 +204,33 @@ def test_exit_conflict_not_called_in_place_leaves_the_list_out() -> None:
     assert entry is not None and "error_codes" not in entry
 
 
+CONFLICT_NAME = treaty.ExitCodeName("CONFLICT")
+
+
+def test_an_exit_name_the_scan_cannot_read_leaves_the_list_out() -> None:
+    """Each answers exit 6 with LOCKED, which a list of the reused key alone would miss"""
+    app = App("dyn", version="1.0.0")
+
+    @app.command("const", description="Const", danger_level="mutating", exit_codes=["CONFLICT"])
+    def const(args: NameArgs, ctx: Ctx) -> Made:
+        raise treaty.CliExit(CONFLICT_NAME, "taken", code="LOCKED")
+
+    @app.command("built", description="Built", danger_level="mutating", exit_codes=["CONFLICT"])
+    def built(args: NameArgs, ctx: Ctx) -> Made:
+        which = "CONFLICT"
+        raise treaty.CliExit(treaty.ExitCodeName(which), "taken", code="LOCKED")
+
+    @app.command("by-name", description="By", danger_level="mutating", exit_codes=["CONFLICT"])
+    def by_name(args: NameArgs, ctx: Ctx) -> Made:
+        which = "CONFLICT"
+        raise getattr(Exit, which)("taken", code="LOCKED")
+
+    for path in ("const", "built", "by-name"):
+        assert run(app, [path, "x"])[1]["error"]["code"] == "LOCKED", path
+        entry = conflict(app, path)
+        assert entry is not None and "error_codes" not in entry, path
+
+
 def test_a_handler_without_source_leaves_the_list_out() -> None:
     """The reused key alone would be partial when the handler cannot be read"""
     app = App("gen", version="1.0.0")
