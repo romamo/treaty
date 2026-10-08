@@ -72,6 +72,7 @@ review), **rename**, **remove**.
 | `HttpResponse` | keep | Returned by `ctx.http` |
 | `NetworkSettings` | keep | `ctx.network`: the resolved proxies, CA bundle, and deadline (`timeout(own)`, `fits(seconds)`) for a client of the handler's own (#171, #237) |
 | `WalkEntry` | keep | Yielded by `ctx.walk` |
+| `Attestation` | added in 1.0 (#424) | Returned by `ctx.attest`: `channel` and `at`, how and when a person confirmed |
 | `CommandPath`, `ExitCode`, `ExitCodeName`, `SchemaVersion`, `Scope` | keep | Value objects in public signatures (`App.commands` keys, `CliExit.name`); the plan asked whether `ExitCodeName` is internal: it is what `CliExit` carries, so it stays |
 | `intercept_stdout` | keep | Captures descriptor 1 around a third-party call |
 | `already_exists` | keep | Create-or-get `CliExit` |
@@ -124,7 +125,8 @@ that no app or example called.
 `introduced_in`, `deprecated`, `steps`, `resumable`, `rollback`, `external`,
 `subprocess`, `platform`, `required_tools`, `filesystem_side_effects`, `background`,
 `preserve_locale`, `cache`, `recursive_traversal`, `id_field`, `passthrough`, `help_command`,
-`idempotent`, `mcp` (added in 1.0, #281), `endless` (added in 1.0, #389).
+`idempotent`, `mcp` (added in 1.0, #281), `endless` (added in 1.0, #389),
+`requires_person` (added in 1.0, #424).
 `Group.command` takes the
 same keywords.
 
@@ -141,7 +143,7 @@ Fields (keep): `app_name`, `version`, `mode`, `format_name`, `request_id`, `env`
 `trace_id`, `project_root`.
 
 Methods and properties (keep): `log`, `warn`, `debug`, `progress`, `log_error`, `run`,
-`pipeline`, `spawn`, `open_url`, `prompt`, `confirm`, `edit`, `retry`, `lock`, `step`,
+`pipeline`, `spawn`, `open_url`, `prompt`, `confirm`, `attest` (added in 1.0, #424), `edit`, `retry`, `lock`, `step`,
 `http`, `network`, `walk`, `cache`, `tmp_dir`, `temp_file`, `output_file`, `truncated`,
 `config_path`, `write_config`, `stdin_lines`, `stdin_records`.
 

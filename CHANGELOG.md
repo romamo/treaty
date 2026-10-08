@@ -96,6 +96,21 @@ Apps built on treaty keep their own, structured schema changelog with
   `mcp serve`, passthrough commands) says `mcp: false`. The `(not an MCP tool)`
   description marker stays. `--schema` carries the same keys; the MCP tool list is
   unchanged (#362)
+- `requires_person=True` on a command says a person, not the calling agent, runs it, such
+  as an approval of what an agent proposed, and allows `ctx.attest(text, expected=...)`:
+  the person types `expected` back at a terminal (stdin and stdout, no
+  `--non-interactive`), and no flag answers it, `--yes` included. Off a terminal the run
+  exits `4` with `PERSON_REQUIRED`, `retryable: false`, and a suggestion to hand the
+  command to a person; any other answer exits `4` with `ATTESTATION_MISMATCH`. Both are
+  `BaseException`s to the handler, like `INPUT_REQUIRED`, so an `except Exception`
+  cannot run on past them. `ctx.attest` returns a `treaty.Attestation` with `channel`
+  (`"terminal"`) and `at` (UTC), for the app's own record. The declaration implies
+  `interactive=True` and `mcp=False`; `--schema` says `requires_person: true`, and the
+  manifest description (`(a person runs this at a terminal)`, since CommandEntry has no
+  key for it), `--help`, `--yes`'s description, the skill file, and AGENTS.md say a person
+  runs it. `ctx.attest` without the declaration is a `RegistrationError`. It is a speed
+  bump and a record, not a security boundary: a process running as the same OS user can
+  fake a terminal (#424)
 
 ### Changed
 

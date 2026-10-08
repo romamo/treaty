@@ -1055,6 +1055,7 @@ class App:
         help_command: Sequence[str] | None = None,
         idempotent: bool = False,
         mcp: bool = True,
+        requires_person: bool = False,
     ) -> Callable[[H], H]:
         """Register a handler; ``danger_level`` and ``exit_codes`` are required, and
         ``exit_codes=()`` declares that the command raises only the implicit codes
@@ -1197,10 +1198,22 @@ class App:
         ``endless=True`` on a ``streaming=True`` command says the stream runs until
         interrupted, such as a follow mode: ``--schema`` says ``endless: true``, and
         ``treaty conformance`` probes it with SIGINT rather than waiting for its end (#389).
+        ``requires_person=True`` says a person, not the calling agent, runs the command,
+        such as an approval of what an agent proposed: it allows ``ctx.attest``, which asks
+        at a terminal for text no flag supplies, ``--yes`` included, and ends off a
+        terminal with exit 4 and ``PERSON_REQUIRED``. It implies ``interactive=True`` and
+        ``mcp=False``; ``--schema`` says ``requires_person: true``, and the manifest's
+        description, ``--help``, the skill file, and AGENTS.md say a person runs it. A
+        speed bump and a record, not a security boundary: a process running as the same
+        OS user can fake a terminal (#424).
         """
         cmd_path = CommandPath(path)
         if not isinstance(mcp, bool):
             raise RegistrationError(f"{cmd_path}: mcp is True or False, not {mcp!r}")
+        if not isinstance(requires_person, bool):
+            raise RegistrationError(
+                f"{cmd_path}: requires_person is True or False, not {requires_person!r}"
+            )
         missing = [
             fix
             for value, fix in ((exit_codes, "exit_codes=()"), (danger_level, 'danger_level="safe"'))
@@ -1404,6 +1417,7 @@ class App:
                             help_command=help_command,
                             idempotent=idempotent,
                             mcp=mcp,
+                            requires_person=requires_person,
                         )
                     )
                 )
@@ -4772,6 +4786,7 @@ class _Run:
             _prompter=Prompter(
                 command=command.path.value,
                 declared=command.interactive,
+                person=command.requires_person,
                 editor_alternatives=command.editor_alternatives,
                 flags=frozenset(n for f in command.fields for n in f.exposed_flags()),
                 interactive=self.interactive and not invocation.non_interactive,

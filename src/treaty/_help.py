@@ -272,6 +272,11 @@ def render_command(name: str, command: Command, globals_: Sequence[Row]) -> str:
         lines += ["Rules", *(f"  {r.describe()}" for r in command.requires), ""]
     lines += _section("Global flags", globals_)
     lines.append(f"Danger level: {command.danger_level.value}")
+    if command.requires_person:
+        lines.append(
+            "A person runs this at a terminal: it asks for a confirmation no flag gives, "
+            "--yes included"
+        )
     if command.streaming:
         lines.append(
             "Streams one JSON object per event, then a _summary line; --no-stream returns a "

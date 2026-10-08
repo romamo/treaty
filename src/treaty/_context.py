@@ -19,7 +19,7 @@ from ._locks import Locks
 from ._mode import Format, FormatName
 from ._network import NetworkSettings
 from ._page import PageRequest
-from ._prompt import Prompter
+from ._prompt import Attestation, Prompter
 from ._retry import Retrier
 from ._session import DEFAULT_KEEP_SECONDS, Session
 from ._steps import StepTracker
@@ -422,6 +422,18 @@ class Ctx:
         """Ask a yes-or-no question; ``--yes`` answers yes without asking, and off a
         terminal without it the run ends with exit 4, ``INPUT_REQUIRED``"""
         return self._prompter.confirm(text)
+
+    def attest(self, text: str, *, expected: str) -> Attestation:
+        """Ask a person at a terminal to type ``expected`` back, and say how they did
+
+        No flag answers it, ``--yes`` included. Only on a terminal (stdin and stdout)
+        without ``--non-interactive``; otherwise the run ends with exit 4,
+        ``PERSON_REQUIRED``, and a suggestion to hand the command to a person. Any other
+        answer ends it with exit 4, ``ATTESTATION_MISMATCH``. Needs ``requires_person=True``
+        on the command. A speed bump and a record, not a security boundary: a process
+        running as the same OS user can fake a terminal (#424).
+        """
+        return self._prompter.attest(text, expected)
 
     def edit(self, initial: str = "") -> str:
         """Let a person edit ``initial`` in ``$VISUAL`` or ``$EDITOR`` and return the text

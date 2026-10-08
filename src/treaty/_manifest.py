@@ -73,6 +73,11 @@ NOT_AN_MCP_TOOL = "(not an MCP tool)"
 ManifestResponse 3.17 the entry says ``mcp: false`` too"""
 
 
+PERSON_RUNS = "(a person runs this at a terminal)"
+"""Ends the manifest description of a command registered ``requires_person=True`` (#424):
+CommandEntry has no key for it, so ``--schema`` says ``requires_person: true``"""
+
+
 def never_a_tool(command: Command, *, builtin: bool) -> bool:
     """Whether no MCP server offers the command as a tool, whatever ``McpServe(commands=)``
     selects: ``exec``, the ``completion`` and ``mcp serve`` built-ins, a passthrough
@@ -498,6 +503,9 @@ def command_entry(
         # CommandEntry has no deprecation keys (04-D2); a baseline audit reads this marker
         instead = "" if old.replacement is None else f"; use {old.replacement}"
         description = f"{description} (deprecated since {old.since}{instead})"
+    if command.requires_person:
+        # CommandEntry has no key for it, and an agent reads the description (#424)
+        description = f"{description} {PERSON_RUNS}"
     if not command.mcp:
         # The marker predates CommandEntry.mcp (#281); the entry says mcp: false below too
         description = f"{description} {NOT_AN_MCP_TOOL}"
@@ -685,6 +693,9 @@ def command_schema(
     if command.endless:
         # #389: the stream ends only when interrupted; not a ManifestResponse key
         entry["endless"] = True
+    if command.requires_person:
+        # #424: ctx.attest asks a person at a terminal; not a ManifestResponse key
+        entry["requires_person"] = True
     if command.paginated:
         # REQ-F-019; not ManifestResponse keys, whose --limit flag shows the same default
         entry["paginated"] = True

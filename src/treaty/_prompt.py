@@ -7,6 +7,11 @@ and stdout are both terminals and ``--non-interactive`` is absent; otherwise the
 ends with exit 4 and an error naming the flag that answers instead (REQ-F-009,
 REQ-C-005, REQ-F-055). A stray ``input()`` that no one can answer ends the same way
 (REQ-F-047).
+
+A command a person must run declares ``requires_person=True`` and asks through
+``ctx.attest``, which no flag answers, ``--yes`` included: off a terminal it ends with
+exit 4 and ``PERSON_REQUIRED`` (#424). It is a speed bump and a record, not a security
+boundary: a process running as the same OS user can fake a terminal.
 """
 
 from __future__ import annotations
@@ -15,8 +20,9 @@ import shlex
 import subprocess
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Literal
 
 from ._errors import CliExit, RegistrationError
 from ._stdout import reconfigure_wrapped, stderr_writes
@@ -45,6 +51,17 @@ class InputRequired(BaseException):
         self.suggestion = suggestion
         self.context = dict(context)
         self.alternatives = tuple(alternatives)
+
+
+@dataclass(frozen=True, slots=True)
+class Attestation:
+    """What ``ctx.attest`` returns once a person typed the expected text back: how the
+    confirmation arrived and when, for the app's own record of it (#424)"""
+
+    channel: Literal["terminal"]
+    """Where the person answered; a terminal on stdin and stdout is the only channel"""
+    at: datetime
+    """When the answer was read, in UTC"""
 
 
 def blocked_read(call: str) -> InputRequired:
@@ -146,6 +163,8 @@ class Prompter:
     stdin: IO[str] = field(repr=False)
     stderr: IO[str] = field(repr=False)
     env: Mapping[str, str] = field(repr=False)
+    person: bool = False
+    """``requires_person=True`` on the command, which ``ctx.attest`` needs (#424)"""
 
     def prompt(self, text: str, *, flag: str) -> str:
         self._check_declared("prompt")
@@ -176,6 +195,45 @@ class Prompter:
                 context={"prompt": text, "flag": "yes"},
             )
         return self._ask(f"{text} [y/N] ", flag="yes").strip().lower() in ("y", "yes")
+
+    def attest(self, text: str, expected: str) -> Attestation:
+        """A person typed ``expected`` back at a terminal; no flag answers it, ``--yes``
+        included, so off a terminal the run ends with ``PERSON_REQUIRED`` and a typo with
+        ``ATTESTATION_MISMATCH``, both exit 4 (#424)"""
+        if not self.person:
+            raise RegistrationError(
+                f"{self.command}: ctx.attest needs requires_person=True on the command, which "
+                "tells agents a person runs it"
+            )
+        if not expected.strip() or "\n" in expected or "\r" in expected:
+            # An empty answer would let a reflexive Enter confirm
+            raise RegistrationError(
+                f"{self.command}: ctx.attest(expected={expected!r}) is the text a person "
+                "types back: one line, not blank"
+            )
+        context = {"prompt": text, "expected": expected}
+        if not self.interactive:
+            raise InputRequired(
+                "PERSON_REQUIRED",
+                f"Command {self.command} asks a person to confirm {text!r} at a terminal, "
+                "and no flag answers it",
+                suggestion="no flag answers this confirmation: hand the command to a person to "
+                "run at a terminal",
+                context=context,
+            )
+        # The question and the echoed answer take rows a terminal frame did not count (#365)
+        stderr_writes.bump()
+        self.stderr.write(f"{text}: ")
+        self.stderr.flush()
+        answer = self.stdin.readline().strip()
+        if answer != expected.strip():
+            raise InputRequired(
+                "ATTESTATION_MISMATCH",
+                f"The answer to {text!r} was not {expected!r}; nothing was done",
+                suggestion=f"run the command again and type {expected} exactly",
+                context=context,
+            )
+        return Attestation(channel="terminal", at=datetime.now(UTC))
 
     def edit(self, initial: str, where: Callable[[], Path]) -> str:
         """The text after a person edited ``initial`` in ``$VISUAL`` or ``$EDITOR``, in a

@@ -177,6 +177,16 @@ def render_block(app: App, target: str, invocation: str) -> str:
     prompt.append(
         "- Off a terminal nothing prompts: an answer a command needs fails with an exit code"
     )
+    personal = [p for p, c in commands if c.requires_person]
+    if personal:
+        # #424: ctx.attest, which no flag answers
+        one = len(personal) == 1
+        prompt.append(
+            f"- {_spans(invocation, personal)} {'needs' if one else 'need'} a person: "
+            f"{'it asks' if one else 'they ask'} at a terminal for a confirmation no flag "
+            "gives, `--yes` included, and exit 4 with `PERSON_REQUIRED` anywhere else; hand "
+            f"{'it' if one else 'them'} to a person"
+        )
     env = "\n".join(
         f"- `{d.name}` ({d.type}, {'required' if d.required else 'optional'}): {d.description}"
         for d in env_vars(app)
