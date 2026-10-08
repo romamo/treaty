@@ -72,7 +72,8 @@ Apps built on treaty keep their own, structured schema changelog with
   when it takes `--idempotency-key`, and each code its `Exit.CONFLICT` raises name, the
   default `CONFLICT` among them. `--schema` and the generated skill files carry the list
   too. The list is read as complete, so it is left out when the scan cannot read a code
-  (a `code=` that is not a literal, `**kwargs`, a handler without source) and on a
+  (a `code=` that is not a literal, `**kwargs`, an exit name that is not a literal such
+  as `CliExit(name, ...)` or `getattr(Exit, name)`, a handler without source) and on a
   passthrough command. `declared-exits` now reads an `already_exists(...)` call as a
   `CONFLICT` raise (#362)
 - At ManifestResponse 3.19 the manifest also carries the 3.16 and 3.17 keys whose absence
