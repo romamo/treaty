@@ -344,6 +344,26 @@ def test_list_tools_prints_the_tools_on_stdout_and_never_serves(project: Path) -
     assert not any(line.startswith("{") for line in err.getvalue().splitlines())
 
 
+def test_validate_only_still_answers_with_its_envelope_on_stderr(project: Path) -> None:
+    """``--validate-only`` never serves, so it is no clean shutdown: its answer stays the
+    envelope on the last line of stderr (REQ-O-009, REQ-C-032)"""
+    import io
+
+    out, err = io.StringIO(), io.StringIO()
+    code = _servectl().run(
+        ["mcp", "serve", "--project", str(project), "--validate-only"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env={},
+    )
+    assert code == 0
+    assert out.getvalue() == ""
+    envelope = json.loads(err.getvalue().strip().splitlines()[-1])
+    assert envelope["ok"] is True
+    assert envelope["meta"]["validation_only"] is True
+
+
 def test_exec_and_app_call_refuse_it_before_setup_runs(project: Path) -> None:
     envelope = _servectl().call("mcp.serve", {"project": str(project)})
     assert envelope.error is not None

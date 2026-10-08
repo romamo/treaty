@@ -4464,9 +4464,10 @@ class _Run:
         envelope = self._reported_stray(envelope)
         if settle:
             envelope = self.settle(envelope)
-        if self.serving_protocol and envelope.ok:
+        if self.serving_protocol and envelope.ok and not envelope.extra_meta.get("validation_only"):
             # REQ-C-032: a protocol command's clean shutdown writes no envelope; what it
-            # would have warned is plain text on stderr (#415)
+            # would have warned is plain text on stderr (#415). --validate-only never
+            # serves, so it answers with its envelope (REQ-O-009)
             self._shutdown_diagnostics(envelope)
             self.delivered = True
             return envelope.exit_code
