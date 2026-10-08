@@ -171,6 +171,14 @@
       "kind": "class",
       "methods": []
     },
+    "Attestation": {
+      "fields": [
+        "channel",
+        "at"
+      ],
+      "kind": "class",
+      "methods": []
+    },
     "AuditLog": {
       "fields": [
         "path",
@@ -286,6 +294,7 @@
       ],
       "kind": "class",
       "methods": [
+        "attest",
         "cache",
         "config_path",
         "confirm",
@@ -1055,7 +1064,8 @@
       "passthrough",
       "help_command",
       "idempotent",
-      "mcp"
+      "mcp",
+      "requires_person"
     ],
     "App.format": [
       "mode",

@@ -111,3 +111,11 @@ entry that supersedes it, never by editing an old one.
 - Why: The manifest says stdout: "protocol" for mcp serve (D-12), and REQ-C-032 defines what such a command does on a clean and a signalled shutdown; this reverses the exit 0 on a signal from #313
 - Applies to: src/treaty/_mcp_serve.py, src/treaty/_app.py, mcp serve, signals, exit codes
 - Enforced by: review; subprocess tests for stdin close and each signal
+
+## D-14: A person's confirmation has no flag
+
+- Decided: 2026-10-08, in romamo/treaty#424
+- Rule: ctx.attest, allowed by requires_person=True, is the one prompt no flag answers, --yes included; off a terminal it exits 4 with PERSON_REQUIRED and a suggestion naming no flag. requires_person implies interactive=True and mcp=False with no opt-in to serving it; the manifest says so in the description and mcp: false, and only --schema carries requires_person: true
+- Why: Any answer an agent can pass as a flag lets it approve its own proposal (cloudfall-dev/cloudfall#25), a departure from REQ-C-005's --yes that a person-only step needs; an MCP server's stdin is its protocol, never a terminal, so a served command could only fail; ManifestResponse's CommandEntry rejects keys it does not define. It is a speed bump and a record, not a boundary: the boundary is a separate OS user
+- Applies to: src/treaty/_prompt.py, src/treaty/_context.py, src/treaty/_command.py, src/treaty/_manifest.py, ctx.attest, requires_person, --yes, mcp
+- Enforced by: review; tests/test_attest.py

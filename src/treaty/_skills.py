@@ -100,6 +100,12 @@ def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) ->
             )
         else:
             rails.append("Mutating: pass --idempotency-key so a retry cannot apply it twice")
+    if command.requires_person:
+        rails.append(
+            "A person runs this: it asks at a terminal for a confirmation no flag gives, "
+            "--yes included, and exits 4 with PERSON_REQUIRED anywhere else; hand the "
+            "command to a person instead of running it"
+        )
     if command.endless:
         rails.append(
             "Endless stream: it runs until interrupted, so read its lines as they come and "

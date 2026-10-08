@@ -428,6 +428,9 @@ class Command:
     mcp: bool = True
     """Served as an MCP tool when ``mcp serve`` or ``treaty-mcp`` serves the app; False
     keeps it off every MCP server whatever ``McpServe(commands=)`` selects (#281)"""
+    requires_person: bool = False
+    """A person, not the calling agent, runs the command: ``ctx.attest`` asks at a
+    terminal, no flag answers it, and it is never an MCP tool (#424)"""
     protocol: StdioProtocol | None = None
     """The protocol the command serves on stdin and stdout, which then never carry an
     envelope; set on the ``mcp serve`` built-in as ``mcp-stdio``, and the manifest says
@@ -630,6 +633,7 @@ def build_command(
     help_command: Sequence[str] | None = None,
     idempotent: bool = False,
     mcp: bool = True,
+    requires_person: bool = False,
 ) -> Command:
     if not description:
         raise RegistrationError(f"{path}: description is required")
@@ -644,6 +648,7 @@ def build_command(
                 "cursor_check=": cursor_check is not None,
                 "safe_default=True": safe_default,
                 "interactive=True": interactive,
+                "requires_person=True": requires_person,
                 "editor_alternatives=": bool(editor_alternatives),
                 "gui_operations=": bool(gui_operations),
                 "heartbeat=True": heartbeat,
@@ -707,6 +712,10 @@ def build_command(
             f"{path}: endless=True says a stream runs until interrupted; declare "
             "streaming=True or drop endless=True"
         )
+    if requires_person:
+        # ctx.attest is a prompt, so --yes and --non-interactive come with it (REQ-C-005);
+        # an MCP server's stdin is its protocol, never a person's terminal
+        interactive, mcp = True, False
     paginated_asked = bool(paginated)
     if passthrough:
         args_type, output_type, resources, paginated = _inspect_passthrough(fn, path)
@@ -762,6 +771,7 @@ def build_command(
         background,
         has_network_io,
         recursive_traversal,
+        requires_person,
     )
     if isinstance(project_root, str) or not all(isinstance(m, str) and m for m in project_root):
         raise RegistrationError(
@@ -1038,6 +1048,7 @@ def build_command(
         help_command=help_argv,
         idempotent=idempotent,
         mcp=mcp,
+        requires_person=requires_person,
     )
 
 
@@ -1457,6 +1468,7 @@ def _check_ctx_calls(
     background: Background | None = None,
     has_network_io: bool = False,
     recursive_traversal: bool = False,
+    requires_person: bool = False,
 ) -> None:
     """Refuse at registration what the handler's source shows would fail at run time"""
     for attribute in ("http", "network"):
@@ -1488,6 +1500,11 @@ def _check_ctx_calls(
             raise RegistrationError(
                 f"{where} asks a person; declare interactive=True, which adds --yes and "
                 "--non-interactive (REQ-C-005)"
+            )
+        if call.method == "attest" and not requires_person:
+            raise RegistrationError(
+                f"{where} asks a person to confirm at a terminal; declare "
+                "requires_person=True, which tells agents a person runs the command (#424)"
             )
         if call.method == "write_config" and config_write_scope is None:
             raise RegistrationError(

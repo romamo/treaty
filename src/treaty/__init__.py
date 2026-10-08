@@ -35,6 +35,7 @@ from ._network import HttpResponse, NetworkSettings
 from ._out import Binary, External, Out
 from ._output_base import OutputBase
 from ._page import Page, PageRequest
+from ._prompt import Attestation
 from ._retry import Retry
 from ._rules import DefaultWhenAbsent, Excludes, RequiredWhen, RequiresAny, RequiresOne
 from ._scalars import ScalarSpec
@@ -82,6 +83,7 @@ __all__ = [
     "App",
     "Arg",
     "ArgsAdapter",
+    "Attestation",
     "AuditLog",
     "Background",
     "Batch",

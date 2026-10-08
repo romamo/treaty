@@ -516,7 +516,12 @@ FLAGS: tuple[FrameworkFlag, ...] = (
         YES_FLAG,
         "yes",
         lambda c: c.interactive,
-        "Answer yes to every confirmation instead of asking",
+        lambda c: (
+            "Answer yes to every confirmation instead of asking, except the one a person "
+            "types at a terminal"
+            if c.requires_person
+            else "Answer yes to every confirmation instead of asking"
+        ),
     ),
     _switch(
         NON_INTERACTIVE_FLAG,

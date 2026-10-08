@@ -1137,8 +1137,36 @@ def init(args: InitArgs, ctx: Ctx) -> Project:
   (`/dev/null`) fails its first `readline()`. Piped data reads as usual through `input()`,
   `readline()`, `read()`, `readlines()`, iteration, and `fileinput`
 
+A step whose point is that a person, not the calling agent, takes it, such as approving
+a change an agent proposed, declares `requires_person=True` and asks with `ctx.attest`:
+
+```python
+@app.command("decisions.approve", description="Run a proposed change", danger_level="mutating",
+             exit_codes=(), requires_person=True)
+def approve(args: ApproveArgs, ctx: Ctx) -> Approved:
+    given = ctx.attest(f"Type {args.decision} to approve it", expected=args.decision)
+    return apply(args.decision, approved_via=given.channel, approved_at=given.at)
+```
+
+- `ctx.attest(text, expected=...)` asks only when stdin and stdout are terminals and
+  `--non-interactive` is absent, and the person types `expected` back (surrounding spaces
+  ignored), so a reflexive Enter approves nothing. No flag answers it, `--yes` included.
+  Off a terminal the run exits `4` with `PERSON_REQUIRED`, `retryable: false`, and a
+  suggestion to hand the command to a person; any other answer exits `4` with
+  `ATTESTATION_MISMATCH`. It returns a `treaty.Attestation`: `channel` (`"terminal"`)
+  and `at` (UTC), for the app's own record of how the confirmation arrived
+- `requires_person=True` implies `interactive=True` and `mcp=False`: an MCP server's
+  stdin is its protocol, never a person's terminal. `--schema` says
+  `requires_person: true`; the manifest's description ends `(a person runs this at a
+  terminal)`, as CommandEntry has no key for it, and `--help`, the skill file, and
+  AGENTS.md say a person runs the command
+- It is a speed bump and an honest record, not a security boundary: an agent running as
+  the same OS user can fake a terminal. The boundary is a separate OS user, one the agent
+  cannot run as, that owns what the approval unlocks
+
 Calling `ctx.prompt`, `ctx.confirm`, or `ctx.edit` without the declaration is a
-`RegistrationError` when the handler's source shows it. The manifest lists
+`RegistrationError` when the handler's source shows it, and `ctx.attest` without
+`requires_person=True` is one too. The manifest lists
 `interactive`, `requires_editor`, and `non_interactive_alternatives`; exit `4` is in
 every command's map. Running with no arguments prints help and exits `0`; treaty has no REPL.
 
