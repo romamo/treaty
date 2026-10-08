@@ -95,3 +95,19 @@ entry that supersedes it, never by editing an old one.
 - Applies to: src/treaty/_out.py, src/treaty/_app.py, ordered, output arrays, sets
 - Enforced by: review
 - Supersedes: D-6
+
+## D-12: A manifest states every key whose absence means something at its schema version
+
+- Decided: 2026-10-08, in romamo/treaty#414
+- Rule: At ManifestResponse 3.19 a command whose stdout is a protocol stream (mcp serve) says stdout: "protocol" and its protocol, with no output_schema or output formats, and every command no MCP server offers says mcp: false; the manifest and the MCP tool list share one predicate for the latter
+- Why: From 3.16 a missing stdout means stdout carries envelopes and from 3.17 a missing mcp means the server may offer the command, so leaving them out would misdescribe mcp serve and mcp=False commands to a spec-reading agent
+- Applies to: src/treaty/_manifest.py, src/treaty/_tools.py, src/treaty/_mcp_serve.py, manifest schema_version, mcp serve
+- Enforced by: review; tests/test_manifest_protocol_mcp.py against the spec's schema
+
+## D-13: mcp serve follows REQ-C-032 on shutdown
+
+- Decided: 2026-10-08, in romamo/treaty#415
+- Rule: mcp serve exits 0 with no envelope when stdin closes (or the client closes stdout); SIGINT exits 130 and SIGTERM 143, each with the envelope on the last line of stderr; a failure before serving keeps its envelope; the stopped_by and tool_calls result is no longer reported
+- Why: The manifest says stdout: "protocol" for mcp serve (D-12), and REQ-C-032 defines what such a command does on a clean and a signalled shutdown; this reverses the exit 0 on a signal from #313
+- Applies to: src/treaty/_mcp_serve.py, src/treaty/_app.py, mcp serve, signals, exit codes
+- Enforced by: review; subprocess tests for stdin close and each signal
