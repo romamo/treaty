@@ -2193,9 +2193,11 @@ resources as a handler does; they are released when the server stops. Stdout and
 carry the protocol from the first byte, so the command's envelope is a JSON line on
 stderr: a failure before serving (a bad flag exits `2`, `setup` raising
 `Exit.PROJECT_INVALID` exits its code) writes nothing to stdout. While serving, a stray
-`print()` or a write to descriptor 1 goes to stderr, never into the protocol. Closing
-stdin, `SIGINT`, or `SIGTERM` stops the server with exit `0`; `data` says which
-(`stopped_by`) and how many `tool_calls` it answered. The audit log gets one entry for the
+`print()` or a write to descriptor 1 goes to stderr, never into the protocol. Shutdown
+follows REQ-C-032: closing stdin (or the client closing stdout) stops the server with
+exit `0` and no envelope, only plain-text diagnostics on stderr, such as a
+`warning: THIRD_PARTY_STDOUT:` line with what was printed; `SIGINT` exits `130` and
+`SIGTERM` `143`, each with the `CANCELLED` envelope on the last line of stderr. The audit log gets one entry for the
 server run, and each tool call one as its command's. The manifest entry says
 `stdout: "protocol"` and `protocol: "mcp-stdio"`, and lists no `output_schema`, since
 stdout carries no envelope; the description says so too. `exec` lines and `App.call`

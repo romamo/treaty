@@ -1,6 +1,6 @@
 # CLI Agent Spec compliance
 
-Status of treaty against the 159 requirements of the
+Status of treaty against the 160 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
 hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations;
@@ -38,14 +38,14 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 159 | 157 | 2 | 0 | **99%** |
+| Level 3: full spec | 160 | 157 | 3 | 0 | **99%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
 | Framework-automatic (F) | 78 | 76 | 2 | 0 | **99%** |
-| Command contract (C) | 31 | 31 | 0 | 0 | **100%** |
+| Command contract (C) | 32 | 31 | 1 | 0 | **98%** |
 | Opt-in (O) | 50 | 50 | 0 | 0 | **100%** |
 
 ## Open mandatory requirements
@@ -172,6 +172,7 @@ open.
 | [REQ-C-029](../cli-agent-ergonomics/requirements/c-029-command-declares-required-scopes.md) | Command Declares Required Scopes | P0 | 2 | Done | `requires_auth=True` refuses registration without `required_scopes`; `required_scopes` in every schema, `[]` by default; `broad-scope` audit rule for blanket scopes |
 | [REQ-C-030](../cli-agent-ergonomics/requirements/c-030-error-responses-include-fix-command.md) | Error Responses Include Executable fix_command | P1 | 3 | Done | `fix_commands=` checked before the first run, raised ones when raised: no `<`, `>`, `$`, shell syntax, or unbalanced quotes; the app or `App(companions=)`; never destructive; `fix-declared` rule |
 | [REQ-C-031](../cli-agent-ergonomics/requirements/c-031-passthrough-commands-delegate-to-another-parser.md) | Passthrough Commands Delegate to Another Tool's Parser | P1 | 3 | Done | `passthrough=True` (#35): every token after the path reaches the tool verbatim, treaty's own flags go before it, and `help_command=` is the `help_argv` a lone `--help` forwards; the tool owns stdout and the exit code (`DELEGATED_EXIT` when not 0), and the envelope is the last stderr line and `--output`'s file; registration refuses `destructive`, `child_log=True`, and anything treaty would have to parse or shape; the manifest has `arguments: "passthrough"`, `option_placement: "strict"`, `help_argv`, `output_file: "envelope"`, and empty `flags` (ManifestResponse 3.9), and `--schema` lists the flags; the timeout, signals, session deduplication, and an audit log entry with `argv: "[OMITTED]"` apply; MCP lists no passthrough command |
+| [REQ-C-032](../cli-agent-ergonomics/requirements/c-032-protocol-server-commands-declare-stdout-protocol.md) | Protocol Server Commands Declare Their Stdout Protocol | P1 | 3 | Partial | `mcp serve` (#239), the one protocol command, says `stdout: "protocol"` and `protocol: "mcp-stdio"` with no `output_schema` or output formats, and every command its server leaves out says `mcp: false` (ManifestResponse 3.19, #414); stdout carries only MCP frames, a stray `print()` or descriptor-1 write goes to stderr; a bad flag exits `2` and a failure before serving its declared code, each with the envelope on the last stderr line and nothing on stdout; `--dry-run`, `--confirm-destructive`, `--idempotency-key`, and `--output` are refused; it has no timeout, so an idle server is never stopped; closing stdin (or stdout) exits `0` with no envelope, only plain-text diagnostics, and `SIGINT`/`SIGTERM` exit `130`/`143` with the `CANCELLED` envelope last on stderr (#415). Gap: the failure and signal envelopes are JSON on stderr whatever `--format` says, where the spec asks for the format's plain-text error outside JSON mode |
 
 ## Opt-in
 

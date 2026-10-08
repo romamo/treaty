@@ -95,7 +95,7 @@ def test_a_provided_tool_call_is_enveloped_and_its_print_misses_the_protocol(
     assert server.close() == 0
     for line in server.lines:
         assert json.loads(line)["jsonrpc"] == "2.0"
-    assert server.envelope()["data"] == {"stopped_by": "eof", "tool_calls": 2}
+    assert not any(line.startswith("{") for line in server.stderr().splitlines())  # (#415)
     entries = [e for e in server.audit_entries() if e["command"] == "mcp.serve"]
     calls = [e["args"] for e in entries if "tool" in e["args"]]  # type: ignore[operator]
     assert calls == [
@@ -196,13 +196,22 @@ def _serve(app: App, argv: Sequence[str] = ()) -> tuple[int, str, dict[str, obje
     return code, out.getvalue(), json.loads(err.getvalue().strip().splitlines()[-1])
 
 
+def _list(app: App, argv: Sequence[str] = ()) -> tuple[int, str]:
+    """``mcp serve --list-tools``: its exit code and stdout. A clean exit writes no
+    envelope, so stderr is empty (REQ-C-032, #415)"""
+    out, err = io.StringIO(), io.StringIO()
+    argv = ["mcp", "serve", *argv, "--list-tools"]
+    code = app.run(argv, stdout=out, stderr=err, stdin=io.StringIO(), env={})
+    assert err.getvalue() == "", err.getvalue()
+    return code, out.getvalue()
+
+
 def test_list_tools_lists_what_the_startup_arguments_provide() -> None:
     app = _app(lambda args: [_tool(f"t{n}") for n in range(args.count)])
-    code, out, envelope = _serve(app, ["--count", "2", "--list-tools"])
+    code, out = _list(app, ["--count", "2"])
     assert code == 0
     names = [t["name"] for t in json.loads(out)["tools"]]
     assert names[-2:] == ["t0", "t1"]
-    assert envelope["data"] == {"stopped_by": "list-tools", "tool_calls": 0}
 
 
 def test_an_invalid_input_schema_is_refused_before_serving() -> None:
@@ -236,7 +245,7 @@ def test_references_within_the_schema_are_served() -> None:
         },
         "$defs": {"name": {"type": "string"}, "anchored": {"$anchor": "named", "type": "string"}},
     }
-    code, out, _ = _serve(_app([_tool("ref", input_schema=schema)]), ["--list-tools"])
+    code, out = _list(_app([_tool("ref", input_schema=schema)]))
     assert code == 0 and "ref" in out
 
 
@@ -248,7 +257,7 @@ def test_a_destructive_tool_defining_confirm_destructive_is_refused() -> None:
     assert envelope["error"]["code"] == "MCP_TOOL_INVALID"  # type: ignore[index]
     assert "confirm_destructive" in envelope["error"]["message"]  # type: ignore[index]
     # A safe tool may name its own field so
-    assert _serve(_app([_tool("keep", input_schema=schema)]), ["--list-tools"])[0] == 0
+    assert _list(_app([_tool("keep", input_schema=schema)]))[0] == 0
 
 
 def test_a_destructive_call_needs_a_boolean_confirmation() -> None:
@@ -319,7 +328,7 @@ def test_mcp_validate_compares_provided_tools_given_the_startup_arguments(
     tmp_path: Path,
 ) -> None:
     app = _app(lambda args: [_tool(f"t{n}") for n in range(args.count)])
-    _, out, _ = _serve(app, ["--count", "2", "--list-tools"])
+    _, out = _list(app, ["--count", "2"])
     saved = tmp_path / "mcp.json"
     saved.write_text(out, encoding="utf-8")
 

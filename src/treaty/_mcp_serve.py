@@ -4,10 +4,15 @@
 Its startup arguments are an args dataclass like any command's: parsed, validated, listed
 in ``--schema``, and handed to ``setup``, which takes resources as a handler does and
 raises ``treaty.Exit`` to refuse. The command runs from argv only. Its stdout and stdin
-carry the protocol from the first byte, so its envelope (on a failure before serving, and
-when the server stops) is a JSON line on stderr, as a passthrough command's is. While it
-serves, ``sys.stdout`` and descriptor 1 still lead to stderr: a stray ``print()`` never
-reaches the protocol, which is written to a copy of the original stdout.
+carry the protocol from the first byte, so a failure before serving answers with its
+envelope as a JSON line on stderr, as a passthrough command's does. While it serves,
+``sys.stdout`` and descriptor 1 still lead to stderr: a stray ``print()`` never reaches
+the protocol, which is written to a copy of the original stdout.
+
+How it ends follows REQ-C-032 (#415): stdin's end, or the client closing stdout, is a
+clean shutdown, exit 0 with no envelope, only plain-text diagnostics on stderr (what a
+stray ``print()`` wrote among them); SIGINT exits 130 and SIGTERM 143, each with the
+CANCELLED envelope on the last line of stderr.
 
 Its manifest entry says ``stdout: protocol`` and ``protocol: mcp-stdio`` (REQ-C-032,
 ManifestResponse 3.16), set as ``App`` registers it, and its description says so too.
@@ -43,7 +48,7 @@ import re
 import types
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from ._command import Command, DangerLevel, build_command
 from ._context import Ctx
@@ -80,10 +85,11 @@ MCP_BIND_NEEDS_SERVE = "MCP_BIND_NEEDS_SERVE"
 LIST_TOOLS = "list_tools"
 
 DESCRIPTION = (
-    "Serve the app's commands as MCP tools over stdio until stdin ends or SIGINT or "
-    "SIGTERM arrives, then exit 0. Stdout carries the MCP protocol (JSON-RPC lines), never "
-    "an envelope: a failure before serving, and the end of the run, answer with the "
-    "envelope as one JSON line on stderr. --list-tools prints the tool list as JSON instead"
+    "Serve the app's commands as MCP tools over stdio until stdin ends, then exit 0 with "
+    "no envelope; SIGINT exits 130 and SIGTERM 143. Stdout carries the MCP protocol "
+    "(JSON-RPC lines), never an envelope: a failure before serving, and a signal, answer "
+    "with the envelope as the last line of stderr. --list-tools prints the tool list as "
+    "JSON instead"
 )
 """States the command's stdout is the protocol's, as its ``stdout`` and ``protocol`` manifest
 keys do (REQ-C-032)"""
@@ -290,17 +296,6 @@ class McpServe:
                 "('PRECONDITION',)"
             )
         object.__setattr__(self, "exit_codes", tuple(self.exit_codes))
-
-
-@dataclass(frozen=True, slots=True)
-class McpServed:
-    """How a server run ended: the client left, a signal stopped it, or ``--list-tools``
-    printed the tools without serving"""
-
-    stopped_by: Literal["eof", "SIGINT", "SIGTERM", "list-tools"]
-    """``eof`` when the client left: stdin ended, or stdout was closed"""
-    tool_calls: int
-    """Tool calls answered during the run"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -889,7 +884,7 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
         module=base.__module__,
     )
 
-    def serve(args: object, ctx: Ctx, *acquired: object) -> McpServed:
+    def serve(args: object, ctx: Ctx, *acquired: object) -> None:
         wire = ctx._wire
         if wire is None:
             raise needs_stdio(app.name)
@@ -911,7 +906,7 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
             listed = tool_list(app, extra=extra, served=served, bindings=bindings)
             wire.out.write(json.dumps(listed, indent=2, sort_keys=True) + "\n")
             wire.out.flush()
-            return McpServed("list-tools", 0)
+            return None
         if importlib.util.find_spec("mcp") is None:
             raise CliExit(
                 ExitCodeName("PRECONDITION"),
@@ -929,7 +924,7 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
         text = instructions_for(app, spec, args)
         from ._mcp import serve_wire  # imports the App module, which imports this one
 
-        return serve_wire(
+        serve_wire(
             app,
             wire,
             env=ctx.env,
@@ -938,9 +933,11 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
             served=served,
             bindings=bindings,
         )
+        return None
 
     # The handler's signature names setup's and tools' resources, so they are resolved
-    sign_handler(serve, args_type, resources, McpServed)
+    # No result: a clean shutdown writes no envelope (REQ-C-032, #415)
+    sign_handler(serve, args_type, resources, None)
     app.command(
         MCP_SERVE_PATH.value,
         description=DESCRIPTION,

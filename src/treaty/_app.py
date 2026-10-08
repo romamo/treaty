@@ -2652,8 +2652,9 @@ class App:
             return run.help_command(mode, command)
         # The delegated tool, or mcp serve's protocol, owns stdout: every answer about the
         # run is a line on stderr
-        run.delegating = command.passthrough or protocol_command(self, command.path)
-        if run.delegating and not command.passthrough:
+        run.serving_protocol = protocol_command(self, command.path)
+        run.delegating = command.passthrough or run.serving_protocol
+        if run.serving_protocol:
             run.wire = Wire(run.out, None if run.payload_stdin is None else run.stdin)
         if config_error is not None and not _answers_over(config_error, command.path.value):
             if not settings_error or self._config_root_field(command) is None:
@@ -4376,6 +4377,9 @@ class _Run:
         self.delegating = False
         """Argv named a passthrough command: its tool owns stdout, so the run's envelope
         is a line on stderr (#35)"""
+        self.serving_protocol = False
+        """Argv named a protocol command (``mcp serve``): a clean shutdown writes no
+        envelope, only plain-text diagnostics on stderr (REQ-C-032, #415)"""
         self.envelope_file: Path | None = None
         """``--output`` of a passthrough command: where its envelope is written too"""
         self.wire: Wire | None = None
@@ -4460,6 +4464,12 @@ class _Run:
         envelope = self._reported_stray(envelope)
         if settle:
             envelope = self.settle(envelope)
+        if self.serving_protocol and envelope.ok:
+            # REQ-C-032: a protocol command's clean shutdown writes no envelope; what it
+            # would have warned is plain text on stderr (#415)
+            self._shutdown_diagnostics(envelope)
+            self.delivered = True
+            return envelope.exit_code
         path = self.envelope_file
         if path is not None:
             try:
@@ -4474,6 +4484,22 @@ class _Run:
         write_envelope(envelope, self.err.stream)
         self.delivered = True
         return envelope.exit_code
+
+    def _shutdown_diagnostics(self, envelope: Envelope) -> None:
+        """A protocol command's warnings at a clean shutdown, as plain text on stderr: a
+        ``warning: <CODE>: <message>`` line each, and the text third-party code printed,
+        which the ``THIRD_PARTY_STDOUT`` warning holds, after its line (#415)"""
+        for warning in envelope.warnings:
+            if self.unprotected and warning.code == UNPROTECTED_CODE:
+                continue  # unprotected_record wrote it before the command ran
+            text = warning.context.get("text") if warning.code == "THIRD_PARTY_STDOUT" else None
+            if isinstance(text, str):
+                # Redacted as the warning was built
+                line = f"warning: {warning.code}: Third-party code wrote to stdout:\n{text}"
+            else:
+                line = f"warning: {warning.code}: {self._redact_everywhere(warning.message)}"
+            self.err.write(line + "\n", Level.WARN)
+        self.err.stream.flush()
 
     def _reported_stray(self, envelope: Envelope) -> Envelope:
         """``envelope`` with a ``THIRD_PARTY_STDOUT`` warning holding what was printed to

@@ -1,5 +1,6 @@
 """An app's own ``mcp serve`` (#239): startup flags, failures before serving on stderr,
-the protocol alone on stdout, and a clean stop on EOF or a signal."""
+the protocol alone on stdout, a clean stop on EOF with no envelope, and a signal's exit
+130 or 143 with the CANCELLED envelope on stderr (REQ-C-032, #415)."""
 
 import json
 import os
@@ -113,6 +114,10 @@ class Server:
     def stderr(self) -> str:
         return self.stderr_path.read_text(encoding="utf-8")
 
+    def json_lines(self) -> list[str]:
+        """The stderr lines that are JSON objects: none after a clean shutdown"""
+        return [line for line in self.stderr().splitlines() if line.lstrip().startswith("{")]
+
     def envelope(self) -> dict[str, object]:
         """The run's envelope: the last stderr line"""
         last = self.stderr().strip().splitlines()[-1]
@@ -165,14 +170,13 @@ def test_serves_the_commands_and_only_the_protocol_reaches_stdout(server: Server
     assert server.lines
     for line in server.lines:
         assert json.loads(line)["jsonrpc"] == "2.0"
-    envelope = server.envelope()
-    assert envelope["ok"] is True
-    assert envelope["data"] == {"stopped_by": "eof", "tool_calls": 1}
-    warning = envelope["warnings"][0]  # type: ignore[index]
-    assert warning["code"] == "THIRD_PARTY_STDOUT"
-    assert "echo printed hi" in warning["context"]["text"]
-    assert "setup printed this" in warning["context"]["text"]
+    # A clean shutdown writes no envelope (REQ-C-032, #415): what was printed is plain
+    # text on stderr
+    assert server.json_lines() == [], server.stderr()
     errors = server.stderr()
+    assert "warning: THIRD_PARTY_STDOUT" in errors
+    assert "echo printed hi" in errors
+    assert "setup printed this" in errors
     assert "released proj" in errors  # setup's resource was released as the run ended
     assert TOKEN not in errors
 
@@ -219,9 +223,19 @@ def test_the_client_closing_stdout_stops_the_server_cleanly(tmp_path: Path, proj
         started.proc.wait(timeout=WAIT)
         pytest.fail(f"the server did not stop; its stderr:\n{started.stderr()}")
     assert code == 0, started.stderr()
-    envelope = started.envelope()
-    assert envelope["data"] == {"stopped_by": "eof", "tool_calls": 0}, started.stderr()
+    assert started.json_lines() == [], started.stderr()
     assert "Traceback" not in started.stderr()
+
+
+def test_closing_stdin_exits_0_with_no_envelope_on_stderr(server: Server) -> None:
+    """REQ-C-032's acceptance criterion: the client closing stdin ends the process with
+    exit 0 and no envelope on stderr (#415)"""
+    server.initialize()
+    assert server.close() == 0
+    assert server.json_lines() == [], server.stderr()
+    assert "released proj" in server.stderr()
+    served = [e for e in server.audit_entries() if e["command"] == "mcp.serve"]
+    assert [e["exit_code"] for e in served] == [0]
 
 
 def test_one_audit_entry_per_server_run_with_the_secret_redacted(server: Server) -> None:
@@ -262,16 +276,25 @@ def test_a_bad_startup_flag_exits_2_on_stderr(tmp_path: Path) -> None:
 
 
 @needs_posix_signals
-@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
-def test_a_signal_stops_the_server_with_exit_0(server: Server, sig: signal.Signals) -> None:
+@pytest.mark.parametrize(("sig", "code"), [(signal.SIGTERM, 143), (signal.SIGINT, 130)])
+def test_a_signal_stops_the_server_with_128_plus_n_and_the_envelope_last(
+    server: Server, sig: signal.Signals, code: int
+) -> None:
+    """REQ-C-032: a signal exits 128 + N with the envelope on the last line of stderr
+    (#415, reversing #313's exit 0)"""
     server.initialize()
     server.request("tools/list")
     server.proc.send_signal(sig)
-    assert server.wait() == 0
+    assert server.wait() == code, server.stderr()
     envelope = server.envelope()
-    assert envelope["data"] == {"stopped_by": sig.name, "tool_calls": 0}
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "CANCELLED"  # type: ignore[index]
+    assert envelope["error"]["context"]["signal"] == sig.name  # type: ignore[index]
+    assert envelope["meta"]["exit_code"] == code  # type: ignore[index]
+    for line in server.lines:  # the protocol alone on stdout, the envelope never
+        assert json.loads(line)["jsonrpc"] == "2.0"
     served = [e for e in server.audit_entries() if e["command"] == "mcp.serve"]
-    assert [e["exit_code"] for e in served] == [0]
+    assert [e["exit_code"] for e in served] == [code]
     assert "released proj" in server.stderr()
 
 
@@ -304,6 +327,23 @@ def test_the_manifest_says_stdout_carries_the_protocol() -> None:
     assert entry["exit_codes"]["80"]["name"] == "PROJECT_INVALID"
 
 
+def test_list_tools_prints_the_tools_on_stdout_and_never_serves(project: Path) -> None:
+    import io
+
+    out, err = io.StringIO(), io.StringIO()
+    code = _servectl().run(
+        ["mcp", "serve", "--project", str(project), "--list-tools"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=err,
+        env={"SERVECTL_TOKEN": TOKEN},
+    )
+    assert code == 0
+    names = {t["name"] for t in json.loads(out.getvalue())["tools"]}
+    assert {"echo", "ping"} <= names
+    assert not any(line.startswith("{") for line in err.getvalue().splitlines())
+
+
 def test_exec_and_app_call_refuse_it_before_setup_runs(project: Path) -> None:
     envelope = _servectl().call("mcp.serve", {"project": str(project)})
     assert envelope.error is not None
@@ -312,12 +352,10 @@ def test_exec_and_app_call_refuse_it_before_setup_runs(project: Path) -> None:
 
 
 @needs_posix_signals
-def test_a_signal_while_the_server_thread_starts_still_stops_it_with_exit_0(
-    project: Path,
-) -> None:
+def test_a_signal_while_the_server_thread_starts_still_stops_it(project: Path) -> None:
     """A SIGTERM landing while ``Thread.start`` waits for the server thread to run, which
-    a loaded machine can stretch past the first answers, stops the server like any other:
-    exit 0, not the CANCELLED envelope's 143 (#313). A trace function raises the signal
+    a loaded machine can stretch past the first answers, stops the server like any other
+    (#313): exit 143 with the CANCELLED envelope (#415). A trace function raises the signal
     as ``start`` waits; its handler runs at the next bytecode, still inside that wait"""
     import io
 
@@ -355,8 +393,9 @@ def test_a_signal_while_the_server_thread_starts_still_stops_it_with_exit_0(
         os.close(write)
     assert raised, "the trace never saw the server thread start"
     envelope = json.loads(err.getvalue().strip().splitlines()[-1])
-    assert code == 0, envelope
-    assert envelope["data"] == {"stopped_by": "SIGTERM", "tool_calls": 0}
+    assert code == 143, envelope
+    assert envelope["error"]["code"] == "CANCELLED"
+    assert envelope["error"]["context"]["signal"] == "SIGTERM"
     raised[0].join(timeout=WAIT)
     assert not raised[0].is_alive()
 
