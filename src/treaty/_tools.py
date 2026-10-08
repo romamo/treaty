@@ -10,10 +10,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ._command import Command, DangerLevel
-from ._completion import COMPLETION_PATH
 from ._framework import CONFIRM_FLAG, IDEMPOTENCY_FLAG
-from ._manifest import EXEC_PATH, payload_schema
-from ._mcp_shared import MCP_SERVE_PATH, NO_BINDINGS, Bindings
+from ._manifest import never_a_tool, payload_schema
+from ._mcp_shared import NO_BINDINGS, Bindings
 from ._refs import EMPTY_DEFS, defs_of, deref, merge_defs, ref_name, with_defs
 from ._schema import JsonSchema
 from ._values import CommandPath
@@ -153,11 +152,8 @@ def tool_entries(
     naming it its description (#285)"""
     entries: list[ToolEntry] = []
     for path, command in sorted(app.commands.items(), key=lambda kv: kv[0].value):
-        if path == EXEC_PATH or (
-            path in (COMPLETION_PATH, MCP_SERVE_PATH) and path in app.builtins
-        ):
-            continue
-        if command.passthrough or not command.mcp:
+        # The manifest marks the same commands mcp: false
+        if never_a_tool(command, builtin=path in app.builtins):
             continue
         if served is not None and path not in served:
             continue

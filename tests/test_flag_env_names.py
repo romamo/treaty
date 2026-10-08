@@ -182,7 +182,7 @@ def test_a_deprecated_name_warns_naming_the_replacement() -> None:
 def test_the_manifest_lists_the_names_and_validates_against_the_spec() -> None:
     manifest = make_app().manifest()
     spec_validator("manifest-response").validate(manifest)
-    assert manifest["schema_version"] == "3.15"
+    assert manifest["schema_version"] == "3.19"
     entry = manifest["commands"]["download"]
     assert entry["secret_env_vars"] == ["PY_IBKR_TOKEN", "IBKR_FLEX_TOKEN", "IBKR_TOKEN"]
     flags = entry["flags"]

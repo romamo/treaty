@@ -41,9 +41,9 @@ from ._scan import (
     FOLLOW_DEPTH,
     ExitRaise,
     Reached,
-    Receivers,
     absolute_module,
     clear_caches,
+    command_reach,
     ctx_calls,
     direct_subprocess_calls,
     exit_raises,
@@ -431,9 +431,6 @@ def _declared_exits(app: App) -> Iterator[Finding]:
         allowed = {n.value for n in c.exit_codes} | {code.name for code in implicit_exit_codes(c)}
         args_class = c.args_model.model if c.args_model else c.args_type
         post_init = getattr(args_class, "__post_init__", None)
-        # Classes whose methods are followed when a parameter is annotated with one (#218)
-        known = {args_class, *c.resource_graph}
-        known.update(r.args_type for r in c.resource_graph.values() if r.args_type is not None)
         if inspect.isfunction(post_init):
             # Only a ParseError or InvalidValue there refuses the arguments: any exit,
             # declared or not, is ArgsCrashed, so declaring it would not help
@@ -452,16 +449,11 @@ def _declared_exits(app: App) -> Iterator[Finding]:
                     f"raise treaty.ParseError there instead of Exit.{name}, which exits 2 "
                     "before anything runs",
                 )
-        code: list[Callable[..., object]] = [
-            c.handler,
-            *(spec.acquire for spec in c.resource_graph.values()),
-        ]
         first: dict[str, tuple[ExitRaise, Reached]] = {}
-        for fn in code:
-            for unit in reached_functions(fn, _receivers(fn, known)):
-                for raised in exit_raises(unit.fn):
-                    if raised.name.value not in allowed:
-                        first.setdefault(raised.name.value, (raised, unit))
+        for unit in command_reach(c):
+            for raised in exit_raises(unit.fn):
+                if raised.name.value not in allowed:
+                    first.setdefault(raised.name.value, (raised, unit))
         for name, (raised, unit) in sorted(first.items()):
             fix = f'add "{name}" to exit_codes='
             if raised.name not in app.exits:
@@ -477,17 +469,6 @@ def _declared_exits(app: App) -> Iterator[Finding]:
                 f"exits 1 with UNDECLARED_EXIT_CODE instead{unit.where}",
                 fix,
             )
-
-
-def _receivers(fn: Callable[..., object], known: set[type]) -> Receivers:
-    """The parameters of ``fn`` annotated with one of the ``known`` classes: the args
-    class and the resources, whose methods the handler and ``acquire`` call"""
-    hints = type_hints(fn)
-    return tuple(
-        (name, hint)
-        for name, hint in hints.items()
-        if name != "return" and any(hint is k for k in known)
-    )
 
 
 def _retryable(app: App) -> Iterator[Finding]:

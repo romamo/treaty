@@ -47,6 +47,11 @@ Apps built on treaty keep their own, structured schema changelog with
   comes from another example or the `manifest --etag` one, so a committed profile with the
   old probe differs from the generated one and `treaty conformance` exits `CONFLICT`:
   rerun `treaty conformance --force` once to update it (#390)
+- `mcp serve`'s manifest entry no longer lists an `output_schema`, since the 3.16 schema
+  rejects one beside `stdout: "protocol"`. An app with `App(mcp=McpServe(...))` and a
+  schema changelog records `mcp.serve.output.stopped_by` and `mcp.serve.output.tool_calls`
+  as removed, marked breaking, on its next `treaty changelog-add`; this happens once.
+  Schema locks and the MCP tool list are unchanged (#362)
 
 ### Added
 
@@ -61,6 +66,23 @@ Apps built on treaty keep their own, structured schema changelog with
   pointing at a local stub, keeps its `read` probe and can give `argument_order`; an
   `output_file` command's `--output` is dropped from a probe as from an example. A
   passthrough command gets no probe either way (#392)
+- The manifest is ManifestResponse 3.19, and a command's exit `6` (`CONFLICT`) entry
+  lists `error_codes`, every `error.code` the command answers under it:
+  `ALREADY_EXISTS` when its handler calls `treaty.already_exists`, `IDEMPOTENCY_KEY_REUSED`
+  when it takes `--idempotency-key`, and each code its `Exit.CONFLICT` raises name, the
+  default `CONFLICT` among them. `--schema` and the generated skill files carry the list
+  too. The list is read as complete, so it is left out when the scan cannot read a code
+  (a `code=` that is not a literal, `**kwargs`, an exit name that is not a literal such
+  as `CliExit(name, ...)` or `getattr(Exit, name)`, a handler without source) and on a
+  passthrough command. `declared-exits` now reads an `already_exists(...)` call as a
+  `CONFLICT` raise (#362)
+- At ManifestResponse 3.19 the manifest also carries the 3.16 and 3.17 keys whose absence
+  means something: `mcp serve`'s entry says `stdout: "protocol"` and `protocol:
+  "mcp-stdio"` and lists no `output_schema` or `output_formats`, which the spec rejects
+  beside them, and every command no MCP server offers (`mcp=False`, `exec`, `completion`,
+  `mcp serve`, passthrough commands) says `mcp: false`. The `(not an MCP tool)`
+  description marker stays. `--schema` carries the same keys; the MCP tool list is
+  unchanged (#362)
 
 ### Changed
 

@@ -112,7 +112,10 @@ def _guardrails(app_name: str, command: Command, entry: Mapping[str, object]) ->
     assert isinstance(codes, dict)
     for code, spec in sorted(codes.items(), key=lambda kv: int(kv[0])):
         retry = "retryable" if spec.get("retryable") else "not retryable"
-        rails.append(f"Exit {code} {spec['name']} ({retry}): {spec['description']}")
+        line = f"Exit {code} {spec['name']} ({retry}): {spec['description']}"
+        if errors := spec.get("error_codes"):
+            line += f"; error.code is one of {', '.join(errors)}"  # ExitCodeEntry 1.1 (#362)
+        rails.append(line)
     rails.append(f"Shared exit codes, 2 among them for bad arguments: {app_name} manifest")
     return rails
 

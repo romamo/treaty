@@ -71,7 +71,8 @@ uv run treaty-mcp examples.tutorial.todo_exit_codes:app --list-tools | jq -e '
   calls, and neither is `completion`, which only a shell can use. `cleanup`,
   `generate-skills`, and `audit-log` are registered `mcp=False`: they are a person's chores
   at a terminal, and the manifest ends their descriptions with `(not an MCP tool)`. Your own
-  command takes `mcp=False` too, for one a person must run, such as an approval
+  command takes `mcp=False` too, for one a person must run, such as an approval. The
+  manifest entry of every command no server offers says `mcp: false`
 - **Hints** come from the danger level (`safe` is read-only and idempotent, `destructive` is
   destructive) and from `has_network_io`, which sets the open-world hint
 - **Descriptions** get the danger level spelled out: `purge`'s tells the model that without

@@ -60,7 +60,15 @@ from ._types import (
     strip_optional,
     type_hints,
 )
-from ._values import CommandPath, ExitCodeName, InvalidValue, SchemaVersion, Scope, ToolVersion
+from ._values import (
+    CommandPath,
+    ExitCodeName,
+    InvalidValue,
+    SchemaVersion,
+    Scope,
+    StdioProtocol,
+    ToolVersion,
+)
 
 if TYPE_CHECKING:
     from ._adapters import OutputAdapters
@@ -420,6 +428,10 @@ class Command:
     mcp: bool = True
     """Served as an MCP tool when ``mcp serve`` or ``treaty-mcp`` serves the app; False
     keeps it off every MCP server whatever ``McpServe(commands=)`` selects (#281)"""
+    protocol: StdioProtocol | None = None
+    """The protocol the command serves on stdin and stdout, which then never carry an
+    envelope; set on the ``mcp serve`` built-in as ``mcp-stdio``, and the manifest says
+    ``stdout: protocol`` (REQ-C-032, ManifestResponse 3.16)"""
 
     def handler_args(self, args: object) -> object:
         """What the handler, its resources, and its rollback receive for parsed ``args``"""

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 _PATH_RE = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$")
 _EXIT_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _INSTANCE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_PROTOCOL_RE = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
 
 
 class InvalidValue(ValueError):
@@ -111,6 +112,21 @@ class Scope:
     def __post_init__(self) -> None:
         if not self.value or self.value != self.value.strip():
             raise InvalidValue(f"invalid scope {self.value!r}")
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True, slots=True)
+class StdioProtocol:
+    """The protocol a command serves on stdin and stdout instead of envelopes, in lowercase
+    kebab-case, such as ``mcp-stdio`` (CommandEntry.protocol, REQ-C-032)"""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _PROTOCOL_RE.fullmatch(self.value):
+            raise InvalidValue(f"invalid protocol name {self.value!r}; use lowercase kebab-case")
 
     def __str__(self) -> str:
         return self.value

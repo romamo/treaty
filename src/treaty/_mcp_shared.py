@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ._framework import CONFIRM_FLAG
-from ._values import CommandPath
+from ._values import CommandPath, StdioProtocol
 
 if TYPE_CHECKING:
     from ._app import App
@@ -19,13 +19,16 @@ if TYPE_CHECKING:
 
 MCP_GROUP = CommandPath("mcp")
 MCP_SERVE_PATH = MCP_GROUP.child("serve")
+MCP_STDIO = StdioProtocol("mcp-stdio")
+"""The protocol ``mcp serve`` serves: CommandEntry.protocol (REQ-C-032)"""
 CONFIRM_KEY = CONFIRM_FLAG.replace("-", "_")
 CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
 
 
 def protocol_command(app: App, path: CommandPath) -> bool:
-    """Whether the command at ``path`` is ``mcp serve``, whose stdout is the protocol's"""
-    return app.mcp is not None and path == MCP_SERVE_PATH and path in app.builtins
+    """Whether the command at ``path`` serves a protocol on stdout, as ``mcp serve`` does"""
+    command = app.commands.get(path)
+    return command is not None and command.protocol is not None
 
 
 @dataclass(frozen=True, slots=True)

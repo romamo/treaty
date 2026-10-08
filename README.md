@@ -2138,7 +2138,8 @@ One tool per command except `exec`, named with dots as underscores (`deploy_roll
 A command registered `mcp=False` is never a tool, on any server: one a person must run,
 such as an approval, or a terminal chore. The `cleanup`, `generate-skills`, and
 `audit-log` built-ins are `mcp=False`, and the manifest ends such a command's description
-with `(not an MCP tool)`, since the spec's `CommandEntry` has no key for it.
+with `(not an MCP tool)`. Its manifest entry says `mcp: false`, as do those of `exec`,
+`completion`, `mcp serve`, and passthrough commands, which no server offers either.
 The input schema is the args dataclass schema with field names as declared, secrets
 replaced by `<name>_from_env` and `<name>_from_file`, and the framework keys the command
 declares: `timeout`, `idempotency_key`, `confirm_destructive`, `retries`, `retry_delay`,
@@ -2195,9 +2196,10 @@ stderr: a failure before serving (a bad flag exits `2`, `setup` raising
 `print()` or a write to descriptor 1 goes to stderr, never into the protocol. Closing
 stdin, `SIGINT`, or `SIGTERM` stops the server with exit `0`; `data` says which
 (`stopped_by`) and how many `tool_calls` it answered. The audit log gets one entry for the
-server run, and each tool call one as its command's. The manifest says in the command's
-description that its stdout is a protocol, since the spec has no key for that yet. `exec`
-lines and `App.call` refuse it with `NEEDS_STDIO`.
+server run, and each tool call one as its command's. The manifest entry says
+`stdout: "protocol"` and `protocol: "mcp-stdio"`, and lists no `output_schema`, since
+stdout carries no envelope; the description says so too. `exec` lines and `App.call`
+refuse it with `NEEDS_STDIO`.
 
 Tools can also come from data the server reads as it starts, such as an operations
 catalog. `McpServe(tools=provide)` calls `provide(args, ctx)` once, after `setup`, and

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Collection, Mapping, Sequence
 from types import MappingProxyType
 
@@ -15,6 +16,7 @@ from ._command import (
     Command,
     DangerLevel,
 )
+from ._completion import COMPLETION_PATH
 from ._deps import ANY_VERSION
 from ._env import (
     CONFIG,
@@ -29,6 +31,7 @@ from ._env import (
 )
 from ._exit import ExitCodeRegistry, FrameworkCode
 from ._framework import (
+    IDEMPOTENCY_FLAG,
     NO_INJECTION_FLAG,
     NO_STREAM_FLAG,
     STABLE_OUTPUT_KEY,
@@ -36,14 +39,16 @@ from ._framework import (
     framework_flags,
 )
 from ._lines import DEFAULT_LINE_CAP, INPUT_LINES_KEY, LineCap, StdinInput
+from ._mcp_shared import MCP_SERVE_PATH
 from ._mode import Format, FormatName, MediaType, media_type_map
 from ._output_base import OutputBase
+from ._scan import command_reach, exit_raises, source_tree, unnamed_exits
 from ._schema import JsonSchema
 from ._select import FIELDS_KEY
 from ._types import FlagType
 from ._values import CommandPath, Etag
 
-SCHEMA_VERSION = "3.15"  # 3.1: CommandEntry.builtin (REQ-O-041)
+SCHEMA_VERSION = "3.19"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.2: ConditionalRule any_of and one_of (REQ-C-026)
 # 3.3: CommandEntry.output_file (REQ-O-001)
 # 3.4: FlagEntry.env_vars; 3.5: the root env_vars of variables that back no flag (REQ-F-073)
@@ -52,14 +57,33 @@ SCHEMA_VERSION = "3.15"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # 3.10: the output side-effect kind (REQ-C-011); 3.11: stderr child_log (REQ-F-038)
 # 3.12: the format flag's media_types and output_media_types (REQ-O-001, REQ-O-049)
 # 3.13: the root secret_env_vars (REQ-F-073); 3.14: confirm_flag (REQ-O-048)
-# 3.15: CommandEntry.idempotent (REQ-C-002)
+# 3.15: CommandEntry.idempotent (REQ-C-002); 3.16: CommandEntry.stdout and protocol
+# (REQ-C-032); 3.17: CommandEntry.mcp (REQ-C-032); 3.18: integer enum_values, which treaty
+# does not emit (an integer Literal's values are in the description); 3.19:
+# ExitCodeEntry.error_codes (#362)
 
 EXEC_PATH = CommandPath("exec")
 """The ``exec`` built-in, which reads its plan from stdin as a buffered payload"""
 
+PROTOCOL_STDOUT = "protocol"
+"""CommandEntry.stdout of a command that serves a protocol over stdio (ManifestResponse 3.16)"""
+
 NOT_AN_MCP_TOOL = "(not an MCP tool)"
-"""Ends the manifest description of a command registered ``mcp=False`` (#281):
-CommandEntry has no key for it, and ``additionalProperties`` is false"""
+"""Ends the manifest description of a command registered ``mcp=False`` (#281); since
+ManifestResponse 3.17 the entry says ``mcp: false`` too"""
+
+
+def never_a_tool(command: Command, *, builtin: bool) -> bool:
+    """Whether no MCP server offers the command as a tool, whatever ``McpServe(commands=)``
+    selects: ``exec``, the ``completion`` and ``mcp serve`` built-ins, a passthrough
+    command, and one registered ``mcp=False`` (#281). Its manifest entry says ``mcp: false``
+    (ManifestResponse 3.17), as absent means a server may offer it"""
+    if command.path == EXEC_PATH:
+        return True
+    if builtin and command.path in (COMPLETION_PATH, MCP_SERVE_PATH):
+        return True
+    return command.passthrough or not command.mcp
+
 
 # The --format values CommandEntry.output_formats leaves out (REQ-O-049): the spec's
 # universal ones, and ndjson, which every treaty command takes
@@ -103,6 +127,41 @@ def implicit_exit_codes(command: Command) -> tuple[FrameworkCode, ...]:
         # A step failed after one completed, or some items of a batch failed
         codes.append(FrameworkCode.PARTIAL_FAILURE)
     return tuple(codes)
+
+
+_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
+"""ErrorDetail.code; a raise with any other code exits 1 with INVALID_EXIT instead"""
+
+CONFLICT_CODE = FrameworkCode.CONFLICT
+REUSED_KEY_CODE = "IDEMPOTENCY_KEY_REUSED"
+"""The ``error.code`` of exit 6 when an ``--idempotency-key`` comes back with other arguments"""
+
+
+def conflict_error_codes(command: Command) -> list[str] | None:
+    """ExitCodeEntry 1.1 ``error_codes`` of the command's exit 6 (CONFLICT), sorted: the
+    codes its handler, its resources' ``acquire``, and the first-party helpers they call
+    raise under CONFLICT (``ALREADY_EXISTS`` for ``already_exists``, a literal ``code=``,
+    else ``CONFLICT``), and ``IDEMPOTENCY_KEY_REUSED`` when it takes ``--idempotency-key``.
+    A present list is read as complete, so it is None when the scan cannot see a code: a
+    function without source, a raise whose ``code=`` is not a literal, an exit whose name is
+    not a literal (``CliExit(name, ...)``, ``getattr(Exit, name)``), or a passthrough
+    command, whose tool owns its exit codes; None too when there is nothing to list"""
+    if command.passthrough:
+        return None
+    codes: set[str] = set()
+    if any(f.name == IDEMPOTENCY_FLAG for f in framework_flags(command)):
+        codes.add(REUSED_KEY_CODE)
+    for unit in command_reach(command):
+        if source_tree(unit.fn) is None or unnamed_exits(unit.fn):
+            return None
+        for raised in exit_raises(unit.fn):
+            if raised.name.value != CONFLICT_CODE.name:
+                continue
+            if raised.error_code is None:
+                return None
+            if _ERROR_CODE.fullmatch(raised.error_code):
+                codes.add(raised.error_code)
+    return sorted(codes) or None
 
 
 def global_flag_entries(
@@ -424,6 +483,11 @@ def command_entry(
         exit_codes.setdefault(str(entry.code.value), entry.to_json())
     timeout = exits.timeout(read_only=command.danger_level is DangerLevel.SAFE)
     exit_codes[str(timeout.code.value)] = timeout.to_json()
+    conflict = exits.framework(CONFLICT_CODE)
+    key = str(conflict.code.value)
+    if key in exit_codes and (errors := conflict_error_codes(command)) is not None:
+        # ExitCodeEntry 1.1 (ManifestResponse 3.19, #362): the error.code values of exit 6
+        exit_codes[key] = {**conflict.to_json(), "error_codes": errors}
     if shared is not None:
         exit_codes = {k: v for k, v in exit_codes.items() if shared.get(k) != v}
     # REQ-C-031: a passthrough command's own flags go before its path, as global options
@@ -435,7 +499,7 @@ def command_entry(
         instead = "" if old.replacement is None else f"; use {old.replacement}"
         description = f"{description} (deprecated since {old.since}{instead})"
     if not command.mcp:
-        # CommandEntry has no MCP key (#281): the description carries mcp=False
+        # The marker predates CommandEntry.mcp (#281); the entry says mcp: false below too
         description = f"{description} {NOT_AN_MCP_TOOL}"
     out: dict[str, object] = {
         "description": description,
@@ -444,8 +508,17 @@ def command_entry(
         "option_placement": command.option_placement.value,  # REQ-C-027: on every entry
         "flags": flags,
         "exit_codes": exit_codes,
-        "output_schema": command.output_schema,
     }
+    serves = command.protocol
+    if serves is None:
+        out["output_schema"] = command.output_schema
+    else:
+        # REQ-C-032 (ManifestResponse 3.16): stdout is the protocol's from the first byte,
+        # so no output_schema, output_formats, or output_media_types describe it
+        out["stdout"] = PROTOCOL_STDOUT
+        out["protocol"] = serves.value
+    if never_a_tool(command, builtin=builtin):
+        out["mcp"] = False  # REQ-C-032 (ManifestResponse 3.17): absent means it may be served
     if builtin:
         # REQ-O-041: set by who registered it; an app command is left unmarked, read as false
         out["builtin"] = True
@@ -490,6 +563,8 @@ def command_entry(
     beyond = [Format.ID.value] if command.id_field is not None else []
     beyond += (n.value for n in offered if n not in _DEFAULT_FORMATS and n.builtin is not Format.ID)
     beyond += (n.value for n in command.renderers if n not in _DEFAULT_FORMATS and n not in offered)
+    if serves is not None:
+        beyond = []  # a protocol's stdout has no --format representation
     if beyond:
         out["output_formats"] = beyond
     # ManifestResponse 3.12: what each of them writes, where the root map does not say it
