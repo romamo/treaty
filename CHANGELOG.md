@@ -47,6 +47,11 @@ Apps built on treaty keep their own, structured schema changelog with
   comes from another example or the `manifest --etag` one, so a committed profile with the
   old probe differs from the generated one and `treaty conformance` exits `CONFLICT`:
   rerun `treaty conformance --force` once to update it (#390)
+- `mcp serve`'s manifest entry no longer lists an `output_schema`, since the 3.16 schema
+  rejects one beside `stdout: "protocol"`. An app with `App(mcp=McpServe(...))` and a
+  schema changelog records `mcp.serve.output.stopped_by` and `mcp.serve.output.tool_calls`
+  as removed, marked breaking, on its next `treaty changelog-add`; this happens once.
+  Schema locks and the MCP tool list are unchanged (#362)
 
 ### Added
 
