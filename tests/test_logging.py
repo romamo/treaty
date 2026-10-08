@@ -630,13 +630,14 @@ from treaty import App, Ctx, Flag
 @dataclass(frozen=True, slots=True)
 class Login:
     api_token: str = Flag(description='API token', secret=True)
-finish = threading.Event()
+started, finish = threading.Event(), threading.Event()
 workers = []
 app = App('libctl', version='1.0.0')
 @app.command('slow', description='Outlive its timeout', timeout=0.05, danger_level='safe',
              exit_codes=())
 def slow(args: Login, ctx: Ctx) -> dict[str, bool]:
     workers.append(threading.current_thread())
+    started.set()
     finish.wait(timeout=10)
     return {{'ok': True}}
 @app.command('leak', description='Print the token', danger_level='safe', exit_codes=())
@@ -647,6 +648,7 @@ def leak(args: Login, ctx: Ctx) -> dict[str, bool]:
 env = {{'LIBCTL_API_TOKEN': {token!r}, 'LIBCTL_AUDIT_LOG': '0'}}
 before = (sys.stdout, sys.stderr)
 print(app.call('slow', {{}}, env=env).error.code)
+assert started.wait(timeout=10)  # the timeout can run out before the handler began (#421)
 out, err = io.StringIO(), io.StringIO()
 sys.stdout, sys.stderr = out, err  # a capture, put in place while the handler lives
 print(app.call('leak', {{}}, env=env).ok, file=before[0])
@@ -809,21 +811,34 @@ class Login:
     api_token: str = Flag(description='API token', secret=True)
 app = App('libctl', version='1.0.0')
 before = (sys.stdout, sys.stderr)
-returned, workers = threading.Event(), []
+returned, first = threading.Event(), []
 @app.command('slow', description='Print on', timeout=0.05, danger_level='safe',
              exit_codes=())
 def slow(args: Login, ctx: Ctx) -> dict[str, bool]:
-    workers.append(threading.current_thread())
     while not returned.is_set():
         sys.stdout.write('tick ' + args.api_token + '\\n')
+        if not first:
+            first.append(time.monotonic())
         time.sleep(0.001)
     sys.stdout.write('tick ' + args.api_token + '\\n')
     return {{'ok': True}}
 env = {{'LIBCTL_API_TOKEN': {token!r}, 'LIBCTL_AUDIT_LOG': '0'}}
-code = app.call('slow', {{}}, env=env).error.code
-returned.set()
-workers[0].join(timeout=10)
-assert not workers[0].is_alive()
+for _ in range(100):
+    returned.clear()
+    first.clear()
+    called = time.monotonic()
+    code = app.call('slow', {{}}, env=env).error.code
+    # Its timeout runs from after this, on the same clock: a first tick written before
+    # called + 0.05 went out while the run was attached
+    attached = bool(first) and first[0] < called + 0.05
+    returned.set()
+    for thread in threading.enumerate():
+        if thread.name == 'treaty-handler':
+            thread.join(timeout=10)
+            assert not thread.is_alive()
+    if attached:
+        break
+assert attached, 'the timeout ran out before the first tick on every call'
 print(code, sys.stdout is before[0], sys.stderr is before[1])
 """
 
@@ -832,7 +847,11 @@ def test_a_handler_printing_through_its_timeout_leaks_no_secret() -> None:
     """A handler that prints on and on through its timeout, while ``App.call`` answers
     ``TIMEOUT``, then after it returned: every line is redacted, on stdout while its run is
     attached, the window between the timeout and the run's detach too, and on stderr once
-    the run detached, with no raw line at the handover (#141, #135)"""
+    the run detached, with no raw line at the handover (#141, #135).
+
+    The 0.05 s timeout can run out before the handler's first tick, as on a loaded
+    free-threaded runner, when nothing is printed while the run is attached. The call is
+    repeated, once every handler worker ended, until a tick came before the timeout (#421)"""
     proc = run_script(CALL_TIMEOUT_SCRIPT.format(token=TOKEN))
     assert proc.returncode == 0, proc.stderr
     *ticks, last = proc.stdout.splitlines()
