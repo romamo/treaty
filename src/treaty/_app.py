@@ -4489,7 +4489,9 @@ class _Run:
     def _shutdown_diagnostics(self, envelope: Envelope) -> None:
         """A protocol command's warnings at a clean shutdown, as plain text on stderr: a
         ``warning: <CODE>: <message>`` line each, and the text third-party code printed,
-        which the ``THIRD_PARTY_STDOUT`` warning holds, after its line (#415)"""
+        which the ``THIRD_PARTY_STDOUT`` warning holds, after its line (#415). A message
+        is cleaned as ``_warning_lines`` cleans it: no escape reaches the terminal raw"""
+        color = color_allowed(self.env, self.tty)
         for warning in envelope.warnings:
             if self.unprotected and warning.code == UNPROTECTED_CODE:
                 continue  # unprotected_record wrote it before the command ran
@@ -4498,7 +4500,8 @@ class _Run:
                 # Redacted as the warning was built
                 line = f"warning: {warning.code}: Third-party code wrote to stdout:\n{text}"
             else:
-                line = f"warning: {warning.code}: {self._redact_everywhere(warning.message)}"
+                message = self._redact_everywhere(warning.message)
+                line = terminal_text(f"warning: {warning.code}: {message}", color=color)
             self.err.write(line + "\n", Level.WARN)
         self.err.stream.flush()
 

@@ -364,6 +364,22 @@ def test_validate_only_still_answers_with_its_envelope_on_stderr(project: Path) 
     assert envelope["meta"]["validation_only"] is True
 
 
+def test_a_clean_shutdown_warning_line_has_no_terminal_escapes() -> None:
+    """A warning at a clean shutdown is a plain-text stderr line, cleaned as every other
+    warning line is: an escape in its message never reaches the terminal raw (#415)"""
+    import io
+
+    def setup(args: Startup, ctx: Ctx) -> None:
+        ctx.warn("SETUP_NOTE", "title \x1b]0;pwned\x07 clear \x1b[2J done")
+
+    app = App("x", version="1.0.0", mcp=McpServe(args=Startup, setup=setup))
+    out, err = io.StringIO(), io.StringIO()
+    argv = ["mcp", "serve", "--list-tools"]
+    assert app.run(argv, stdin=io.StringIO(), stdout=out, stderr=err, env={}) == 0
+    assert "warning: SETUP_NOTE: title" in err.getvalue()
+    assert "\x1b" not in err.getvalue() and "\x07" not in err.getvalue()
+
+
 def test_exec_and_app_call_refuse_it_before_setup_runs(project: Path) -> None:
     envelope = _servectl().call("mcp.serve", {"project": str(project)})
     assert envelope.error is not None
