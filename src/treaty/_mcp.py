@@ -29,7 +29,7 @@ import sys
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import IO, Any, Literal, TextIO, cast
+from typing import IO, Any, TextIO, cast
 
 from ._app import App, _closed_pipe, _Run
 from ._context import Wire
@@ -40,7 +40,6 @@ from ._mcp_serve import (
     MCP_BIND_NEEDS_SERVE,
     NO_BINDINGS,
     Bindings,
-    McpServed,
     Provided,
 )
 from ._prompt import NoPromptStdin
@@ -162,7 +161,6 @@ def build_server(
     app: App,
     *,
     env: Mapping[str, str] | None = None,
-    called: Callable[[], None] | None = None,
     provided: Mapping[str, Provided] | None = None,
     instructions: str | None = None,
     served: frozenset[CommandPath] | None = None,
@@ -170,8 +168,7 @@ def build_server(
 ) -> Any:
     """A low-level ``mcp`` Server whose tools are the app's commands, those ``served``
     selects when given (#281), and the ``provided`` tools (#240), called with ``env`` (the
-    process's when None), with the fields ``bindings`` fixes (#285); ``called`` runs as
-    each tool call is answered"""
+    process's when None), with the fields ``bindings`` fixes (#285)"""
     from mcp import types
     from mcp.server.lowlevel.server import Server
 
@@ -216,8 +213,6 @@ def build_server(
                 bindings=bindings,
                 available=available,
             )
-        if called is not None:
-            called()
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=serialize(envelope))],
             structured_content=without_surrogates(envelope.to_json()),
@@ -256,14 +251,13 @@ not see a signal's handler run on Windows"""
 
 
 class _Serving:
-    """The server thread's loop and cancel scope, so the run's thread can stop it, and how
-    the server ended"""
+    """The server thread's loop and cancel scope, so the run's thread can stop it, and the
+    error it failed with, if any"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._stop: Callable[[], None] | None = None
         self._stopped = False
-        self.calls = 0
         self.error: BaseException | None = None
         self.read_all = threading.Event()
         """Set once the stdin reader left its last read: no read of the protocol's
@@ -283,10 +277,6 @@ class _Serving:
         if stop is not None:
             stop()
 
-    def called(self) -> None:
-        with self._lock:
-            self.calls += 1
-
 
 def serve_wire(
     app: App,
@@ -297,9 +287,11 @@ def serve_wire(
     instructions: str,
     served: frozenset[CommandPath] | None,
     bindings: Bindings,
-) -> McpServed:
-    """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends, or until a
-    signal raises ``Cancelled`` here, on the run's thread, which stops the server. The
+) -> None:
+    """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends or the
+    client closes stdout, a clean shutdown (REQ-C-032), or until a signal raises
+    ``Cancelled`` here, on the run's thread: the server is stopped and the signal raised
+    on, so the run exits 130 or 143 with its CANCELLED envelope on stderr (#415). The
     server runs on a thread of its own, so the run's thread only waits, where a signal
     can interrupt it without tearing the event loop."""
     assert wire.stdin is not None, "mcp serve refuses a closed stdin before serving"
@@ -307,7 +299,6 @@ def serve_wire(
     server = build_server(
         app,
         env=env,
-        called=serving.called,
         provided=provided,
         instructions=instructions,
         served=served,
@@ -332,18 +323,14 @@ def serve_wire(
             thread.start()
             while thread.is_alive():
                 thread.join(JOIN_SECONDS)
-        except Cancelled as exc:
+        except Cancelled, KeyboardInterrupt:
+            # KeyboardInterrupt: no treaty handler on this thread (a run started off the
+            # main thread). Raised on once the server stopped: the run answers CANCELLED
             serving.stop()
             ended.wait(GRACE_SECONDS)  # join() refuses a thread whose start() was cut short
-            return McpServed(_signal_name(exc.signal.name), serving.calls)
-        except KeyboardInterrupt:
-            # No treaty handler on this thread (a run started off the main thread)
-            serving.stop()
-            ended.wait(GRACE_SECONDS)
-            return McpServed("SIGINT", serving.calls)
+            raise
     if serving.error is not None:
         raise serving.error
-    return McpServed("eof", serving.calls)
 
 
 @contextlib.contextmanager
@@ -388,14 +375,6 @@ def _rebind_std_handle(fd: int) -> None:
         from mcp.os.win32.utilities import rebind_std_handle_to_fd
 
         rebind_std_handle_to_fd(fd)
-
-
-def _signal_name(name: str) -> Literal["SIGINT", "SIGTERM"]:
-    if name == "SIGTERM":
-        return "SIGTERM"
-    if name == "SIGINT":
-        return "SIGINT"
-    raise ValueError(f"no server stop for {name}")
 
 
 async def _serve_wire(

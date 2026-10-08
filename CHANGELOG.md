@@ -52,6 +52,19 @@ Apps built on treaty keep their own, structured schema changelog with
   schema changelog records `mcp.serve.output.stopped_by` and `mcp.serve.output.tool_calls`
   as removed, marked breaking, on its next `treaty changelog-add`; this happens once.
   Schema locks and the MCP tool list are unchanged (#362)
+- `mcp serve` stopped by `SIGINT` or `SIGTERM` exits `130` or `143` with the `CANCELLED`
+  envelope (`error.context.signal` names the signal) on the last line of stderr, as
+  REQ-C-032 and every other command do, instead of exit `0`. This reverses #313's exit
+  `0` on a signal (1.0.0rc33): a client or supervisor that stops the server with
+  `SIGTERM` and treated only `0` as a clean stop now sees `143` (#415)
+- `mcp serve` writes no envelope when it stops cleanly: closing stdin, the client closing
+  stdout, and `--list-tools` exit `0` with only plain-text diagnostics on stderr, such
+  as a `warning: THIRD_PARTY_STDOUT:` line followed by what third-party code printed
+  (REQ-C-032). Its result, `data.stopped_by` and `data.tool_calls`, is gone: a client
+  that parsed the stderr envelope after a clean exit gets nothing, and the exit code
+  still says the stop was clean. `mcp serve --output-schema` prints `{"type": "null"}`.
+  Schema locks, the schema changelog, and the manifest are unchanged, as `mcp serve` is a
+  built-in with no `output_schema` there (#415)
 
 ### Added
 
