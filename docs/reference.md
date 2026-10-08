@@ -2134,7 +2134,7 @@ treaty-mcp deployctl:app
 ```
 
 It stops as an app's own `mcp serve` does (REQ-C-032): closing stdin (or the client
-closing stdout) exits `0` with nothing on stderr, and `SIGINT` exits `130` and `SIGTERM`
+closing stdout) exits `0` with no envelope on stderr, and `SIGINT` exits `130` and `SIGTERM`
 `143`, each with the `CANCELLED` envelope on the last line of stderr.
 
 One tool per command except `exec`, named with dots as underscores (`deploy_rollback`).

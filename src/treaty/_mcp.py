@@ -236,8 +236,8 @@ def build_server(
 
 def serve(app: App, target: str) -> int:
     """``treaty-mcp``: the server on the process's own streams, ended as ``mcp serve``'s
-    is (REQ-C-032, #418): stdin's end, or the client closing stdout, exits 0 with nothing
-    on stderr; SIGINT exits 130 and SIGTERM 143 with the CANCELLED envelope as the last
+    is (REQ-C-032, #418): stdin's end, or the client closing stdout, exits 0 with no
+    envelope on stderr; SIGINT exits 130 and SIGTERM 143 with the CANCELLED envelope as the last
     line of stderr"""
     out, stdin = sys.stdout, sys.stdin
     if stdin is None:
