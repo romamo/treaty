@@ -14,7 +14,7 @@ from conftest import spec_validator
 
 from treaty import App, Arg, Attestation, Background, Ctx, NoArgs, RegistrationError
 from treaty._agents_md import check, render_file
-from treaty._manifest import PERSON_RUNS
+from treaty._manifest import PERSON_RUNS, PERSON_SCHEMA_VERSION, SCHEMA_VERSION
 from treaty._prompt import Prompter
 from treaty._skills import render
 from treaty._tools import tool_entries
@@ -186,10 +186,47 @@ def test_the_declaration_implies_interactive_and_no_mcp_tool() -> None:
     entry = built["commands"]["decisions.approve"]
     assert entry["description"].endswith(f"{PERSON_RUNS} (not an MCP tool)")
     assert entry["interactive"] is True and entry["mcp"] is False
-    assert "requires_person" not in entry  # CommandEntry has no such key
-    assert "requires_person" not in built["commands"]["decisions.list"]
     tools = [e.name for e in tool_entries(app)]
     assert "decisions_list" in tools and "decisions_approve" not in tools
+
+
+def test_the_manifest_entry_says_requires_person_at_3_21() -> None:
+    """ManifestResponse 3.21 (REQ-C-036, #431): true on the person-only entry, absent on
+    the rest, and the manifest that lists one says 3.21"""
+    built = make_app([]).manifest()
+    spec_validator("manifest-response").validate(built)
+    assert built["schema_version"] == PERSON_SCHEMA_VERSION == "3.21"
+    assert built["commands"]["decisions.approve"]["requires_person"] is True
+    assert "requires_person" not in built["commands"]["decisions.list"]
+
+
+def manifest_of(app: App, argv: list[str]) -> dict[str, Any]:
+    out = io.StringIO()
+    assert app.run(argv, stdout=out, stderr=io.StringIO(), env={}, isatty=False) == 0
+    data: dict[str, Any] = json.loads(out.getvalue())["data"]
+    return data
+
+
+def test_a_manifest_without_a_person_only_command_keeps_3_19() -> None:
+    """Only a manifest listing a person-only command needs 3.21; a subtree without one, and
+    an app without one, stay at the version they emitted before (#431)"""
+    app = make_app([])
+
+    @app.command("reports.list", description="List reports", danger_level="safe", exit_codes=())
+    def reports(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    subtree = manifest_of(app, ["reports", "--schema"])
+    spec_validator("manifest-response").validate(subtree)
+    assert subtree["schema_version"] == SCHEMA_VERSION == "3.19"
+    assert manifest_of(app, ["decisions", "--schema"])["schema_version"] == "3.21"
+    plain = App("plain", version="1.0.0")
+
+    @plain.command("go", description="Go", danger_level="safe", exit_codes=())
+    def go(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    assert plain.manifest()["schema_version"] == "3.19"
 
 
 def test_schema_and_help_say_a_person_runs_it() -> None:

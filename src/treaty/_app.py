@@ -349,6 +349,7 @@ from ._timeout import (
     Timeout,
     TimeoutExpired,
     call_with_timeout,
+    meta_timeout_ms,
 )
 from ._types import FlagType
 from ._update import UpdateCheck, available, check_allowed
@@ -1202,8 +1203,9 @@ class App:
         such as an approval of what an agent proposed: it allows ``ctx.attest``, which asks
         at a terminal for text no flag supplies, ``--yes`` included, and ends off a
         terminal with exit 4 and ``PERSON_REQUIRED``. It implies ``interactive=True`` and
-        ``mcp=False``; ``--schema`` says ``requires_person: true``, and the manifest's
-        description, ``--help``, the skill file, and AGENTS.md say a person runs it. With
+        ``mcp=False``; the manifest entry (ManifestResponse 3.21) and ``--schema`` say
+        ``requires_person: true``, and the manifest's description, ``--help``, the skill
+        file, and AGENTS.md say a person runs it. With
         ``resumable=True`` it is a ``RegistrationError``: ``--resume-from`` would skip the
         confirmation, so a person-only command restarts from it (#426). A speed bump and a
         record, not a security boundary: a process running as the same OS user can fake a
@@ -5877,7 +5879,7 @@ class _Run:
             return self._execute(command, invocation, mode, meta=meta)
         started = time.perf_counter()
         timeout = self.app._effective_timeout(command, invocation.timeout)
-        full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
+        full_meta: dict[str, object] = {"timeout_ms": meta_timeout_ms(timeout), **(meta or {})}
         directory = state_dir(
             self.app.name, self.app.state_dir, self.env, self.settings.options.instance_id
         )
@@ -6158,7 +6160,7 @@ class _Run:
         self.page = None
         started = time.perf_counter()
         timeout = self.app._effective_timeout(command, invocation.timeout)
-        full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
+        full_meta: dict[str, object] = {"timeout_ms": meta_timeout_ms(timeout), **(meta or {})}
         key = invocation.idempotency_key
         position = invocation.cursor if invocation.cursor is not None else Position()
         limit = invocation.limit if invocation.limit is not None else command.default_limit
@@ -6443,7 +6445,7 @@ class _Run:
         started = time.perf_counter()
         waiting_since = started
         timeout = self.app._effective_timeout(command, invocation.timeout)
-        full_meta: dict[str, object] = {"timeout_ms": timeout.milliseconds, **(meta or {})}
+        full_meta: dict[str, object] = {"timeout_ms": meta_timeout_ms(timeout), **(meta or {})}
         args = invocation.args
         # REQ-O-004: a mutating stream reports an effect per event and counts them; a dry
         # run covers the whole stream, so every line says so

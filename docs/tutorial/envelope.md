@@ -212,7 +212,7 @@ These are on every run:
 | `tool_version` | the app's version, as `--version` reports it |
 | `schema_version` | the `MAJOR.MINOR` version of this command's output contract |
 | `cwd` | the working directory the run used, `--cwd` included |
-| `timeout_ms` | the time limit the run had |
+| `timeout_ms` | the time limit the run had, `0` for none |
 | `headless` | `true` when there is no person or display to open a window for |
 | `config_sources`, `effective_config_hash` | the config files read, highest first, and a hash of the settings they produced |
 

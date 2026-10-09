@@ -71,6 +71,15 @@ class Timeout:
         return None if self.seconds is None else int(self.seconds * 1000)
 
 
+def meta_timeout_ms(timeout: Timeout) -> int:
+    """``meta.timeout_ms`` of a run: the limit in milliseconds, ``0`` when there is none, as
+    ``--timeout 0`` says it (REQ-F-011; ResponseEnvelope 2.4 types it as an integer, #431).
+    A limit under 1 ms says ``1``, as ``0`` would claim there is none"""
+    if timeout.milliseconds is None:
+        return 0
+    return max(1, timeout.milliseconds)
+
+
 @dataclass(frozen=True, slots=True)
 class Reserve:
     """The time held back before a command's hard limit, so a handler that watches
