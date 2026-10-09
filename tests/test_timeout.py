@@ -133,6 +133,12 @@ def test_timeout_zero_disables_limit() -> None:
     assert code == 0 and env["data"]["timeout_s"] is None and env["meta"]["timeout_ms"] == 0
 
 
+def test_a_sub_millisecond_limit_is_not_reported_as_no_limit() -> None:
+    """0 in meta.timeout_ms means no limit, so a limit under 1 ms in force says 1 (#431)"""
+    code, env = run_json(make_app(), ["fetch", "--timeout", "0.0004"])
+    assert code in (0, 10) and env["meta"]["timeout_ms"] == 1
+
+
 def test_per_command_timeout_beats_app_default() -> None:
     app = make_app(default_timeout=5)
     code, env = run_json(app, ["quick", "--seconds", "0.2"])
