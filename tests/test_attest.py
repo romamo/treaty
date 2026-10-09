@@ -3,6 +3,7 @@
 
 import io
 import json
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import IO, Any, Literal
 import pytest
 from conftest import spec_validator
 
-from treaty import App, Arg, Attestation, Ctx, NoArgs, RegistrationError
+from treaty import App, Arg, Attestation, Background, Ctx, NoArgs, RegistrationError
 from treaty._agents_md import check, render_file
 from treaty._manifest import PERSON_RUNS
 from treaty._prompt import Prompter
@@ -212,6 +213,92 @@ def test_the_skill_file_and_agents_md_say_hand_it_to_a_person() -> None:
     agents = render_file(app, None, "opsctl:app", "opsctl")
     assert "`opsctl decisions approve` needs a person" in agents
     assert check(app, Path("AGENTS.md"), agents, agents_md=True) == []
+
+
+@dataclass(frozen=True, slots=True)
+class Stepped:
+    effect: str
+
+
+def test_a_person_only_command_cannot_be_resumed_past_its_confirmation() -> None:
+    # #426: --resume-from two skipped the attest inside step one, so a flag answered it
+    app = App("opsctl", version="1.0.0")
+    with pytest.raises(RegistrationError) as raised:
+
+        @app.command("go", description="Go", danger_level="mutating", exit_codes=(),
+                     requires_person=True, steps=("one", "two"), resumable=True)  # fmt: skip
+        def go(args: NoArgs, ctx: Ctx) -> Stepped:
+            if ctx.step("one"):
+                ctx.attest("Type go", expected="go")
+            ctx.step("two")
+            return Stepped("updated")
+
+    message = str(raised.value)
+    assert "requires_person=True" in message and "resumable=True" in message
+    assert "--resume-from" in message and "confirmation" in message
+
+
+def test_a_person_only_command_may_still_have_steps() -> None:
+    app = App("opsctl", version="1.0.0")
+
+    @app.command("go", description="Go", danger_level="mutating", exit_codes=(),
+                 requires_person=True, steps=("one", "two"))  # fmt: skip
+    def go(args: NoArgs, ctx: Ctx) -> Stepped:
+        if ctx.step("one"):
+            ctx.attest("Type go", expected="go")
+        ctx.step("two")
+        return Stepped("updated")
+
+    out = io.StringIO()
+    argv = ["go", "--resume-from", "two", "--format", "json"]
+    code = app.run(argv, stdin=io.StringIO(), stdout=out, stderr=io.StringIO(), env={})
+    assert code == 2  # no --resume-from without resumable=True
+
+
+SLEEPER = [sys.executable, "-c", "import time; time.sleep(60)"]
+
+
+@dataclass(frozen=True, slots=True)
+class Watching:
+    background_pid: int
+    cleanup_command: str
+    effect: str
+
+
+def test_a_background_command_needs_a_person_before_it_spawns(tmp_path: Path) -> None:
+    # background= detaches only what ctx.spawn starts; ctx.attest runs in the foreground
+    app = App("opsctl", version="1.0.0", state_dir=tmp_path)
+    spawned: list[int] = []
+
+    @app.command(
+        "watch",
+        description="Start a watcher a person approves",
+        danger_level="mutating",
+        exit_codes=(),
+        requires_person=True,
+        background=Background("opsctl unwatch", max_lifetime_seconds=60),
+    )
+    def watch(args: NoArgs, ctx: Ctx) -> Watching:
+        ctx.attest("Type watch to start it", expected="watch")
+        started = ctx.spawn(SLEEPER)
+        spawned.append(started.pid)
+        return Watching(started.pid, f"opsctl unwatch --pid {started.pid}", "created")
+
+    @app.command("unwatch", description="Stop it", danger_level="safe", exit_codes=())
+    def unwatch(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+        return {}
+
+    out = io.StringIO()
+    code = app.run(
+        ["watch", "--yes", "--format", "json"],
+        stdin=io.StringIO(),
+        stdout=out,
+        stderr=io.StringIO(),
+        env={},
+        isatty=False,
+    )
+    assert code == 4 and json.loads(out.getvalue())["error"]["code"] == "PERSON_REQUIRED"
+    assert spawned == [] and not (tmp_path / "background").exists()
 
 
 def test_a_passthrough_command_cannot_require_a_person() -> None:

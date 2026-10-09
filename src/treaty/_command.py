@@ -712,6 +712,12 @@ def build_command(
             f"{path}: endless=True says a stream runs until interrupted; declare "
             "streaming=True or drop endless=True"
         )
+    if requires_person and resumable:
+        raise RegistrationError(
+            f"{path}: requires_person=True and resumable=True cannot be combined: --resume-from "
+            "skips the steps before it, a person's confirmation among them, so a flag would "
+            "answer it; a person-only command restarts from its confirmation. Drop resumable=True"
+        )
     if requires_person:
         # ctx.attest is a prompt, so --yes and --non-interactive come with it (REQ-C-005);
         # an MCP server's stdin is its protocol, never a person's terminal

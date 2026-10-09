@@ -129,6 +129,10 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `requires_person=True` with `resumable=True` is now a `RegistrationError`:
+  `--resume-from` skipped the steps before it, a `ctx.attest` among them, so an agent
+  could pass the person's confirmation with a flag after all. A person-only command
+  restarts from its confirmation; `steps=` and `rollback=` stay allowed (#426)
 - `treaty-mcp module:app` ends as an app's own `mcp serve` does (REQ-C-032, D-13): `SIGINT`
   exits `130` and `SIGTERM` `143`, each with the `CANCELLED` envelope
   (`error.context.signal` names the signal) on the last line of stderr, and stdin left

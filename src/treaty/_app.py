@@ -1203,9 +1203,11 @@ class App:
         at a terminal for text no flag supplies, ``--yes`` included, and ends off a
         terminal with exit 4 and ``PERSON_REQUIRED``. It implies ``interactive=True`` and
         ``mcp=False``; ``--schema`` says ``requires_person: true``, and the manifest's
-        description, ``--help``, the skill file, and AGENTS.md say a person runs it. A
-        speed bump and a record, not a security boundary: a process running as the same
-        OS user can fake a terminal (#424).
+        description, ``--help``, the skill file, and AGENTS.md say a person runs it. With
+        ``resumable=True`` it is a ``RegistrationError``: ``--resume-from`` would skip the
+        confirmation, so a person-only command restarts from it (#426). A speed bump and a
+        record, not a security boundary: a process running as the same OS user can fake a
+        terminal (#424).
         """
         cmd_path = CommandPath(path)
         if not isinstance(mcp, bool):

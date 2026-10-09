@@ -1160,6 +1160,9 @@ def approve(args: ApproveArgs, ctx: Ctx) -> Approved:
   `requires_person: true`; the manifest's description ends `(a person runs this at a
   terminal)`, as CommandEntry has no key for it, and `--help`, the skill file, and
   AGENTS.md say a person runs the command
+- `requires_person=True` with `resumable=True` is a `RegistrationError`: `--resume-from`
+  skips the steps before it, the confirmation among them, so a person-only command
+  restarts from its confirmation. `steps=` and `rollback=` stay allowed
 - It is a speed bump and an honest record, not a security boundary: an agent running as
   the same OS user can fake a terminal. The boundary is a separate OS user, one the agent
   cannot run as, that owns what the approval unlocks
