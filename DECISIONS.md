@@ -119,3 +119,11 @@ entry that supersedes it, never by editing an old one.
 - Why: Any answer an agent can pass as a flag lets it approve its own proposal (cloudfall-dev/cloudfall#25), a departure from REQ-C-005's --yes that a person-only step needs; an MCP server's stdin is its protocol, never a terminal, so a served command could only fail; ManifestResponse's CommandEntry rejects keys it does not define. It is a speed bump and a record, not a boundary: the boundary is a separate OS user
 - Applies to: src/treaty/_prompt.py, src/treaty/_context.py, src/treaty/_command.py, src/treaty/_manifest.py, ctx.attest, requires_person, --yes, mcp
 - Enforced by: review; tests/test_attest.py
+
+## D-15: A person-only command is not resumable
+
+- Decided: 2026-10-09, in romamo/treaty#426
+- Rule: requires_person=True with resumable=True is a RegistrationError, as requires_person on a passthrough command already is; a person-only command restarts from its confirmation
+- Why: --resume-from is a flag, and resuming past the step that calls ctx.attest answers it without a person, which D-14 forbids; refusing the pair is small and fails closed, while guarding the resume needs the asking step recorded at run time
+- Applies to: src/treaty/_command.py, requires_person, resumable, --resume-from, ctx.attest
+- Enforced by: review; tests/test_attest.py
