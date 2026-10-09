@@ -23,8 +23,8 @@ concurrency:
 
 env:
   # The spec commit treaty is verified against; tests find it as the sibling checkout.
-  # cli-agent-spec v1.13.0
-  SPEC_REF: 16e86fbac8581787e48c160bd285e4f7d738b3c5
+  # cli-agent-spec v1.16.0
+  SPEC_REF: 00c2c15a559f32bf46e1e1015adc4fd590b3db4d
 
 jobs:
   lint:

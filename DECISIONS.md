@@ -119,6 +119,7 @@ entry that supersedes it, never by editing an old one.
 - Why: Any answer an agent can pass as a flag lets it approve its own proposal (cloudfall-dev/cloudfall#25), a departure from REQ-C-005's --yes that a person-only step needs; an MCP server's stdin is its protocol, never a terminal, so a served command could only fail; ManifestResponse's CommandEntry rejects keys it does not define. It is a speed bump and a record, not a boundary: the boundary is a separate OS user
 - Applies to: src/treaty/_prompt.py, src/treaty/_context.py, src/treaty/_command.py, src/treaty/_manifest.py, ctx.attest, requires_person, --yes, mcp
 - Enforced by: review; tests/test_attest.py
+- Superseded by: D-16
 
 ## D-15: A person-only command is not resumable
 
@@ -127,3 +128,12 @@ entry that supersedes it, never by editing an old one.
 - Why: --resume-from is a flag, and resuming past the step that calls ctx.attest answers it without a person, which D-14 forbids; refusing the pair is small and fails closed, while guarding the resume needs the asking step recorded at run time
 - Applies to: src/treaty/_command.py, requires_person, resumable, --resume-from, ctx.attest
 - Enforced by: review; tests/test_attest.py
+
+## D-16: A person's confirmation has no flag, and the manifest entry says so
+
+- Decided: 2026-10-09, in romamo/treaty#431
+- Rule: ctx.attest, allowed by requires_person=True, is the one prompt no flag answers, --yes included; off a terminal it exits 4 with PERSON_REQUIRED and a suggestion naming no flag. requires_person implies interactive=True and mcp=False with no opt-in to serving it; the manifest entry says requires_person: true (ManifestResponse 3.21, REQ-C-036) beside interactive: true and mcp: false, and a manifest listing such a command says schema_version 3.21 while one without stays at its earlier version; the description keeps its marker, and --schema carries requires_person: true too
+- Why: cli-agent-spec v1.16.0 adopted treaty's design as REQ-C-036 and gave CommandEntry the key D-14 lacked, so an agent reading the manifest learns it from a key rather than description text; the rest of D-14 stands: any answer an agent can pass as a flag lets it approve its own proposal, and an MCP server's stdin is never a terminal. It is a speed bump and a record, not a boundary: the boundary is a separate OS user
+- Applies to: src/treaty/_prompt.py, src/treaty/_context.py, src/treaty/_command.py, src/treaty/_manifest.py, ctx.attest, requires_person, --yes, mcp, manifest schema_version
+- Enforced by: review; tests/test_attest.py against the spec's schema
+- Supersedes: D-14

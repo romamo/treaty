@@ -602,7 +602,7 @@ Every handler runs under a wall-clock limit: `App(default_timeout=60)` app-wide,
 long work (`--timeout 0` disables it; at most one year). A stream buffered in-process (`App.call`, MCP) always has a deadline: the
 caller's `timeout`, else the app default; `0` is refused there. On expiry the
 framework writes a `TIMEOUT` envelope, exits `10`, and records `meta.timeout_ms` on every
-response; a read-only command's `TIMEOUT` is retryable, and when the command takes
+response (`0` when the run has no limit); a read-only command's `TIMEOUT` is retryable, and when the command takes
 `--timeout` its hint also names a larger `--timeout` and `--timeout 0`, since a run whose
 length depends on its input times out again on a plain retry. Handlers read `ctx.remaining`, the seconds left (`None` without a limit), to
 pass the same deadline to their network calls, and `ctx.expired` to stop a long loop
@@ -1156,9 +1156,10 @@ def approve(args: ApproveArgs, ctx: Ctx) -> Approved:
   `ATTESTATION_MISMATCH`. It returns a `treaty.Attestation`: `channel` (`"terminal"`)
   and `at` (UTC), for the app's own record of how the confirmation arrived
 - `requires_person=True` implies `interactive=True` and `mcp=False`: an MCP server's
-  stdin is its protocol, never a person's terminal. `--schema` says
-  `requires_person: true`; the manifest's description ends `(a person runs this at a
-  terminal)`, as CommandEntry has no key for it, and `--help`, the skill file, and
+  stdin is its protocol, never a person's terminal. The manifest entry and `--schema` say
+  `requires_person: true` (REQ-C-036), and a manifest listing such a command is
+  ManifestResponse `3.21`; the description still ends `(a person runs this at a
+  terminal)` for a consumer of an earlier version, and `--help`, the skill file, and
   AGENTS.md say a person runs the command
 - `requires_person=True` with `resumable=True` is a `RegistrationError`: `--resume-from`
   skips the steps before it, the confirmation among them, so a person-only command

@@ -62,6 +62,12 @@ SCHEMA_VERSION = "3.19"  # 3.1: CommandEntry.builtin (REQ-O-041)
 # does not emit (an integer Literal's values are in the description); 3.19:
 # ExitCodeEntry.error_codes (#362)
 
+PERSON_SCHEMA_VERSION = "3.21"
+"""The version of a manifest listing a command registered ``requires_person=True``, whose
+entry says ``requires_person: true`` (ManifestResponse 3.21, REQ-C-036, #431); a manifest
+without one stays at ``SCHEMA_VERSION``. 3.20's CommandEntry.interruption treaty does not
+emit"""
+
 EXEC_PATH = CommandPath("exec")
 """The ``exec`` built-in, which reads its plan from stdin as a buffered payload"""
 
@@ -74,8 +80,8 @@ ManifestResponse 3.17 the entry says ``mcp: false`` too"""
 
 
 PERSON_RUNS = "(a person runs this at a terminal)"
-"""Ends the manifest description of a command registered ``requires_person=True`` (#424):
-CommandEntry has no key for it, so ``--schema`` says ``requires_person: true``"""
+"""Ends the manifest description of a command registered ``requires_person=True`` (#424);
+since ManifestResponse 3.21 the entry says ``requires_person: true`` too (#431)"""
 
 
 def never_a_tool(command: Command, *, builtin: bool) -> bool:
@@ -504,7 +510,8 @@ def command_entry(
         instead = "" if old.replacement is None else f"; use {old.replacement}"
         description = f"{description} (deprecated since {old.since}{instead})"
     if command.requires_person:
-        # CommandEntry has no key for it, and an agent reads the description (#424)
+        # The marker predates CommandEntry.requires_person (#424); the entry says
+        # requires_person: true below too, which a 3.20 consumer does not read (#431)
         description = f"{description} {PERSON_RUNS}"
     if not command.mcp:
         # The marker predates CommandEntry.mcp (#281); the entry says mcp: false below too
@@ -587,6 +594,10 @@ def command_entry(
         out["safe_default"] = True
     if command.interactive:
         out["interactive"] = True
+    if command.requires_person:
+        # REQ-C-036 (ManifestResponse 3.21): true only; registration forced interactive and
+        # mcp=False, which the schema requires beside it
+        out["requires_person"] = True
     if command.editor_alternatives:
         out["requires_editor"] = True
         out["non_interactive_alternatives"] = list(command.editor_alternatives)
@@ -693,9 +704,6 @@ def command_schema(
     if command.endless:
         # #389: the stream ends only when interrupted; not a ManifestResponse key
         entry["endless"] = True
-    if command.requires_person:
-        # #424: ctx.attest asks a person at a terminal; not a ManifestResponse key
-        entry["requires_person"] = True
     if command.paginated:
         # REQ-F-019; not ManifestResponse keys, whose --limit flag shows the same default
         entry["paginated"] = True
@@ -836,9 +844,12 @@ def build_manifest(
                 entry["secret_env_vars"] = kept
             else:
                 del entry["secret_env_vars"]
+    # D-16: only a manifest listing a person-only command needs 3.21's requires_person
+    person = any(cmd.requires_person for cmd in commands.values())
+    schema_version = PERSON_SCHEMA_VERSION if person else SCHEMA_VERSION
     # Everything an agent caches: a new global flag or shared code must change the etag
     shape: dict[str, object] = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": schema_version,
         "flags": flags,
         "exit_codes": shared,
         "env_vars": root_env,
@@ -853,7 +864,7 @@ def build_manifest(
     from importlib.metadata import version  # only a manifest reads it (#360)
 
     manifest: dict[str, object] = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": schema_version,
         "framework_version": version("treaty"),
         "etag": etag.value,
         "flags": flags,

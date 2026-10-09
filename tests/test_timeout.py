@@ -128,8 +128,9 @@ def test_timeout_flag_overrides_default_and_reaches_ctx() -> None:
 
 
 def test_timeout_zero_disables_limit() -> None:
+    """ResponseEnvelope 2.4 types meta.timeout_ms as an integer: 0 is no limit (#431)"""
     code, env = run_json(make_app(), ["fetch", "--timeout=0", "--seconds", "0.1"])
-    assert code == 0 and env["data"]["timeout_s"] is None and env["meta"]["timeout_ms"] is None
+    assert code == 0 and env["data"]["timeout_s"] is None and env["meta"]["timeout_ms"] == 0
 
 
 def test_per_command_timeout_beats_app_default() -> None:
@@ -211,6 +212,8 @@ def test_an_unbounded_command_takes_timeout_and_ends_in_timeout() -> None:
     assert code == 0 and env["data"]["timeout_s"] == 3.0 and 0 < env["data"]["remaining"] <= 3
     code, env = run_json(unbounded_app(), ["play"])
     assert code == 0 and env["data"] == {"effect": "noop", "timeout_s": None, "remaining": None}
+    assert env["meta"]["timeout_ms"] == 0
+    spec_validator("response-envelope").validate(env)
 
 
 def test_the_timeout_of_an_unbounded_command_stops_its_child() -> None:
@@ -261,7 +264,7 @@ def test_an_unbounded_commands_own_timeout_field_keeps_the_flag() -> None:
 
     code, env = run_json(app, ["wait", "--timeout", "7"])
     assert code == 0 and env["data"] == {"own": 7.0, "timeout_s": None}
-    assert env["meta"]["timeout_ms"] is None
+    assert env["meta"]["timeout_ms"] == 0
     assert app.manifest()["commands"]["wait"]["flags"]["timeout"]["description"] == "Own limit"
 
 

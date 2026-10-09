@@ -1,6 +1,6 @@
 # CLI Agent Spec compliance
 
-Status of treaty against the 160 requirements of the
+Status of treaty against the 167 requirements of the
 [CLI Agent Spec](../cli-agent-ergonomics/requirements/index.md), assessed 2026-09-27 at
 commit `458bab5` (0.0.6), and updated by hand as the Level 2 plans land (01, output
 hygiene; 02, validation phase; 03, interactivity; 04, subprocess API; 05, declarations;
@@ -19,9 +19,12 @@ as `SPEC_REF` (`019247f`, the merge of the spec's PR #21 after its 1.9.0 release
 `--output` departures, and the requirement list were re-checked against `930a111`
 (ManifestResponse 3.15), which retires REQ-F-026 into REQ-O-030 and adds REQ-C-031, and
 CI then pinned `b0fc1f3`, the merge of the spec's PR #52: a boolean given as false is not
-present in REQ-C-026's rules, while `if_value: false` matches it. CI now pins `16e86fb`,
+present in REQ-C-026's rules, while `if_value: false` matches it. CI then pinned `16e86fb`,
 the spec's v1.13.0 release, whose kit checks a stream's lines (`stream_contract`) and its
-SIGINT ending (`stream_sigint`).
+SIGINT ending (`stream_sigint`), and now pins `00c2c15`, the spec's v1.16.0 release
+(#431): it adds REQ-C-036 from treaty's `requires_person` (ManifestResponse 3.21), §79's
+bounded calls (REQ-F-080 to REQ-F-082, REQ-C-033 to REQ-C-035, ManifestResponse 3.20,
+exit `14`), and types `meta.timeout_ms` as an integer (ResponseEnvelope 2.4).
 1.0 claims Level 2; the Level 3 score below is published, not claimed (15-D3).
 
 Each requirement was checked against its acceptance criteria by reading the source and
@@ -38,14 +41,14 @@ Score weights: Done 1, Partial 0.5, Not started 0.
 |-------|------|------|---------|-------------|-------|
 | Level 1: agent-safe basics | 12 | 12 | 0 | 0 | **100%** |
 | Level 2: every P0 (includes Level 1) | 51 | 51 | 0 | 0 | **100%** |
-| Level 3: full spec | 160 | 157 | 3 | 0 | **99%** |
+| Level 3: full spec | 167 | 158 | 4 | 5 | **96%** |
 
 ## By tier
 
 | Scope | Size | Done | Partial | Not started | Score |
 |-------|------|------|---------|-------------|-------|
-| Framework-automatic (F) | 78 | 76 | 2 | 0 | **99%** |
-| Command contract (C) | 32 | 31 | 1 | 0 | **98%** |
+| Framework-automatic (F) | 81 | 76 | 2 | 3 | **95%** |
+| Command contract (C) | 36 | 32 | 2 | 2 | **92%** |
 | Opt-in (O) | 50 | 50 | 0 | 0 | **100%** |
 
 ## Open mandatory requirements
@@ -68,7 +71,7 @@ open.
 | [REQ-F-008](../cli-agent-ergonomics/requirements/f-008-no-color-and-ci-environment-detection.md) | NO_COLOR and CI Environment Detection | P0 | 1 | Done | `NO_COLOR` (even empty), `CI`, `GITHUB_ACTIONS`, `JENKINS_URL`, `TERM=dumb` turn `ctx.color` off; `App.main()` sets `NO_COLOR=1` for children |
 | [REQ-F-009](../cli-agent-ergonomics/requirements/f-009-non-interactive-mode-auto-detection.md) | Non-Interactive Mode Auto-Detection | P0 | 1 | Done | `ctx.prompt` and `ctx.confirm` ask only when stdin and stdout are TTYs; otherwise exit 4 `INPUT_REQUIRED` with a suggestion naming the flag; `input()` off a TTY exits 4 instead of hanging |
 | [REQ-F-010](../cli-agent-ergonomics/requirements/f-010-pager-suppression.md) | Pager Suppression | P0 | 1 | Done | `App.main()` sets `PAGER=cat` and `GIT_PAGER=cat` for every child; treaty never pages |
-| [REQ-F-011](../cli-agent-ergonomics/requirements/f-011-default-timeout-per-command.md) | Default Timeout Per Command | P0 | 2 | Done | 60 s default, per-command `timeout=`, `--timeout`; runs on a worker thread so blocked I/O still times out; streams get it as an idle limit per event; `meta.timeout_ms` on every response. Deviation: a `stdin_input="lines"` stream's idle limit also restarts on every input line read, so a filter that drops records does not time out while input arrives (#33); awaits a cli-agent-spec decision ([cli-agent-spec#26](https://github.com/cli-agent-spec/cli-agent-spec/issues/26)) |
+| [REQ-F-011](../cli-agent-ergonomics/requirements/f-011-default-timeout-per-command.md) | Default Timeout Per Command | P0 | 2 | Done | 60 s default, per-command `timeout=`, `--timeout`; runs on a worker thread so blocked I/O still times out; streams get it as an idle limit per event; `meta.timeout_ms` on every response, `0` when a run has no limit (ResponseEnvelope 2.4, #431). A command whose run length depends on its input sizes its own `timeout=`; treaty cannot tell one apart, so its read-only `TIMEOUT` stays retryable, which v1.14.0 permits, with the larger `--timeout` named in `suggestion`, not `fix_required`. Deviation: a `stdin_input="lines"` stream's idle limit also restarts on every input line read, so a filter that drops records does not time out while input arrives (#33); awaits a cli-agent-spec decision ([cli-agent-spec#26](https://github.com/cli-agent-spec/cli-agent-spec/issues/26)) |
 | [REQ-F-012](../cli-agent-ergonomics/requirements/f-012-timeout-exit-code-and-json-error.md) | Timeout Exit Code and JSON Error | P0 | 2 | Done | TIMEOUT, exit 10, `duration_ms` |
 | [REQ-F-013](../cli-agent-ergonomics/requirements/f-013-sigterm-handler-installation.md) | SIGTERM Handler Installation | P0 | 2 | Done | SIGTERM gives a CANCELLED envelope, exit 143, cleanup runs |
 | [REQ-F-014](../cli-agent-ergonomics/requirements/f-014-sigpipe-handler-installation.md) | SIGPIPE Handler Installation | P0 | 2 | Done | No traceback or stderr text on a closed stdout; exit 0 once a complete envelope or event reached the reader, 141 (`OUTPUT_CLOSED`) before any (decision D1) |
@@ -136,6 +139,9 @@ open.
 | [REQ-F-077](../cli-agent-ergonomics/requirements/f-077-telemetry-non-blocking.md) | Telemetry Non-Blocking | P2 | 3 | Done | No network code or telemetry |
 | [REQ-F-078](../cli-agent-ergonomics/requirements/f-078-retry-count-in-response-meta.md) | Retry Count in Response Meta | P2 | 3 | Done | `retry=Retry(...)` with `ctx.retry`, `--retries`, `--retry-delay`; `meta.retries` when above 0; exhaustion exits the declared code with `retryable: false` and `retries_exhausted`; the timeout bounds every attempt; audit rule `retry-declared` |
 | [REQ-F-079](../cli-agent-ergonomics/requirements/f-079-global-option-scope.md) | Global Option Scope | P1 | 3 | Done | Root `flags` map; colliding command flags fail at registration, including names reserved for 1.0 features, which exit 2 `RESERVED_FLAG` until they land |
+| [REQ-F-080](../cli-agent-ergonomics/requirements/f-080-sync-call-budget.md) | Sync Call Budget | P1 | 3 | Not started | No `--budget`, `AGENT_CALL_BUDGET_MS`, or `meta.budget_ms`; it applies only to a command declaring `interruption` (REQ-C-033), which treaty has no way to declare |
+| [REQ-F-081](../cli-agent-ergonomics/requirements/f-081-detached-job-runtime.md) | Detached Job Runtime | P1 | 3 | Not started | No detached job runtime for `interruption.detach`; `async_job=True` (REQ-C-022) is the app's own job system |
+| [REQ-F-082](../cli-agent-ergonomics/requirements/f-082-incomplete-work-response.md) | Incomplete-Work Response | P1 | 3 | Not started | Treaty never exits `14` (`INCOMPLETE`); its framework table stops at `13`, and app codes stay in `79..125`, so nothing collides with the reserved `14` |
 
 ## Command contract
 
@@ -145,7 +151,7 @@ open.
 | [REQ-C-002](../cli-agent-ergonomics/requirements/c-002-command-declares-danger-level.md) | Command Declares Danger Level | P0 | 2 | Done | `danger_level=` is required; in every `--schema`; destructive forces `dry_run`, safe gets no `--idempotency-key`; writes of declared `cache`, `log`, `temp`, and `output` paths keep a command `safe`; a `streaming=True` command is `safe` or `mutating`, a destructive one is refused (#175); `idempotent=True` registers on any danger level, changes no exit code (#226), and is the manifest's `idempotent: true` (ManifestResponse 3.15) and the MCP `idempotentHint` |
 | [REQ-C-003](../cli-agent-ergonomics/requirements/c-003-mutating-commands-declare-effect-field.md) | Mutating Commands Declare effect Field | P0 | 2 | Done | Mutating output types must carry `effect`; checked at registration and run time. A mutating stream checks each event's `effect` and counts them in the terminal envelope's `meta.effects` (#175) |
 | [REQ-C-004](../cli-agent-ergonomics/requirements/c-004-destructive-commands-must-support-dry-run.md) | Destructive Commands Must Support --dry-run | P0 | 1 | Done | Destructive commands require `dry_run` and a `would_affect` field; dry runs must return `would_*` and `treaty.Affects`, else `INVALID_EFFECT` |
-| [REQ-C-005](../cli-agent-ergonomics/requirements/c-005-interactive-commands-must-support-yes-non-interact.md) | Interactive Commands Must Support --yes / --non-interactive | P0 | 2 | Done | `interactive=True` adds `--yes` and `--non-interactive` and `interactive: true` in the manifest and `--schema`; a prompt that cannot be shown exits 4. One deliberate departure: `--yes` does not answer `ctx.attest` on a `requires_person=True` command, a confirmation only a person at a terminal gives (D-14, #424) |
+| [REQ-C-005](../cli-agent-ergonomics/requirements/c-005-interactive-commands-must-support-yes-non-interact.md) | Interactive Commands Must Support --yes / --non-interactive | P0 | 2 | Done | `interactive=True` adds `--yes` and `--non-interactive` and `interactive: true` in the manifest and `--schema`; a prompt that cannot be shown exits 4. `--yes` does not answer `ctx.attest` on a `requires_person=True` command, the criterion's one exception since v1.16.0 (REQ-C-036, #431) |
 | [REQ-C-006](../cli-agent-ergonomics/requirements/c-006-all-args-validated-in-phase-1.md) | All Args Validated in Phase 1 | P0 | 2 | Done | All phase-1 errors in `error.errors` with field and value |
 | [REQ-C-007](../cli-agent-ergonomics/requirements/c-007-mutating-commands-accept-idempotency-key.md) | Mutating Commands Accept --idempotency-key | P1 | 3 | Done | `--idempotency-key` with replay as `noop`; with `<APP>_SESSION` set, a key derived from session, command, and arguments, in `meta.idempotency_key`. A streaming mutating command takes no key and is never replayed, from a key or a session; a field named `idempotency_key` on one is refused at registration (#175) |
 | [REQ-C-008](../cli-agent-ergonomics/requirements/c-008-multi-step-commands-emit-step-manifest.md) | Multi-Step Commands Emit Step Manifest | P1 | 3 | Done | `steps=` in the manifest and `--schema`; `ctx.step` logs step start and completion and names the step in heartbeat lines; `data` carries `completed_steps`, `failed_step`, and `skipped_steps` on success, failure, timeout, and signal; a failure after a completed step exits 3 keeping `error.code`; out-of-order steps are `INVALID_STEP` |
@@ -173,6 +179,10 @@ open.
 | [REQ-C-030](../cli-agent-ergonomics/requirements/c-030-error-responses-include-fix-command.md) | Error Responses Include Executable fix_command | P1 | 3 | Done | `fix_commands=` checked before the first run, raised ones when raised: no `<`, `>`, `$`, shell syntax, or unbalanced quotes; the app or `App(companions=)`; never destructive; `fix-declared` rule |
 | [REQ-C-031](../cli-agent-ergonomics/requirements/c-031-passthrough-commands-delegate-to-another-parser.md) | Passthrough Commands Delegate to Another Tool's Parser | P1 | 3 | Done | `passthrough=True` (#35): every token after the path reaches the tool verbatim, treaty's own flags go before it, and `help_command=` is the `help_argv` a lone `--help` forwards; the tool owns stdout and the exit code (`DELEGATED_EXIT` when not 0), and the envelope is the last stderr line and `--output`'s file; registration refuses `destructive`, `child_log=True`, and anything treaty would have to parse or shape; the manifest has `arguments: "passthrough"`, `option_placement: "strict"`, `help_argv`, `output_file: "envelope"`, and empty `flags` (ManifestResponse 3.9), and `--schema` lists the flags; the timeout, signals, session deduplication, and an audit log entry with `argv: "[OMITTED]"` apply; MCP lists no passthrough command |
 | [REQ-C-032](../cli-agent-ergonomics/requirements/c-032-protocol-server-commands-declare-stdout-protocol.md) | Protocol Server Commands Declare Their Stdout Protocol | P1 | 3 | Partial | `mcp serve` (#239), the one protocol command, says `stdout: "protocol"` and `protocol: "mcp-stdio"` with no `output_schema` or output formats, and every command its server leaves out says `mcp: false` (ManifestResponse 3.19, #414); stdout carries only MCP frames, a stray `print()` or descriptor-1 write goes to stderr; a bad flag exits `2` and a failure before serving its declared code, each with the envelope on the last stderr line and nothing on stdout; `--dry-run`, `--confirm-destructive`, `--idempotency-key`, and `--output` are refused; it has no timeout, so an idle server is never stopped; closing stdin (or stdout) exits `0` with no envelope, only plain-text diagnostics, and `SIGINT`/`SIGTERM` exit `130`/`143` with the `CANCELLED` envelope last on stderr (#415), and `treaty-mcp module:app` ends the same way (#418). Gap: the failure and signal envelopes are JSON on stderr whatever `--format` says, where the spec asks for the format's plain-text error outside JSON mode |
+| [REQ-C-033](../cli-agent-ergonomics/requirements/c-033-commands-declare-interruption.md) | Commands Declare Interruption | P1 | 3 | Not started | No `interruption=` declaration or `CommandEntry.interruption` (ManifestResponse 3.20); a command keeps today's behaviour, which the requirement allows for one that declares nothing |
+| [REQ-C-034](../cli-agent-ergonomics/requirements/c-034-long-running-commands-report-progress.md) | Long-Running Commands Report Progress | P1 | 3 | Partial | `ctx.progress(message, done=, total=)` writes a progress line and feeds the heartbeat's status; no `unit`, `done` is not checked to never decrease, and nothing watches its interval, as no job runtime reads it |
+| [REQ-C-035](../cli-agent-ergonomics/requirements/c-035-resumable-commands-checkpoint-at-safe-points.md) | Resumable Commands Checkpoint at Safe Points | P2 | 3 | Not started | No `ctx.checkpoint` or `ctx.restore`; `resumable=True` resumes by step name with `--resume-from` (REQ-O-010) |
+| [REQ-C-036](../cli-agent-ergonomics/requirements/c-036-person-only-commands-declare-requires-person.md) | Person-Only Commands Declare requires_person | P1 | 3 | Done | `requires_person=True` (#424) implies `interactive=True` and `mcp=False` and allows `ctx.attest`, which asks only when stdin and stdout are terminals and `--non-interactive` is absent; no flag answers it, `--yes` included; off a terminal exit 4 `PERSON_REQUIRED`, `retryable: false`, a suggestion naming no flag; a wrong answer exit 4 `ATTESTATION_MISMATCH`. The manifest entry says `requires_person: true` and a manifest listing one is ManifestResponse 3.21 (#431, D-16); the description keeps `(a person runs this at a terminal)`. With `resumable=True` or `passthrough=True` it is a `RegistrationError` (D-15) |
 
 ## Opt-in
 

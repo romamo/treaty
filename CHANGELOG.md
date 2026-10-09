@@ -111,8 +111,24 @@ Apps built on treaty keep their own, structured schema changelog with
   runs it. `ctx.attest` without the declaration is a `RegistrationError`. It is a speed
   bump and a record, not a security boundary: a process running as the same OS user can
   fake a terminal (#424)
+- The manifest entry of a `requires_person=True` command says `requires_person: true`
+  (REQ-C-036, ManifestResponse 3.21), beside the `interactive: true` and `mcp: false` it
+  already carried, and a manifest that lists such a command, the whole app's or a
+  subtree's, says `schema_version` `3.21`. A manifest without one stays at `3.19`, so its
+  bytes and etag are unchanged. The `(a person runs this at a terminal)` description
+  marker stays for a consumer of an earlier version, as `(not an MCP tool)` did beside
+  `mcp: false`; `--schema` says `requires_person: true` as before (#431)
 
 ### Changed
+
+- CI checks against cli-agent-spec v1.16.0, which adopts treaty's person-only
+  confirmation as REQ-C-036 and allows its `--yes` exception in REQ-C-005, so
+  COMPLIANCE.md drops that departure. To pass its ResponseEnvelope 2.4, `meta.timeout_ms`
+  of a run with no limit (`timeout=None`, or `--timeout 0`) is `0` instead of `null`, as
+  the spec says `--timeout 0`; a consumer that read `null` as "no limit" reads `0`.
+  `treaty.Timeout.milliseconds` still returns `None` without a limit. The spec's §79
+  bounded calls (REQ-F-080 to REQ-F-082, REQ-C-033 to REQ-C-035, exit `14`) are not
+  implemented yet: treaty never exits `14` (#431)
 
 - A read-only command's `TIMEOUT` stays retryable, and when the command takes `--timeout`
   its hint now also names a larger `--timeout` and `--timeout 0` (no limit; not on a

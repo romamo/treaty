@@ -167,7 +167,9 @@ above). `Ctx.config` was already private (`_config_file`, workstream 02).
   `refresh_command`, `expires_at`, `required_permission`, `network_context`, `redirect`,
   `corrected_input`
 - `warnings[]`: `code`, `message`, `context`
-- Manifest root: `schema_version` (`"3.19"`, the spec's `ManifestResponse`),
+- Manifest root: `schema_version` (`"3.19"`, the spec's `ManifestResponse`; `"3.21"`
+  when a listed command declares `requires_person`, whose entry says
+  `requires_person: true`),
   `framework_version`, `etag`, `flags`, `exit_codes`, `env_vars` (the variables that back
   no flag, each with a `description`), `commands`, `dependencies` when declared, and
   `secret_env_vars` (the secret settings) when there are any; a flag that reads variables
