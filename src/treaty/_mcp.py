@@ -8,13 +8,15 @@ confirmation, idempotency, timeouts, effect validation, and output caps all
 apply. An unconfirmed destructive call returns the ``CONFIRMATION_REQUIRED``
 envelope with its dry-run preview, exactly as the CLI does.
 
-``treaty-mcp module:app`` serves on the process's streams as they are. An app's own
-``mcp serve`` (#239) runs inside its CLI run instead, where descriptor 1 and
-``sys.stdout`` lead to stderr: ``serve_wire`` speaks the protocol on the copy of the
-original stdout the run holds, so a stray write never reaches the client.
+``treaty-mcp module:app`` serves on the process's own streams, with ``sys.stdout`` led to
+stderr. An app's own ``mcp serve`` (#239) runs inside its CLI run instead, where
+descriptor 1 and ``sys.stdout`` lead to stderr: ``serve_wire`` speaks the protocol on the
+copy of the original stdout the run holds, so a stray write never reaches the client.
+Both serve through ``serve_on``, so both end alike (REQ-C-032, #415, #418).
 
-Only ``build_server``, ``serve``, ``serve_wire``, and ``main`` import the ``mcp`` package;
-everything else is plain data so it can be inspected and tested without the SDK.
+Only ``build_server``, ``serve``, ``serve_wire``, ``serve_on``, and ``main`` import the
+``mcp`` package; everything else is plain data so it can be inspected and tested without
+the SDK.
 """
 
 from __future__ import annotations
@@ -27,23 +29,25 @@ import json
 import os
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import IO, Any, TextIO, cast
 
 from ._app import App, _closed_pipe, _Run
 from ._context import Wire
-from ._envelope import Envelope, serialize
+from ._envelope import Envelope, serialize, write_envelope
 from ._errors import CliExit, ParseError
 from ._mcp_serve import (
     DEFAULT_INSTRUCTIONS,
     MCP_BIND_NEEDS_SERVE,
     NO_BINDINGS,
+    STDIN_CLOSED,
     Bindings,
     Provided,
 )
 from ._prompt import NoPromptStdin
-from ._signals import Cancelled
+from ._signals import Cancelled, cancellation_handlers
 from ._subprocess import GRACE_SECONDS
 from ._tools import (
     DRAFT_07,
@@ -230,19 +234,43 @@ def build_server(
     )
 
 
-async def serve(app: App) -> None:
-    """Run the server over stdio until the client disconnects"""
-    from mcp.server.stdio import stdio_server
-
+def serve(app: App, target: str) -> int:
+    """``treaty-mcp``: the server on the process's own streams, ended as ``mcp serve``'s
+    is (REQ-C-032, #418): stdin's end, or the client closing stdout, exits 0 with no
+    envelope on stderr; SIGINT exits 130 and SIGTERM 143 with the CANCELLED envelope as the last
+    line of stderr"""
+    out, stdin = sys.stdout, sys.stdin
+    if stdin is None:
+        sys.stderr.write(
+            f"treaty-mcp: {STDIN_CLOSED}: stdin is closed, so no MCP client can send "
+            "requests; start treaty-mcp from an MCP client, with stdin and stdout piped\n"
+        )
+        return 4
     server = build_server(app)
-    async with stdio_server() as (read, write):
-        # The transport holds the real streams now. For the rest of the process a print()
-        # goes to stderr and an input() exits 4, instead of corrupting or stalling the
-        # protocol. App.call only wraps the streams it finds, redacting its own threads'
-        # writes there, since calls run on several threads
-        sys.stdout = sys.stderr
-        sys.stdin = cast(TextIO, NoPromptStdin(io.StringIO()))
-        await server.run(read, write, server.create_initialization_options())
+    # serve_on holds the real streams now. For the rest of the process a print() goes to
+    # stderr and an input() exits 4, instead of corrupting or stalling the protocol.
+    # App.call only wraps the streams it finds, redacting its own threads' writes there,
+    # since calls run on several threads
+    sys.stdout = sys.stderr
+    sys.stdin = cast(TextIO, NoPromptStdin(io.StringIO()))
+    started = time.perf_counter()
+    with cancellation_handlers(out) as cancellation:
+        try:
+            with cancellation.armed():
+                serve_on(server, Wire(out, stdin))
+        except Cancelled as exc:
+            sig = exc.signal
+            run = _Run(app, io.StringIO(), io.StringIO(), os.environ)
+            envelope = run.cancelled_envelope(
+                f"treaty-mcp {target}",
+                sig,
+                {"signal": sig.name},
+                started=started,
+                meta={"partial": True},
+            )
+            write_envelope(envelope, sys.stderr)
+            return envelope.exit_code
+    return 0
 
 
 JOIN_SECONDS = 0.25
@@ -288,14 +316,7 @@ def serve_wire(
     served: frozenset[CommandPath] | None,
     bindings: Bindings,
 ) -> None:
-    """``mcp serve``: the app's commands as tools on ``wire`` until stdin ends or the
-    client closes stdout, a clean shutdown (REQ-C-032), or until a signal raises
-    ``Cancelled`` here, on the run's thread: the server is stopped and the signal raised
-    on, so the run exits 130 or 143 with its CANCELLED envelope on stderr (#415). The
-    server runs on a thread of its own, so the run's thread only waits, where a signal
-    can interrupt it without tearing the event loop."""
-    assert wire.stdin is not None, "mcp serve refuses a closed stdin before serving"
-    serving = _Serving()
+    """``mcp serve``: the app's commands as tools on ``wire``, served by ``serve_on``"""
     server = build_server(
         app,
         env=env,
@@ -304,6 +325,18 @@ def serve_wire(
         served=served,
         bindings=bindings,
     )
+    serve_on(server, wire)
+
+
+def serve_on(server: Any, wire: Wire) -> None:
+    """``server`` on ``wire`` until stdin ends or the client closes stdout, a clean
+    shutdown (REQ-C-032), or until a signal raises ``Cancelled`` here, on the run's
+    thread: the server is stopped and the signal raised on, so ``mcp serve`` (#415) and
+    ``treaty-mcp`` (#418) exit 130 or 143 with the CANCELLED envelope on stderr. The
+    server runs on a thread of its own, so the run's thread only waits, where a signal
+    can interrupt it without tearing the event loop."""
+    assert wire.stdin is not None, "a closed stdin is refused before serving"
+    serving = _Serving()
     with _claimed_stdin(wire.stdin, serving.read_all) as stdin:
         ended = threading.Event()
 
@@ -542,8 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     except ModuleNotFoundError:
         sys.stderr.write("treaty-mcp: the mcp package is missing; install treaty[mcp]\n")
         return 2
-    asyncio.run(serve(app))
-    return 0
+    return serve(app, args[0])
 
 
 if __name__ == "__main__":

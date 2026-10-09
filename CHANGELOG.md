@@ -129,6 +129,15 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ### Fixed
 
+- `treaty-mcp module:app` ends as an app's own `mcp serve` does (REQ-C-032, D-13): `SIGINT`
+  exits `130` and `SIGTERM` `143`, each with the `CANCELLED` envelope
+  (`error.context.signal` names the signal) on the last line of stderr, and stdin left
+  open no longer holds it up. `SIGTERM` used to kill it with no envelope, and `SIGINT`
+  did not stop it until stdin closed. Closing stdin still exits `0` with no envelope
+  on stderr. It now serves through `mcp serve`'s server loop, so the client closing stdout
+  also stops it cleanly, and while it serves, descriptor 0 reads an empty pipe, so a
+  child process a tool starts no longer takes the client's requests; a closed stdin at
+  startup is refused with exit `4` (`STDIN_CLOSED`) instead of a traceback (#418)
 - `treaty conformance` drops an `output_file` command's `--output PATH` and
   `--output=PATH` from the argv it takes from the command's example, so the kit's runs of
   its probes return the data in the envelope instead of writing the file on every run. An

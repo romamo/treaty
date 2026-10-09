@@ -6814,18 +6814,37 @@ class _Run:
             teardown.run(GRACE_SECONDS)
             if teardown.failures:
                 context["cleanup_failed"] = type(teardown.failures[0][1]).__qualname__
+        return self.cancelled_envelope(
+            f"Command {path}",
+            sig,
+            context,
+            started=started,
+            meta={**meta, "partial": True} if handler_started else dict(meta),
+        )
+
+    def cancelled_envelope(
+        self,
+        what: str,
+        sig: CancelSignal,
+        context: Mapping[str, object],
+        *,
+        started: float,
+        meta: Mapping[str, object],
+    ) -> Envelope:
+        """The CANCELLED envelope a signal ends ``what`` with: a command's run, or the
+        server ``treaty-mcp`` runs (#418)"""
         entry = self.app.exits.by_code(sig.exit_code)
         return self._envelope(
             sig.exit_code,
             error=ErrorDetail(
                 code="CANCELLED",
-                message=f"Command {path} was cancelled by {sig.name}",
+                message=f"{what} was cancelled by {sig.name}",
                 retryable=entry.retryable,
-                context=context,
+                context=dict(context),
                 phase="execution",
             ),
             started=started,
-            meta={**meta, "partial": True} if handler_started else dict(meta),
+            meta=meta,
         )
 
     def _exit_envelope(
