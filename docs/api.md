@@ -7,7 +7,7 @@ including every `treaty._*` module, may change in any release.
 `tests/test_public_api.py` holds the same inventory as a snapshot
 (`tests/data/public_api.json`): a change to any item fails CI until the snapshot is
 regenerated on purpose with `uv run python tests/test_public_api.py > tests/data/public_api.json`
-and the change has a `CHANGELOG.md` entry.
+and the change has a changelog entry (a fragment in `changelog.d/`).
 
 Decision key: **keep** (frozen as is), **private** (moved out of the public surface in the
 review), **rename**, **remove**.
