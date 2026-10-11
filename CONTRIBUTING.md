@@ -45,12 +45,10 @@ A pull request runs CI on Ubuntu; the `full-ci` label runs every OS.
 ## Pull requests
 
 - One change per pull request, on a branch, with a test that fails without it
-- Add the changelog entry as a fragment file in [`changelog.d/`](changelog.d/README.md),
-  named `<issue>-<slug>.md`, not in `CHANGELOG.md` itself: under the section that matches
-  the change (`Breaking`, `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or
-  `Security`). The release bot picks the next version from these headings, so a breaking
-  change without a `Breaking` entry ships as a minor release; a stable release writes the
-  fragments into `CHANGELOG.md`
+- Add an entry under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md), in the section
+  that matches the change: `Breaking`, `Added`, `Changed`, `Deprecated`, `Removed`,
+  `Fixed`, or `Security`. The release bot picks the next version from these headings,
+  so a breaking change without a `Breaking` entry ships as a minor release
 - A change to a built-in command, flag, or environment variable updates `AGENTS.md`:
   `uv run treaty agents-md treaty._cli:cli` regenerates its generated sections
 - A change to the documented API updates [`docs/reference.md`](docs/reference.md), and
