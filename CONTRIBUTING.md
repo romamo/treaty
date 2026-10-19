@@ -61,8 +61,8 @@ A pull request runs CI on Ubuntu; the `full-ci` label runs every OS.
 
 Releases are cut by [shipmill](https://github.com/shipmill/shipmill) from the
 hand-written changelog: a release candidate after each batch of merges to `main`, and a
-stable release once its milestone closes and the candidate has soaked. Contributors never
-bump the version or tag by hand.
+stable release, promoted from the newest candidate, once its milestone has no open issues.
+Contributors never bump the version or tag by hand.
 
 ## Code of Conduct
 
