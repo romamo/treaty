@@ -14,7 +14,8 @@ A failed request ends the run with ``error.network_context`` saying how it went 
 (REQ-F-037): exit 12 ``CONNECTION_FAILED`` or ``TLS_VERIFY_FAILED``, exit 10 ``TIMEOUT``,
 exit 12 ``UPSTREAM_UNAVAILABLE`` for 502, 503, and 504, and, when the command declares
 them, exit 8 ``UNAUTHENTICATED`` for 401, exit 7 ``PERMISSION_DENIED`` for 403, and exit
-11 ``RATE_LIMITED`` for 429 (REQ-F-063). Any other status is returned. On a ``retry=``
+11 ``RATE_LIMITED`` for 429 (REQ-F-063), unless the request lists that status in
+``handle=`` (#449). Any other status is returned. On a ``retry=``
 command, connection failures, timeouts, and 502 to 504 are retried through ``ctx.retry``'s
 budget, so ``meta.retries`` counts them; a ``Retry-After`` lengthens the delay. A POST or
 PATCH may have taken effect before it failed, so it is retried only when it never reached
@@ -63,6 +64,8 @@ IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELET
 """RFC 9110 9.2.2: sending one twice has the effect of sending it once"""
 CROSS_ORIGIN_HEADERS = frozenset({"Accept", "Accept-encoding", "Accept-language", "User-agent"})
 """The headers a redirect to another origin keeps, in urllib's capitalization"""
+HANDLED_STATUSES = frozenset({401, 403, 429})
+"""The statuses ``handle=`` may return to the handler: the ones mapped by declared exits"""
 
 
 class _Exhausted(Exception):
@@ -287,8 +290,14 @@ class Http:
         self.declared = frozenset(declared)
         self._opener: urllib.request.OpenerDirector | None = None
 
-    def get(self, url: str, *, headers: Mapping[str, str] | None = None) -> HttpResponse:
-        return self.request("GET", url, headers=headers)
+    def get(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        handle: Collection[int] = (),
+    ) -> HttpResponse:
+        return self.request("GET", url, headers=headers, handle=handle)
 
     def post(
         self,
@@ -297,8 +306,9 @@ class Http:
         headers: Mapping[str, str] | None = None,
         body: bytes | None = None,
         json: object = None,
+        handle: Collection[int] = (),
     ) -> HttpResponse:
-        return self.request("POST", url, headers=headers, body=body, json=json)
+        return self.request("POST", url, headers=headers, body=body, json=json, handle=handle)
 
     def request(
         self,
@@ -308,12 +318,22 @@ class Http:
         headers: Mapping[str, str] | None = None,
         body: bytes | None = None,
         json: object = None,
+        handle: Collection[int] = (),
     ) -> HttpResponse:
-        """Send one request and return the response; ``json=`` sends a JSON body"""
+        """Send one request and return the response; ``json=`` sends a JSON body, and a
+        401, 403, or 429 in ``handle`` is returned instead of ending the run with the
+        command's declared exit (#449)"""
         if urlsplit(url).scheme not in ("http", "https"):
             raise ValueError(f"ctx.http takes http:// and https:// URLs, not {url!r}")
         if body is not None and json is not None:
             raise ValueError("pass body= or json=, not both")
+        unmapped = [status for status in handle if status not in HANDLED_STATUSES]
+        if unmapped:
+            raise ValueError(
+                f"handle= takes 401, 403, and 429, not {unmapped!r}: every other status "
+                "but 502 to 504 is already returned"
+            )
+        handled = frozenset(handle)
         sent = dict(headers or {})
         if json is not None:
             body = jsonlib.dumps(json).encode()
@@ -321,7 +341,8 @@ class Http:
 
         def once() -> HttpResponse:
             # A new Request each time: sending one routes it through the proxy in place
-            return self._send(urllib.request.Request(url, data=body, headers=sent, method=method))
+            request = urllib.request.Request(url, data=body, headers=sent, method=method)
+            return self._send(request, handled)
 
         if self.retrier is None:
             return once()
@@ -338,7 +359,7 @@ class Http:
 
         return self.retrier.call(attempt, on=(_Exhausted,), give_up=_give_up, wait=_asked)
 
-    def _send(self, request: urllib.request.Request) -> HttpResponse:
+    def _send(self, request: urllib.request.Request, handled: frozenset[int]) -> HttpResponse:
         url = request.full_url
         timeout = None
         if self.deadline is not None:
@@ -362,7 +383,7 @@ class Http:
             self._trace(request, started, error=failure.code)
             raise failure
         self._trace(request, started, status=response.status)
-        return self._status(url, response) if failed else response
+        return self._status(url, response, handled) if failed else response
 
     def _exchange(
         self, request: urllib.request.Request, timeout: float | None
@@ -435,7 +456,7 @@ class Http:
             unsent=isinstance(reason, (ConnectionRefusedError, socket.gaierror)),
         )
 
-    def _status(self, url: str, response: HttpResponse) -> HttpResponse:
+    def _status(self, url: str, response: HttpResponse, handled: frozenset[int]) -> HttpResponse:
         status = response.status
         retry_after = _retry_after_ms(response.headers.get("retry-after"))
         if status in (502, 503, 504):
@@ -452,8 +473,9 @@ class Http:
             403: ("PERMISSION_DENIED", "PERMISSION_DENIED", "the server refused access (403)"),
             429: ("RATE_LIMITED", "RATE_LIMITED", "the server is rate limiting (429)"),
         }.get(status)
-        # A status the command cannot exit with is the handler's to decide
-        if mapped is None or ExitCodeName(mapped[0]) not in self.declared:
+        # A status the command cannot exit with, or one the request asked to handle, is the
+        # handler's to decide
+        if mapped is None or status in handled or ExitCodeName(mapped[0]) not in self.declared:
             return response
         name, code, message = mapped
         fixes = {
