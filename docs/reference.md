@@ -923,6 +923,11 @@ return Release(**response.json())
   retryable on a `safe` command only; and, when the command declares the exit code,
   `8` `UNAUTHENTICATED` for 401, `7` `PERMISSION_DENIED` for 403, and `11` `RATE_LIMITED`
   with `retry_after_ms` for 429. Any other status is returned (REQ-F-037, REQ-F-063)
+- `handle=(401, 403, 429)`, or any of them, on `get`, `post`, or `request` returns that
+  status to the handler unchanged, its headers and body included, even when the command
+  declares the exit: a handler reads an API's problem details and picks the exit itself.
+  It takes only those three; any other status raises `ValueError` before the request is
+  sent. A handled 429 is a response, so it is not retried
 - On a `retry=` command, connection failures, timeouts, and 502 to 504 are retried within
   `--retries`, counted in `meta.retries`; a failure that outlasts those retries is not
   retryable, so an agent does not retry on top of them

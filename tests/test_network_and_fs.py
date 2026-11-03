@@ -56,10 +56,11 @@ BASE_ENV = {"PATH": os.environ["PATH"], "SYSTEMROOT": os.environ.get("SYSTEMROOT
 
 
 class Origin(BaseHTTPRequestHandler):
-    """``/status/N`` answers N, ``/slow`` waits 2 s, ``/flaky`` answers 503 once, as
-    ``/flaky-after`` does with ``Retry-After: 3``, ``/trickle`` and ``/trickle-open`` send
-    a 10 s body a byte at a time (the first with a ``Content-Length``, the second ending at
-    the connection's close), and anything else 200 with the path in JSON"""
+    """``/status/N`` answers N, ``/problem/N`` answers N with ``PROBLEM`` as an RFC 9457
+    problem body, ``/slow`` waits 2 s, ``/flaky`` answers 503 once, as ``/flaky-after``
+    does with ``Retry-After: 3``, ``/trickle`` and ``/trickle-open`` send a 10 s body a
+    byte at a time (the first with a ``Content-Length``, the second ending at the
+    connection's close), and anything else 200 with the path in JSON"""
 
     server: Recording
 
@@ -71,18 +72,22 @@ class Origin(BaseHTTPRequestHandler):
         if self.path == "/slow":
             time.sleep(2)
         status = 200
-        if self.path.startswith("/status/"):
+        if self.path.startswith(("/status/", "/problem/")):
             status = int(self.path.rsplit("/", 1)[1])
         if self.path in ("/flaky", "/flaky-after") and self.server.flaky:
             self.server.flaky -= 1
             status = 503
         body = json.dumps({"via": "origin", "path": self.path}).encode()
+        content_type = "application/json"
+        if self.path.startswith("/problem/"):
+            body = json.dumps(PROBLEM).encode()
+            content_type = "application/problem+json"
         self.send_response(status)
         if status == 429:
             self.send_header("Retry-After", "7")
         if status == 503 and self.path == "/flaky-after":
             self.send_header("Retry-After", "3")
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -109,6 +114,7 @@ class Origin(BaseHTTPRequestHandler):
 
 
 TRICKLE_BYTES = 200
+PROBLEM = {"type": "token-organization", "title": "The token belongs to another organization"}
 
 
 class Proxy(BaseHTTPRequestHandler):
@@ -222,6 +228,13 @@ class Got:
     body: str
 
 
+@dataclass(frozen=True, slots=True)
+class Answered:
+    status: int
+    headers: dict[str, str]
+    body: str
+
+
 def net_app() -> App:
     app = App("netctl", version="1.0.0")
 
@@ -242,6 +255,17 @@ def net_app() -> App:
     def authed(args: Fetch, ctx: Ctx) -> Got:
         response = ctx.http.get(args.url)
         return Got(response.status, response.text())
+
+    @app.command(
+        "handled",
+        description="Get a URL, deciding 401, 403, and 429 itself",
+        danger_level="safe",
+        exit_codes=("AUTH_REQUIRED", "PERMISSION_DENIED", "RATE_LIMITED"),
+        has_network_io=True,
+    )
+    def handled(args: Fetch, ctx: Ctx) -> Answered:
+        response = ctx.http.request("GET", args.url, handle=(401, 403, 429))
+        return Answered(response.status, dict(response.headers), response.text())
 
     @app.command(
         "sturdy",
@@ -685,6 +709,64 @@ def test_a_429_exits_11_with_retry_after_ms_from_the_header(origin: Recording) -
 def test_an_undeclared_401_is_the_handlers_to_decide(origin: Recording) -> None:
     code, envelope = run(net_app(), ["get", "--url", f"{origin.url}/status/401"])
     assert code == 0 and envelope["data"]["status"] == 401  # type: ignore[index]
+
+
+# #449: handle= returns a declared 401, 403, or 429 to the handler
+
+
+@pytest.mark.parametrize(
+    ("status", "exit_code"), [(401, 8), (403, 7), (429, 11)], ids=["401", "403", "429"]
+)
+def test_a_handled_status_reaches_the_handler_with_its_problem_body(
+    origin: Recording, status: int, exit_code: int
+) -> None:
+    url = f"{origin.url}/problem/{status}"
+    code, envelope = run(net_app(), ["handled", "--url", url])
+    assert code == 0
+    data = envelope["data"]
+    assert isinstance(data, dict)
+    assert data["status"] == status
+    assert data["headers"]["content-type"] == "application/problem+json"
+    assert json.loads(data["body"]) == PROBLEM
+    assert (data["headers"].get("retry-after") == "7") is (status == 429)
+    # Without handle= the same answer still ends the run with the declared exit
+    code, envelope = run(net_app(), ["authed", "--url", url])
+    assert code == exit_code
+    assert network_of(envelope)["status_code"] == status
+
+
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_get_and_post_pass_handle_through(origin: Recording, method: str) -> None:
+    http = Http(
+        ProxyConfig({}), deadline=None, retrier=None, declared=[ExitCodeName("PERMISSION_DENIED")]
+    )
+    url = f"{origin.url}/problem/403"
+    send = http.get if method == "get" else http.post
+    response = send(url, handle=(403,))
+    assert response.status == 403 and response.json() == PROBLEM
+    with pytest.raises(NetworkFailure) as raised:
+        send(url)
+    assert raised.value.code == "PERMISSION_DENIED"
+
+
+def test_a_handled_429_is_not_retried(origin: Recording) -> None:
+    waits: list[float] = []
+    policy = Retry(retries=2, delay_ms=1)
+    retrier = Retrier(policy, retries=2, delay_ms=1, deadline=None, sleep=waits.append)
+    declared = [ExitCodeName("RATE_LIMITED")]
+    http = Http(ProxyConfig({}), deadline=None, retrier=retrier, declared=declared)
+    assert http.get(f"{origin.url}/problem/429", handle=[429]).status == 429
+    assert waits == [] and retrier.count == 0 and len(origin.seen) == 1
+
+
+@pytest.mark.parametrize("handle", [(503,), (404,), (403, 502)])
+def test_handle_takes_only_401_403_and_429(origin: Recording, handle: tuple[int, ...]) -> None:
+    http = Http(ProxyConfig({}), deadline=None, retrier=None, declared=())
+    with pytest.raises(ValueError, match="401, 403, and 429") as raised:
+        http.request("GET", f"{origin.url}/status/403", handle=handle)
+    bad = [s for s in handle if s not in (401, 403, 429)]
+    assert str(bad) in str(raised.value)
+    assert origin.seen == []
 
 
 # X5: ctx.http retries through ctx.retry
