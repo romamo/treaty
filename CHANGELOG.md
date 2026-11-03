@@ -10,6 +10,8 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-03
+
 ### Breaking
 
 - A streaming command writes REQ-O-004's lines on stdout in `json` and `jsonl` instead
@@ -65,6 +67,172 @@ Apps built on treaty keep their own, structured schema changelog with
   still says the stop was clean. `mcp serve --output-schema` prints `{"type": "null"}`.
   Schema locks, the schema changelog, and the manifest are unchanged, as `mcp serve` is a
   built-in with no `output_schema` there (#415)
+- An app whose `argument_order` came from a destructive example with only its dry-run
+  flag now generates a conformance profile with another example's options or the
+  `manifest --etag` `argument_order`, and never `--confirm-destructive`, so a committed
+  profile with the old confirmed run differs from the generated one and
+  `treaty conformance` exits `CONFLICT`: rerun `treaty conformance --force` once to update
+  it. `treaty init` scaffolds the `manifest --etag` one (#373)
+- A response's `seq`, `end`, `total`, `effects`, `dry_run`, and `partial` moved from
+  `Envelope.extra_meta` to typed `Meta` fields: code reading `env.extra_meta["total"]` and
+  the like must read `env.meta.total`. Building an `Envelope` whose `extra_meta` holds a
+  key `Meta` declares now raises `RegistrationError` instead of merging it into `meta`
+  (#348)
+- An app with streaming commands now generates a conformance profile with probes for
+  them, so a committed profile differs from the generated one and `treaty conformance`
+  exits `CONFLICT`: rerun `treaty conformance --force` once to update it. Each safe
+  stream's read probe adds about 15 s to a kit run, which runs it three times (#349)
+- An app with no destructive command of its own, or no example with a local option, now
+  generates a conformance profile with the `cleanup built-in` probe or the
+  `manifest --etag` `argument_order`, so a committed profile differs from the generated
+  one and `treaty conformance` exits `CONFLICT`: rerun `treaty conformance --force` once
+  to update it (#361)
+- `--format tsv` on an `external=True` command no longer writes the `_source` and
+  `_trusted` columns, on stdout or in an `--output` file, reversing what 1.0.0rc12 said
+  for tsv (#198): a consumer reading tsv by column position sees the columns shift. The
+  untrusted status is in the `UNTRUSTED_CONTENT` warning, on stderr or in the envelope
+  describing an `--output` write. `--format plain --no-stream` of an external stream now
+  prints the `(external content, untrusted)` line first and no tag columns, as a
+  buffered result does (#336)
+- With `ordered=True` on a command, the arrays inside the items of a list of dataclasses
+  or models, and inside batch item values, now keep the handler's order where they used
+  to be sorted. An app's schema lock differs for an ordered command whose typed output
+  holds arrays, since those array nodes now carry `"x-ordered": true` (#329)
+- Per-command `--schema` no longer has `requires_groups`: its `requires` lists a command's
+  `RequiresAny` and `RequiresOne` rules as `{"any_of": [...]}` and `{"one_of": [...]}`
+  among its other rules, as the manifest does, so a consumer reads `requires` alone
+- `SUBPROCESS_FAILED` marks its `context.stderr` as content from outside the tool:
+  `error.context` gets `"_source": "external", "_trusted": false`, a stderr that is a
+  high-entropy value is masked, and a handler that catches the `CliExit` from `ctx.run`
+  finds `treaty.External` in `exc.context["stderr"]`, the text in its `.value` (#174)
+- A failure's `data` on an `external=True` command, from `raise Exit.X(..., data=...)`, a
+  destructive preview, or a partial run of steps, is tagged
+  `"_source": "external", "_trusted": false` with an `UNTRUSTED_CONTENT` warning, as a
+  success's is; before, only a success's `data` and a batch's were (#174)
+- A plain flag that declares `Flag(env=(...))` reads its own `<APP>_<NAME>` first, then the
+  declared names in order, as a secret and a setting already do: with both
+  `CLOUDFALL_PROJECT` and `DEPLOYCTL_PROJECT` set, `--project` takes `DEPLOYCTL_PROJECT`,
+  where rc11 read only `CLOUDFALL_PROJECT`. The spec's REQ-F-073 allows a variable outside
+  the prefix only after the prefixed name. A flag without `env=` still reads no variable.
+  The flag's `<APP>_<NAME>` is now a variable it reads, so a registration where a setting,
+  a framework option, or another command's secret or token reads it too is a
+  `RegistrationError`, as is naming it in `env=`; a deprecated name's warning names it as
+  the replacement instead of the flag (#178)
+- The audit log is off by default, as the spec's REQ-O-030 now says (it retired REQ-F-026,
+  which had it on): a run of an app that configured nothing creates no file or directory,
+  and `meta.audit_log_path` is absent. `App(audit_log=None)` is the default;
+  `App(audit_log=treaty.AuditLog())` turns it on. `<APP>_AUDIT_LOG` wins over the app:
+  `1` turns it on, `0` off, an absolute path on at that path. Any other value, an empty one
+  included, exits 2 with `INVALID_AUDIT_LOG_SETTING` for every invocation except `--help`
+  and `--version`, where `manifest` and `--schema` answered before. That includes `off`,
+  which earlier releases documented: write `0` instead. An `AuditLog(path=...)` no longer
+  beats the operator's path (#71)
+- The default audit log path is `$XDG_STATE_HOME/<app>/audit.jsonl`, else
+  `~/.local/state/<app>/audit.jsonl`. A log written by an earlier release under
+  `$XDG_DATA_HOME/<app>/` (`~/.local/share/<app>/`) is neither moved nor read; delete it,
+  or point `<APP>_AUDIT_LOG` at it (#71)
+- `AuditLog` defaults to 10 MiB per file, 5 rotated files, and 30 days, O-030's own bounds:
+  at most 60 MiB per tool where it was 600 MiB. This settles #53. The active file also
+  rotates once its first entry is older than `max_age_days`, and rotated files that old are
+  deleted before every append rather than once per process (#71)
+- An audit entry matches the spec's `audit-log-entry.json`: `parameters` is `args`, with
+  `validate_only`, `confirm_destructive`, and `no_injection_protection` added when given;
+  `operator` is `session_id` (still read from `<APP>_SESSION`), present only when set, as
+  `trace_id` is; `timestamp` is when the run started; `error_code`, `data`, and
+  `data_bytes` are gone. A line is at most 16 KiB: the largest `args` values become
+  `[TRUNCATED]` and `truncated` is `true`, where strings were cut at 1,024 characters (#71)
+- Only invocations that resolve to a command are logged: an unknown command, `--version`,
+  `version`, `manifest`, `completion`, and `audit-log` itself no longer append an entry
+  (#71)
+- `audit-log` is on every app, the treaty CLI included, since the operator can turn the log
+  on for any of them. While the log is off it exits 4 with `AUDIT_LOG_DISABLED` (was
+  `AUDIT_LOG_OFF`). `--since` takes a positive duration or an ISO 8601 time with a UTC
+  offset (`0h` and a time without an offset exit 2), and `--command config` also matches
+  `config set` and `config get`, but not `configure` (#71)
+- While the log is on, the manifest lists its path as a `log` side effect of every command
+  it records; the log's files are created `0600` and new directories `0700` whatever the
+  umask (#71)
+- The audit rule `stable-order` is a warning for an output array of objects with no
+  declared order, a `list[T]` result or field of dataclasses, so `treaty audit --strict`
+  fails on it: treaty sorts such an array by each item's JSON text, which silently puts
+  `"10.00"` before `"5.00"`. Declare `sort_key=` or `ordered=True` on the command, or
+  `Out(sort_key=...)` or `Out(ordered=True)` on the field. Arrays inside untyped output
+  stay advice (#38)
+- `ctx.http` retries a POST or PATCH only when it never reached a server (a refused
+  connection or an unknown host): a timeout or a 502 to 504 may come after the server
+  acted. GET, HEAD, OPTIONS, TRACE, PUT, and DELETE retry as before. A `Retry-After`
+  lengthens the delay, and one over 60 s ends the run with `retry_after_ms` instead
+- An integer or number on argv is written as JSON writes it: `1_000`, `+3`, `" 7"`, and
+  digits of other scripts are argument errors. `pattern=` on a number is checked against
+  the parsed number on argv and JSON alike, so `--price 1.50` and `{"price": 1.50}` agree
+- A JSON object that repeats a key is refused (`--raw-payload` and `exec` lines) instead
+  of taking the last value, as argv already refused a repeated flag
+- The forgiving JSON reader offers no `corrected_input` for a near-number (`+1`, `0x1F`,
+  `.5`, `NaN`, `Infinity`): quoting it would have sent a string
+- Two commands that differ only in `.` and `-`, such as `cache.clear` and `cache-clear`,
+  fail registration: they would share a skill file and skill name
+- A flag default that breaks its own `pattern`, `pattern_type`, or `max_bytes` fails
+  registration
+- An empty `--config=`, `--context=`, or `--instance-id=` is an argument error instead of
+  falling back to the variable or the default files
+- `--schema-version` takes a major or a `MAJOR.MINOR` the command serves: `1.garbage` and
+  an unserved minor such as `1.5` are argument errors
+- `ctx.prompt(flag=)` must name a flag of the command
+- `ctx.edit` reports an editor that exits non-zero, or is missing, as `EDITOR_FAILED`
+  (exit 1) instead of a crash
+- `treaty audit`, `schema-lock`, `conformance`, and `init` resolve the target module, the
+  schema lock, `conformance/`, and the new project against `--cwd` instead of the
+  process's directory; `schema-lock` reports the lock's absolute path
+- A background pid file entry carries the child's start time; entries written by rc2 are
+  still read
+- A command whose arguments or output have no schema, such as a `tuple[SomeDataclass,
+  ...]` field, raises `RegistrationError` naming the command at registration, instead of a
+  bare `SchemaError` (#6). Code that caught `SchemaError` there catches
+  `RegistrationError` now, or `TreatyError` for both
+- `treaty conformance` no longer overwrites a profile that differs from the generated one:
+  it exits `6` (`CONFLICT`) naming the changed keys and probes, and `--force` replaces the
+  file; an equal profile is left untouched (`effect: noop`). `treaty init` now scaffolds
+  exactly the profile `conformance` generates
+- `TREATY_FORMAT`, `TREATY_MAX_OUTPUT_BYTES`, `TREATY_MAX_STDIN_BYTES`, and
+  `TREATY_STATE_DIR` are now `<APP>_FORMAT` and friends; every variable treaty reads for
+  an app carries its prefix, and `<APP>_STATE_DIR` names the directory itself
+- `Envelope` takes a `treaty.Meta` instead of `duration_ms` and `request_id`;
+  `Meta.request_id` and `timestamp` are optional
+- `App(version=)` must be semver
+- `Ctx.config` is private; config writes go through `ctx.write_config` and are locked
+- `RATE_LIMITED` without `retry_after_ms` and an invalid `fix_command` end the run as
+  `INVALID_EXIT`; a missing login is `UNAUTHENTICATED` and a missing scope at run time
+  `PERMISSION_DENIED` (was `AUTH_REQUIRED` and `INSUFFICIENT_SCOPES`); a read-only
+  command's `TIMEOUT` is retryable
+- `async def` handlers, hooks, and resource acquires fail registration
+- Unparseable JSON input is `INVALID_JSON` (was `ARG_ERROR`, or `DISPATCH_PARSE_ERROR`
+  for an `exec` line); `validate_only` is a framework key; every manifest entry has
+  `option_placement`
+- Arrays in `data` are sorted unless the field is `Out(ordered=True)`; `Path` output is
+  absolute; `list[T] | None` output fields are refused; every output key is required
+- `cleanup=` runs after every handler run, not only on signals
+- High-entropy strings and credential-named fields in `data` are masked unless
+  `--unmask`; `unmask` and `no-injection-protection` are global names; output fields
+  named `_source` or `_trusted` are refused; more names are inferred secret (`cookie`, a
+  `pass` segment); truncation warnings name `data.x` instead of `$.x`
+- `os.system`, `os.popen`, and `shell=True` in a handler fail registration (the `no-shell`
+  audit rule is gone); `gui_operations` requires `headless_behavior=`
+- Every app has the `doctor`, `cleanup`, `status`, `generate-skills`, `mcp-validate`, and
+  `audit-log` built-ins, each yielding to an app command of the same name, so every etag
+  changes once; `cleanup` output has `cleaned` instead of `removed`
+- Children of `ctx.run` get `LC_ALL=C` unless `preserve_locale=True`, and `CI=1` off a
+  terminal
+- Off a terminal or under `CI`, `ctx.log` and stray `print()` text no longer reach stderr
+- Every app writes a rotated, redacted audit log under `XDG_DATA_HOME` unless
+  `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`
+- A field named after a reserved framework flag (`--config`, `--quiet`, `--fields`,
+  `--token-limit`, and the rest of the table in `_framework.py`) fails registration
+- The manifest's `framework_version` is treaty's version; the app's is `meta.tool_version`
+- API review: `treaty.ExecArgs` is no longer exported; `Ctx`'s run plumbing (`log_sink`,
+  `warn_sink`, `processes`, `prompter`, `retrier`, `locks`, `teardown`, `steps`,
+  `session`) and `App`'s run-path helpers (`renderer`, `moved`, `check_fixes`,
+  `fix_problem`, `named_commands`, `effective_timeout`, `silence_notifiers`) are private
+- `--version --format plain` prints the bare version
 
 ### Added
 
@@ -118,213 +286,10 @@ Apps built on treaty keep their own, structured schema changelog with
   bytes and etag are unchanged. The `(a person runs this at a terminal)` description
   marker stays for a consumer of an earlier version, as `(not an MCP tool)` did beside
   `mcp: false`; `--schema` says `requires_person: true` as before (#431)
-
-### Changed
-
-- CI checks against cli-agent-spec v1.16.0, which adopts treaty's person-only
-  confirmation as REQ-C-036 and allows its `--yes` exception in REQ-C-005, so
-  COMPLIANCE.md drops that departure. To pass its ResponseEnvelope 2.4, `meta.timeout_ms`
-  of a run with no limit (`timeout=None`, or `--timeout 0`) is `0` instead of `null`, as
-  the spec says `--timeout 0`; a consumer that read `null` as "no limit" reads `0`.
-  `treaty.Timeout.milliseconds` still returns `None` without a limit. The spec's §79
-  bounded calls (REQ-F-080 to REQ-F-082, REQ-C-033 to REQ-C-035, exit `14`) are not
-  implemented yet: treaty never exits `14` (#431)
-
-- A read-only command's `TIMEOUT` stays retryable, and when the command takes `--timeout`
-  its hint now also names a larger `--timeout` and `--timeout 0` (no limit; not on a
-  stream `App.call` or MCP buffers, which refuse it): a run whose length depends on its
-  input timed out again on the plain retry the hint suggested. The
-  `explicit-timeout` advice now covers a safe command on the app's default timeout too, so
-  an app sees more advice; `--strict` is unaffected. `treaty init`'s scaffold and
-  treaty's own `audit`, `check-docs`, and `rules` declare their timeout (#394)
-- The README, also the PyPI page, is a short overview: what treaty guarantees, a quick
-  start, and what an agent sees. The full API reference it held moved unchanged to
-  `docs/reference.md`, and the tutorial links there. The repository gains
-  `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue forms, and a pull request
-  template
-
-### Fixed
-
-- `requires_person=True` with `resumable=True` is now a `RegistrationError`:
-  `--resume-from` skipped the steps before it, a `ctx.attest` among them, so an agent
-  could pass the person's confirmation with a flag after all. A person-only command
-  restarts from its confirmation; `steps=` and `rollback=` stay allowed (#426)
-- `treaty-mcp module:app` ends as an app's own `mcp serve` does (REQ-C-032, D-13): `SIGINT`
-  exits `130` and `SIGTERM` `143`, each with the `CANCELLED` envelope
-  (`error.context.signal` names the signal) on the last line of stderr, and stdin left
-  open no longer holds it up. `SIGTERM` used to kill it with no envelope, and `SIGINT`
-  did not stop it until stdin closed. Closing stdin still exits `0` with no envelope
-  on stderr. It now serves through `mcp serve`'s server loop, so the client closing stdout
-  also stops it cleanly, and while it serves, descriptor 0 reads an empty pipe, so a
-  child process a tool starts no longer takes the client's requests; a closed stdin at
-  startup is refused with exit `4` (`STDIN_CLOSED`) instead of a traceback (#418)
-- `treaty conformance` drops an `output_file` command's `--output PATH` and
-  `--output=PATH` from the argv it takes from the command's example, so the kit's runs of
-  its probes return the data in the envelope instead of writing the file on every run. An
-  example whose only option was `--output` no longer gives `argument_order`, which moves
-  to the next example or the built-in `manifest --etag` (#391)
-- `treaty conformance` no longer generates a `read` probe for a `has_network_io` command,
-  or takes such a command's example for `argument_order`, `safe_default` ones included
-  (a destructive one keeps its `--dry-run` probe): each kit run made the command's real,
-  and perhaps paid, requests. Its probes are the ones that exit 2 before the network: the
-  malformed `--proxy`, and the `unknown flag` probe, which still goes on the first
-  command's example when that command is a network one. Both go before an example's `--`,
-  where they no longer become positionals that run the command (#390)
-- A command with `ordered=True` sorts a `set` or `frozenset` field of an output model by
-  its canonical JSON again, as before rc34: it kept the set's iteration order, which the
-  hash seed picks, so the output changed from run to run. A set's schema node
-  (`"uniqueItems": true`) loses its `"x-ordered": true`, which a schema lock reports as a
-  change; an explicit per-property `x-ordered: true` on a set still keeps its order (#387)
-- An async generator stream whose source is still running after its cancellation grace,
-  as when it swallows `CancelledError`, now reports it in the stream's end envelope: a
-  `CLEANUP_FAILED` warning for the `async stream` hook, and `error.context.cleanup_failed`
-  on `CANCELLED`, as an `async def` handler does since rc36 (D-9). It used to be only a
-  stderr note, and on a timeout not even that, since the timeout answered without
-  waiting for the source; it now gives the source its grace first. The stream's lines
-  are unchanged (#382)
-- An `async def release` no longer waits forever behind an `async def` handler or async
-  stream source still running after its cancellation grace, which holds the run's event
-  loop: the run's async releases wait to start for one grace more in all, then each is
-  reported as a `CLEANUP_FAILED` warning naming its `release`, and the run answers
-  `CANCELLED` or `TIMEOUT` as it would without the resource. A release that cannot start is
-  cancelled, so it never runs late; once started, a release still runs to its end (#383)
-- A pattern its author already anchored as `^...$`, such as `app.scalar(datetime.date,
-  pattern=r"^\d{4}-\d{2}-\d{2}$")`, is published as written instead of wrapped again into
-  `^(?:^...$)$`, in the manifest's flags and in argument schemas, nested object fields
-  among them; one with a top-level `|` is still wrapped. A `datetime.date`,
-  `datetime.datetime`, or `datetime.time` an app registers with `app.scalar` no longer
-  carries `"title": "date"` in argument schemas, at the top level or nested. Validation is
-  unchanged. A schema lock or saved MCP tool list of such an app shows the shorter pattern
-  and the dropped title once (#388)
-
-## [1.0.0rc36] - 2026-10-06
-
-The 36th 1.0 release candidate: 1 breaking change and 5 fixes. Not additive over rc35: see
-Breaking.
-
-### Breaking
-
-- An app whose `argument_order` came from a destructive example with only its dry-run
-  flag now generates a conformance profile with another example's options or the
-  `manifest --etag` `argument_order`, and never `--confirm-destructive`, so a committed
-  profile with the old confirmed run differs from the generated one and
-  `treaty conformance` exits `CONFLICT`: rerun `treaty conformance --force` once to update
-  it. `treaty init` scaffolds the `manifest --etag` one (#373)
-
-### Fixed
-
-- `treaty conformance` puts the flags its probes add to a passthrough command before the
-  command path, where treaty reads them: the `unknown flag` and `--proxy` probes used to
-  append them after the path, so the delegated tool got `--no-such-flag` and the handler
-  ran and exited 0 instead of exiting 2. A passthrough example's tokens after the path
-  reach its probe verbatim, where an option named like a global, such as `--format
-  oneline`, was dropped, and `argument_order` skips passthrough commands, since the kit
-  moves `--format` after the path (#367)
-- The `--help` usage line of an `option_placement="strict"` command puts `[flags]` before
-  its positionals, where the command reads them; after them, a usage line typed as shown
-  passed the options to the positional verbatim. The missing-argument usage got the same
-  order in rc35, and `generate-skills` now writes a strict command's minimal call and
-  `--validate-only` pattern with the options first too (#374)
-- `treaty conformance` no longer puts `--confirm-destructive` in the `argument_order` run:
-  a destructive example whose only option is its dry-run flag is skipped, so the search
-  moves to the next example or the built-in `manifest --etag`, where it used to run the
-  command confirmed and dry run, and a handler that ignored its dry-run flag applied for
-  real on the kit's machine (#373)
-- An `async def` handler cancelled by SIGINT or its timeout now gets the same 2 s grace
-  as an async generator's source to finish its `finally` blocks and `async with` exits,
-  which can await, before the run answers `CANCELLED` or `TIMEOUT`; the process used to
-  exit first when the handler ran on the main thread, and a timed-out one was abandoned at
-  the deadline. The handler is cancelled once: a signal turns its deadline off, and a
-  deadline that already fired is not followed by the signal's cancel, either of which
-  used to cut the `finally` short. A handler still running past the grace, one that swallows
-  `CancelledError` or whose cleanup is slow, no longer delays the answer: stderr says it
-  was still running after its cancellation, and the envelope carries a `CLEANUP_FAILED`
-  warning for the `async handler` hook (#355)
-- A `FormatRenderer(frame=True)` stream at a terminal no longer erases text that reached
-  the terminal between frames outside a stderr line: a `ctx.prompt` or `ctx.confirm`
-  question and its typed answer, and what a child or C code wrote to descriptor 1, which
-  treaty passes on to stderr before the next frame. The next frame is written below it,
-  as after a stderr line. After a resize, the last frame's rows are counted at the new
-  width, so a terminal that reflows its lines is redrawn without the old frame's tail
-  left on screen; one that does not reflow can still be off by the rows the resize
-  changed (#365)
-
-## [1.0.0rc35] - 2026-10-06
-
-The 35th 1.0 release candidate: 3 breaking changes, 3 changes, 4 fixes, and 4 additions.
-Not additive over rc34: see Breaking.
-
-### Breaking
-
-- A response's `seq`, `end`, `total`, `effects`, `dry_run`, and `partial` moved from
-  `Envelope.extra_meta` to typed `Meta` fields: code reading `env.extra_meta["total"]` and
-  the like must read `env.meta.total`. Building an `Envelope` whose `extra_meta` holds a
-  key `Meta` declares now raises `RegistrationError` instead of merging it into `meta`
-  (#348)
-
-- An app with streaming commands now generates a conformance profile with probes for
-  them, so a committed profile differs from the generated one and `treaty conformance`
-  exits `CONFLICT`: rerun `treaty conformance --force` once to update it. Each safe
-  stream's read probe adds about 15 s to a kit run, which runs it three times (#349)
-
-- An app with no destructive command of its own, or no example with a local option, now
-  generates a conformance profile with the `cleanup built-in` probe or the
-  `manifest --etag` `argument_order`, so a committed profile differs from the generated
-  one and `treaty conformance` exits `CONFLICT`: rerun `treaty conformance --force` once
-  to update it (#361)
-
-### Changed
-
-- A missing required argument names it as it is typed: `Missing required option
-  --name/-n`, a positional as `<name>`, a secret by its `--x-from-env/--x-from-file`
-  sources. At a terminal or with `--format plain`, each missing argument's `--help` row
-  follows, then a usage line with only the command's required arguments and `Run '<app>
-  <command> --help' for all options.`, which replaces the generic `correct the arguments`
-  hint. The human error lines print context values as text, a list joined with `, `,
-  never a Python repr. JSON is unchanged but for `error.message`: `error.context.missing`
-  keeps the names, and the code and exit 2 are the same (#358)
-
-- Registering a command walks its handler's source once: the `ctx` calls, the `ctx`
-  attributes, the shell calls, and the locals that carry an argument's fields come from
-  one cached scan per handler, which registration's two reads share. Registering
-  treaty's own CLI spends about a third of the CPU time it did on these scans; every
-  registration rule's verdict is unchanged (#359)
-
-- `import treaty` no longer loads `http.client`, `ssl`, the MCP server module, or
-  `importlib.metadata`: `ctx.http`'s client loads for a `has_network_io=True` command,
-  the MCP server for an `App(mcp=)` app, and package metadata when `treaty.__version__`
-  or a manifest reads it. `treaty.McpServe`, `treaty.McpTool`, and `treaty.__version__`
-  resolve on first use, as the same objects as before (#360)
-
-### Fixed
-
-- `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,
-  `total`, and `effects`, and `dry_run` and `partial`, as typed optional fields of `Meta`
-  (`env.meta.effects`), where they used to land in the undocumented `Envelope.extra_meta`.
-  `extra_meta` keeps the `meta` keys `Meta` does not declare and refuses one it does; the
-  JSON envelope is byte for byte as before. The README and docs/api.md now describe both
-  (#348)
-
-- `treaty conformance` probes the built-in `cleanup` as the destructive command when no
-  command of the app's own is destructive, so the kit's `dry_run_preview` and
-  `destructive_refuses_unconfirmed` checks run instead of being skipped; the kit only
-  previews it or sees it refused. Without an example that has a local option, the
-  profile's `argument_order` uses the built-in `manifest --etag` (#361)
-
-- `treaty audit`'s `describe` rule checks an example of a `passthrough=True` command by
-  putting `--validate-only` before the command path, where treaty reads it (#306). It went
-  after the path, into the delegated tool's argv, so the handler ran during the audit and
-  a tool that refuses unknown options failed a valid example with `DELEGATED_EXIT`. Only
-  treaty's part is judged: the options before the path, and the path
-
-- The `http-client` audit rule only advises on a direct `requests`, `httpx`, or `urlopen`
-  client configured from `ctx.network`'s `proxies`, `proxy_for()`, or `ca_bundle`, as the
-  README recommends, so `treaty audit --strict` passes for it; the advice names the gap
-  left, a failure without `error.network_context`. A direct client with no such read on
-  the handler's path still warns (#356)
-
-### Added
-
+- `ctx.http`: `handle=` on `request`, `get`, and `post` returns a 401, 403, or 429 to the
+  handler with its headers and body, such as RFC 9457 problem details, instead of ending
+  the run with the declared `AUTH_REQUIRED`, `PERMISSION_DENIED`, or `RATE_LIMITED`; any
+  other status in it raises `ValueError` before the request is sent (#449)
 - `FormatRenderer(render, frame=True)` on a streaming command's `plain` renderer redraws a
   live view in place: at a terminal, treaty moves back up the rows the last frame took and
   clears to the end of the screen before it writes the next, with escapes it emits itself,
@@ -333,14 +298,12 @@ Not additive over rc34: see Breaking.
   file, under `NO_COLOR`, `TERM=dumb`, or CI, and in every other format, frames are
   appended as before. `frame=True` is refused at registration off `streaming=True` or on a
   format other than `plain`, and `FormatRenderer`'s `media_type=` is now optional (#350)
-
 - `RenderContext`: a renderer that takes two parameters is called `render(data, rc)`, where
   `rc.color` says whether it may color and `rc.width` is the width plain's tables are cut
   to (`COLUMNS`), or `None` when unset and in an `--output` file; a one-parameter renderer
   is called `render(data)` as before. The parameters are read once at registration, for
   `app.format`, a command's `renderers=`, and `FormatRenderer`, and any other shape is a
   `RegistrationError` naming the renderer (#357)
-
 - A streaming handler may be an async generator (`async def ... -> AsyncIterator[T]`),
   with async resources, stepped on the run's event loop. A signal, the idle timeout, or a
   reader that stops cancels the pending step before closing the generator, so its
@@ -349,34 +312,11 @@ Not additive over rc34: see Breaking.
   `--no-stream`, `App.call`, and MCP collect it as any stream; an async generator without
   `streaming=True`, and an `async def` that returns with it, are still a
   `RegistrationError` (#347)
-
 - `treaty conformance` writes probes for a `streaming=True` command, which it used to
   leave out: the `invalid` ones that exit 2 before the stream starts, such as a network
   command's `--proxy socks5://...`, and, for a safe stream, a `read` probe run with
   `--no-stream --timeout 5`, which ends with one envelope (the collected events, or
   `TIMEOUT`) within the kit's 10-second limit. A mutating stream is never run (#349)
-
-## [1.0.0rc34] - 2026-10-04
-
-The 34th 1.0 release candidate: 2 breaking changes, 5 additions, 2 changes, and 3 fixes.
-Not additive over rc33: see Breaking.
-
-### Breaking
-
-- `--format tsv` on an `external=True` command no longer writes the `_source` and
-  `_trusted` columns, on stdout or in an `--output` file, reversing what 1.0.0rc12 said
-  for tsv (#198): a consumer reading tsv by column position sees the columns shift. The
-  untrusted status is in the `UNTRUSTED_CONTENT` warning, on stderr or in the envelope
-  describing an `--output` write. `--format plain --no-stream` of an external stream now
-  prints the `(external content, untrusted)` line first and no tag columns, as a
-  buffered result does (#336)
-- With `ordered=True` on a command, the arrays inside the items of a list of dataclasses
-  or models, and inside batch item values, now keep the handler's order where they used
-  to be sorted. An app's schema lock differs for an ordered command whose typed output
-  holds arrays, since those array nodes now carry `"x-ordered": true` (#329)
-
-### Added
-
 - A `Literal` of integers, such as `sig_type: Literal[0, 1, 2]`, declares an argument
   whose values are a few numbers: argv and variable text is read as an integer and must be
   one of them, so `--sig-type 3` and `--sig-type abc` exit 2 before the handler runs;
@@ -425,52 +365,6 @@ Not additive over rc33: see Breaking.
   an ordered command, and its advice for a model's array, like the error for
   `Out(ordered=True)` on a field that is not an array, names both routes: `ordered=True`
   on the command and the per-property `json_schema_extra={"x-ordered": True}` (#329)
-
-### Changed
-
-- The click/typer migration chapter says every command runs under the app's
-  `default_timeout`, 60 seconds unless set, not only network commands, so a migrated
-  command that ran longer ends in `TIMEOUT` with exit 10: Step 1 has a command that may
-  run longer declare `timeout=` or `timeout=None`, which also gives it `--timeout` and
-  `--timeout 0`, with a check that a command on the default has no `--timeout`; "What
-  changes for the people using your CLI" and the agentyper table say the same. The
-  behaviour is unchanged (#333)
-- The `volatile-data` audit rule is looser inside records: a per-call name such as
-  `timestamp`, `fetched_at`, `request_id`, or `duration_ms` on a field inside an array
-  item (`[].timestamp`, `trades[].timestamp`) is now advice rather than a warning, since
-  there it may be a fact of the record, such as when a trade happened, so
-  `audit --strict` passes a CLI returning timestamped records. The advice hedges as the
-  date-time advice does: "if it is when the response was made rather than a fact of the
-  record". The same name at the top of the output, or in an object outside any array,
-  still warns (#332)
-
-### Fixed
-
-- A conditional rule names a positional member as `--help` does, `<market>`, and a flag as
-  `--series`: `RequiresAny(("market", "series"))` with an optional positional `market` now
-  answers `Pass at least one of <market> or --series` with the suggestion `add <market> or
-  --series`, where it suggested `--market`, which argv does not accept. `RequiresOne`,
-  `RequiredWhen`, `Excludes`, and `DefaultWhenAbsent` spell their members the same way in
-  their errors, `--help`'s Rules section, and the MCP tool description; the manifest's
-  `requires` entries and the error's `context` keep the bare field names (#331)
-
-- `--format tsv` and a format an app registers with `render=table(...)`, such as
-  `app.format(Format.CSV, render=table(","))`, no longer write the trust tags `_source`
-
-- A format an app registers with `render=table(...)`, such as
-  `app.format(Format.CSV, render=table(","))`, no longer writes the trust tags `_source`
-  and `_trusted` as the first columns of an `external=True` command's rows, on stdout or
-  in the `--output PATH` file, a stream's events and `--no-stream` included; the
-  `UNTRUSTED_CONTENT` warning says the content is untrusted. JSON, jsonl, and ndjson keep
-  the tags, and an app's own renderer still gets them in its data, as the
-  `app.format(render=)` docs now say (#336)
-
-## [1.0.0rc33] - 2026-10-03
-
-The 33th 1.0 release candidate: 4 additions and 6 fixes.
-
-### Added
-
 - `required_tools=` takes `None` as a program's version, or a plain list of names such as
   `required_tools=["bean-format"]`, for a program needed at any version, such as one
   without `--version`: `doctor` checks only that it resolves on PATH and never runs it,
@@ -509,116 +403,6 @@ The 33th 1.0 release candidate: 4 additions and 6 fixes.
   `meta.config_sources`, `--show-config`, `status`, and `config_write_scope="local"`
   writes use the file actually read; `--config` and `<APP>_CONFIG` still replace it, and
   `--show-config`, answering before any command's arguments, follows only the variable
-
-### Fixed
-
-- A run no longer crashes at startup when another treaty run sharing its session root
-  removes its own session directory while this run prunes: the listed entry's `stat`
-  raised `FileNotFoundError` out of `prune`, which promises best effort. An entry, a
-  session root, or an `out` directory that vanished mid-scan now counts as nothing to
-  prune, and `cleanup` finds no outputs in an `out` that vanished; permission errors
-  behave as before (#318)
-- A command may return a type that holds itself, such as a tree node whose `children`
-  are nodes (#298). Its output schema inlines the type where it first appears and refers
-  to it as `{"$ref": "#/$defs/Node"}` wherever it holds itself, with the definition in
-  `$defs` at the root of the output schema and of the MCP tool's envelope schema; a
-  pydantic model that holds itself keeps its `$defs` entry the same way. Recursion through
-  `X | None`, lists, tuples, dict values, and other classes works, and two classes of one
-  name get `Node` and `Node_2`. Masking, ordering, `--stable-output`, the audit, schema-lock
-  diffs, and `mcp-validate` follow the reference. A schema without recursion is unchanged
-  byte for byte. A value nested more than 400 arrays and objects deep, or one that holds
-  itself, fails the run with `INVALID_OUTPUT` naming the cause, before any data is
-  written; such a value used to crash the handler with a `RecursionError`. A recursive
-  argument type is still a registration error
-- `dict[str, V]` arguments: an object argument's field, or a flag of its own, may be a
-  mapping of free string keys to a scalar type (`str`, `int`, `float`, `bool`, `Decimal`,
-  `Path`, an enum, a `Literal`, or an `app.scalar` class) or a union of them, such as
-  `meta: dict[str, str | int] | None = None` (#299). argv takes it as one JSON object,
-  and `exec`, `--raw-payload`, `app.call(...)`, and MCP carry it as is; its schema is
-  `{"type": "object", "additionalProperties": ...}`, `anyOf` the scalars for a union.
-  Each value is checked as its type is, the first type of a union that takes it winning,
-  and every error is at its key, such as `postings[0].meta.ref`. The handler gets a
-  `dict`; a default is read-only, such as `types.MappingProxyType(...)`. A setting may be
-  one too: a TOML table, or a JSON object in its variable, a secret one redacted value by
-  value. A flag or object field named as a secret, such as `api_keys: dict[str, str]`, is
-  refused as a tuple is, since it would travel on argv, unless `secret=False`. Null
-  values, nested mappings, non-`str` keys, and a bare `dict` are refused at registration
-  with the supported shape, rather than a suggestion of `app.scalar(...)`
-
-- SIGINT or SIGTERM cancels an async handler, and any handler under a timeout, within
-  50 ms of reaching the process, where it could be held until the handler ended: or
-  forever, for an untimed async handler (#304). The main thread waited for the handler
-  in one lock wait, which a signal does not wake when its C handler ran on another
-  thread, or, on free-threaded CPython, when it lands as the wait begins; the wait is
-  now sliced. The wait for an async handler also no longer uses `threading.Event`, whose
-  Python code a signal could interrupt between its lock's releases, turning the
-  `CANCELLED` answer into a crash
-- A failure's `data` is protected as a success's is: the dataclasses an exit carries,
-  as `CliExit(data=...)`, `treaty.already_exists(...)`, or a stream's terminal failure,
-  keep their `Out(high_entropy=True)`, `Out(high_entropy=False)`, and `Out(external=True)`
-  declarations, nested, in a list, or under a key of a plain dict, in JSON, plain, `exec`,
-  `app.call`, and MCP results, with `--unmask` the only way to the raw value. So does the
-  preview a destructive command refuses without `--confirm-destructive`, which is the
-  command's output. Error data was masked only by field name and shape, so a field
-  declared `Out(high_entropy=True)` reached the error envelope unmasked. Data no
-  dataclass covers is masked by name and shape, as before (#322)
-
-- `mcp serve` stops with exit 0 and `stopped_by` naming the signal when SIGINT or SIGTERM
-  lands while it is still starting its server thread. On a loaded machine that start can
-  outlast the server's first answers, so a client that signalled right after them got
-  the CANCELLED envelope and exit 130 or 143 instead (#313)
-
-## [1.0.0rc32] - 2026-10-03
-
-The 32th 1.0 release candidate: 1 fix.
-
-### Fixed
-
-- The root `--help` Environment section and AGENTS.md name every command that reads a
-  variable of a flag several commands share, such as a `kw_only` base dataclass's
-  `Flag(env=)` flag or secret (#295): "of every command" when all the app's commands
-  read it, else their paths. They named only the first command, which suggested the
-  others ignore the variable. A command reading the variable through a flag of another
-  name is not named on that flag's line, and a keyword secret such as `pass_` is spelled
-  `--pass` there, not `--pass-`
-
-## [1.0.0rc31] - 2026-10-03
-
-The 31th 1.0 release candidate: 1 fix.
-
-### Fixed
-
-- An `App.call` made while a handler abandoned at its timeout still lives redacts what it
-  prints into a `sys.stdout` or `sys.stderr` the host put in place since the first call,
-  such as a capture (#300). The wrapper the first call left standing no longer keeps the
-  next call from wrapping the host's stream, so a secret the call's handler printed went
-  out to it in clear
-
-## [1.0.0rc30] - 2026-10-03
-
-The 30th 1.0 release candidate: 2 fixes.
-
-### Fixed
-
-- An MCP call to an unknown tool answers `UNKNOWN_TOOL` with `error.context.available`
-  listing exactly what `tools/list` lists, in its order (#289): the served command tools
-  and the tools `McpServe(tools=)` provides, which were missing. A command registered
-  `mcp=False` or left out by `McpServe(commands=)` stays off it, under `mcp serve` and
-  `treaty-mcp module:app` alike
-- Every stand-in treaty puts on `sys.stdout`, `sys.stderr`, or `sys.stdin` during a run
-  has `reconfigure()` (#288), taking `TextIOWrapper.reconfigure`'s keywords and refusing
-  any other with the real stream's `TypeError`. A library that calls it unguarded, such as
-  ansible-core's `Display`, no longer fails or warns on every run. The stdout stand-in
-  changes nothing: what a handler prints is still redacted a line at a time on stderr,
-  whatever `encoding` or `errors` it asks for. The `App.call` and no-prompt stdin
-  stand-ins pass the keywords on to the stream they wrap, where it has `reconfigure`
-
-## [1.0.0rc29] - 2026-10-03
-
-The 29th 1.0 release candidate: 1 addition.
-
-### Added
-
 - `McpServe(bind=bind)` fixes arguments of the command tools `mcp serve` serves for the
   run (#285): `bind(args)` returns field values from the startup arguments, and every
   served command tool with that field runs with the value, checked on each call as a
@@ -630,21 +414,6 @@ The 29th 1.0 release candidate: 1 addition.
   --serve-args` show the bound schemas; provided tools are unaffected. `treaty-mcp
   module:app` refuses an app that binds, exit `4` with `MCP_BIND_NEEDS_SERVE`, serving or
   listing: it has no startup arguments to bind from, so the app's own `mcp serve` serves it
-
-## [1.0.0rc28] - 2026-10-03
-
-The 28th 1.0 release candidate: 1 fix, 2 additions, and 1 change.
-
-### Fixed
-
-- A `RequiredWhen` rule on a boolean with `False`, the manifest's `if_value: false`, now
-  fires on an explicit false (#241): `--no-x`, or `"x": false` in `--raw-payload`, `exec`,
-  and `App.call`. It compared the value only once the flag was present, and a boolean is
-  present only when true, so the rule never fired. A left-out flag still does not trigger
-  it, as cli-agent-spec#52 settles. Its error and `--help` line read `--no-x requires
-  --y`, and CI pins the spec at that change
-### Added
-
 - `McpServe(commands=select)` chooses the commands `mcp serve` serves as tools from its
   startup arguments (#281): `select(args)` returns command paths, None serves every
   command, and an empty collection only the provided tools. A path the app does not have
@@ -654,109 +423,6 @@ The 28th 1.0 release candidate: 1 fix, 2 additions, and 1 change.
   `treaty-mcp` alike, whatever `select` returns: a command a person must run, such as an
   approval. The manifest ends its description with `(not an MCP tool)`, since
   `CommandEntry` has no key for it
-
-### Changed
-
-- The `cleanup`, `generate-skills`, and `audit-log` built-ins are no longer MCP tools
-  (`mcp=False`); an app command at one of those paths is served as before. A provided tool
-  may not take the name of any command, served or not (before, `exec`, `completion`, and
-  a passthrough command's names were free), and an old name `redirect` keeps answers
-  `REDIRECTED` over MCP only toward a served tool, else `UNKNOWN_TOOL`
-
-## [1.0.0rc27] - 2026-10-03
-
-The 27th 1.0 release candidate: 1 fix.
-
-### Fixed
-
-- A declared secret split by a terminal escape, such as `hunte\x1b[0mr2`, no longer
-  reaches stderr or the envelope whole (#277): it was redacted while the escape still hid
-  it, and became whole once the escape was cleaned away, or showed whole on a terminal
-  that kept it. The `--heartbeat-interval` status, `ctx.log` and `ctx.progress` lines in
-  every format, `ctx.warn` warnings, and a crashed handler's message and traceback were
-  affected. Redaction now also looks at the text without its escapes,
-  and where that finds a secret, the text goes without them; the heartbeat status is
-  redacted, cleaned, and redacted again before its 200-character cut, and a traceback
-  is redacted before its escapes are written out as `\x1b`. A refused setting's message
-  is redacted the same way, the longest secret first. Cleaning takes an escape a
-  terminal hides whole out whole: the charset reset `\x1b(B` that `tput sgr0` writes,
-  `\x1b7`, and a DCS, SOS, PM, or APC string left their rest as text, and a secret one
-  split reached a host's stream whole through `App.call`
-
-## [1.0.0rc26] - 2026-10-03
-
-The 26th 1.0 release candidate: 2 fixes.
-
-### Fixed
-
-- What reaches descriptor 1 as the process exits, a handler thread abandoned at its
-  timeout still alive, is no longer lost (#271): a host's exit hook that runs after
-  treaty's, or the interpreter's last flush of `sys.__stdout__`, wrote to the pipe after
-  its reader had stopped with the interpreter. Treaty's exit hook, now registered as
-  treaty is imported so it runs after every hook registered later, turns descriptor 1 to
-  a spool file and passes what reaches it on to stderr, redacted, as the last held thread
-  ends or at the interpreter's last flush; once no held thread lives, descriptor 1 is
-  stdout again. It never leads to stdout while one does
-
-- A declared secret that the `THIRD_PARTY_STDOUT` warning's 4096-character cut split no
-  longer leaves its first part in the warning, its `-vv` trace, or stderr (#274): the
-  printed text was cut before it was redacted, so the secret was no longer whole. The
-  text is now kept past the cut, redacted whole, and only then cut; where even that text
-  was cut, its end, which may hold the start of a secret, goes first.
-  `SHELL_STRING_PROHIBITED` quotes the shell string whole in `context.argv`, rather than
-  its first 200 characters, for the same reason
-
-## [1.0.0rc25] - 2026-10-03
-
-The 25th 1.0 release candidate: 2 fixes.
-
-### Fixed
-
-- `--debug` with a `logging.handlers.QueueListener` whose handler writes to `sys.stdout`
-  no longer floods stderr (#268): the listener's thread wrote each `stdout write` trace
-  record back to stdout, which traced it again, tens of thousands of lines a second. A
-  write made while a handler emits one of treaty's own trace records now goes to stderr
-  as written, on any thread; the record's own text is still traced once, redacted
-- As the process exits with a handler thread abandoned at its timeout still alive, the
-  last flush of `sys.stdout` no longer risks blocking the exit (#268): descriptor 1 is
-  then a pipe whose reader stops as the interpreter finalizes, and on Windows its 4 KiB
-  buffer could not hold the flush. The pipe now holds 1 MiB on Windows and Linux
-
-## [1.0.0rc24] - 2026-10-03
-
-The 24th 1.0 release candidate: 4 fixes.
-
-### Fixed
-
-- A secret used as a mapping key is redacted as it is as a value (#262): a string or
-  numeric secret as a key in `Exit` context, a warning's context, a `ctx.log` field, the
-  audit log's arguments, or an `exec_fallback` line's error context and data came back
-  raw, and now reads `[REDACTED]` (or with the secret's text replaced inside it); a key of
-  another type, such as a tuple, is read by the text JSON prints it as. Two keys
-  that redact to the same text both stay, the later one as `[REDACTED]#2`, `#3`, and so
-  on. Command `data` is still not redacted (REQ-F-034)
-- `--debug` with a log handler that writes to `sys.stdout`, such as
-  `logging.StreamHandler(sys.stdout)` added in a handler, no longer recurses until
-  `RecursionError` (#263): the handler's copy of a `stdout write` trace record goes to
-  stderr once, redacted, instead of being traced again
-- What a handler thread abandoned at its timeout writes to descriptor 1 as the process
-  exits, after `App.main()` has written its envelope, reaches stderr redacted instead of
-  stdout in the clear (#263): descriptor 1 stays a pipe to stderr until the last such
-  thread ends, and what the thread wrote is passed on before its secrets are forgotten
-- Under `App.call`, a secret a handler prints split across two writes no longer reaches
-  the host's stream unredacted (#261): what the call's threads print, on the calling
-  thread, a handler worker, or a handler thread held past its timeout, is passed on a line
-  at a time, each thread's held apart, as printed text is under `main()` and `exec`. A line
-  without its end waits for the end (a carriage return too), for the call to return, or
-  for a held thread to end; past 64 Ki characters it is passed on but for its tail. The
-  text keeps its escapes as before
-
-## [1.0.0rc23] - 2026-10-02
-
-The 23th 1.0 release candidate: 2 additions and 2 fixes.
-
-### Added
-
 - `App(mcp=McpServe(args=ServeArgs, setup=..., exit_codes=...))` adds the `mcp serve`
   built-in (#239): an app serves its commands as MCP tools over stdio as one of its own
   commands, with startup flags parsed, validated, and listed in `--schema` like any
@@ -768,7 +434,6 @@ The 23th 1.0 release candidate: 2 additions and 2 fixes.
   exit 0 and one audit log entry for the run. The manifest marks the
   command's stdout as a protocol in its description; `exec` and `App.call` refuse it with
   `NEEDS_STDIO`
-
 - `McpServe(tools=provide, instructions=...)` serves tools from runtime data beside the
   command tools (#240): `provide(args, ctx)` runs once as serving starts and returns
   `treaty.McpTool` values, each with a name, a description, an input JSON Schema that
@@ -786,39 +451,6 @@ The 23th 1.0 release candidate: 2 additions and 2 fixes.
   startup arguments.
   `mcp serve --list-tools` prints the tool list, provided tools included, and
   `mcp-validate --serve-args` compares them
-
-### Fixed
-
-- A numeric secret, such as an `int` secret flag, is redacted by value, not only inside
-  strings: echoed as a number in `Exit` context, a warning's context, a `ctx.log` field,
-  the audit log's arguments, or an `exec_fallback` line's data, it came back raw, and now
-  reads `[REDACTED]`. An equal number matches (987654.0 is the secret 987654), and so does
-  one whose spelling holds it, as a string's does (-987654, 9876540); a number
-  spelled in fewer than 4 characters stays, as a short string secret does, and a bool is
-  never one
-
-- Printed text, from `print()` or `sys.stdout.write`, reaches stderr a line at a time,
-  redacted whole, as descriptor 1's text does: a declared secret split across two writes
-  went to stderr in the clear. A partial line now waits for its newline or carriage
-  return, the next envelope, or the run's end, so a `ctx.log` line written in between
-  comes first. Each line of a multi-line secret, such as a PEM key, with at least 4
-  characters besides its indentation, is redacted on its own too, so the key written a
-  line at a time by `print`, `os.write(1, ...)`, or a child process no longer reaches
-  stderr line by line (#256)
-
-## [1.0.0rc22] - 2026-10-02
-
-The 22th 1.0 release candidate: 2 additions, 3 changes, 1 fix, and 1 breaking change. Not
-additive over rc21: see Breaking.
-
-### Breaking
-
-- Per-command `--schema` no longer has `requires_groups`: its `requires` lists a command's
-  `RequiresAny` and `RequiresOne` rules as `{"any_of": [...]}` and `{"one_of": [...]}`
-  among its other rules, as the manifest does, so a consumer reads `requires` alone
-
-### Added
-
 - `ctx.network.timeout(own)` and `ctx.network.fits(seconds)` hand a client of the
   handler's own, such as a library's `requests.Session`, the command's deadline:
   `timeout=ctx.network.timeout(30)` is `min(30, ctx.remaining)`, exiting 10 `TIMEOUT`
@@ -826,144 +458,11 @@ additive over rc21: see Breaking.
   still ends in time, so a retry budget stops and the handler answers with the failure
   it got instead of `TIMEOUT`. Both take seconds or a `treaty.Timeout`. The README shows
   the recipe for `requests`, `httpx`, and a urllib3 `Retry` (#237)
-
 - The `network-timeout` audit rule advises on a `has_network_io=True` command whose
   handler reaches none of `ctx.http`, `ctx.remaining`, `ctx.timeout`,
   `ctx.network.timeout()`, `ctx.network.fits()`, and `ctx.run`: a client of its own may
   wait longer than `--timeout` allows, with the fix `timeout=ctx.network.timeout(30)` per
   call (#237)
-
-### Changed
-
-- `ctx.remaining` ends a reserve before the command's hard limit: a tenth of the timeout,
-  at least 100 ms and at most 2 s, and never more than half of it. `ctx.http`, `ctx.run`,
-  `ctx.pipeline`, `ctx.lock`, `ctx.retry`, and an async handler's cancellation all stop at
-  that deadline too, so a handler that catches a call cut at its deadline still has time
-  to return its partial result before exit 10 `TIMEOUT`. `ctx.remaining` reads that much
-  less than before and `ctx.expired` turns true that much sooner; the hard limit and
-  `meta.timeout_ms` are unchanged
-
-- The README and the conditional rules' docstrings say a boolean flag counts toward
-  `RequiresAny`, `RequiresOne`, and `Excludes` only when true: an explicit `--no-x`, or
-  `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
-  unchanged, and a test pins it (#241)
-
-### Fixed
-
-- A `ctx.http` request ends at the deadline as a whole, not only each socket read: a server
-  that sent its answer a little at a time kept a request running seconds past the time
-  left, so a handler watching `ctx.remaining` lost its partial result to `TIMEOUT`. The
-  connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
-  when a body without a length would have looked complete
-
-- A declared secret written straight to descriptor 1, by C code, `os.write(1, ...)`, or a
-  child process that inherited it, reaches stderr redacted, as printed text does; it went
-  there in the clear. The interceptor redacts a line at a time, so a secret split across
-  two writes or two reads of the pipe is still caught, and passes on a line without its end
-  when the next envelope is written or the run ends, while the run's secrets are still
-  known; bytes that are not UTF-8 pass through unchanged around it (#254)
-
-## [1.0.0rc21] - 2026-10-02
-
-The 21th 1.0 release candidate: 1 fix.
-
-### Fixed
-
-- The long-running work chapter's `import-all` starts a feed only when the time left is at
-  least twice the slowest feed so far took, not just the last one's duration, which started
-  a feed with no room for it to run slower: on a loaded machine that feed ran into the
-  limit and the run exited 10 with `TIMEOUT`, losing the result of the feeds already
-  imported. The chapter explains the margin, and its tests time one feed on the runner and
-  set their limits from it, so a loaded runner's first feed does not outlast a limit fixed
-  in seconds
-
-## [1.0.0rc20] - 2026-10-02
-
-The twentieth 1.0 release candidate: 2 changes.
-
-### Changed
-
-- The manifest's `requires` lists a command's `RequiresAny` and `RequiresOne` rules as the
-  `ConditionalRule` shapes `{"any_of": [...]}` and `{"one_of": [...]}` (ManifestResponse
-  3.2), in declaration order among its other rules, so an agent reading the manifest alone
-  sees that one of the group's flags is required. `--schema`'s `requires` lists them too,
-  and keeps `requires_groups`; a manifest without such rules is unchanged
-- An `Excludes` between two flags of one `RequiresOne` fails registration: the `one_of`
-  already forbids the pair and replaces the pairwise rule (REQ-C-026), so the manifest
-  never lists both and a call is never refused twice for one mistake
-
-## [1.0.0rc19] - 2026-10-02
-
-The nineteenth 1.0 release candidate: 1 change and 1 fix.
-
-### Changed
-
-- The manifest is ManifestResponse 3.15, the version CI's spec pin defines, and states in
-  keys what it said in descriptions: `idempotent: true` (3.15), `confirm_flag` naming a
-  `Flag(confirm=True)` (3.14), `stderr: "child_log"` (3.11), and a passthrough command's
-  `arguments: "passthrough"` with `help_argv` from `help_command=` (3.9), each in place of
-  its sentence in the command's or the flag's description. A passthrough entry's `flags` is
-  empty, since its flags go before the path as global options do; `--schema` still lists
-  them, and `treaty audit --baseline` does not report them removed. `output_file` is
-  `"envelope"` on a passthrough command and `"handler"` where the app's own `output` field
-  takes the path (3.6), and `output_file_base` is `project_root` or `resource` when a
-  relative `--output` does not land in the working directory (3.7). An object flag is
-  `type: "object"` (an `array` of them stays `array`) with the value's `schema`, in place
-  of `string` and its shape in the description (3.7). `stdin` declares the mode of every
-  command that reads stdin, `buffered`, `lines`, or `records` with its `record_schema`, the
-  `exec` built-in's `buffered` included, with `max_bytes` or `max_line_bytes` when the app
-  changed the cap (3.8). The root `format` flag's `media_types` names what each value
-  outside the spec's table writes: an `app.format(media_type=)` and treaty's own `ndjson`,
-  `csv`, `yaml`, and `markdown`; a command's `output_media_types` names what its own formats
-  write, in place of the "--format html writes text/html" sentences (3.12). A secret setting
-  is in the root `secret_env_vars` with its declared names (3.13). An app without these
-  features sees `schema_version`, the etag, the `format` flag's `{"ndjson":
-  "application/x-ndjson"}`, and `exec`'s `stdin` change. The MCP `idempotentHint` is true on
-  an `idempotent=True` command too, not only a `safe` one. `child_log=True` on a passthrough
-  command, and an `app.format` or `FormatRenderer` media type for `plain` or `tsv` other
-  than the spec's, are now a `RegistrationError` (#231)
-
-### Fixed
-
-- A `stdin_records=` command ends its input at REQ-O-004's `{"_summary": true, ...}` line
-  after bare records, as the manifest's `stdin` mode `records` tells an agent to feed it,
-  instead of failing that line with `RECORD_INVALID`. A passthrough command that also sets
-  `output_file=` is `output_file: "envelope"` in the manifest, as its `--output` file holds
-  the envelope, not `"formatted"`. `treaty changelog-add` no longer records an upgrade to
-  this manifest as breaking for a passthrough command's flags, now listed before its path,
-  or an object flag's new `object` type, which takes the same argv token. A secret field
-  that shares a secret setting's `<APP>_<NAME>` no longer repeats it in the command's
-  `secret_env_vars`, as the root `secret_env_vars` lists it (#231)
-
-## [1.0.0rc18] - 2026-10-02
-
-The eighteenth 1.0 release candidate: 1 change and 1 fix.
-
-### Changed
-
-- `@app.command(..., idempotent=True)` registers on a `safe` or `destructive` command, as
-  REQ-C-002 requires, instead of raising `RegistrationError`. On a `safe` command it is
-  redundant and accepted without warning; on any danger level the manifest description
-  ends with the idempotent note, and the declared exit codes are unchanged. The
-  `retryable` audit rule passes an idempotent destructive command's retryable codes as it
-  does a mutating one's, and its fix on a destructive command now names `idempotent=True`
-  too (#226)
-### Fixed
-
-- `cleanup` no longer removes an `output`, `credential`, or `config` path that its
-  declaration reaches through a symlink it never removes through, such as a
-  `{project_root}/tmp/dashboard/` output whose `<project>/tmp` links to a scratch directory
-  another command declares as `temp`: the match still joins the kept set by its resolved
-  path. A path a `temp`, `cache`, or `log` glob spells in another case on a
-  case-insensitive filesystem is compared by file identity too, so it no longer slips
-  past the kept check (#227)
-
-## [1.0.0rc17] - 2026-10-02
-
-The seventeenth 1.0 release candidate: 2 additions.
-
-### Added
-
 - `SideEffect(path, "output")` declares a location a command writes as its product, such
   as a rendered dashboard under `{project_root}/tmp/dashboard/`, including its default when
   `--output` is absent; a per-call `--output` path stays declared by `output_file=`. The
@@ -988,56 +487,6 @@ The seventeenth 1.0 release candidate: 2 additions.
   run with its counts in `effects`. A `destructive` stream, and a streaming command with
   `config_write_scope=`, are still refused at registration. Implements cli-agent-spec
   ResponseEnvelope 2.2 and AuditLogEntry 1.1 (#175)
-
-## [1.0.0rc16] - 2026-10-02
-
-The sixteenth 1.0 release candidate: 1 fix.
-
-### Fixed
-
-- Security: a handler's own `print()` or `sys.stderr` write during `App.call` no longer
-  reaches the host's streams with its secrets in it, on the calling thread, on the worker
-  a timeout runs it on, or in the window between its timeout and the call's return. While
-  an `App.call` runs, `sys.stdout` and `sys.stderr` redact what the call's threads write of
-  every live run's and handler thread's secrets, and keep it on the stream it was written
-  to; `App.call`'s envelope is unchanged. Other threads' writes, and bytes written through
-  `.buffer`, pass through untouched, `app.run`'s own stand-in keeps `sys.stdout`, and the
-  streams are restored as the call returns, unless the host replaced one meanwhile. A
-  worker that outlives its timeout hands over to the late wrapping of #135. Under
-  `treaty-mcp`, whose `sys.stdout` is stderr, a handler's print is now redacted there
-  (#141)
-
-## [1.0.0rc15] - 2026-10-02
-
-The fifteenth 1.0 release candidate: 1 change and 1 fix.
-
-### Changed
-
-- A command's manifest `output_formats` lists every format it takes beyond `json`,
-  `jsonl`, `tsv`, `plain`, and `ndjson`: `id` where it has an `id_field`, the formats it
-  inherits from `app.format(...)`, then its own. An agent assumes no format the entry
-  leaves out, so a command of an app registering `csv` read as one that cannot write it.
-  The manifests and `--schema` of apps that register a format change: each entry gains
-  those names; other apps' manifests are unchanged. `<APP>_FORMAT=id` is passed over by a
-  command without an `id_field`, which answers in its default instead of exiting `2`, as
-  for another command's own format; `--format id` there still exits `2`, and neither its
-  `--help` nor its shell completion offers it (#216)
-### Fixed
-
-- The `declared-exits` audit rule follows a method called on a parameter annotated with
-  the args class or a resource class, such as `store.load()`, and the methods it calls on
-  its own `self`, so the tutorial's `STORE_CORRUPT`, raised in `Store.load`, is found when
-  a command does not declare it, instead of failing only at run time as
-  `UNDECLARED_EXIT_CODE`. A method on an object of unknown class, or on a parameter the
-  function binds again (a loop target, a nested function's parameter), is not followed
-  (#218)
-
-## [1.0.0rc14] - 2026-10-02
-
-The fourteenth 1.0 release candidate: 3 additions.
-
-### Added
-
 - The `declared-exits` audit rule warns for each exit code a command's handler raises
   without declaring it, which passed `treaty audit --strict` and failed only at run time
   as `UNDECLARED_EXIT_CODE`. It reads `Exit.NAME` and `CliExit(ExitCodeName("NAME"))` in
@@ -1046,14 +495,12 @@ The fourteenth 1.0 release candidate: 3 additions.
   code never raised stays silent. An exit in the args class's `__post_init__` is reported
   declared or not, as the run reports it as `HANDLER_CRASHED`; the fix is a `ParseError`
   (#211)
-
 - `@app.command(..., idempotent=True)` declares that a repeat of a mutating command with
   the same arguments leaves the same state: the `retryable` audit rule passes its
   retryable codes, and its manifest description says so, as the spec's CommandEntry has
   no key for it. The rule's fix names the option instead of asking to "confirm" the
   command is idempotent. A safe or destructive command refuses it, and it changes no run:
   `--idempotency-key` still replays the first result (#210)
-
 - A command's `renderers=` can name a format the app does not register, such as
   `renderers={"html": render_page}`: that command alone offers it. Its manifest entry
   lists it in `output_formats`, its `--help` and completion offer it, and the root
@@ -1063,13 +510,6 @@ The fourteenth 1.0 release candidate: 3 additions.
   media_type="text/html")` states what a command's renderer writes, in its manifest
   description, as the output_formats list has no room for it. A command's renderer still
   wins over the app's for a name both declare (#209)
-
-## [1.0.0rc13] - 2026-10-02
-
-The thirteenth 1.0 release candidate: 2 additions and 3 fixes.
-
-### Added
-
 - A mutating command can preview unless its own confirmation flag is passed:
   `yes: bool = Flag(confirm=True, description=...)`. Without `--yes` the run is a dry run
   under the `--dry-run` contract: a `would_*` effect, `meta.dry_run: true`, and nothing
@@ -1081,7 +521,6 @@ The thirteenth 1.0 release candidate: 2 additions and 3 fixes.
   other than `False`, with `env=` (a variable left set would confirm every run), or
   beside a `dry_run` switch is a `RegistrationError`. The audit log records a preview's
   `args` with `dry_run: true` (#197)
-
 - A `SideEffect` path may start at the project: `SideEffect("{project_root}/tmp/dashboard/",
   "cache")` on a command declaring `project_root=` markers, so a safe command that writes
   its regenerated reports under the project can declare them and pass `fs-side-effects`.
@@ -1090,90 +529,6 @@ The thirteenth 1.0 release candidate: 2 additions and 3 fixes.
   the cwd, and `cleanup` never follows a symlink out of the project. A project path on a
   command without markers, or one reaching out with `..`, is a `RegistrationError`. The
   manifest carries the template as declared (#184)
-
-### Fixed
-
-- Commands that run children at the same time from several threads no longer crash on
-  Windows with `PermissionError: [WinError 5] Access is denied` rewriting the session's
-  `children.pids`, and no longer lose a child's pid from it on any platform: the
-  rewrites of the file take turns, and a rename another process blocks for a moment is
-  retried (#213)
-
-- `--help` shows a control character, terminal escape, or Unicode bidi override in the
-  app's own text (the app, group, command, and flag descriptions, and the examples) as its
-  escape, such as `\x1b` or `\u202e`, as plain output does, instead of writing it to the
-  terminal; newlines and tabs keep their layout. The zsh completion menu's descriptions
-  are escaped the same way (#203)
-
-- Plain output no longer prints the trust tags of external content as data: the data
-  block of an `external=True` command, and the stderr error block of a context with
-  `treaty.External`, show one `(external content, untrusted)` line instead of
-  `_source: external` and `_trusted: false`, in a table too, and so does a plain
-  `--output` file. JSON, jsonl, ndjson, and tsv keep the tags, and a field named
-  `_source` on a command that is not external still prints. A boolean in the stderr error
-  block reads `true` or `false`, as in the rest of plain output, not Python's `True` or
-  `False` (#198)
-
-## [1.0.0rc12] - 2026-10-01
-
-The twelfth 1.0 release candidate: 1 change, 7 fixes, 5 additions, and 3 breaking changes.
-Not additive over rc11: see Breaking.
-
-### Changed
-
-- The README says a passthrough command's delegated parser follows its own colour rules:
-  Python 3.14's argparse colours its help when `FORCE_COLOR` is set, even off a terminal,
-  and `NO_COLOR` turns that off (#170)
-### Fixed
-
-- An `app.output_adapter` type raised as a failure's data, `raise Exit.X(..., data=obj)`,
-  keeps the array order its schema declares with `x-ordered`, nested arrays included, as it
-  does when returned; before, every array in it was re-sorted. A dataclass keeps its
-  `Out(ordered=True)` order as before, and a plain dict is still sorted (#181)
-### Fixed
-
-- A `mutating` or `destructive` command may return a class an `app.output_adapter` writes,
-  when the adapter's schema lists `effect` (and `would_affect` for a destructive command):
-  registration failed with "must return an object with an 'effect' field" whatever the
-  schema said. Each run checks the dumped object's `effect` and `would_affect` as it checks a
-  dataclass's, so `would_*` dry runs, `meta.dry_run`, the destructive preview, and the
-  idempotent `noop` replay hold. An adapter schema that lists the key as `x-volatile`, which
-  `--stable-output` leaves out, is a `RegistrationError` saying so; the same holds for
-  `open_url`, `background_pid`, and `cleanup_command` (#183)
-### Fixed
-
-- The `stable-order` audit rule warns about a `list[X]` or `tuple[X, ...]` of a class an
-  `app.output_adapter` writes, returned by a command with neither `sort_key=` nor
-  `ordered=True` or held in a dataclass field with no `Out(sort_key=...)` or
-  `Out(ordered=True)`, as it does for dataclasses: treaty re-sorts such an array by its
-  items' JSON text, so a ranking such as search results lost its order with a clean audit.
-  The fix names `sort_key=` for a stable listing and `ordered=True` for a ranking; a
-  dataclass array's fix now says the same. `treaty audit --strict` may now flag an adapted
-  list whose order is not declared, including one nested in a dataclass field or a dict;
-  `ordered=True` or `sort_key=` on the command (or `treaty.Out(...)` on the field) clears
-  it (#182)
-### Fixed
-
-- The `recursive-traversal` audit rule no longer warns that a circular symlink can loop
-  `Path.rglob()`, `Path.walk()`, `os.walk()`, or `os.fwalk()`, which do not enter a
-  symlinked directory unless asked, nor `shutil.rmtree()`, which never does. The loop
-  warning stays for a call passing `recurse_symlinks=`, `follow_symlinks=`, or
-  `followlinks=` as anything but a literal false (by name, by position, or in a `**`
-  mapping), and for `glob(..., recursive=True)` and `shutil.copytree()`. A walk that cannot
-  loop is advice instead: no `--max-depth` bounds it. `os.walk` is recognized under an alias such as
-  `from os import walk as w`, and a module-level `walk` that is not a directory walk, such
-  as `ast.walk`, is no longer flagged (#180)
-### Fixed
-
-- Plain output, tables, TSV and CSV cells, stderr error lines, log lines, and printed text
-  show the Unicode bidirectional embeddings, overrides, and isolates (U+202A to U+202E,
-  U+2066 to U+2069) as escapes such as `\u202e`, as they show C0 and C1 controls. Printed
-  raw, one reordered how the rest of its line displays, so a crafted value could make a
-  row read differently from what it holds; a table counted them as no width. The LRM, RLM,
-  and ALM marks stay text, since right-to-left prose uses them, and JSON keeps all of them
-  as data (#177)
-### Added
-
 - `ctx.run(argv, stream="always")` writes a long child's lines to stderr as plain text as
   they arrive, in any `--format` and verbosity, where `stream=True` makes them `ctx.log`
   lines that an agent off a terminal never sees, and sees as JSON log records under `-v`.
@@ -1183,8 +538,6 @@ Not additive over rc11: see Breaking.
   `@app.command(..., child_log=True)`, without which `stream="always"` raises
   `RegistrationError`, and its manifest description then says stderr carries the child's
   log, since the spec's CommandEntry has no key for it. `stream=True` is unchanged (#173)
-### Added
-
 - `ctx.network`, a `treaty.NetworkSettings`, hands a `has_network_io=True` handler's own
   HTTP client, such as a library's `requests.Session`, the settings `ctx.http` goes out
   with, so `--proxy` and `--no-proxy` reach it too: `proxies`, a `requests`-style
@@ -1196,29 +549,6 @@ Not additive over rc11: see Breaking.
   `has_network_io=True` is a `RegistrationError`, as `ctx.http` is. The `http-client` audit
   rule now advises on a network command whose handler reaches none of `ctx.http`,
   `ctx.network`, and `ctx.run`, since `--proxy` would not reach a client of its own (#171)
-
-### Fixed
-
-- A malformed proxy setting no longer shows its password in the `PROXY_INVALID` or
-  `--proxy` error: one written without a scheme (`user:pass@host:port`), or whose password
-  holds a `/`, `?`, or `#`, now loses everything up to its last `@`
-- `NO_PROXY` matches an IPv6 host, bare (`::1`) or in brackets (`[::1]`, `[::1]:8080`),
-  and a `host:port` entry matches a URL that names no port when the port is the scheme's
-  own, as `example.com:443` does `https://example.com/`; `ctx.http` and `ctx.network` both
-  follow it
-### Breaking
-
-- `SUBPROCESS_FAILED` marks its `context.stderr` as content from outside the tool:
-  `error.context` gets `"_source": "external", "_trusted": false`, a stderr that is a
-  high-entropy value is masked, and a handler that catches the `CliExit` from `ctx.run`
-  finds `treaty.External` in `exc.context["stderr"]`, the text in its `.value` (#174)
-- A failure's `data` on an `external=True` command, from `raise Exit.X(..., data=...)`, a
-  destructive preview, or a partial run of steps, is tagged
-  `"_source": "external", "_trusted": false` with an `UNTRUSTED_CONTENT` warning, as a
-  success's is; before, only a success's `data` and a batch's were (#174)
-
-### Added
-
 - `treaty.External(value)` marks a top-level value of a failure's `error.context` as
   content from outside the tool, such as the play log of a failed child:
   `raise Exit.PLAYBOOK_FAILED(msg, context={"output": External(tail)})`. A marked value is
@@ -1230,20 +560,6 @@ Not additive over rc11: see Breaking.
   so its text never reaches the agent unmasked. The `external-data` audit rule also warns when a
   `context=` value is built from a `ctx.run` result's `stdout` or `stderr` without
   `External`, whatever the command declares (#174)
-### Breaking
-
-- A plain flag that declares `Flag(env=(...))` reads its own `<APP>_<NAME>` first, then the
-  declared names in order, as a secret and a setting already do: with both
-  `CLOUDFALL_PROJECT` and `DEPLOYCTL_PROJECT` set, `--project` takes `DEPLOYCTL_PROJECT`,
-  where rc11 read only `CLOUDFALL_PROJECT`. The spec's REQ-F-073 allows a variable outside
-  the prefix only after the prefixed name. A flag without `env=` still reads no variable.
-  The flag's `<APP>_<NAME>` is now a variable it reads, so a registration where a setting,
-  a framework option, or another command's secret or token reads it too is a
-  `RegistrationError`, as is naming it in `env=`; a deprecated name's warning names it as
-  the replacement instead of the flag (#178)
-
-### Added
-
 - The manifest is ManifestResponse 3.5. A flag that reads variables lists them in
   `env_vars`, `{name, deprecated?}` in precedence order with `<APP>_<NAME>` first, in place
   of the "(read from $A or $B when not passed)" prose in its description; `--format`,
@@ -1268,13 +584,6 @@ Not additive over rc11: see Breaking.
   `Format.PLAIN` for both. `--output` is argv only (an `exec` line and `App.call`
   refuse an `output` key), so the refusal of `--output html` covers every path that
   writes a file (#179)
-
-## [1.0.0rc11] - 2026-10-01
-
-The eleventh 1.0 release candidate: 4 additions and 1 change.
-
-### Added
-
 - A settings field can keep a variable its users already export, outside the app's prefix:
   `Flag(default=..., description=..., env=("BEANCOUNT_FILE",))` reads the declared names in
   order after `<APP>_<FIELD>` and before the config files. `--show-config` reports the
@@ -1319,41 +628,6 @@ The eleventh 1.0 release candidate: 4 additions and 1 change.
   `schema_version` is `"3.3"`; the spec's 3.2 adds `ConditionalRule` `any_of` and
   `one_of`, which treaty's manifest does not emit, as only `--schema` shows a group rule
   (#10)
-
-### Changed
-
-- `--format plain` without a renderer prints a list of objects whose values are all
-  scalars as an aligned table: a header of the field names in the output dataclass's
-  field order, one row per object, numbers and `Decimal` fields right-aligned, `null` as an
-  empty cell, and `(no rows)` for an empty `list[T]`. A list of models an output adapter
-  writes, such as pydantic's, is a table in the order its dump writes the keys, its
-  integer and number properties right-aligned. Fifty items read as fifty lines instead of
-  fifty `key: value` blocks. When `COLUMNS` is a positive integer, a wider
-  table cuts its widest text column with an ellipsis, down to four cells, and never cuts a
-  number; `COLUMNS` joins the unprefixed conventions, so AGENTS.md lists it beside
-  `NO_COLOR` and `TERM`. `Out(table=False)` leaves a field out of the table without
-  touching JSON or the output schema. A list holding a nested value keeps the
-  `key: value` blocks; JSON, `jsonl`, `ndjson`, and `tsv` do not change. Upgrading: rerun
-  `treaty agents-md` on each app after upgrading, or `treaty check-docs` exits 81 on the
-  Environment Variables section of its AGENTS.md, which now lists `COLUMNS` (#8)
-
-## [1.0.0rc10] - 2026-10-01
-
-The tenth 1.0 release candidate: 5 fixes and 11 additions.
-
-### Fixed
-
-- A warning reaches stderr in a text format: under `--format plain`, `tsv`, or a format
-  an app registers with `app.format`, the stdout text has no room for the envelope's
-  `warnings`, so a `ctx.warn` call, or a framework warning such as `CWD_CHANGED` or
-  `CLEANUP_FAILED`, was lost. Each is now one `warning: <CODE>: <message>` line on stderr
-  after the result, redacted and cleaned of escapes as a `ctx.log` line is, and kept off
-  by `--quiet`; a stream writes each once, after the event it arrived with. A warning
-  treaty already writes in text mode, such as a deprecated flag's notice, the
-  `--no-injection-protection` notice, or a `--token-limit` cut, is not written twice.
-  stdout and the exit code are unchanged (#152)
-### Added
-
 - Object arguments: a flag annotated with a frozen dataclass, `X | None`, or
   `tuple[X, ...]` takes a structured record, nesting other objects and lists of them up to
   8 deep. `exec` lines, `--raw-payload`, `app.call(...)`, and MCP carry it as a JSON
@@ -1368,8 +642,6 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   `postings[].token`, so it becomes a top-level flag read from `--x-from-env` or
   `--x-from-file`. An object flag cannot be positional, a secret, a setting, or a
   `Subprocess(user_controlled_args=)` field (#6)
-### Added
-
 - `app.output_adapter(base, schema=..., dump=...)` lets a handler return a class treaty
   does not know, such as a pydantic `BaseModel`, with no dataclass mirror: one
   registration covers every subclass, returned at the top, in a `list` or `tuple`, as
@@ -1409,8 +681,6 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   The `THIRD_PARTY_STDOUT` warning still counts the bytes as written. `ctx.run`'s
   `stream=True` lines and a failed child's stderr already reached stderr cleaned, now
   covered by tests; `Completed.stdout` and `stderr` stay as the child wrote them (#117)
-### Added
-
 - `stdin_input="lines"` reads a command's input one line at a time: `ctx.stdin_lines`
   yields each line as the producer writes it, with no total cap, so an NDJSON pipeline
   streams instead of hitting the 64 KiB `STDIN_TOO_LARGE` cap of `stdin_input=True`,
@@ -1431,45 +701,6 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   fails its fields exits 1 with `RECORD_INVALID`, `context.line`, and `context.field`. A
   paged or cut upstream response adds an `UPSTREAM_TRUNCATED` warning. `--schema` gives
   the record type as `stdin_records_schema` (#32)
-
-### Fixed
-
-- A `streaming=True` command with `stdin_input=True` gets its payload: `ctx.stdin_text`
-  was always None, as the stream never read stdin (#33)
-- Security: a phase 1 error written by app code no longer carries a secret value it
-  quotes. A `ParseError` or `InvalidValue` raised from an args `__post_init__` sees every
-  secret argument in the clear, and its message, suggestion, `errors[]` items, and context
-  values reached the envelope as written. They are now redacted of the run's secret
-  values, as a handler's error is, on every path that answers with that envelope: JSON,
-  the plain rendering on stderr, `exec` lines, `--raw-payload`, `--validate-only`,
-  `App.call`, and MCP tool calls. That holds at parse time, for the rebuild of a forced
-  dry run or under `--cwd`, and for an object flag's own `__post_init__`, whose crash
-  report is now redacted of the run's secrets too. treaty's own phase 1 errors, which
-  never echo a secret, read as before (#165)
-- Args models: `app.args_adapter(base, schema=..., validate=...)`, returning a
-  `treaty.ArgsAdapter`, lets a handler's arguments be a subclass of `base`, such as a
-  pydantic `BaseModel`, instead of a dataclass; the input-side counterpart of
-  `app.output_adapter`. The model's JSON Schema becomes the flags (a `treaty` key carries
-  `positional`, `short`, and the other `Flag` options), so argv, `--raw-payload`, `exec`,
-  `app.call(...)`, MCP, `--help`, completion, `--schema`, and `--validate-only` take it
-  as they take an args dataclass. Phase 1 then calls `validate` with the parsed values,
-  and each entry of a `ValueError`'s `errors()`, such as a pydantic `ValidationError`'s,
-  is one `error.errors` item, exit 2; a password-format field is a treaty secret. treaty
-  imports no pydantic (#102)
-- `--format ndjson` (`Format.NDJSON`) writes `data` alone for `jq -c`, `duckdb`, `mlr`, or
-  the next command in a pipe: one compact JSON line per item of a list result or event of a
-  stream, a single result as one line, and nothing for `null` data, with keys sorted and
-  values masked as in the envelope, and `--fields` applied. The exit code carries the
-  status, and stderr gets one JSON line each for the error (`{"error": {...}}`), every
-  warning, a cut page (`{"pagination": {...}}`), and `ctx.log` lines. `--max-output`
-  caps it (REQ-F-052): a buffered answer writes whole records up to the cap, and a stream
-  leaves out each record over the cap and goes on, as `jsonl` caps each envelope; each
-  cut is one `{"truncation": {...}}` line and a `FIELD_TRUNCATED` warning on stderr, the
-  exit code unchanged. The flag's description now says so. Every app offers it,
-  so the manifest's `--format` enum and `--help` list it; it takes no renderer, and
-  `--output ndjson` is refused as a format name. `jsonl` stays the envelope stream (#34)
-### Added
-
 - `treaty scaffold-from typer|click|argparse module:obj` writes a treaty module from an
   existing CLI: it imports the target, walks the click or typer command tree (typer's own
   copy of click included) or the argparse subparsers, and writes an args dataclass per
@@ -1502,8 +733,6 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   and the manifest names the base. The `fs-side-effects` audit rule now suggests
   `output_file=True` for a safe command that writes to a path from one of its `Path` flags,
   instead of a cache side effect (#68)
-### Added
-
 - Passthrough commands: `@app.command(..., passthrough=True)` wraps another tool's own
   argument parser. The args type is `NoArgs`, `ctx.argv_rest` holds every token after the
   command path verbatim (`--help` and `--` included), and the handler returns the tool's
@@ -1517,124 +746,6 @@ The tenth 1.0 release candidate: 5 fixes and 11 additions.
   go to the delegated tool. Exec lines and `App.call` take `"argv": [...]`, MCP lists no
   passthrough command, and completion offers file paths after the path. COMPLIANCE.md lists
   the spec requirements a passthrough command departs from (#35)
-
-## [1.0.0rc9] - 2026-10-01
-
-The ninth 1.0 release candidate: 2 fixes.
-
-### Fixed
-
-- The output cap measures the envelope it falls back to when no cut of `data` fits: when
-  the truncation meta and warning would pass the cap, an exec line or `call()` hint takes
-  its short form, and a line that still passes the cap does so by that report alone. A
-  response cut again after `--warnings-as-errors` or a failed audit log write grew it
-  keeps the first cut's `meta.total_bytes`, the full response's size, and reports each
-  field in a single `FIELD_TRUNCATED` warning against its original length (#134)
-- Security: a handler abandoned at its timeout or on a signal no longer leaks a secret it
-  prints or writes to `sys.stderr` after its run returned, as after a host's `App.call`.
-  With no run's stand-in left on `sys.stdout`, the text reached the host's streams
-  unredacted. Now, while such a thread lives, `sys.stdout` and `sys.stderr` redact what it
-  writes of every live run's and handler thread's secrets, and send its stdout text to
-  stderr, so it never lands in the host's own output; other threads' writes, and bytes
-  written through `.buffer`, pass through untouched. The streams are restored once the
-  thread ends, unless the host replaced one meanwhile (#135)
-
-## [1.0.0rc8] - 2026-10-01
-
-The eighth 1.0 release candidate: 1 change and 2 fixes.
-
-### Changed
-
-- The package metadata names the author, links the documentation and the changelog, and
-  adds the `Environment :: Console`, `Operating System :: OS Independent`,
-  `Programming Language :: Python :: 3 :: Only`, and `Typing :: Typed` classifiers. The
-  README's links are absolute, so they resolve on pypi.org, and a test fails on a relative
-  one (#122)
-
-### Fixed
-
-- `--max-output` and `<APP>_MAX_OUTPUT_BYTES` now bound the line as written, its newline
-  included. The cut measured the JSON envelope without the newline that ends every line
-  on stdout, so a cut that filled the cap exactly, which a string cut always does, wrote
-  one byte over it; this held for a command's response, each stream event, and each
-  `exec` line. `meta.total_bytes` counts the same bytes, so it is one more than before
-  (#129)
-- Security: a stream abandoned at its timeout or on a signal no longer leaks a secret its
-  generator logs from `finally`. The generator was never closed, so it was finalized at
-  garbage collection, after its worker was forgotten and the framework's handler had left
-  the root logger, and the record went to `logging.lastResort` unredacted. Now the worker
-  closes the generator as soon as its `next()` returns, while its secrets are still
-  redacted. A handler on a worker thread also runs only once the worker is registered, so
-  one that returns at once can no longer leave the framework's handler on the root logger,
-  and `logging.basicConfig()` a no-op, until the next `App.call` (#128)
-
-## [1.0.0rc7] - 2026-09-30
-
-The seventh 1.0 release candidate: 2 fixes.
-
-### Fixed
-
-- The audit counts a distribution's other top-level packages as first-party only when the
-  handler was loaded from that distribution: a file its RECORD lists, or a file under the
-  project of its editable install. A local package that shadows an unrelated installed
-  one of the same name keeps only its own package, so the source rules no longer follow
-  helpers into the other distribution's packages. A `direct_url.json` that is not a
-  PEP 610 record was taken as a non-editable install. Now the record of the distribution
-  that ships the handler's package stops the audit with exit 4 and `PRECONDITION`,
-  naming the distribution, and any other distribution's is skipped and named in the
-  report's `scope` (#106)
-- Security: a handler that outlives its timeout no longer leaks its secret through
-  `logging` once no run is attached, as after `App.call` returned. The framework's handler
-  left the root logger with the last run, so a WARNING the handler logged then went to
-  `logging.lastResort` and `sys.stderr` unredacted. The handler now stays on the root until
-  every such thread ends, and with no run attached writes a record at WARNING or above where
-  `lastResort` would, the held threads' secrets redacted, and nothing when the host's own
-  handler takes the record (#118)
-
-## [1.0.0rc6] - 2026-09-30
-
-The sixth 1.0 release candidate: 7 breaking changes, 12 additions, and 13 fixes. Not
-additive over rc5: see Breaking.
-
-### Breaking
-
-- The audit log is off by default, as the spec's REQ-O-030 now says (it retired REQ-F-026,
-  which had it on): a run of an app that configured nothing creates no file or directory,
-  and `meta.audit_log_path` is absent. `App(audit_log=None)` is the default;
-  `App(audit_log=treaty.AuditLog())` turns it on. `<APP>_AUDIT_LOG` wins over the app:
-  `1` turns it on, `0` off, an absolute path on at that path. Any other value, an empty one
-  included, exits 2 with `INVALID_AUDIT_LOG_SETTING` for every invocation except `--help`
-  and `--version`, where `manifest` and `--schema` answered before. That includes `off`,
-  which earlier releases documented: write `0` instead. An `AuditLog(path=...)` no longer
-  beats the operator's path (#71)
-- The default audit log path is `$XDG_STATE_HOME/<app>/audit.jsonl`, else
-  `~/.local/state/<app>/audit.jsonl`. A log written by an earlier release under
-  `$XDG_DATA_HOME/<app>/` (`~/.local/share/<app>/`) is neither moved nor read; delete it,
-  or point `<APP>_AUDIT_LOG` at it (#71)
-- `AuditLog` defaults to 10 MiB per file, 5 rotated files, and 30 days, O-030's own bounds:
-  at most 60 MiB per tool where it was 600 MiB. This settles #53. The active file also
-  rotates once its first entry is older than `max_age_days`, and rotated files that old are
-  deleted before every append rather than once per process (#71)
-- An audit entry matches the spec's `audit-log-entry.json`: `parameters` is `args`, with
-  `validate_only`, `confirm_destructive`, and `no_injection_protection` added when given;
-  `operator` is `session_id` (still read from `<APP>_SESSION`), present only when set, as
-  `trace_id` is; `timestamp` is when the run started; `error_code`, `data`, and
-  `data_bytes` are gone. A line is at most 16 KiB: the largest `args` values become
-  `[TRUNCATED]` and `truncated` is `true`, where strings were cut at 1,024 characters (#71)
-- Only invocations that resolve to a command are logged: an unknown command, `--version`,
-  `version`, `manifest`, `completion`, and `audit-log` itself no longer append an entry
-  (#71)
-- `audit-log` is on every app, the treaty CLI included, since the operator can turn the log
-  on for any of them. While the log is off it exits 4 with `AUDIT_LOG_DISABLED` (was
-  `AUDIT_LOG_OFF`). `--since` takes a positive duration or an ISO 8601 time with a UTC
-  offset (`0h` and a time without an offset exit 2), and `--command config` also matches
-  `config set` and `config get`, but not `configure` (#71)
-- While the log is on, the manifest lists its path as a `log` side effect of every command
-  it records; the log's files are created `0600` and new directories `0700` whatever the
-  umask (#71)
-
-### Added
-
 - `Flag(audit=False)` and `Arg(audit=False)` keep an argument's key in the audit log's
   `args` with the value `[OMITTED]`, for a value that is no secret but should not be
   kept, such as a message body. It still works on argv, in `exec`, `--raw-payload`, MCP, and
@@ -1709,14 +820,771 @@ additive over rc5: see Breaking.
   `ctx.log`'s are. `Completed.stdout` and `stderr` keep the last 4096 characters, as
   `SUBPROCESS_FAILED`'s `context.stderr` does; timeouts, signals, the locale, `input=`,
   and `children.pids` are unchanged (#61)
+- `Decimal` is a built-in argument type, as `int` and `float` are: `--amount 12.30` reaches
+  the handler as `Decimal("12.30")`, parsed from fixed-point text without a float, and
+  `Decimal | None` and `tuple[Decimal, ...]` work too. An exponent, `NaN`, `Infinity`, or
+  `1,5` exits 2 naming the flag, and `-0` is zero. `exec` lines and `--raw-payload` take a
+  JSON string or a JSON number read from its source text; a float from an MCP client or
+  `app.call` is refused. Its argument schema says `format: decimal`; output schemas are
+  unchanged. An app's own `app.scalar(Decimal, ...)` replaces the built-in,
+  for output schemas too (#39)
+- A settings field declared `Flag(default=..., description=..., secret=True)` is a secret
+  setting whatever its name: redacted by `--show-config` and left out of the config hash.
+  An enum setting, like an enum flag, is not inferred secret
+- The `describe` rule runs each example through `--validate-only`, and one that does not
+  parse is an error: agents copy examples verbatim, and a `<name>` placeholder is one too.
+  Only the spelling is judged: a secret's `--<name>-from-env` or `-from-file` reads a dummy
+  value, `--cwd`, `--input-file`, and `--config` are dropped with their values, leading
+  `VAR=` words set the call's environment, `uv run` and `sudo` are skipped, an unquoted `#`
+  at a word's start begins a comment, and an example with a pipe, a redirect, `;`, or a
+  lone `-` for stdin is not judged. `--validate-only` goes right after the command path, so
+  no handler ever runs during the audit. The no-example fix suggests values its checks accept (a
+  preset's sample, a secret from a variable, a tuple's item type); a custom `pattern=`
+  leaves a `<name>` to replace
+- `App.redirected_paths`: the old command paths `redirect` keeps answering
+- `external=False` on a command that calls out says it returns only values it computed,
+  which clears the `external-data` warning; unset, `external` is `None`, undeclared
+- The `subprocess-declared` rule reports `subprocess.run` and its siblings, `os.exec*`,
+  `os.spawn*`, and `os.posix_spawn*`, called in a handler however they were imported:
+  outside `ctx.run` a child has no time limit or declared argv, and `doctor` cannot check
+  the program. Its fix says `ctx.run` checks the exit status unless `check=False`
+- `Arg(multiline=True)` lets a positional hold newlines, as `Flag(multiline=True)` does; the
+  `multiline-flag` advice now suggests `Arg` for a positional instead of a `Flag` it cannot take
+- Did-you-mean on an unknown command: `context.did_you_mean` lists up to three close
+  registered commands, best first, and `suggestion` names them, on the command line (as
+  invocations, matching a mistyped word, a command's own name without its group, or the
+  dot path) and on `UNKNOWN_COMMAND` from `App.call`, `exec`, MCP, and
+  `check-permissions --for` (as dot paths). Close is one typo per three characters typed,
+  a swap of neighbors counting as one, or a prefix of a one-word name
+- `completion` built-in: `<app> completion bash` or `zsh` prints a completion script
+  generated from the manifest, covering commands, nested groups, flags, and the values of
+  enum and path flags and positionals, `--flag=value` included. The script is static, so a
+  tab press runs no Python. It yields to an app command named `completion`, and MCP serves
+  no tool for it. Every app lists one more command, so every manifest etag changes once
+- `CLEANUP_KEPT` warning: `cleanup` names the paths it left because they are, or hold, a
+  declared credential or config path
+- `APP_IMPORT_FAILED` (exit 4) from the `treaty` tooling commands when the app's module
+  raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash. Its
+  context carries `target`, `exception`, and the registration `message`, with no
+  traceback, on `audit`, `schema-lock`, `changelog-add`, `agents-md`, `check-docs`, and
+  `conformance` (#4)
+- `App(version=)` accepts PEP 440 development and post releases and their combinations
+  (`0.3.0.dev0`, `0.3.0.post1`, `1.0.0rc1.post2.dev3`), as `introduced_in=`,
+  `Deprecated(...)`, and an update check do (#5). Their semver spelling puts `.devN` in
+  the pre-release (`0.3.0-dev.0`) and `.postN` in the build metadata (`0.3.0+post.1`); a
+  `.devN` of a post release stays in the build metadata (`1.0.0+post.1.dev.0`). Semver
+  orders `dev` between `beta` and `rc`, so the spelling keeps the parts but not PEP 440's
+  order. Epochs and local versions are still refused, and the error says why
+- `Retry(backoff=, max_delay_ms=, jitter=, retry_if=)` (#11): each wait grows by
+  `backoff` from `delay_ms`, which `--retry-delay` still sets, up to `max_delay_ms` (an
+  hour when unset), moved by up to `jitter` of itself either way. A `CliExit` raised
+  inside `ctx.retry` with `retry_after_ms` lengthens the wait as a `Retry-After` does in
+  `ctx.http`, and one over 60 s ends the run with that error instead. `retry_if` retries
+  on a returned value it holds for, and ends with the `exhausted` code when it still
+  holds. The defaults keep the fixed delay, and the command's timeout still bounds every
+  wait
+- `treaty audit` reports its `scope` in JSON and on a `Scope:` line in plain output: what
+  the source rules read, so a clean audit is not taken for a runtime check
+- `-v` is short for `--verbose`, and `-vv` or `-v -v` for `--debug`, before or after the
+  command path. A command that declares its own `short="v"` keeps `-v` for its flag on that
+  command only; the `--verbose` and `--debug` descriptions in the manifest and help say so (#13)
+- Audit rule `timeout-budget` (#12), a warning: a `retry=Retry(...)` whose waits, at
+  their cap and full jitter, add up past the command's timeout, with a `timeout=` sized
+  to them; and a `heartbeat=True` command that inherits the app's default timeout
+- Audit rule `explicit-timeout` (#15), advice: a mutating or destructive command that
+  inherits `App(default_timeout=)`. Any `timeout=`, the default's own value or `None`
+  included, records the decision and silences it. `treaty init` scaffolds and treaty's
+  own mutating commands now declare theirs
+- `async def` handlers, and `async def` resource `acquire` and `release` (REQ-F-049): one
+  event loop per run on a thread of its own, cancellation at the timeout, and an
+  `UNAWAITED_TASKS` warning for tasks the handler left running. An async resource needs an
+  async handler; streaming handlers and other hooks stay plain `def`
+- `App(version=)` accepts a PEP 440 release with an `a`, `b`, or `rc` pre-release, such
+  as `importlib.metadata.version` returns (`1.0.0rc1`); `--version`, `meta.tool_version`,
+  and `app.version` give its semver spelling (`1.0.0-rc.1`). `introduced_in=`,
+  `Deprecated(since=, removed_in=)`, and a version string from an update check are read
+  the same way. Development and post releases are still refused
+- `ctx.remaining`, the seconds left before the command times out (`None` without a
+  limit), and `ctx.expired`: a handler passes the deadline to a client's `timeout=`,
+  or stops a long loop at the limit instead of running on after `TIMEOUT`
+- Response meta: `command`, `timestamp`, `schema_version`, `tool_version`, `cwd`,
+  `trace_id`, `project_root`, and `retries`; `schema_version=` and `compat=` with
+  `--schema-version`, `--output-schema`, `--print-schema`; `project_root=`; `treaty.Retry`
+  with `ctx.retry`; `treaty schema-lock`
+- Settings: `App(settings=)` from `<APP>_<FIELD>`, `--config`, project and user TOML
+  files, and defaults; `--context`, `--no-config`, `--show-config`, `--instance-id`;
+  `App(init=)` with the `init` built-in and `INIT_REQUIRED`
+- Error contract: `retry_strategy`, `treaty.already_exists` with `conflict_id`,
+  `fix_commands=` and `App(companions=)`, `treaty.Expired` with `refreshes_auth=`,
+  `treaty.NetworkContext`, `ctx.lock` with `LOCK_HELD`, `<APP>_SESSION` idempotency keys,
+  and `App.redirect` (exit 13 `REDIRECTED`, manifest `aliases`)
+- Argument grammar: `pattern_type=`, `requires=` with `RequiredWhen`, `Excludes`, and
+  `DefaultWhenAbsent`, `option_placement="strict"`, `from_stdin=`, `--validate-only`, JSON5
+  in `--raw-payload` and `exec` with `corrected_input`, `introduced_in=`,
+  `deprecated=treaty.Deprecated(...)`, and `treaty audit --baseline`
+- Output data: `treaty.Out` (`sort_key`, `ordered`, `volatile`, `high_entropy`,
+  `external`), `treaty.Binary`, `Flag(max_bytes=)` with `FIELD_TOO_LARGE`,
+  `ctx.truncated`, `--stable-output`
+- Multi-step commands: `steps=`, `ctx.step`, `--resume-from`, `--rollback-on-failure`,
+  `treaty.Batch`; resources' `release` on every exit
+- Output security: masking, `external=True` with `_source` and `_trusted` tags,
+  `--no-injection-protection`, `scrub()` for logs and stderr
+- Declarations: `subprocess=treaty.Subprocess(...)`, `platform=`, `required_tools=`,
+  `filesystem_side_effects=`, `background=` with `ctx.spawn`,
+  `App(dependencies=[treaty.Dependency(...)])`, and the `doctor` and `cleanup` built-ins
+- Session hygiene: `app.suppress_update_notifier`, `App(update_check=)` with
+  `--no-update-check`, `--cwd` and `CWD_CHANGED`, `ctx.tmp_dir`, `ctx.temp_file()`,
+  `ctx.output_file()`, `treaty.intercept_stdout()`, `cache=treaty.CachePolicy(...)` with
+  `ctx.cache`, `--no-cache`, `--cache-ttl`
+- Network and filesystem: `ctx.http` (proxies, CA bundles, `error.network_context`,
+  retries), `--proxy`, `--no-proxy`, `recursive_traversal=True` with `ctx.walk`,
+  `--no-follow-symlinks`, `--max-depth`
+- Logging: `--quiet`, `--verbose`, `--debug`, `ctx.progress`, `ctx.debug`,
+  `ctx.log_error`, `--warnings-as-errors`, `treaty.AuditLog`, the `audit-log` built-in
+- Output selection: `--fields`, `--stream`, `--format id` with `id_field=`,
+  `--heartbeat-interval`, `--token-limit`, `--token-offset`, `--token-count`,
+  `--tokenizer`, `app.tokenizer()`, the `treaty[tiktoken]` extra
+- Built-ins: `manifest --etag` with `meta.not_modified`, `App(checks=)` with `treaty.Check`
+  and `treaty.endpoint`, `status`, `cleanup --scope` and `--min-age`,
+  `App(schema_changelog=)` with `changelog` and `treaty changelog-add`, `generate-skills`,
+  `mcp-validate`, `treaty-mcp --list-tools`
+- Agent docs: `treaty agents-md`, `treaty check-docs`, AGENTS.md from `treaty init`
+- 37 new audit rules (56 in all, listed by `treaty rules`), each with a generated fix
+- `docs/api.md` (the frozen surface), `docs/guide.md`, this changelog, a stability policy,
+  and per-platform notes in the README
+
+### Changed
+
+- CI checks against cli-agent-spec v1.16.0, which adopts treaty's person-only
+  confirmation as REQ-C-036 and allows its `--yes` exception in REQ-C-005, so
+  COMPLIANCE.md drops that departure. To pass its ResponseEnvelope 2.4, `meta.timeout_ms`
+  of a run with no limit (`timeout=None`, or `--timeout 0`) is `0` instead of `null`, as
+  the spec says `--timeout 0`; a consumer that read `null` as "no limit" reads `0`.
+  `treaty.Timeout.milliseconds` still returns `None` without a limit. The spec's §79
+  bounded calls (REQ-F-080 to REQ-F-082, REQ-C-033 to REQ-C-035, exit `14`) are not
+  implemented yet: treaty never exits `14` (#431)
+- A read-only command's `TIMEOUT` stays retryable, and when the command takes `--timeout`
+  its hint now also names a larger `--timeout` and `--timeout 0` (no limit; not on a
+  stream `App.call` or MCP buffers, which refuse it): a run whose length depends on its
+  input timed out again on the plain retry the hint suggested. The
+  `explicit-timeout` advice now covers a safe command on the app's default timeout too, so
+  an app sees more advice; `--strict` is unaffected. `treaty init`'s scaffold and
+  treaty's own `audit`, `check-docs`, and `rules` declare their timeout (#394)
+- The README, also the PyPI page, is a short overview: what treaty guarantees, a quick
+  start, and what an agent sees. The full API reference it held moved unchanged to
+  `docs/reference.md`, and the tutorial links there. The repository gains
+  `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue forms, and a pull request
+  template
+- Changelog: a pull request adds its entry as a fragment file in `changelog.d/` instead
+  of editing `CHANGELOG.md`; a stable release writes the fragments into its section (#429)
+- A missing required argument names it as it is typed: `Missing required option
+  --name/-n`, a positional as `<name>`, a secret by its `--x-from-env/--x-from-file`
+  sources. At a terminal or with `--format plain`, each missing argument's `--help` row
+  follows, then a usage line with only the command's required arguments and `Run '<app>
+  <command> --help' for all options.`, which replaces the generic `correct the arguments`
+  hint. The human error lines print context values as text, a list joined with `, `,
+  never a Python repr. JSON is unchanged but for `error.message`: `error.context.missing`
+  keeps the names, and the code and exit 2 are the same (#358)
+- Registering a command walks its handler's source once: the `ctx` calls, the `ctx`
+  attributes, the shell calls, and the locals that carry an argument's fields come from
+  one cached scan per handler, which registration's two reads share. Registering
+  treaty's own CLI spends about a third of the CPU time it did on these scans; every
+  registration rule's verdict is unchanged (#359)
+- `import treaty` no longer loads `http.client`, `ssl`, the MCP server module, or
+  `importlib.metadata`: `ctx.http`'s client loads for a `has_network_io=True` command,
+  the MCP server for an `App(mcp=)` app, and package metadata when `treaty.__version__`
+  or a manifest reads it. `treaty.McpServe`, `treaty.McpTool`, and `treaty.__version__`
+  resolve on first use, as the same objects as before (#360)
+- The click/typer migration chapter says every command runs under the app's
+  `default_timeout`, 60 seconds unless set, not only network commands, so a migrated
+  command that ran longer ends in `TIMEOUT` with exit 10: Step 1 has a command that may
+  run longer declare `timeout=` or `timeout=None`, which also gives it `--timeout` and
+  `--timeout 0`, with a check that a command on the default has no `--timeout`; "What
+  changes for the people using your CLI" and the agentyper table say the same. The
+  behaviour is unchanged (#333)
+- The `volatile-data` audit rule is looser inside records: a per-call name such as
+  `timestamp`, `fetched_at`, `request_id`, or `duration_ms` on a field inside an array
+  item (`[].timestamp`, `trades[].timestamp`) is now advice rather than a warning, since
+  there it may be a fact of the record, such as when a trade happened, so
+  `audit --strict` passes a CLI returning timestamped records. The advice hedges as the
+  date-time advice does: "if it is when the response was made rather than a fact of the
+  record". The same name at the top of the output, or in an object outside any array,
+  still warns (#332)
+- The `cleanup`, `generate-skills`, and `audit-log` built-ins are no longer MCP tools
+  (`mcp=False`); an app command at one of those paths is served as before. A provided tool
+  may not take the name of any command, served or not (before, `exec`, `completion`, and
+  a passthrough command's names were free), and an old name `redirect` keeps answers
+  `REDIRECTED` over MCP only toward a served tool, else `UNKNOWN_TOOL`
+- `ctx.remaining` ends a reserve before the command's hard limit: a tenth of the timeout,
+  at least 100 ms and at most 2 s, and never more than half of it. `ctx.http`, `ctx.run`,
+  `ctx.pipeline`, `ctx.lock`, `ctx.retry`, and an async handler's cancellation all stop at
+  that deadline too, so a handler that catches a call cut at its deadline still has time
+  to return its partial result before exit 10 `TIMEOUT`. `ctx.remaining` reads that much
+  less than before and `ctx.expired` turns true that much sooner; the hard limit and
+  `meta.timeout_ms` are unchanged
+- The README and the conditional rules' docstrings say a boolean flag counts toward
+  `RequiresAny`, `RequiresOne`, and `Excludes` only when true: an explicit `--no-x`, or
+  `false` in `--raw-payload`, is the same as leaving the flag out. The behaviour is
+  unchanged, and a test pins it (#241)
+- The manifest's `requires` lists a command's `RequiresAny` and `RequiresOne` rules as the
+  `ConditionalRule` shapes `{"any_of": [...]}` and `{"one_of": [...]}` (ManifestResponse
+  3.2), in declaration order among its other rules, so an agent reading the manifest alone
+  sees that one of the group's flags is required. `--schema`'s `requires` lists them too,
+  and keeps `requires_groups`; a manifest without such rules is unchanged
+- An `Excludes` between two flags of one `RequiresOne` fails registration: the `one_of`
+  already forbids the pair and replaces the pairwise rule (REQ-C-026), so the manifest
+  never lists both and a call is never refused twice for one mistake
+- The manifest is ManifestResponse 3.15, the version CI's spec pin defines, and states in
+  keys what it said in descriptions: `idempotent: true` (3.15), `confirm_flag` naming a
+  `Flag(confirm=True)` (3.14), `stderr: "child_log"` (3.11), and a passthrough command's
+  `arguments: "passthrough"` with `help_argv` from `help_command=` (3.9), each in place of
+  its sentence in the command's or the flag's description. A passthrough entry's `flags` is
+  empty, since its flags go before the path as global options do; `--schema` still lists
+  them, and `treaty audit --baseline` does not report them removed. `output_file` is
+  `"envelope"` on a passthrough command and `"handler"` where the app's own `output` field
+  takes the path (3.6), and `output_file_base` is `project_root` or `resource` when a
+  relative `--output` does not land in the working directory (3.7). An object flag is
+  `type: "object"` (an `array` of them stays `array`) with the value's `schema`, in place
+  of `string` and its shape in the description (3.7). `stdin` declares the mode of every
+  command that reads stdin, `buffered`, `lines`, or `records` with its `record_schema`, the
+  `exec` built-in's `buffered` included, with `max_bytes` or `max_line_bytes` when the app
+  changed the cap (3.8). The root `format` flag's `media_types` names what each value
+  outside the spec's table writes: an `app.format(media_type=)` and treaty's own `ndjson`,
+  `csv`, `yaml`, and `markdown`; a command's `output_media_types` names what its own formats
+  write, in place of the "--format html writes text/html" sentences (3.12). A secret setting
+  is in the root `secret_env_vars` with its declared names (3.13). An app without these
+  features sees `schema_version`, the etag, the `format` flag's `{"ndjson":
+  "application/x-ndjson"}`, and `exec`'s `stdin` change. The MCP `idempotentHint` is true on
+  an `idempotent=True` command too, not only a `safe` one. `child_log=True` on a passthrough
+  command, and an `app.format` or `FormatRenderer` media type for `plain` or `tsv` other
+  than the spec's, are now a `RegistrationError` (#231)
+- `@app.command(..., idempotent=True)` registers on a `safe` or `destructive` command, as
+  REQ-C-002 requires, instead of raising `RegistrationError`. On a `safe` command it is
+  redundant and accepted without warning; on any danger level the manifest description
+  ends with the idempotent note, and the declared exit codes are unchanged. The
+  `retryable` audit rule passes an idempotent destructive command's retryable codes as it
+  does a mutating one's, and its fix on a destructive command now names `idempotent=True`
+  too (#226)
+- A command's manifest `output_formats` lists every format it takes beyond `json`,
+  `jsonl`, `tsv`, `plain`, and `ndjson`: `id` where it has an `id_field`, the formats it
+  inherits from `app.format(...)`, then its own. An agent assumes no format the entry
+  leaves out, so a command of an app registering `csv` read as one that cannot write it.
+  The manifests and `--schema` of apps that register a format change: each entry gains
+  those names; other apps' manifests are unchanged. `<APP>_FORMAT=id` is passed over by a
+  command without an `id_field`, which answers in its default instead of exiting `2`, as
+  for another command's own format; `--format id` there still exits `2`, and neither its
+  `--help` nor its shell completion offers it (#216)
+- The README says a passthrough command's delegated parser follows its own colour rules:
+  Python 3.14's argparse colours its help when `FORCE_COLOR` is set, even off a terminal,
+  and `NO_COLOR` turns that off (#170)
+- `--format plain` without a renderer prints a list of objects whose values are all
+  scalars as an aligned table: a header of the field names in the output dataclass's
+  field order, one row per object, numbers and `Decimal` fields right-aligned, `null` as an
+  empty cell, and `(no rows)` for an empty `list[T]`. A list of models an output adapter
+  writes, such as pydantic's, is a table in the order its dump writes the keys, its
+  integer and number properties right-aligned. Fifty items read as fifty lines instead of
+  fifty `key: value` blocks. When `COLUMNS` is a positive integer, a wider
+  table cuts its widest text column with an ellipsis, down to four cells, and never cuts a
+  number; `COLUMNS` joins the unprefixed conventions, so AGENTS.md lists it beside
+  `NO_COLOR` and `TERM`. `Out(table=False)` leaves a field out of the table without
+  touching JSON or the output schema. A list holding a nested value keeps the
+  `key: value` blocks; JSON, `jsonl`, `ndjson`, and `tsv` do not change. Upgrading: rerun
+  `treaty agents-md` on each app after upgrading, or `treaty check-docs` exits 81 on the
+  Environment Variables section of its AGENTS.md, which now lists `COLUMNS` (#8)
+- The package metadata names the author, links the documentation and the changelog, and
+  adds the `Environment :: Console`, `Operating System :: OS Independent`,
+  `Programming Language :: Python :: 3 :: Only`, and `Typing :: Typed` classifiers. The
+  README's links are absolute, so they resolve on pypi.org, and a test fails on a relative
+  one (#122)
 
 ### Fixed
 
+- `requires_person=True` with `resumable=True` is now a `RegistrationError`:
+  `--resume-from` skipped the steps before it, a `ctx.attest` among them, so an agent
+  could pass the person's confirmation with a flag after all. A person-only command
+  restarts from its confirmation; `steps=` and `rollback=` stay allowed (#426)
+- `treaty-mcp module:app` ends as an app's own `mcp serve` does (REQ-C-032, D-13): `SIGINT`
+  exits `130` and `SIGTERM` `143`, each with the `CANCELLED` envelope
+  (`error.context.signal` names the signal) on the last line of stderr, and stdin left
+  open no longer holds it up. `SIGTERM` used to kill it with no envelope, and `SIGINT`
+  did not stop it until stdin closed. Closing stdin still exits `0` with no envelope
+  on stderr. It now serves through `mcp serve`'s server loop, so the client closing stdout
+  also stops it cleanly, and while it serves, descriptor 0 reads an empty pipe, so a
+  child process a tool starts no longer takes the client's requests; a closed stdin at
+  startup is refused with exit `4` (`STDIN_CLOSED`) instead of a traceback (#418)
+- `treaty conformance` drops an `output_file` command's `--output PATH` and
+  `--output=PATH` from the argv it takes from the command's example, so the kit's runs of
+  its probes return the data in the envelope instead of writing the file on every run. An
+  example whose only option was `--output` no longer gives `argument_order`, which moves
+  to the next example or the built-in `manifest --etag` (#391)
+- `treaty conformance` no longer generates a `read` probe for a `has_network_io` command,
+  or takes such a command's example for `argument_order`, `safe_default` ones included
+  (a destructive one keeps its `--dry-run` probe): each kit run made the command's real,
+  and perhaps paid, requests. Its probes are the ones that exit 2 before the network: the
+  malformed `--proxy`, and the `unknown flag` probe, which still goes on the first
+  command's example when that command is a network one. Both go before an example's `--`,
+  where they no longer become positionals that run the command (#390)
+- A command with `ordered=True` sorts a `set` or `frozenset` field of an output model by
+  its canonical JSON again, as before rc34: it kept the set's iteration order, which the
+  hash seed picks, so the output changed from run to run. A set's schema node
+  (`"uniqueItems": true`) loses its `"x-ordered": true`, which a schema lock reports as a
+  change; an explicit per-property `x-ordered: true` on a set still keeps its order (#387)
+- An async generator stream whose source is still running after its cancellation grace,
+  as when it swallows `CancelledError`, now reports it in the stream's end envelope: a
+  `CLEANUP_FAILED` warning for the `async stream` hook, and `error.context.cleanup_failed`
+  on `CANCELLED`, as an `async def` handler does since rc36 (D-9). It used to be only a
+  stderr note, and on a timeout not even that, since the timeout answered without
+  waiting for the source; it now gives the source its grace first. The stream's lines
+  are unchanged (#382)
+- An `async def release` no longer waits forever behind an `async def` handler or async
+  stream source still running after its cancellation grace, which holds the run's event
+  loop: the run's async releases wait to start for one grace more in all, then each is
+  reported as a `CLEANUP_FAILED` warning naming its `release`, and the run answers
+  `CANCELLED` or `TIMEOUT` as it would without the resource. A release that cannot start is
+  cancelled, so it never runs late; once started, a release still runs to its end (#383)
+- A pattern its author already anchored as `^...$`, such as `app.scalar(datetime.date,
+  pattern=r"^\d{4}-\d{2}-\d{2}$")`, is published as written instead of wrapped again into
+  `^(?:^...$)$`, in the manifest's flags and in argument schemas, nested object fields
+  among them; one with a top-level `|` is still wrapped. A `datetime.date`,
+  `datetime.datetime`, or `datetime.time` an app registers with `app.scalar` no longer
+  carries `"title": "date"` in argument schemas, at the top level or nested. Validation is
+  unchanged. A schema lock or saved MCP tool list of such an app shows the shorter pattern
+  and the dropped title once (#388)
+- `treaty conformance` puts the flags its probes add to a passthrough command before the
+  command path, where treaty reads them: the `unknown flag` and `--proxy` probes used to
+  append them after the path, so the delegated tool got `--no-such-flag` and the handler
+  ran and exited 0 instead of exiting 2. A passthrough example's tokens after the path
+  reach its probe verbatim, where an option named like a global, such as `--format
+  oneline`, was dropped, and `argument_order` skips passthrough commands, since the kit
+  moves `--format` after the path (#367)
+- The `--help` usage line of an `option_placement="strict"` command puts `[flags]` before
+  its positionals, where the command reads them; after them, a usage line typed as shown
+  passed the options to the positional verbatim. The missing-argument usage got the same
+  order in rc35, and `generate-skills` now writes a strict command's minimal call and
+  `--validate-only` pattern with the options first too (#374)
+- `treaty conformance` no longer puts `--confirm-destructive` in the `argument_order` run:
+  a destructive example whose only option is its dry-run flag is skipped, so the search
+  moves to the next example or the built-in `manifest --etag`, where it used to run the
+  command confirmed and dry run, and a handler that ignored its dry-run flag applied for
+  real on the kit's machine (#373)
+- An `async def` handler cancelled by SIGINT or its timeout now gets the same 2 s grace
+  as an async generator's source to finish its `finally` blocks and `async with` exits,
+  which can await, before the run answers `CANCELLED` or `TIMEOUT`; the process used to
+  exit first when the handler ran on the main thread, and a timed-out one was abandoned at
+  the deadline. The handler is cancelled once: a signal turns its deadline off, and a
+  deadline that already fired is not followed by the signal's cancel, either of which
+  used to cut the `finally` short. A handler still running past the grace, one that swallows
+  `CancelledError` or whose cleanup is slow, no longer delays the answer: stderr says it
+  was still running after its cancellation, and the envelope carries a `CLEANUP_FAILED`
+  warning for the `async handler` hook (#355)
+- A `FormatRenderer(frame=True)` stream at a terminal no longer erases text that reached
+  the terminal between frames outside a stderr line: a `ctx.prompt` or `ctx.confirm`
+  question and its typed answer, and what a child or C code wrote to descriptor 1, which
+  treaty passes on to stderr before the next frame. The next frame is written below it,
+  as after a stderr line. After a resize, the last frame's rows are counted at the new
+  width, so a terminal that reflows its lines is redrawn without the old frame's tail
+  left on screen; one that does not reflow can still be off by the rows the resize
+  changed (#365)
+- `App.call` and every other in-process `Envelope` now carry a stream's `seq`, `end`,
+  `total`, and `effects`, and `dry_run` and `partial`, as typed optional fields of `Meta`
+  (`env.meta.effects`), where they used to land in the undocumented `Envelope.extra_meta`.
+  `extra_meta` keeps the `meta` keys `Meta` does not declare and refuses one it does; the
+  JSON envelope is byte for byte as before. The README and docs/api.md now describe both
+  (#348)
+- `treaty conformance` probes the built-in `cleanup` as the destructive command when no
+  command of the app's own is destructive, so the kit's `dry_run_preview` and
+  `destructive_refuses_unconfirmed` checks run instead of being skipped; the kit only
+  previews it or sees it refused. Without an example that has a local option, the
+  profile's `argument_order` uses the built-in `manifest --etag` (#361)
+- `treaty audit`'s `describe` rule checks an example of a `passthrough=True` command by
+  putting `--validate-only` before the command path, where treaty reads it (#306). It went
+  after the path, into the delegated tool's argv, so the handler ran during the audit and
+  a tool that refuses unknown options failed a valid example with `DELEGATED_EXIT`. Only
+  treaty's part is judged: the options before the path, and the path
+- The `http-client` audit rule only advises on a direct `requests`, `httpx`, or `urlopen`
+  client configured from `ctx.network`'s `proxies`, `proxy_for()`, or `ca_bundle`, as the
+  README recommends, so `treaty audit --strict` passes for it; the advice names the gap
+  left, a failure without `error.network_context`. A direct client with no such read on
+  the handler's path still warns (#356)
+- A conditional rule names a positional member as `--help` does, `<market>`, and a flag as
+  `--series`: `RequiresAny(("market", "series"))` with an optional positional `market` now
+  answers `Pass at least one of <market> or --series` with the suggestion `add <market> or
+  --series`, where it suggested `--market`, which argv does not accept. `RequiresOne`,
+  `RequiredWhen`, `Excludes`, and `DefaultWhenAbsent` spell their members the same way in
+  their errors, `--help`'s Rules section, and the MCP tool description; the manifest's
+  `requires` entries and the error's `context` keep the bare field names (#331)
+- `--format tsv` and a format an app registers with `render=table(...)`, such as
+  `app.format(Format.CSV, render=table(","))`, no longer write the trust tags `_source`
+- A format an app registers with `render=table(...)`, such as
+  `app.format(Format.CSV, render=table(","))`, no longer writes the trust tags `_source`
+  and `_trusted` as the first columns of an `external=True` command's rows, on stdout or
+  in the `--output PATH` file, a stream's events and `--no-stream` included; the
+  `UNTRUSTED_CONTENT` warning says the content is untrusted. JSON, jsonl, and ndjson keep
+  the tags, and an app's own renderer still gets them in its data, as the
+  `app.format(render=)` docs now say (#336)
+- A run no longer crashes at startup when another treaty run sharing its session root
+  removes its own session directory while this run prunes: the listed entry's `stat`
+  raised `FileNotFoundError` out of `prune`, which promises best effort. An entry, a
+  session root, or an `out` directory that vanished mid-scan now counts as nothing to
+  prune, and `cleanup` finds no outputs in an `out` that vanished; permission errors
+  behave as before (#318)
+- A command may return a type that holds itself, such as a tree node whose `children`
+  are nodes (#298). Its output schema inlines the type where it first appears and refers
+  to it as `{"$ref": "#/$defs/Node"}` wherever it holds itself, with the definition in
+  `$defs` at the root of the output schema and of the MCP tool's envelope schema; a
+  pydantic model that holds itself keeps its `$defs` entry the same way. Recursion through
+  `X | None`, lists, tuples, dict values, and other classes works, and two classes of one
+  name get `Node` and `Node_2`. Masking, ordering, `--stable-output`, the audit, schema-lock
+  diffs, and `mcp-validate` follow the reference. A schema without recursion is unchanged
+  byte for byte. A value nested more than 400 arrays and objects deep, or one that holds
+  itself, fails the run with `INVALID_OUTPUT` naming the cause, before any data is
+  written; such a value used to crash the handler with a `RecursionError`. A recursive
+  argument type is still a registration error
+- `dict[str, V]` arguments: an object argument's field, or a flag of its own, may be a
+  mapping of free string keys to a scalar type (`str`, `int`, `float`, `bool`, `Decimal`,
+  `Path`, an enum, a `Literal`, or an `app.scalar` class) or a union of them, such as
+  `meta: dict[str, str | int] | None = None` (#299). argv takes it as one JSON object,
+  and `exec`, `--raw-payload`, `app.call(...)`, and MCP carry it as is; its schema is
+  `{"type": "object", "additionalProperties": ...}`, `anyOf` the scalars for a union.
+  Each value is checked as its type is, the first type of a union that takes it winning,
+  and every error is at its key, such as `postings[0].meta.ref`. The handler gets a
+  `dict`; a default is read-only, such as `types.MappingProxyType(...)`. A setting may be
+  one too: a TOML table, or a JSON object in its variable, a secret one redacted value by
+  value. A flag or object field named as a secret, such as `api_keys: dict[str, str]`, is
+  refused as a tuple is, since it would travel on argv, unless `secret=False`. Null
+  values, nested mappings, non-`str` keys, and a bare `dict` are refused at registration
+  with the supported shape, rather than a suggestion of `app.scalar(...)`
+- SIGINT or SIGTERM cancels an async handler, and any handler under a timeout, within
+  50 ms of reaching the process, where it could be held until the handler ended: or
+  forever, for an untimed async handler (#304). The main thread waited for the handler
+  in one lock wait, which a signal does not wake when its C handler ran on another
+  thread, or, on free-threaded CPython, when it lands as the wait begins; the wait is
+  now sliced. The wait for an async handler also no longer uses `threading.Event`, whose
+  Python code a signal could interrupt between its lock's releases, turning the
+  `CANCELLED` answer into a crash
+- A failure's `data` is protected as a success's is: the dataclasses an exit carries,
+  as `CliExit(data=...)`, `treaty.already_exists(...)`, or a stream's terminal failure,
+  keep their `Out(high_entropy=True)`, `Out(high_entropy=False)`, and `Out(external=True)`
+  declarations, nested, in a list, or under a key of a plain dict, in JSON, plain, `exec`,
+  `app.call`, and MCP results, with `--unmask` the only way to the raw value. So does the
+  preview a destructive command refuses without `--confirm-destructive`, which is the
+  command's output. Error data was masked only by field name and shape, so a field
+  declared `Out(high_entropy=True)` reached the error envelope unmasked. Data no
+  dataclass covers is masked by name and shape, as before (#322)
+- `mcp serve` stops with exit 0 and `stopped_by` naming the signal when SIGINT or SIGTERM
+  lands while it is still starting its server thread. On a loaded machine that start can
+  outlast the server's first answers, so a client that signalled right after them got
+  the CANCELLED envelope and exit 130 or 143 instead (#313)
+- The root `--help` Environment section and AGENTS.md name every command that reads a
+  variable of a flag several commands share, such as a `kw_only` base dataclass's
+  `Flag(env=)` flag or secret (#295): "of every command" when all the app's commands
+  read it, else their paths. They named only the first command, which suggested the
+  others ignore the variable. A command reading the variable through a flag of another
+  name is not named on that flag's line, and a keyword secret such as `pass_` is spelled
+  `--pass` there, not `--pass-`
+- An `App.call` made while a handler abandoned at its timeout still lives redacts what it
+  prints into a `sys.stdout` or `sys.stderr` the host put in place since the first call,
+  such as a capture (#300). The wrapper the first call left standing no longer keeps the
+  next call from wrapping the host's stream, so a secret the call's handler printed went
+  out to it in clear
+- An MCP call to an unknown tool answers `UNKNOWN_TOOL` with `error.context.available`
+  listing exactly what `tools/list` lists, in its order (#289): the served command tools
+  and the tools `McpServe(tools=)` provides, which were missing. A command registered
+  `mcp=False` or left out by `McpServe(commands=)` stays off it, under `mcp serve` and
+  `treaty-mcp module:app` alike
+- Every stand-in treaty puts on `sys.stdout`, `sys.stderr`, or `sys.stdin` during a run
+  has `reconfigure()` (#288), taking `TextIOWrapper.reconfigure`'s keywords and refusing
+  any other with the real stream's `TypeError`. A library that calls it unguarded, such as
+  ansible-core's `Display`, no longer fails or warns on every run. The stdout stand-in
+  changes nothing: what a handler prints is still redacted a line at a time on stderr,
+  whatever `encoding` or `errors` it asks for. The `App.call` and no-prompt stdin
+  stand-ins pass the keywords on to the stream they wrap, where it has `reconfigure`
+- A `RequiredWhen` rule on a boolean with `False`, the manifest's `if_value: false`, now
+  fires on an explicit false (#241): `--no-x`, or `"x": false` in `--raw-payload`, `exec`,
+  and `App.call`. It compared the value only once the flag was present, and a boolean is
+  present only when true, so the rule never fired. A left-out flag still does not trigger
+  it, as cli-agent-spec#52 settles. Its error and `--help` line read `--no-x requires
+  --y`, and CI pins the spec at that change
+- A declared secret split by a terminal escape, such as `hunte\x1b[0mr2`, no longer
+  reaches stderr or the envelope whole (#277): it was redacted while the escape still hid
+  it, and became whole once the escape was cleaned away, or showed whole on a terminal
+  that kept it. The `--heartbeat-interval` status, `ctx.log` and `ctx.progress` lines in
+  every format, `ctx.warn` warnings, and a crashed handler's message and traceback were
+  affected. Redaction now also looks at the text without its escapes,
+  and where that finds a secret, the text goes without them; the heartbeat status is
+  redacted, cleaned, and redacted again before its 200-character cut, and a traceback
+  is redacted before its escapes are written out as `\x1b`. A refused setting's message
+  is redacted the same way, the longest secret first. Cleaning takes an escape a
+  terminal hides whole out whole: the charset reset `\x1b(B` that `tput sgr0` writes,
+  `\x1b7`, and a DCS, SOS, PM, or APC string left their rest as text, and a secret one
+  split reached a host's stream whole through `App.call`
+- What reaches descriptor 1 as the process exits, a handler thread abandoned at its
+  timeout still alive, is no longer lost (#271): a host's exit hook that runs after
+  treaty's, or the interpreter's last flush of `sys.__stdout__`, wrote to the pipe after
+  its reader had stopped with the interpreter. Treaty's exit hook, now registered as
+  treaty is imported so it runs after every hook registered later, turns descriptor 1 to
+  a spool file and passes what reaches it on to stderr, redacted, as the last held thread
+  ends or at the interpreter's last flush; once no held thread lives, descriptor 1 is
+  stdout again. It never leads to stdout while one does
+- A declared secret that the `THIRD_PARTY_STDOUT` warning's 4096-character cut split no
+  longer leaves its first part in the warning, its `-vv` trace, or stderr (#274): the
+  printed text was cut before it was redacted, so the secret was no longer whole. The
+  text is now kept past the cut, redacted whole, and only then cut; where even that text
+  was cut, its end, which may hold the start of a secret, goes first.
+  `SHELL_STRING_PROHIBITED` quotes the shell string whole in `context.argv`, rather than
+  its first 200 characters, for the same reason
+- `--debug` with a `logging.handlers.QueueListener` whose handler writes to `sys.stdout`
+  no longer floods stderr (#268): the listener's thread wrote each `stdout write` trace
+  record back to stdout, which traced it again, tens of thousands of lines a second. A
+  write made while a handler emits one of treaty's own trace records now goes to stderr
+  as written, on any thread; the record's own text is still traced once, redacted
+- As the process exits with a handler thread abandoned at its timeout still alive, the
+  last flush of `sys.stdout` no longer risks blocking the exit (#268): descriptor 1 is
+  then a pipe whose reader stops as the interpreter finalizes, and on Windows its 4 KiB
+  buffer could not hold the flush. The pipe now holds 1 MiB on Windows and Linux
+- A secret used as a mapping key is redacted as it is as a value (#262): a string or
+  numeric secret as a key in `Exit` context, a warning's context, a `ctx.log` field, the
+  audit log's arguments, or an `exec_fallback` line's error context and data came back
+  raw, and now reads `[REDACTED]` (or with the secret's text replaced inside it); a key of
+  another type, such as a tuple, is read by the text JSON prints it as. Two keys
+  that redact to the same text both stay, the later one as `[REDACTED]#2`, `#3`, and so
+  on. Command `data` is still not redacted (REQ-F-034)
+- `--debug` with a log handler that writes to `sys.stdout`, such as
+  `logging.StreamHandler(sys.stdout)` added in a handler, no longer recurses until
+  `RecursionError` (#263): the handler's copy of a `stdout write` trace record goes to
+  stderr once, redacted, instead of being traced again
+- What a handler thread abandoned at its timeout writes to descriptor 1 as the process
+  exits, after `App.main()` has written its envelope, reaches stderr redacted instead of
+  stdout in the clear (#263): descriptor 1 stays a pipe to stderr until the last such
+  thread ends, and what the thread wrote is passed on before its secrets are forgotten
+- Under `App.call`, a secret a handler prints split across two writes no longer reaches
+  the host's stream unredacted (#261): what the call's threads print, on the calling
+  thread, a handler worker, or a handler thread held past its timeout, is passed on a line
+  at a time, each thread's held apart, as printed text is under `main()` and `exec`. A line
+  without its end waits for the end (a carriage return too), for the call to return, or
+  for a held thread to end; past 64 Ki characters it is passed on but for its tail. The
+  text keeps its escapes as before
+- A numeric secret, such as an `int` secret flag, is redacted by value, not only inside
+  strings: echoed as a number in `Exit` context, a warning's context, a `ctx.log` field,
+  the audit log's arguments, or an `exec_fallback` line's data, it came back raw, and now
+  reads `[REDACTED]`. An equal number matches (987654.0 is the secret 987654), and so does
+  one whose spelling holds it, as a string's does (-987654, 9876540); a number
+  spelled in fewer than 4 characters stays, as a short string secret does, and a bool is
+  never one
+- Printed text, from `print()` or `sys.stdout.write`, reaches stderr a line at a time,
+  redacted whole, as descriptor 1's text does: a declared secret split across two writes
+  went to stderr in the clear. A partial line now waits for its newline or carriage
+  return, the next envelope, or the run's end, so a `ctx.log` line written in between
+  comes first. Each line of a multi-line secret, such as a PEM key, with at least 4
+  characters besides its indentation, is redacted on its own too, so the key written a
+  line at a time by `print`, `os.write(1, ...)`, or a child process no longer reaches
+  stderr line by line (#256)
+- A `ctx.http` request ends at the deadline as a whole, not only each socket read: a server
+  that sent its answer a little at a time kept a request running seconds past the time
+  left, so a handler watching `ctx.remaining` lost its partial result to `TIMEOUT`. The
+  connection is now shut at the deadline and the request fails with exit 10 `TIMEOUT`, also
+  when a body without a length would have looked complete
+- A declared secret written straight to descriptor 1, by C code, `os.write(1, ...)`, or a
+  child process that inherited it, reaches stderr redacted, as printed text does; it went
+  there in the clear. The interceptor redacts a line at a time, so a secret split across
+  two writes or two reads of the pipe is still caught, and passes on a line without its end
+  when the next envelope is written or the run ends, while the run's secrets are still
+  known; bytes that are not UTF-8 pass through unchanged around it (#254)
+- The long-running work chapter's `import-all` starts a feed only when the time left is at
+  least twice the slowest feed so far took, not just the last one's duration, which started
+  a feed with no room for it to run slower: on a loaded machine that feed ran into the
+  limit and the run exited 10 with `TIMEOUT`, losing the result of the feeds already
+  imported. The chapter explains the margin, and its tests time one feed on the runner and
+  set their limits from it, so a loaded runner's first feed does not outlast a limit fixed
+  in seconds
+- A `stdin_records=` command ends its input at REQ-O-004's `{"_summary": true, ...}` line
+  after bare records, as the manifest's `stdin` mode `records` tells an agent to feed it,
+  instead of failing that line with `RECORD_INVALID`. A passthrough command that also sets
+  `output_file=` is `output_file: "envelope"` in the manifest, as its `--output` file holds
+  the envelope, not `"formatted"`. `treaty changelog-add` no longer records an upgrade to
+  this manifest as breaking for a passthrough command's flags, now listed before its path,
+  or an object flag's new `object` type, which takes the same argv token. A secret field
+  that shares a secret setting's `<APP>_<NAME>` no longer repeats it in the command's
+  `secret_env_vars`, as the root `secret_env_vars` lists it (#231)
+- `cleanup` no longer removes an `output`, `credential`, or `config` path that its
+  declaration reaches through a symlink it never removes through, such as a
+  `{project_root}/tmp/dashboard/` output whose `<project>/tmp` links to a scratch directory
+  another command declares as `temp`: the match still joins the kept set by its resolved
+  path. A path a `temp`, `cache`, or `log` glob spells in another case on a
+  case-insensitive filesystem is compared by file identity too, so it no longer slips
+  past the kept check (#227)
+- Security: a handler's own `print()` or `sys.stderr` write during `App.call` no longer
+  reaches the host's streams with its secrets in it, on the calling thread, on the worker
+  a timeout runs it on, or in the window between its timeout and the call's return. While
+  an `App.call` runs, `sys.stdout` and `sys.stderr` redact what the call's threads write of
+  every live run's and handler thread's secrets, and keep it on the stream it was written
+  to; `App.call`'s envelope is unchanged. Other threads' writes, and bytes written through
+  `.buffer`, pass through untouched, `app.run`'s own stand-in keeps `sys.stdout`, and the
+  streams are restored as the call returns, unless the host replaced one meanwhile. A
+  worker that outlives its timeout hands over to the late wrapping of #135. Under
+  `treaty-mcp`, whose `sys.stdout` is stderr, a handler's print is now redacted there
+  (#141)
+- The `declared-exits` audit rule follows a method called on a parameter annotated with
+  the args class or a resource class, such as `store.load()`, and the methods it calls on
+  its own `self`, so the tutorial's `STORE_CORRUPT`, raised in `Store.load`, is found when
+  a command does not declare it, instead of failing only at run time as
+  `UNDECLARED_EXIT_CODE`. A method on an object of unknown class, or on a parameter the
+  function binds again (a loop target, a nested function's parameter), is not followed
+  (#218)
+- Commands that run children at the same time from several threads no longer crash on
+  Windows with `PermissionError: [WinError 5] Access is denied` rewriting the session's
+  `children.pids`, and no longer lose a child's pid from it on any platform: the
+  rewrites of the file take turns, and a rename another process blocks for a moment is
+  retried (#213)
+- `--help` shows a control character, terminal escape, or Unicode bidi override in the
+  app's own text (the app, group, command, and flag descriptions, and the examples) as its
+  escape, such as `\x1b` or `\u202e`, as plain output does, instead of writing it to the
+  terminal; newlines and tabs keep their layout. The zsh completion menu's descriptions
+  are escaped the same way (#203)
+- Plain output no longer prints the trust tags of external content as data: the data
+  block of an `external=True` command, and the stderr error block of a context with
+  `treaty.External`, show one `(external content, untrusted)` line instead of
+  `_source: external` and `_trusted: false`, in a table too, and so does a plain
+  `--output` file. JSON, jsonl, ndjson, and tsv keep the tags, and a field named
+  `_source` on a command that is not external still prints. A boolean in the stderr error
+  block reads `true` or `false`, as in the rest of plain output, not Python's `True` or
+  `False` (#198)
+- An `app.output_adapter` type raised as a failure's data, `raise Exit.X(..., data=obj)`,
+  keeps the array order its schema declares with `x-ordered`, nested arrays included, as it
+  does when returned; before, every array in it was re-sorted. A dataclass keeps its
+  `Out(ordered=True)` order as before, and a plain dict is still sorted (#181)
+- A `mutating` or `destructive` command may return a class an `app.output_adapter` writes,
+  when the adapter's schema lists `effect` (and `would_affect` for a destructive command):
+  registration failed with "must return an object with an 'effect' field" whatever the
+  schema said. Each run checks the dumped object's `effect` and `would_affect` as it checks a
+  dataclass's, so `would_*` dry runs, `meta.dry_run`, the destructive preview, and the
+  idempotent `noop` replay hold. An adapter schema that lists the key as `x-volatile`, which
+  `--stable-output` leaves out, is a `RegistrationError` saying so; the same holds for
+  `open_url`, `background_pid`, and `cleanup_command` (#183)
+- The `stable-order` audit rule warns about a `list[X]` or `tuple[X, ...]` of a class an
+  `app.output_adapter` writes, returned by a command with neither `sort_key=` nor
+  `ordered=True` or held in a dataclass field with no `Out(sort_key=...)` or
+  `Out(ordered=True)`, as it does for dataclasses: treaty re-sorts such an array by its
+  items' JSON text, so a ranking such as search results lost its order with a clean audit.
+  The fix names `sort_key=` for a stable listing and `ordered=True` for a ranking; a
+  dataclass array's fix now says the same. `treaty audit --strict` may now flag an adapted
+  list whose order is not declared, including one nested in a dataclass field or a dict;
+  `ordered=True` or `sort_key=` on the command (or `treaty.Out(...)` on the field) clears
+  it (#182)
+- The `recursive-traversal` audit rule no longer warns that a circular symlink can loop
+  `Path.rglob()`, `Path.walk()`, `os.walk()`, or `os.fwalk()`, which do not enter a
+  symlinked directory unless asked, nor `shutil.rmtree()`, which never does. The loop
+  warning stays for a call passing `recurse_symlinks=`, `follow_symlinks=`, or
+  `followlinks=` as anything but a literal false (by name, by position, or in a `**`
+  mapping), and for `glob(..., recursive=True)` and `shutil.copytree()`. A walk that cannot
+  loop is advice instead: no `--max-depth` bounds it. `os.walk` is recognized under an alias such as
+  `from os import walk as w`, and a module-level `walk` that is not a directory walk, such
+  as `ast.walk`, is no longer flagged (#180)
+- Plain output, tables, TSV and CSV cells, stderr error lines, log lines, and printed text
+  show the Unicode bidirectional embeddings, overrides, and isolates (U+202A to U+202E,
+  U+2066 to U+2069) as escapes such as `\u202e`, as they show C0 and C1 controls. Printed
+  raw, one reordered how the rest of its line displays, so a crafted value could make a
+  row read differently from what it holds; a table counted them as no width. The LRM, RLM,
+  and ALM marks stay text, since right-to-left prose uses them, and JSON keeps all of them
+  as data (#177)
+- A malformed proxy setting no longer shows its password in the `PROXY_INVALID` or
+  `--proxy` error: one written without a scheme (`user:pass@host:port`), or whose password
+  holds a `/`, `?`, or `#`, now loses everything up to its last `@`
+- `NO_PROXY` matches an IPv6 host, bare (`::1`) or in brackets (`[::1]`, `[::1]:8080`),
+  and a `host:port` entry matches a URL that names no port when the port is the scheme's
+  own, as `example.com:443` does `https://example.com/`; `ctx.http` and `ctx.network` both
+  follow it
+- A warning reaches stderr in a text format: under `--format plain`, `tsv`, or a format
+  an app registers with `app.format`, the stdout text has no room for the envelope's
+  `warnings`, so a `ctx.warn` call, or a framework warning such as `CWD_CHANGED` or
+  `CLEANUP_FAILED`, was lost. Each is now one `warning: <CODE>: <message>` line on stderr
+  after the result, redacted and cleaned of escapes as a `ctx.log` line is, and kept off
+  by `--quiet`; a stream writes each once, after the event it arrived with. A warning
+  treaty already writes in text mode, such as a deprecated flag's notice, the
+  `--no-injection-protection` notice, or a `--token-limit` cut, is not written twice.
+  stdout and the exit code are unchanged (#152)
+- A `streaming=True` command with `stdin_input=True` gets its payload: `ctx.stdin_text`
+  was always None, as the stream never read stdin (#33)
+- Security: a phase 1 error written by app code no longer carries a secret value it
+  quotes. A `ParseError` or `InvalidValue` raised from an args `__post_init__` sees every
+  secret argument in the clear, and its message, suggestion, `errors[]` items, and context
+  values reached the envelope as written. They are now redacted of the run's secret
+  values, as a handler's error is, on every path that answers with that envelope: JSON,
+  the plain rendering on stderr, `exec` lines, `--raw-payload`, `--validate-only`,
+  `App.call`, and MCP tool calls. That holds at parse time, for the rebuild of a forced
+  dry run or under `--cwd`, and for an object flag's own `__post_init__`, whose crash
+  report is now redacted of the run's secrets too. treaty's own phase 1 errors, which
+  never echo a secret, read as before (#165)
+- Args models: `app.args_adapter(base, schema=..., validate=...)`, returning a
+  `treaty.ArgsAdapter`, lets a handler's arguments be a subclass of `base`, such as a
+  pydantic `BaseModel`, instead of a dataclass; the input-side counterpart of
+  `app.output_adapter`. The model's JSON Schema becomes the flags (a `treaty` key carries
+  `positional`, `short`, and the other `Flag` options), so argv, `--raw-payload`, `exec`,
+  `app.call(...)`, MCP, `--help`, completion, `--schema`, and `--validate-only` take it
+  as they take an args dataclass. Phase 1 then calls `validate` with the parsed values,
+  and each entry of a `ValueError`'s `errors()`, such as a pydantic `ValidationError`'s,
+  is one `error.errors` item, exit 2; a password-format field is a treaty secret. treaty
+  imports no pydantic (#102)
+- `--format ndjson` (`Format.NDJSON`) writes `data` alone for `jq -c`, `duckdb`, `mlr`, or
+  the next command in a pipe: one compact JSON line per item of a list result or event of a
+  stream, a single result as one line, and nothing for `null` data, with keys sorted and
+  values masked as in the envelope, and `--fields` applied. The exit code carries the
+  status, and stderr gets one JSON line each for the error (`{"error": {...}}`), every
+  warning, a cut page (`{"pagination": {...}}`), and `ctx.log` lines. `--max-output`
+  caps it (REQ-F-052): a buffered answer writes whole records up to the cap, and a stream
+  leaves out each record over the cap and goes on, as `jsonl` caps each envelope; each
+  cut is one `{"truncation": {...}}` line and a `FIELD_TRUNCATED` warning on stderr, the
+  exit code unchanged. The flag's description now says so. Every app offers it,
+  so the manifest's `--format` enum and `--help` list it; it takes no renderer, and
+  `--output ndjson` is refused as a format name. `jsonl` stays the envelope stream (#34)
+- The output cap measures the envelope it falls back to when no cut of `data` fits: when
+  the truncation meta and warning would pass the cap, an exec line or `call()` hint takes
+  its short form, and a line that still passes the cap does so by that report alone. A
+  response cut again after `--warnings-as-errors` or a failed audit log write grew it
+  keeps the first cut's `meta.total_bytes`, the full response's size, and reports each
+  field in a single `FIELD_TRUNCATED` warning against its original length (#134)
+- Security: a handler abandoned at its timeout or on a signal no longer leaks a secret it
+  prints or writes to `sys.stderr` after its run returned, as after a host's `App.call`.
+  With no run's stand-in left on `sys.stdout`, the text reached the host's streams
+  unredacted. Now, while such a thread lives, `sys.stdout` and `sys.stderr` redact what it
+  writes of every live run's and handler thread's secrets, and send its stdout text to
+  stderr, so it never lands in the host's own output; other threads' writes, and bytes
+  written through `.buffer`, pass through untouched. The streams are restored once the
+  thread ends, unless the host replaced one meanwhile (#135)
+- `--max-output` and `<APP>_MAX_OUTPUT_BYTES` now bound the line as written, its newline
+  included. The cut measured the JSON envelope without the newline that ends every line
+  on stdout, so a cut that filled the cap exactly, which a string cut always does, wrote
+  one byte over it; this held for a command's response, each stream event, and each
+  `exec` line. `meta.total_bytes` counts the same bytes, so it is one more than before
+  (#129)
+- Security: a stream abandoned at its timeout or on a signal no longer leaks a secret its
+  generator logs from `finally`. The generator was never closed, so it was finalized at
+  garbage collection, after its worker was forgotten and the framework's handler had left
+  the root logger, and the record went to `logging.lastResort` unredacted. Now the worker
+  closes the generator as soon as its `next()` returns, while its secrets are still
+  redacted. A handler on a worker thread also runs only once the worker is registered, so
+  one that returns at once can no longer leave the framework's handler on the root logger,
+  and `logging.basicConfig()` a no-op, until the next `App.call` (#128)
+- The audit counts a distribution's other top-level packages as first-party only when the
+  handler was loaded from that distribution: a file its RECORD lists, or a file under the
+  project of its editable install. A local package that shadows an unrelated installed
+  one of the same name keeps only its own package, so the source rules no longer follow
+  helpers into the other distribution's packages. A `direct_url.json` that is not a
+  PEP 610 record was taken as a non-editable install. Now the record of the distribution
+  that ships the handler's package stops the audit with exit 4 and `PRECONDITION`,
+  naming the distribution, and any other distribution's is skipped and named in the
+  report's `scope` (#106)
+- Security: a handler that outlives its timeout no longer leaks its secret through
+  `logging` once no run is attached, as after `App.call` returned. The framework's handler
+  left the root logger with the last run, so a WARNING the handler logged then went to
+  `logging.lastResort` and `sys.stderr` unredacted. The handler now stays on the root until
+  every such thread ends, and with no run attached writes a record at WARNING or above where
+  `lastResort` would, the held threads' secrets redacted, and nothing when the host's own
+  handler takes the record (#118)
 - The `conditional-rules` audit advice for a `__post_init__` that raises when none of
   several fields is set (`not (self.a or self.b)`, `not any(...)`, or `self.a is None and
   self.b is None`) suggests `RequiresAny` with those fields; it suggested `Excludes` on
   the first two, which would refuse valid calls (#99)
-
 - Parallel runs on Windows no longer fail now and then while one writes a file another
   reads: replacing the config file or the update-check and `ctx.cache` files while
   another process has it open, or reading it while it is being replaced, raised
@@ -1802,15 +1670,6 @@ additive over rc5: see Breaking.
   warning of whichever run held `sys.stdout` unredacted, because its run's secrets were
   released when the run returned. They now stay registered until the handler's thread
   ends; a thread that never ends keeps them for the life of the process (#104)
-
-## [1.0.0rc5] - 2026-09-30
-
-The fifth 1.0 release candidate: fixes to rc4's `stable-order` warning and `Decimal`
-arguments. The warning now also covers object arrays nested in a list, tuple, or dict,
-so `treaty audit --strict` can fail where rc4 passed.
-
-### Fixed
-
 - The audit rule `stable-order` warns about an array of objects nested in a list, tuple, or
   dict, such as `dict[str, list[Line]]` or `list[list[Line]]`: treaty sorts it by each
   item's JSON text, and neither `ordered=True` on the command nor `Out(ordered=True)` on
@@ -1824,145 +1683,6 @@ so `treaty audit --strict` can fail where rc4 passed.
   handler could see a signed zero
 - A `Decimal` sent as a JSON number, in `exec`, `--raw-payload`, MCP, or `app.call`, counts
   against `Flag(max_bytes=)` as its text, as a JSON string does; a number skipped the limit
-
-## [1.0.0rc4] - 2026-09-30
-
-The fourth 1.0 release candidate: built-in `Decimal` arguments, and a `stable-order` warning
-for an output array of objects with no declared order. Not additive over rc3: see Breaking.
-
-### Breaking
-
-- The audit rule `stable-order` is a warning for an output array of objects with no
-  declared order, a `list[T]` result or field of dataclasses, so `treaty audit --strict`
-  fails on it: treaty sorts such an array by each item's JSON text, which silently puts
-  `"10.00"` before `"5.00"`. Declare `sort_key=` or `ordered=True` on the command, or
-  `Out(sort_key=...)` or `Out(ordered=True)` on the field. Arrays inside untyped output
-  stay advice (#38)
-
-### Added
-
-- `Decimal` is a built-in argument type, as `int` and `float` are: `--amount 12.30` reaches
-  the handler as `Decimal("12.30")`, parsed from fixed-point text without a float, and
-  `Decimal | None` and `tuple[Decimal, ...]` work too. An exponent, `NaN`, `Infinity`, or
-  `1,5` exits 2 naming the flag, and `-0` is zero. `exec` lines and `--raw-payload` take a
-  JSON string or a JSON number read from its source text; a float from an MCP client or
-  `app.call` is refused. Its argument schema says `format: decimal`; output schemas are
-  unchanged. An app's own `app.scalar(Decimal, ...)` replaces the built-in,
-  for output schemas too (#39)
-
-## [1.0.0rc3] - 2026-09-30
-
-The third 1.0 release candidate: retry backoff and the timeout audit rules, `-v` and `-vv`,
-library logging routed by level, and a round of audit, secret-redaction, and parsing fixes.
-Not additive over rc2: see Breaking.
-
-### Breaking
-
-- `ctx.http` retries a POST or PATCH only when it never reached a server (a refused
-  connection or an unknown host): a timeout or a 502 to 504 may come after the server
-  acted. GET, HEAD, OPTIONS, TRACE, PUT, and DELETE retry as before. A `Retry-After`
-  lengthens the delay, and one over 60 s ends the run with `retry_after_ms` instead
-- An integer or number on argv is written as JSON writes it: `1_000`, `+3`, `" 7"`, and
-  digits of other scripts are argument errors. `pattern=` on a number is checked against
-  the parsed number on argv and JSON alike, so `--price 1.50` and `{"price": 1.50}` agree
-- A JSON object that repeats a key is refused (`--raw-payload` and `exec` lines) instead
-  of taking the last value, as argv already refused a repeated flag
-- The forgiving JSON reader offers no `corrected_input` for a near-number (`+1`, `0x1F`,
-  `.5`, `NaN`, `Infinity`): quoting it would have sent a string
-- Two commands that differ only in `.` and `-`, such as `cache.clear` and `cache-clear`,
-  fail registration: they would share a skill file and skill name
-- A flag default that breaks its own `pattern`, `pattern_type`, or `max_bytes` fails
-  registration
-- An empty `--config=`, `--context=`, or `--instance-id=` is an argument error instead of
-  falling back to the variable or the default files
-- `--schema-version` takes a major or a `MAJOR.MINOR` the command serves: `1.garbage` and
-  an unserved minor such as `1.5` are argument errors
-- `ctx.prompt(flag=)` must name a flag of the command
-- `ctx.edit` reports an editor that exits non-zero, or is missing, as `EDITOR_FAILED`
-  (exit 1) instead of a crash
-- `treaty audit`, `schema-lock`, `conformance`, and `init` resolve the target module, the
-  schema lock, `conformance/`, and the new project against `--cwd` instead of the
-  process's directory; `schema-lock` reports the lock's absolute path
-- A background pid file entry carries the child's start time; entries written by rc2 are
-  still read
-- A command whose arguments or output have no schema, such as a `tuple[SomeDataclass,
-  ...]` field, raises `RegistrationError` naming the command at registration, instead of a
-  bare `SchemaError` (#6). Code that caught `SchemaError` there catches
-  `RegistrationError` now, or `TreatyError` for both
-
-### Added
-
-- A settings field declared `Flag(default=..., description=..., secret=True)` is a secret
-  setting whatever its name: redacted by `--show-config` and left out of the config hash.
-  An enum setting, like an enum flag, is not inferred secret
-- The `describe` rule runs each example through `--validate-only`, and one that does not
-  parse is an error: agents copy examples verbatim, and a `<name>` placeholder is one too.
-  Only the spelling is judged: a secret's `--<name>-from-env` or `-from-file` reads a dummy
-  value, `--cwd`, `--input-file`, and `--config` are dropped with their values, leading
-  `VAR=` words set the call's environment, `uv run` and `sudo` are skipped, an unquoted `#`
-  at a word's start begins a comment, and an example with a pipe, a redirect, `;`, or a
-  lone `-` for stdin is not judged. `--validate-only` goes right after the command path, so
-  no handler ever runs during the audit. The no-example fix suggests values its checks accept (a
-  preset's sample, a secret from a variable, a tuple's item type); a custom `pattern=`
-  leaves a `<name>` to replace
-- `App.redirected_paths`: the old command paths `redirect` keeps answering
-- `external=False` on a command that calls out says it returns only values it computed,
-  which clears the `external-data` warning; unset, `external` is `None`, undeclared
-- The `subprocess-declared` rule reports `subprocess.run` and its siblings, `os.exec*`,
-  `os.spawn*`, and `os.posix_spawn*`, called in a handler however they were imported:
-  outside `ctx.run` a child has no time limit or declared argv, and `doctor` cannot check
-  the program. Its fix says `ctx.run` checks the exit status unless `check=False`
-- `Arg(multiline=True)` lets a positional hold newlines, as `Flag(multiline=True)` does; the
-  `multiline-flag` advice now suggests `Arg` for a positional instead of a `Flag` it cannot take
-- Did-you-mean on an unknown command: `context.did_you_mean` lists up to three close
-  registered commands, best first, and `suggestion` names them, on the command line (as
-  invocations, matching a mistyped word, a command's own name without its group, or the
-  dot path) and on `UNKNOWN_COMMAND` from `App.call`, `exec`, MCP, and
-  `check-permissions --for` (as dot paths). Close is one typo per three characters typed,
-  a swap of neighbors counting as one, or a prefix of a one-word name
-
-- `completion` built-in: `<app> completion bash` or `zsh` prints a completion script
-  generated from the manifest, covering commands, nested groups, flags, and the values of
-  enum and path flags and positionals, `--flag=value` included. The script is static, so a
-  tab press runs no Python. It yields to an app command named `completion`, and MCP serves
-  no tool for it. Every app lists one more command, so every manifest etag changes once
-- `CLEANUP_KEPT` warning: `cleanup` names the paths it left because they are, or hold, a
-  declared credential or config path
-- `APP_IMPORT_FAILED` (exit 4) from the `treaty` tooling commands when the app's module
-  raises `RegistrationError` or `SyntaxError` on import, instead of a treaty crash. Its
-  context carries `target`, `exception`, and the registration `message`, with no
-  traceback, on `audit`, `schema-lock`, `changelog-add`, `agents-md`, `check-docs`, and
-  `conformance` (#4)
-- `App(version=)` accepts PEP 440 development and post releases and their combinations
-  (`0.3.0.dev0`, `0.3.0.post1`, `1.0.0rc1.post2.dev3`), as `introduced_in=`,
-  `Deprecated(...)`, and an update check do (#5). Their semver spelling puts `.devN` in
-  the pre-release (`0.3.0-dev.0`) and `.postN` in the build metadata (`0.3.0+post.1`); a
-  `.devN` of a post release stays in the build metadata (`1.0.0+post.1.dev.0`). Semver
-  orders `dev` between `beta` and `rc`, so the spelling keeps the parts but not PEP 440's
-  order. Epochs and local versions are still refused, and the error says why
-- `Retry(backoff=, max_delay_ms=, jitter=, retry_if=)` (#11): each wait grows by
-  `backoff` from `delay_ms`, which `--retry-delay` still sets, up to `max_delay_ms` (an
-  hour when unset), moved by up to `jitter` of itself either way. A `CliExit` raised
-  inside `ctx.retry` with `retry_after_ms` lengthens the wait as a `Retry-After` does in
-  `ctx.http`, and one over 60 s ends the run with that error instead. `retry_if` retries
-  on a returned value it holds for, and ends with the `exhausted` code when it still
-  holds. The defaults keep the fixed delay, and the command's timeout still bounds every
-  wait
-- `treaty audit` reports its `scope` in JSON and on a `Scope:` line in plain output: what
-  the source rules read, so a clean audit is not taken for a runtime check
-- `-v` is short for `--verbose`, and `-vv` or `-v -v` for `--debug`, before or after the
-  command path. A command that declares its own `short="v"` keeps `-v` for its flag on that
-  command only; the `--verbose` and `--debug` descriptions in the manifest and help say so (#13)
-- Audit rule `timeout-budget` (#12), a warning: a `retry=Retry(...)` whose waits, at
-  their cap and full jitter, add up past the command's timeout, with a `timeout=` sized
-  to them; and a `heartbeat=True` command that inherits the app's default timeout
-- Audit rule `explicit-timeout` (#15), advice: a mutating or destructive command that
-  inherits `App(default_timeout=)`. Any `timeout=`, the default's own value or `None`
-  included, records the decision and silences it. `treaty init` scaffolds and treaty's
-  own mutating commands now declare theirs
-
-### Fixed
-
 - `exit-code-suggestion` advised redeclaring a retryable framework code such as
   `RATE_LIMITED` with `app.exit_code("RATE_LIMITED", 11, ..., suggestion=...)`, which
   registration refuses, so the advice could never clear. Framework codes are skipped: they
@@ -2206,131 +1926,6 @@ Not additive over rc2: see Breaking.
   (description, command) pairs of strings with a `RegistrationError` that names the
   command and the shape to write, instead of a raw `ValueError` for a plain string or a
   silent unpacking of a two-character one
-
-## [1.0.0rc2] - 2026-09-28
-
-The second 1.0 release candidate: native `async def` handlers, cooperative deadlines, and
-PEP 440 pre-release versions for apps. Additive over rc1; no breaking changes.
-
-### Added
-
-- `async def` handlers, and `async def` resource `acquire` and `release` (REQ-F-049): one
-  event loop per run on a thread of its own, cancellation at the timeout, and an
-  `UNAWAITED_TASKS` warning for tasks the handler left running. An async resource needs an
-  async handler; streaming handlers and other hooks stay plain `def`
-- `App(version=)` accepts a PEP 440 release with an `a`, `b`, or `rc` pre-release, such
-  as `importlib.metadata.version` returns (`1.0.0rc1`); `--version`, `meta.tool_version`,
-  and `app.version` give its semver spelling (`1.0.0-rc.1`). `introduced_in=`,
-  `Deprecated(since=, removed_in=)`, and a version string from an update check are read
-  the same way. Development and post releases are still refused
-- `ctx.remaining`, the seconds left before the command times out (`None` without a
-  limit), and `ctx.expired`: a handler passes the deadline to a client's `timeout=`,
-  or stops a long loop at the limit instead of running on after `TIMEOUT`
-
-## [1.0.0rc1] - 2026-09-28
-
-The first 1.0 release candidate: every Level 3 requirement that changes the public API,
-the additive Level 3 work, and the API review. See `plans/1.0/` and `docs/api.md`. The
-package version is PEP 440 (`1.0.0rc1`); `treaty --version` and `meta.tool_version` give its
-semver spelling (`1.0.0-rc.1`), which `App(version=)` requires.
-
-### Breaking
-
-- `treaty conformance` no longer overwrites a profile that differs from the generated one:
-  it exits `6` (`CONFLICT`) naming the changed keys and probes, and `--force` replaces the
-  file; an equal profile is left untouched (`effect: noop`). `treaty init` now scaffolds
-  exactly the profile `conformance` generates
-- `TREATY_FORMAT`, `TREATY_MAX_OUTPUT_BYTES`, `TREATY_MAX_STDIN_BYTES`, and
-  `TREATY_STATE_DIR` are now `<APP>_FORMAT` and friends; every variable treaty reads for
-  an app carries its prefix, and `<APP>_STATE_DIR` names the directory itself
-- `Envelope` takes a `treaty.Meta` instead of `duration_ms` and `request_id`;
-  `Meta.request_id` and `timestamp` are optional
-- `App(version=)` must be semver
-- `Ctx.config` is private; config writes go through `ctx.write_config` and are locked
-- `RATE_LIMITED` without `retry_after_ms` and an invalid `fix_command` end the run as
-  `INVALID_EXIT`; a missing login is `UNAUTHENTICATED` and a missing scope at run time
-  `PERMISSION_DENIED` (was `AUTH_REQUIRED` and `INSUFFICIENT_SCOPES`); a read-only
-  command's `TIMEOUT` is retryable
-- `async def` handlers, hooks, and resource acquires fail registration
-- Unparseable JSON input is `INVALID_JSON` (was `ARG_ERROR`, or `DISPATCH_PARSE_ERROR`
-  for an `exec` line); `validate_only` is a framework key; every manifest entry has
-  `option_placement`
-- Arrays in `data` are sorted unless the field is `Out(ordered=True)`; `Path` output is
-  absolute; `list[T] | None` output fields are refused; every output key is required
-- `cleanup=` runs after every handler run, not only on signals
-- High-entropy strings and credential-named fields in `data` are masked unless
-  `--unmask`; `unmask` and `no-injection-protection` are global names; output fields
-  named `_source` or `_trusted` are refused; more names are inferred secret (`cookie`, a
-  `pass` segment); truncation warnings name `data.x` instead of `$.x`
-- `os.system`, `os.popen`, and `shell=True` in a handler fail registration (the `no-shell`
-  audit rule is gone); `gui_operations` requires `headless_behavior=`
-- Every app has the `doctor`, `cleanup`, `status`, `generate-skills`, `mcp-validate`, and
-  `audit-log` built-ins, each yielding to an app command of the same name, so every etag
-  changes once; `cleanup` output has `cleaned` instead of `removed`
-- Children of `ctx.run` get `LC_ALL=C` unless `preserve_locale=True`, and `CI=1` off a
-  terminal
-- Off a terminal or under `CI`, `ctx.log` and stray `print()` text no longer reach stderr
-- Every app writes a rotated, redacted audit log under `XDG_DATA_HOME` unless
-  `<APP>_AUDIT_LOG=off` or `App(audit_log=None)`
-- A field named after a reserved framework flag (`--config`, `--quiet`, `--fields`,
-  `--token-limit`, and the rest of the table in `_framework.py`) fails registration
-- The manifest's `framework_version` is treaty's version; the app's is `meta.tool_version`
-- API review: `treaty.ExecArgs` is no longer exported; `Ctx`'s run plumbing (`log_sink`,
-  `warn_sink`, `processes`, `prompter`, `retrier`, `locks`, `teardown`, `steps`,
-  `session`) and `App`'s run-path helpers (`renderer`, `moved`, `check_fixes`,
-  `fix_problem`, `named_commands`, `effective_timeout`, `silence_notifiers`) are private
-- `--version --format plain` prints the bare version
-
-### Added
-
-- Response meta: `command`, `timestamp`, `schema_version`, `tool_version`, `cwd`,
-  `trace_id`, `project_root`, and `retries`; `schema_version=` and `compat=` with
-  `--schema-version`, `--output-schema`, `--print-schema`; `project_root=`; `treaty.Retry`
-  with `ctx.retry`; `treaty schema-lock`
-- Settings: `App(settings=)` from `<APP>_<FIELD>`, `--config`, project and user TOML
-  files, and defaults; `--context`, `--no-config`, `--show-config`, `--instance-id`;
-  `App(init=)` with the `init` built-in and `INIT_REQUIRED`
-- Error contract: `retry_strategy`, `treaty.already_exists` with `conflict_id`,
-  `fix_commands=` and `App(companions=)`, `treaty.Expired` with `refreshes_auth=`,
-  `treaty.NetworkContext`, `ctx.lock` with `LOCK_HELD`, `<APP>_SESSION` idempotency keys,
-  and `App.redirect` (exit 13 `REDIRECTED`, manifest `aliases`)
-- Argument grammar: `pattern_type=`, `requires=` with `RequiredWhen`, `Excludes`, and
-  `DefaultWhenAbsent`, `option_placement="strict"`, `from_stdin=`, `--validate-only`, JSON5
-  in `--raw-payload` and `exec` with `corrected_input`, `introduced_in=`,
-  `deprecated=treaty.Deprecated(...)`, and `treaty audit --baseline`
-- Output data: `treaty.Out` (`sort_key`, `ordered`, `volatile`, `high_entropy`,
-  `external`), `treaty.Binary`, `Flag(max_bytes=)` with `FIELD_TOO_LARGE`,
-  `ctx.truncated`, `--stable-output`
-- Multi-step commands: `steps=`, `ctx.step`, `--resume-from`, `--rollback-on-failure`,
-  `treaty.Batch`; resources' `release` on every exit
-- Output security: masking, `external=True` with `_source` and `_trusted` tags,
-  `--no-injection-protection`, `scrub()` for logs and stderr
-- Declarations: `subprocess=treaty.Subprocess(...)`, `platform=`, `required_tools=`,
-  `filesystem_side_effects=`, `background=` with `ctx.spawn`,
-  `App(dependencies=[treaty.Dependency(...)])`, and the `doctor` and `cleanup` built-ins
-- Session hygiene: `app.suppress_update_notifier`, `App(update_check=)` with
-  `--no-update-check`, `--cwd` and `CWD_CHANGED`, `ctx.tmp_dir`, `ctx.temp_file()`,
-  `ctx.output_file()`, `treaty.intercept_stdout()`, `cache=treaty.CachePolicy(...)` with
-  `ctx.cache`, `--no-cache`, `--cache-ttl`
-- Network and filesystem: `ctx.http` (proxies, CA bundles, `error.network_context`,
-  retries), `--proxy`, `--no-proxy`, `recursive_traversal=True` with `ctx.walk`,
-  `--no-follow-symlinks`, `--max-depth`
-- Logging: `--quiet`, `--verbose`, `--debug`, `ctx.progress`, `ctx.debug`,
-  `ctx.log_error`, `--warnings-as-errors`, `treaty.AuditLog`, the `audit-log` built-in
-- Output selection: `--fields`, `--stream`, `--format id` with `id_field=`,
-  `--heartbeat-interval`, `--token-limit`, `--token-offset`, `--token-count`,
-  `--tokenizer`, `app.tokenizer()`, the `treaty[tiktoken]` extra
-- Built-ins: `manifest --etag` with `meta.not_modified`, `App(checks=)` with `treaty.Check`
-  and `treaty.endpoint`, `status`, `cleanup --scope` and `--min-age`,
-  `App(schema_changelog=)` with `changelog` and `treaty changelog-add`, `generate-skills`,
-  `mcp-validate`, `treaty-mcp --list-tools`
-- Agent docs: `treaty agents-md`, `treaty check-docs`, AGENTS.md from `treaty init`
-- 37 new audit rules (56 in all, listed by `treaty rules`), each with a generated fix
-- `docs/api.md` (the frozen surface), `docs/guide.md`, this changelog, a stability policy,
-  and per-platform notes in the README
-
-### Fixed
-
 - On Windows: `cleanup` and `status` report matched side-effect paths in native form
   instead of mixing `/` and `\`, and a `THIRD_PARTY_STDOUT` warning's `text` ends lines
   with `\n` (its `bytes` still counts what was written)
@@ -2429,43 +2024,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0rc36...HEAD
-[1.0.0rc36]: https://github.com/romamo/treaty/compare/v1.0.0rc35...v1.0.0rc36
-[1.0.0rc35]: https://github.com/romamo/treaty/compare/v1.0.0rc34...v1.0.0rc35
-[1.0.0rc34]: https://github.com/romamo/treaty/compare/v1.0.0rc33...v1.0.0rc34
-[1.0.0rc33]: https://github.com/romamo/treaty/compare/v1.0.0rc32...v1.0.0rc33
-[1.0.0rc32]: https://github.com/romamo/treaty/compare/v1.0.0rc31...v1.0.0rc32
-[1.0.0rc31]: https://github.com/romamo/treaty/compare/v1.0.0rc30...v1.0.0rc31
-[1.0.0rc30]: https://github.com/romamo/treaty/compare/v1.0.0rc29...v1.0.0rc30
-[1.0.0rc29]: https://github.com/romamo/treaty/compare/v1.0.0rc28...v1.0.0rc29
-[1.0.0rc28]: https://github.com/romamo/treaty/compare/v1.0.0rc27...v1.0.0rc28
-[1.0.0rc27]: https://github.com/romamo/treaty/compare/v1.0.0rc26...v1.0.0rc27
-[1.0.0rc26]: https://github.com/romamo/treaty/compare/v1.0.0rc25...v1.0.0rc26
-[1.0.0rc25]: https://github.com/romamo/treaty/compare/v1.0.0rc24...v1.0.0rc25
-[1.0.0rc24]: https://github.com/romamo/treaty/compare/v1.0.0rc23...v1.0.0rc24
-[1.0.0rc23]: https://github.com/romamo/treaty/compare/v1.0.0rc22...v1.0.0rc23
-[1.0.0rc22]: https://github.com/romamo/treaty/compare/v1.0.0rc21...v1.0.0rc22
-[1.0.0rc21]: https://github.com/romamo/treaty/compare/v1.0.0rc20...v1.0.0rc21
-[1.0.0rc20]: https://github.com/romamo/treaty/compare/v1.0.0rc19...v1.0.0rc20
-[1.0.0rc19]: https://github.com/romamo/treaty/compare/v1.0.0rc18...v1.0.0rc19
-[1.0.0rc18]: https://github.com/romamo/treaty/compare/v1.0.0rc17...v1.0.0rc18
-[1.0.0rc17]: https://github.com/romamo/treaty/compare/v1.0.0rc16...v1.0.0rc17
-[1.0.0rc16]: https://github.com/romamo/treaty/compare/v1.0.0rc15...v1.0.0rc16
-[1.0.0rc15]: https://github.com/romamo/treaty/compare/v1.0.0rc14...v1.0.0rc15
-[1.0.0rc14]: https://github.com/romamo/treaty/compare/v1.0.0rc13...v1.0.0rc14
-[1.0.0rc13]: https://github.com/romamo/treaty/compare/v1.0.0rc12...v1.0.0rc13
-[1.0.0rc12]: https://github.com/romamo/treaty/compare/v1.0.0rc11...v1.0.0rc12
-[1.0.0rc11]: https://github.com/romamo/treaty/compare/v1.0.0rc10...v1.0.0rc11
-[1.0.0rc10]: https://github.com/romamo/treaty/compare/v1.0.0rc9...v1.0.0rc10
-[1.0.0rc9]: https://github.com/romamo/treaty/compare/v1.0.0rc8...v1.0.0rc9
-[1.0.0rc8]: https://github.com/romamo/treaty/compare/v1.0.0rc7...v1.0.0rc8
-[1.0.0rc7]: https://github.com/romamo/treaty/compare/v1.0.0rc6...v1.0.0rc7
-[1.0.0rc6]: https://github.com/romamo/treaty/compare/v1.0.0rc5...v1.0.0rc6
-[1.0.0rc5]: https://github.com/romamo/treaty/compare/v1.0.0rc4...v1.0.0rc5
-[1.0.0rc4]: https://github.com/romamo/treaty/compare/v1.0.0rc3...v1.0.0rc4
-[1.0.0rc3]: https://github.com/romamo/treaty/compare/v1.0.0rc2...v1.0.0rc3
-[1.0.0rc2]: https://github.com/romamo/treaty/compare/v1.0.0rc1...v1.0.0rc2
-[1.0.0rc1]: https://github.com/romamo/treaty/compare/v0.1.0...v1.0.0rc1
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/romamo/treaty/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/romamo/treaty/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/romamo/treaty/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/romamo/treaty/compare/v0.0.4...v0.0.5
