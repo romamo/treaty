@@ -3,7 +3,7 @@ approval a person runs, registered ``mcp=False`` (#281). Every handler that runs
 its name in the file ``SELECTCTL_RAN`` names, so a test sees what ran."""
 
 import os
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -20,12 +20,15 @@ def ran(name: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ServeArgs:
-    mode: Literal["project", "repository", "mixed", "none", "unknown", "clash"] = Flag(
+    mode: Literal[
+        "project", "repository", "mixed", "none", "unknown", "clash", "person", "shadow"
+    ] = Flag(
         default="project",
         description="project serves every command; repository the brownfield ones and the "
         "approval, which mcp=False keeps off anyway; mixed those and the provided tool; none "
         "only the provided tool; unknown a path the app lacks; clash a provided tool named "
-        "like the approval",
+        "like a served command; person one named like the person-only command; shadow the "
+        "fleet and provided tools named like the deploy it leaves out and the approval (#453)",
     )
 
 
@@ -36,6 +39,8 @@ SELECTED: Mapping[str, Collection[str] | None] = {
     "none": (),
     "unknown": ("fleet", "observe.missing"),
     "clash": ("fleet",),
+    "person": ("fleet",),
+    "shadow": ("fleet",),
 }
 
 
@@ -53,12 +58,42 @@ def preview(arguments: Mapping[str, object], ctx: Ctx) -> Previewed:
     return Previewed(True)
 
 
+@dataclass(frozen=True, slots=True)
+class Answered:
+    tool: str
+
+
+def answering(name: str) -> Callable[[Mapping[str, object], Ctx], Answered]:
+    """The handler of a provided tool named like a command, which leaves ``provided <name>``
+    where the command's own handler would leave ``<name>``"""
+
+    def answer(arguments: Mapping[str, object], ctx: Ctx) -> Answered:
+        ran(f"provided {name}")
+        return Answered(name)
+
+    return answer
+
+
+PROVIDED: Mapping[str, tuple[str, ...]] = {
+    "mixed": ("preview",),
+    "none": ("preview",),
+    "clash": ("fleet",),
+    "person": ("sign",),
+    "shadow": ("deploy", "approve"),
+}
+
+
 def provide(args: ServeArgs, ctx: Ctx) -> list[McpTool]:
-    name = {"mixed": "preview", "none": "preview", "clash": "approve"}.get(args.mode)
-    if name is None:
-        return []
     schema: dict[str, object] = {"type": "object", "properties": {}}
-    return [McpTool(name=name, description="Preview", input_schema=schema, handler=preview)]
+    return [
+        McpTool(
+            name=name,
+            description="Preview" if name == "preview" else f"The API's own {name}",
+            input_schema=schema,
+            handler=preview if name == "preview" else answering(name),
+        )
+        for name in PROVIDED.get(args.mode, ())
+    ]
 
 
 app = App(
@@ -96,6 +131,18 @@ def deploy(args: NoArgs, ctx: Ctx) -> dict[str, str]:
 )
 def approve(args: NoArgs, ctx: Ctx) -> dict[str, str]:
     ran("approve")
+    return {"effect": "updated"}
+
+
+@app.command(
+    "sign",
+    description="Sign the release",
+    danger_level="mutating",
+    exit_codes=(),
+    requires_person=True,
+)
+def sign(args: NoArgs, ctx: Ctx) -> dict[str, str]:
+    ran("sign")
     return {"effect": "updated"}
 
 

@@ -2272,8 +2272,9 @@ only previews can still be flagged destructive. A tool advertised destructive
 true`, which treaty adds to its input schema: without it the call exits `2` with
 `CONFIRMATION_REQUIRED` and the handler never runs (treaty cannot preview a provided tool's
 work), and such a tool whose schema defines that property itself is refused as serving
-starts. A provided tool named like a command tool or another provided tool is refused with
-exit `4`, `MCP_TOOL_NAME_TAKEN`, before serving; an invalid schema is `MCP_TOOL_INVALID`.
+starts. A provided tool named like a command tool the run serves, a `requires_person`
+command, or another provided tool is refused with exit `4`, `MCP_TOOL_NAME_TAKEN`, before
+serving; an invalid schema is `MCP_TOOL_INVALID`.
 `instructions=` is the server's text, or a function of the startup arguments returning it;
 empty text is refused before serving with `MCP_INSTRUCTIONS_INVALID`.
 
@@ -2314,7 +2315,10 @@ only the provided tools. A path the app does not have is refused before serving 
 `4`, `MCP_COMMAND_UNKNOWN`, its envelope on stderr; a command registered `mcp=False` stays
 off whatever `select` returns. A command left off answers `UNKNOWN_TOOL` by its name, and
 an old name `redirect` keeps answers `REDIRECTED` only toward a served tool. A provided tool
-may not take the name of any command, served or not.
+may take the name of a command kept off, such as one an API's own tool registry shares
+with the CLI: that name answers for the provided tool, whose handler runs, and the
+command's never runs over MCP by any name. It may not take the name of a served command's
+tool, of another provided tool, or of a `requires_person` command, which no server serves.
 
 A server started for one project can fix arguments for the run, so no call reaches past
 it. `McpServe(bind=bind)` calls `bind(args)` as serving starts and takes the mapping it

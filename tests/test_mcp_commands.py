@@ -1,6 +1,7 @@
 """Which commands an MCP server serves (#281): ``McpServe(commands=select)`` per startup
 mode, ``mcp=False`` on a command whatever ``select`` returns, and the built-ins that are
-no tools. A command left off is not callable through the server by any name."""
+no tools. A command left off is not callable through the server by any name; a provided
+tool may answer for its exact name (#453)."""
 
 import asyncio
 import io
@@ -172,15 +173,22 @@ def test_an_unknown_tool_names_what_tools_list_lists_in_its_order(
 
 
 @pytest.mark.parametrize(
-    ("mode", "code", "context"),
+    ("mode", "code", "context", "said"),
     [
-        ("unknown", "MCP_COMMAND_UNKNOWN", {"command": "observe.missing"}),
-        # A provided tool never answers for a command left off the server
-        ("clash", "MCP_TOOL_NAME_TAKEN", {"tool": "approve"}),
+        ("unknown", "MCP_COMMAND_UNKNOWN", {"command": "observe.missing"}, "not a command"),
+        # A provided tool takes no name a served command's tool has (#453)
+        ("clash", "MCP_TOOL_NAME_TAKEN", {"tool": "fleet"}, "a served command's tool"),
+        # Nor a person-only command's, though no server serves it (D-16, #453)
+        ("person", "MCP_TOOL_NAME_TAKEN", {"tool": "sign"}, "a person-only command"),
     ],
 )
 def test_a_bad_selection_is_refused_before_serving(
-    tmp_path: Path, started: list[Server], mode: str, code: str, context: dict[str, str]
+    tmp_path: Path,
+    started: list[Server],
+    mode: str,
+    code: str,
+    context: dict[str, str],
+    said: str,
 ) -> None:
     server = _serve(started, tmp_path, "--mode", mode)
     assert server.close() == 4
@@ -190,6 +198,47 @@ def test_a_bad_selection_is_refused_before_serving(
     error = envelope["error"]
     assert isinstance(error, dict)
     assert error["code"] == code and error["context"] == context
+    assert said in error["message"]
+    assert _ran(tmp_path / "ran.txt") == []
+
+
+# A provided tool named like a command kept off the server answers for itself (#453)
+SHADOWED = ["deploy", "approve"]
+STILL_UNKNOWN = [
+    "Deploy",
+    "deploy ",
+    "ｄeploy",  # fullwidth d, which NFKC folds to deploy
+    "Approve",
+    "approve​",
+    "ok",  # the approval's old name, redirected to it on the command line
+    "observe_logs",  # a command the selection leaves out and no provided tool takes
+    "observe.logs",
+    "sign",
+]
+
+
+def test_a_provided_tool_answers_for_a_command_kept_off_the_server(
+    tmp_path: Path, started: list[Server]
+) -> None:
+    server = _serve(started, tmp_path, "--mode", "shadow")
+    server.initialize()
+    tools = _result(server.request("tools/list"))["tools"]
+    assert isinstance(tools, list)
+    assert [t["name"] for t in tools] == ["fleet", *SHADOWED]
+    for name in SHADOWED:
+        called = _call(server, name, {})
+        assert called["isError"] is False, name
+        content = called["structuredContent"]
+        assert isinstance(content, dict)
+        assert content["data"] == {"tool": name}
+    # Every other name of a command kept off still answers as an unknown tool
+    for name in STILL_UNKNOWN:
+        called = _call(server, name, {})
+        assert called["isError"] is True, name
+        assert _code(called) == "UNKNOWN_TOOL", name
+    assert server.close() == 0
+    # The provided handlers ran; the commands' own never did, through any name
+    assert _ran(tmp_path / "ran.txt") == ["provided deploy", "provided approve"]
 
 
 def test_treaty_mcp_leaves_the_mcp_false_commands_off(tmp_path: Path) -> None:
@@ -239,7 +288,11 @@ def _run(app: App, argv: list[str]) -> tuple[int, str, str]:
 
 @pytest.mark.parametrize(
     ("mode", "expected"),
-    [("repository", ["fleet", "observe_logs"]), ("none", ["preview"])],
+    [
+        ("repository", ["fleet", "observe_logs"]),
+        ("none", ["preview"]),
+        ("shadow", ["fleet", "deploy", "approve"]),
+    ],
 )
 def test_list_tools_lists_the_selection(mode: str, expected: list[str]) -> None:
     code, out, _ = _run(_selectctl(), ["mcp", "serve", "--mode", mode, "--list-tools"])
@@ -272,6 +325,25 @@ def test_mcp_validate_compares_the_selection_the_serve_args_make(tmp_path: Path)
     assert "deploy" in missing and "approve" not in missing
     unknown = validate('{"mode": "unknown"}')
     assert unknown["error"]["code"] == "MCP_COMMAND_UNKNOWN"  # type: ignore[index]
+
+
+def test_mcp_validate_names_a_provided_tool_named_like_a_command_kept_off(
+    tmp_path: Path,
+) -> None:
+    app = _selectctl()
+    _, out, _ = _run(app, ["mcp", "serve", "--mode", "shadow", "--list-tools"])
+    saved = tmp_path / "mcp.json"
+    saved.write_text(out, encoding="utf-8")
+    argv = ["mcp-validate", "--mcp-schema-file", str(saved), "--serve-args"]
+    assert json.loads(_run(app, [*argv, '{"mode": "shadow"}'])[1])["ok"] is True
+    # Against the full catalog, deploy is the command's tool, whose schema differs
+    drifted = json.loads(_run(app, [*argv, '{"mode": "project"}'])[1])
+    assert drifted["error"]["code"] == "SCHEMA_DRIFT_DETECTED"
+    drift = drifted["data"]["drift"]
+    # approve is no tool there, so the saved list holds one too many
+    assert {"command": "approve", "field": None} in drift["removed"]
+    assert {"command": "deploy", "field": "data.tool"} in drift["removed"]
+    assert "deploy" not in drift["missing_from_mcp"]
 
 
 def test_the_manifest_marks_a_command_that_is_no_tool() -> None:
