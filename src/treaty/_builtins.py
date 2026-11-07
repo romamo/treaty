@@ -864,7 +864,7 @@ def _served_tools(
     bindings = bound_values(app, app.mcp, invocation.args, served)
     resolver = Resolver(command.resource_graph, invocation.args, ctx, held)
     resources = resolver.all(provider_resources(app, app.mcp))
-    provided = provided_tools(app, app.mcp, invocation.args, ctx, resources)
+    provided = provided_tools(app, app.mcp, invocation.args, ctx, resources, served=served)
     return [p.entry() for p in provided.values()], served, bindings
 
 

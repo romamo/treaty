@@ -234,7 +234,10 @@ class McpServe:
     ``treaty.Exit`` to refuse (answered on stderr). ``tools(args, ctx, *resources)``
     returns the ``McpTool`` values served beside the commands, called once as serving
     starts, after ``setup``; it takes resources as ``setup`` does, the ``App(settings=)``
-    class among them, acquired as serving starts and released when it ends (#302).
+    class among them, acquired as serving starts and released when it ends (#302). A
+    provided tool may not take the name of a command tool the run serves, of a
+    ``requires_person`` command, or of another provided tool; a command kept off the
+    server never runs over MCP, but its name may answer for a provided tool (#453).
     ``instructions`` is the server's instructions to the client: text, or a function of
     the startup arguments returning it. ``exit_codes`` names the app exit
     codes ``setup``, ``tools``, and ``bind`` may raise, registered with ``app.exit_code``
@@ -561,12 +564,30 @@ def _invalid(name: str, problem: str) -> CliExit:
     )
 
 
+def _name_taken(name: str, what: str) -> CliExit:
+    return CliExit(
+        ExitCodeName("PRECONDITION"),
+        f"the provided MCP tool {name!r} has the name of {what}",
+        code=MCP_TOOL_NAME_TAKEN,
+        context={"tool": name},
+        fix_required="rename the provided tool; tool names are unique",
+    )
+
+
 def provided_tools(
-    app: App, spec: McpServe, args: object, ctx: Ctx, resources: Sequence[object] = ()
+    app: App,
+    spec: McpServe,
+    args: object,
+    ctx: Ctx,
+    resources: Sequence[object] = (),
+    *,
+    served: frozenset[CommandPath] | None = None,
 ) -> dict[str, Provided]:
     """``spec.tools(args, ctx, *resources)``, each checked: an ``McpTool``, a valid input
-    schema, a name no command tool or other provided tool has, and an output type treaty
-    can check. Raised before serving, so a bad catalog never reaches a client"""
+    schema, a name no command tool the run serves (``served``, what ``McpServe(commands=)``
+    selected; None for every command), no person-only command, and no other provided tool
+    has, and an output type treaty can check. Raised before serving, so a bad catalog
+    never reaches a client"""
     provide = spec.tools
     if provide is None:
         return {}
@@ -583,31 +604,31 @@ def provided_tools(
             code=MCP_SDK_MISSING,
             fix_required="install the mcp extra: treaty[mcp]",
         ) from None
-    from ._tools import tool_name
+    from ._tools import tool_entries, tool_name
 
     returned = provide(args, ctx, *resources)
     if isinstance(returned, (str, bytes, Mapping)) or not isinstance(returned, Sequence):
         raise TypeError(
             f"McpServe tools returned {type(returned).__name__}; it returns a list of McpTool"
         )
-    # Every command's name, served or not: a provided tool never answers for a command
-    # left off the server (#281)
-    taken = {tool_name(path) for path in app.commands}
+    # The names of the command tools this run serves, as tools/list lists them, and of
+    # every person-only command, which no server serves (D-16). A command kept off by
+    # commands= or mcp=False never runs over MCP, but its name may answer for a provided
+    # tool rather than UNKNOWN_TOOL (D-17, #453)
+    served_names = {e.name for e in tool_entries(app, served)}
+    person_names = {tool_name(p) for p, c in app.commands.items() if c.requires_person}
     found: dict[str, Provided] = {}
     for tool in returned:
         if not isinstance(tool, McpTool):
             raise TypeError(
                 f"McpServe tools returned a {type(tool).__name__}; each tool is a treaty.McpTool"
             )
-        if tool.name in taken or tool.name in found:
-            what = "a command's tool" if tool.name in taken else "another provided tool"
-            raise CliExit(
-                ExitCodeName("PRECONDITION"),
-                f"the provided MCP tool {tool.name!r} has the name of {what}",
-                code=MCP_TOOL_NAME_TAKEN,
-                context={"tool": tool.name},
-                fix_required="rename the provided tool; tool names are unique",
-            )
+        if tool.name in served_names:
+            raise _name_taken(tool.name, "a served command's tool")
+        if tool.name in person_names:
+            raise _name_taken(tool.name, "a person-only command, which never answers over MCP")
+        if tool.name in found:
+            raise _name_taken(tool.name, "another provided tool")
         properties = tool.input_schema.get("properties")
         if (
             advertised_destructive(tool)
@@ -898,7 +919,7 @@ def register_mcp_serve(app: App, spec: McpServe) -> CommandPath:
                 )
         served = served_commands(app, spec, args)
         bindings = bound_values(app, spec, args, served)
-        provided = provided_tools(app, spec, args, ctx, [held[c] for c in for_tools])
+        provided = provided_tools(app, spec, args, ctx, [held[c] for c in for_tools], served=served)
         if getattr(args, LIST_TOOLS):
             from ._tools import tool_list
 
