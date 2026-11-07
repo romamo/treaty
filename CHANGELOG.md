@@ -10,6 +10,17 @@ Apps built on treaty keep their own, structured schema changelog with
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-07
+
+### Changed
+
+- `McpServe(tools=...)` serves a provided tool named like a command the run keeps off the
+  server (left out by `McpServe(commands=)` or registered `mcp=False`), such as an API's
+  own `whoami`: that name answers for the provided tool, and the command still never runs
+  over MCP by any name. A provided tool named like a served command's tool, a
+  `requires_person` command, or another provided tool is still refused with
+  `MCP_TOOL_NAME_TAKEN`, whose message now says which (#453)
+
 ## [1.0.0] - 2026-11-03
 
 ### Breaking
@@ -2024,7 +2035,8 @@ First release.
 - `treaty audit`, `treaty init`, and `treaty conformance`
 - The benchmark against argparse and click on the spec harness
 
-[Unreleased]: https://github.com/romamo/treaty/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/romamo/treaty/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/romamo/treaty/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/romamo/treaty/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/romamo/treaty/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/romamo/treaty/compare/v0.0.5...v0.0.6
