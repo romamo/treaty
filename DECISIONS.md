@@ -137,3 +137,11 @@ entry that supersedes it, never by editing an old one.
 - Applies to: src/treaty/_prompt.py, src/treaty/_context.py, src/treaty/_command.py, src/treaty/_manifest.py, ctx.attest, requires_person, --yes, mcp, manifest schema_version
 - Enforced by: review; tests/test_attest.py against the spec's schema
 - Supersedes: D-14
+
+## D-17: A provided MCP tool may take the name of a command this run doesn't serve
+
+- Decided: 2026-11-07, in romamo/treaty#453
+- Rule: McpServe(tools=...) reserves only the names of the command tools this run serves (after McpServe(commands=) and mcp=False) and of the provided tools already seen; a provided tool named like a served command, another provided tool, or a requires_person command fails with MCP_TOOL_NAME_TAKEN. A command kept off the server never runs over MCP, but its name may answer for the app's own provided tool rather than UNKNOWN_TOOL
+- Why: An app whose API-side tool registry shares names with its CLI commands could not serve it through treaty (abecra/app#219); the guarantee that matters, that an excluded command's handler never runs, holds, while the name-level UNKNOWN_TOOL promise of #281/#283 is given up except for requires_person commands, the one kind no agent may run (D-16)
+- Applies to: src/treaty/_mcp_serve.py, McpServe, provided tools, mcp serve, MCP_TOOL_NAME_TAKEN, mcp
+- Enforced by: review; tests for an allowed and a refused provided tool name over stdio
