@@ -30,6 +30,11 @@ A dataclass's new field counts as added when it comes after every kept field and
 default. A new field without one, a field inserted among the kept ones, and a reorder are
 changed.
 
+A keyword list (`App`, `App.command`, `App.format`, `App.run`, `Flag`, `Arg`, `Deprecated`)
+holds names only, so a new keyword is read from the live signature: it counts as added when
+it has a default or is variadic and, if positional, comes after every kept positional one. A
+new required keyword and a positional one inserted among the kept ones are changed.
+
 A removed or changed entry fails CI unless the changelog since that release has a Breaking
 entry: a `- ` line under a `### Breaking` heading in a `changelog.d/` fragment or in
 CHANGELOG.md above the release's heading, the same entry that makes the release bot bump

@@ -327,6 +327,55 @@ def fields_change(
     return changes
 
 
+_KEYWORDS = re.compile(r"keywords/(?P<owner>[^/]+)")
+_KEYWORD_TARGETS: dict[str, Callable[..., object]] = {
+    "App": App.__init__,
+    "App.command": App.command,
+    "App.format": App.format,
+    "App.run": App.run,
+    "Flag": treaty.Flag,
+    "Arg": treaty.Arg,
+    "Deprecated": treaty.Deprecated,
+}
+_POSITIONAL_KINDS = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+_VARIADIC_KINDS = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+
+
+def keywords_change(
+    released: list[object], current: list[object], path: str, owner: str
+) -> list[Change]:
+    """A keyword list holds names only, so a new one is read from the live signature: it is
+    added when it has a default or is variadic and, if positional, comes after every kept
+    positional; a new required one or one inserted among the positionals is a change"""
+    changes = [Change("removed", f"{path}[{item}]") for item in released if item not in current]
+    if [i for i in released if i in current] != [i for i in current if i in released]:
+        changes.append(Change("changed", f"{path} (order)"))
+    new = [item for item in current if item not in released]
+    if not new:
+        return changes
+    if owner not in _KEYWORD_TARGETS:
+        raise ValueError(f"{path}: no live callable to read the new keywords from")
+    params = inspect.signature(_KEYWORD_TARGETS[owner]).parameters
+    order = list(params)
+    last_kept = max(
+        (
+            order.index(p.name)
+            for p in params.values()
+            if p.name in released and p.kind in _POSITIONAL_KINDS
+        ),
+        default=-1,
+    )
+    for item in new:
+        param = params[str(item)]
+        if param.default is inspect.Parameter.empty and param.kind not in _VARIADIC_KINDS:
+            changes.append(Change("changed", f"{path}[{item}] (new parameter without a default)"))
+        elif param.kind in _POSITIONAL_KINDS and order.index(param.name) < last_kept:
+            changes.append(Change("changed", f"{path}[{item}] (positional parameter inserted)"))
+        else:
+            changes.append(Change("added", f"{path}[{item}]"))
+    return changes
+
+
 def snapshot_changes(
     released: object,
     current: object,
@@ -364,6 +413,9 @@ def snapshot_changes(
         fields = _FIELDS.fullmatch(path)
         if fields is not None:
             return fields_change(released, current, path, fields["export"], has_default)
+        keywords = _KEYWORDS.fullmatch(path)
+        if keywords is not None:
+            return keywords_change(released, current, path, keywords["owner"])
         changes = [Change("removed", f"{path}[{item}]") for item in released if item not in current]
         changes += [Change("added", f"{path}[{item}]") for item in current if item not in released]
         kept_before = [item for item in released if item in current]
@@ -681,6 +733,42 @@ def test_a_dataclass_field_is_added_only_appended_with_a_default(
     released = {"exports": {"Affects": {"kind": "class", "fields": ["summary", "count"]}}}
     current = {"exports": {"Affects": {"kind": "class", "fields": fields}}}
     assert snapshot_changes(released, current, has_default=_has_default) == expected
+
+
+def _live_keywords(owner: str) -> list[object]:
+    keywords = inventory()["keywords"]
+    assert isinstance(keywords, dict)
+    return list(keywords[owner])
+
+
+def _without(owner: str, name: str) -> dict[str, object]:
+    return {"keywords": {owner: [k for k in _live_keywords(owner) if k != name]}}
+
+
+@pytest.mark.parametrize(
+    ("owner", "name", "kind"),
+    [
+        pytest.param("App.command", "requires_person", "added", id="defaulted-keyword-only"),
+        pytest.param("App.command", "description", "changed", id="required-keyword-only"),
+        pytest.param("App", "version", "changed", id="required-constructor-keyword"),
+        pytest.param("Deprecated", "replacement", "changed", id="positional-inserted"),
+        pytest.param("Deprecated", "removed_in", "added", id="positional-appended"),
+    ],
+)
+def test_a_new_keyword_is_added_only_with_a_default_after_the_kept_positionals(
+    owner: str, name: str, kind: str
+) -> None:
+    current = {"keywords": {owner: _live_keywords(owner)}}
+    changes = snapshot_changes(_without(owner, name), current)
+    assert [change.kind for change in changes] == [kind]
+    assert name in changes[0].path
+
+
+def test_a_new_keyword_without_a_live_callable_fails_loudly() -> None:
+    released = {"keywords": {"Group.command": ["name", "**App.command"]}}
+    current = {"keywords": {"Group.command": ["name", "extra", "**App.command"]}}
+    with pytest.raises(ValueError, match="no live callable"):
+        snapshot_changes(released, current)
 
 
 def test_a_live_dataclass_field_default_is_read_from_treaty() -> None:
