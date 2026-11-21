@@ -102,3 +102,10 @@ triage = "act"
 fix = "act"
 land = "act"
 upgrade = "act"                   # shipmill config migrations land without a question
+
+# Who decides (spec 030; Roman, 2026-11-21). treaty is before 1.0.0: a changed command, flag,
+# format or exit code is listed under Changed and undone by a revert within veto_hours, as in
+# shipmill and cloudfall. Read this level again when 1.0.0 is released. scope, rule-departure,
+# security and protected stay ask
+[decisions]
+contract-change = "notify"
