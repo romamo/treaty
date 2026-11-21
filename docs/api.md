@@ -12,12 +12,23 @@ and the change has a changelog entry (a fragment in `changelog.d/`).
 The same test file compares the snapshot with `tests/data/public_api.released.json`, the
 snapshot as of the last stable release, and sorts each difference:
 
-- **Added**: a name, method, field, keyword, key, exit code, or variable that the release
-  lacked. It passes: it is a minor change
+- **Added**: a name, method, keyword, key, exit code, or variable that the release
+  lacked. It passes: it is a minor change. So do a function's new parameter and a
+  dataclass's new field, under the rules below
 - **Removed**: one the release had and the snapshot lacks
-- **Changed**: one both have with a different value (a function's signature, an alias, an
-  exit code's number, a kind), or a list whose kept items moved (the order of keywords or
-  dataclass fields)
+- **Changed**: one both have with a different value (an alias, an exit code's number, a
+  kind), or a list whose kept items moved (the order of keywords)
+
+A function's signature is compared parameter by parameter. A new parameter counts as added
+when every old one keeps its name, kind, position (a positional one), annotation, and
+default, the new one has a default or is `*args` or `**kwargs`, and the return annotation
+stays. Anything else is changed: a removed or renamed parameter, a new required one, a
+changed default or annotation, a positional one inserted or moved. A signature the check
+can't parse fails the test rather than being guessed at.
+
+A dataclass's new field counts as added when it comes after every kept field and has a
+default. A new field without one, a field inserted among the kept ones, and a reorder are
+changed.
 
 A removed or changed entry fails CI unless the changelog since that release has a Breaking
 entry: a `- ` line under a `### Breaking` heading in a `changelog.d/` fragment or in

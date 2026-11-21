@@ -19,7 +19,7 @@ import re
 import subprocess
 import sys
 import types
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from importlib.metadata import version
 from pathlib import Path
 from typing import Literal
@@ -161,10 +161,183 @@ def _scalars(value: list[object]) -> bool:
     return all(isinstance(item, str | int) for item in value)
 
 
-def snapshot_changes(released: object, current: object, path: str = "") -> list[Change]:
+type ParamKind = Literal[
+    "positional_only", "positional_or_keyword", "keyword_only", "var_positional", "var_keyword"
+]
+_POSITIONAL = ("positional_only", "positional_or_keyword")
+_NAME = re.compile(r"[A-Za-z_]\w*")
+_CLOSE = {"[": "]", "(": ")", "{": "}", "<": ">"}
+
+
+@dataclasses.dataclass(frozen=True)
+class Param:
+    """One parameter of a signature string, as ``inspect.signature`` prints it"""
+
+    name: str
+    kind: ParamKind
+    annotation: str | None
+    default: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class Signature:
+    params: tuple[Param, ...]
+    returns: str | None
+
+
+def _split_top(text: str, sep: str | None) -> list[str]:
+    """Split ``text`` at each ``sep`` outside quotes and brackets; with ``sep`` None, split
+    once after the bracket that ``text`` opens with closes"""
+    parts: list[str] = []
+    stack: list[str] = []
+    quote: str | None = None
+    start = i = 0
+    while i < len(text):
+        char = text[i]
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char in _CLOSE:
+            stack.append(_CLOSE[char])
+        elif char in _CLOSE.values():
+            if not stack or stack.pop() != char:
+                raise ValueError(f"unbalanced {char!r} in {text!r}")
+            if sep is None and not stack:
+                return [text[: i + 1], text[i + 1 :]]
+        elif sep is not None and not stack and text.startswith(sep, i):
+            parts.append(text[start:i])
+            i += len(sep)
+            start = i
+            continue
+        i += 1
+    if quote is not None or stack or sep is None:
+        raise ValueError(f"unclosed quote or bracket in {text!r}")
+    parts.append(text[start:])
+    return parts
+
+
+def parse_signature(text: str) -> Signature:
+    """Parse a snapshot's signature string; raise ValueError on a form it doesn't know"""
+    if not text.startswith("("):
+        raise ValueError(f"a signature starts with '(': {text!r}")
+    params_text, rest = _split_top(text, None)
+    inner = params_text[1:-1]
+    if rest == "":
+        returns = None
+    elif rest.startswith(" -> ") and rest[4:]:
+        returns = rest[4:]
+    else:
+        raise ValueError(f"unexpected text after the parameters: {text!r}")
+    params: list[Param] = []
+    kind: ParamKind = "positional_or_keyword"
+    pieces = _split_top(inner, ", ") if inner else []
+    if "/" in pieces:
+        kind = "positional_only"
+    for piece in pieces:
+        if piece == "/":
+            kind = "positional_or_keyword"
+            continue
+        if piece == "*":
+            kind = "keyword_only"
+            continue
+        stars = len(piece) - len(piece.lstrip("*"))
+        name_match = _NAME.match(piece, stars)
+        if stars > 2 or name_match is None:
+            raise ValueError(f"cannot parse parameter {piece!r} of {text!r}")
+        name, tail = name_match.group(), piece[name_match.end() :]
+        annotation: str | None = None
+        default: str | None = None
+        if tail.startswith(": "):
+            annotated = _split_top(tail[2:], " = ")
+            if len(annotated) > 2 or not all(annotated):
+                raise ValueError(f"cannot parse parameter {piece!r} of {text!r}")
+            annotation = annotated[0]
+            default = annotated[1] if len(annotated) == 2 else None
+        elif tail.startswith("=") and tail[1:]:
+            default = tail[1:]
+        elif tail:
+            raise ValueError(f"cannot parse parameter {piece!r} of {text!r}")
+        if stars and default is not None:
+            raise ValueError(f"a variadic parameter has no default: {piece!r} of {text!r}")
+        if stars == 1:
+            params.append(Param(name, "var_positional", annotation, None))
+            kind = "keyword_only"
+        elif stars == 2:
+            params.append(Param(name, "var_keyword", annotation, None))
+        else:
+            params.append(Param(name, kind, annotation, default))
+    names = [param.name for param in params]
+    if len(set(names)) != len(names):
+        raise ValueError(f"a parameter name repeats in {text!r}")
+    return Signature(tuple(params), returns)
+
+
+def signature_change(released: str, current: str, path: str) -> list[Change]:
+    """A new signature is an addition when every old parameter keeps its name, kind,
+    position (a positional one), annotation, and default, every new one has a default or
+    is variadic, and the return annotation stays; anything else is a change"""
+    before, now = parse_signature(released), parse_signature(current)
+    by_name = {param.name: param for param in now.params}
+    positions_before = [p.name for p in before.params if p.kind in _POSITIONAL]
+    positions_now = [p.name for p in now.params if p.kind in _POSITIONAL]
+    compatible = (
+        before.returns == now.returns
+        and all(by_name.get(param.name) == param for param in before.params)
+        and positions_now[: len(positions_before)] == positions_before
+    )
+    old_names = {param.name for param in before.params}
+    added = [param for param in now.params if param.name not in old_names]
+    if not compatible or any(
+        param.default is None and param.kind not in ("var_positional", "var_keyword")
+        for param in added
+    ):
+        return [Change("changed", path)]
+    return [Change("added", f"{path}({param.name})") for param in added]
+
+
+def _live_field_has_default(export: str, field: str) -> bool:
+    fields = {f.name: f for f in dataclasses.fields(getattr(treaty, export))}
+    found = fields[field]
+    return (
+        found.default is not dataclasses.MISSING or found.default_factory is not dataclasses.MISSING
+    )
+
+
+type HasDefault = Callable[[str, str], bool]
+_FIELDS = re.compile(r"exports/(?P<export>[^/]+)/fields")
+
+
+def fields_change(
+    released: list[object], current: list[object], path: str, export: str, has_default: HasDefault
+) -> list[Change]:
+    """A dataclass's fields: a removed one is removed, a new one appended after the kept
+    ones with a default is added, and anything else (a new field without a default, one
+    inserted among the kept ones, a reorder) is a change"""
+    changes = [Change("removed", f"{path}[{item}]") for item in released if item not in current]
+    kept = [item for item in released if item in current]
+    if current[: len(kept)] != kept:
+        return [*changes, Change("changed", f"{path} (order)")]
+    for item in current[len(kept) :]:
+        if has_default(export, str(item)):
+            changes.append(Change("added", f"{path}[{item}]"))
+        else:
+            changes.append(Change("changed", f"{path}[{item}] (new field without a default)"))
+    return changes
+
+
+def snapshot_changes(
+    released: object,
+    current: object,
+    path: str = "",
+    *,
+    has_default: HasDefault = _live_field_has_default,
+) -> list[Change]:
     """Sort each difference: a key or list item only in ``current`` is added, one only in
     ``released`` is removed, and a different value or a new order of the kept items is
-    changed"""
+    changed; a signature and a dataclass's fields are compared item by item, so a
+    compatible extension is added"""
     if isinstance(released, dict) and isinstance(current, dict):
         changes: list[Change] = []
         for key in sorted(released.keys() | current.keys()):
@@ -174,14 +347,23 @@ def snapshot_changes(released: object, current: object, path: str = "") -> list[
             elif key not in released:
                 changes.append(Change("added", where))
             else:
-                changes += snapshot_changes(released[key], current[key], where)
+                changes += snapshot_changes(
+                    released[key], current[key], where, has_default=has_default
+                )
         return changes
+    if released == current and type(released) is type(current):
+        return []
+    if path.endswith("/signature") and isinstance(released, str) and isinstance(current, str):
+        return signature_change(released, current, path)
     if (
         isinstance(released, list)
         and isinstance(current, list)
         and _scalars(released)
         and _scalars(current)
     ):
+        fields = _FIELDS.fullmatch(path)
+        if fields is not None:
+            return fields_change(released, current, path, fields["export"], has_default)
         changes = [Change("removed", f"{path}[{item}]") for item in released if item not in current]
         changes += [Change("added", f"{path}[{item}]") for item in current if item not in released]
         kept_before = [item for item in released if item in current]
@@ -189,9 +371,7 @@ def snapshot_changes(released: object, current: object, path: str = "") -> list[
         if kept_before != kept_now:
             changes.append(Change("changed", f"{path} (order)"))
         return changes
-    if type(released) is not type(current) or released != current:
-        return [Change("changed", path)]
-    return []
+    return [Change("changed", path)]
 
 
 def has_breaking_entry(text: str) -> bool:
@@ -323,6 +503,194 @@ def test_a_changed_entry_fails_without_a_breaking_entry(
     failing = unexcused_changes(snapshot_changes(_BASE, current), fragments)
     assert failing
     assert {change.kind for change in failing} <= {"changed", "removed"}
+
+
+_SIGNATURE = "(name: 'str', /, flag: 'bool' = False, *, fix: 'str', note: 'str | None' = None)"
+
+
+@pytest.mark.parametrize(
+    ("current", "added"),
+    [
+        pytest.param(_SIGNATURE, [], id="same"),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, *, fix: 'str', note: 'str | None' = None, "
+            "audit: 'bool' = True)",
+            ["audit"],
+            id="optional-keyword",
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, *, extra: 'int' = 0, fix: 'str', "
+            "note: 'str | None' = None)",
+            ["extra"],
+            id="optional-keyword-among-others",
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, depth=1, *, fix: 'str', "
+            "note: 'str | None' = None)",
+            ["depth"],
+            id="optional-positional-appended",
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, *rest: 'str', fix: 'str', "
+            "note: 'str | None' = None, **extra: 'object')",
+            ["rest", "extra"],
+            id="variadic",
+        ),
+    ],
+)
+def test_a_compatible_signature_extension_is_added(current: str, added: list[str]) -> None:
+    changes = signature_change(_SIGNATURE, current, "exports/f/signature")
+    assert changes == [Change("added", f"exports/f/signature({name})") for name in added]
+    assert unexcused_changes(changes, []) == []
+
+
+@pytest.mark.parametrize(
+    "current",
+    [
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, *, fix: 'str', note: 'str | None' = None, "
+            "level: 'int')",
+            id="new-required-keyword",
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = True, *, fix: 'str', note: 'str | None' = None)",
+            id="changed-default",
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'int' = False, *, fix: 'str', note: 'str | None' = None)",
+            id="changed-annotation",
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, *, fix: 'str')", id="removed-parameter"
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, *, fixes: 'str', note: 'str | None' = None)",
+            id="renamed-parameter",
+        ),
+        pytest.param(
+            "(name: 'str', /, *, flag: 'bool' = False, fix: 'str', note: 'str | None' = None)",
+            id="changed-kind",
+        ),
+        pytest.param(
+            "(name: 'str', /, depth=1, flag: 'bool' = False, *, fix: 'str', "
+            "note: 'str | None' = None)",
+            id="positional-inserted",
+        ),
+        pytest.param(
+            "(flag: 'bool' = False, /, name: 'str', *, fix: 'str', note: 'str | None' = None)",
+            id="positional-reordered",
+        ),
+        pytest.param(
+            "(name: 'str', /, flag: 'bool' = False, *, fix: 'str', note: 'str | None' = None) "
+            "-> 'int'",
+            id="changed-return",
+        ),
+    ],
+)
+def test_an_incompatible_signature_is_changed(current: str) -> None:
+    changes = signature_change(_SIGNATURE, current, "exports/f/signature")
+    assert changes == [Change("changed", "exports/f/signature")]
+    assert unexcused_changes(changes, []) == changes
+    assert unexcused_changes(changes, [_BREAKING]) == []
+
+
+def test_a_signature_in_the_snapshot_is_compared_by_parameter() -> None:
+    current = _with(run={"kind": "function", "signature": "(argv=None, *, env=None)"})
+    changes = snapshot_changes(_BASE, current)
+    assert changes == [Change("added", "exports/run/signature(env)")]
+    assert unexcused_changes(changes, []) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "argv",
+        "(argv",
+        "(argv) int",
+        "(argv: 'int)",
+        "(***argv)",
+        "(1argv)",
+        "(argv: int = )",
+        "(*args=1)",
+        "(argv, argv)",
+        "(argv: 'Callable[[int], int]'",
+    ],
+)
+def test_a_signature_the_parser_does_not_know_fails_loudly(text: str) -> None:
+    with pytest.raises(ValueError):
+        parse_signature(text)
+
+
+def _signatures(snapshot: object) -> list[str]:
+    assert isinstance(snapshot, dict)
+    exports = snapshot["exports"]
+    assert isinstance(exports, dict)
+    return [entry["signature"] for entry in exports.values() if "signature" in entry]
+
+
+@pytest.mark.parametrize("path", [SNAPSHOT, RELEASED], ids=["snapshot", "released"])
+def test_every_signature_in_the_snapshots_parses(path: Path) -> None:
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+    signatures = _signatures(snapshot.get("snapshot", snapshot))
+    assert signatures
+    for signature in signatures:
+        parsed = parse_signature(signature)
+        assert signature_change(signature, signature, "s") == []
+        assert parsed.params or signature.startswith("()")
+
+
+_DEFAULTS = {"summary": False, "count": True, "extra": True, "required": False}
+
+
+def _has_default(export: str, field: str) -> bool:
+    assert export == "Affects"
+    return _DEFAULTS[field]
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        pytest.param(
+            ["summary", "count", "extra"],
+            [Change("added", "exports/Affects/fields[extra]")],
+            id="appended-with-default",
+        ),
+        pytest.param(
+            ["summary", "count", "required"],
+            [Change("changed", "exports/Affects/fields[required] (new field without a default)")],
+            id="appended-required",
+        ),
+        pytest.param(
+            ["summary", "extra", "count"],
+            [Change("changed", "exports/Affects/fields (order)")],
+            id="inserted-among-kept",
+        ),
+        pytest.param(
+            ["count", "summary"],
+            [Change("changed", "exports/Affects/fields (order)")],
+            id="reordered",
+        ),
+        pytest.param(
+            ["summary"], [Change("removed", "exports/Affects/fields[count]")], id="removed"
+        ),
+    ],
+)
+def test_a_dataclass_field_is_added_only_appended_with_a_default(
+    fields: list[str], expected: list[Change]
+) -> None:
+    released = {"exports": {"Affects": {"kind": "class", "fields": ["summary", "count"]}}}
+    current = {"exports": {"Affects": {"kind": "class", "fields": fields}}}
+    assert snapshot_changes(released, current, has_default=_has_default) == expected
+
+
+def test_a_live_dataclass_field_default_is_read_from_treaty() -> None:
+    fields = {f.name: f for f in dataclasses.fields(treaty.Affects)}
+    for name, found in fields.items():
+        expected = (
+            found.default is not dataclasses.MISSING
+            or found.default_factory is not dataclasses.MISSING
+        )
+        assert _live_field_has_default("Affects", name) is expected
 
 
 @pytest.mark.parametrize(
