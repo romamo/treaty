@@ -103,9 +103,10 @@ fix = "act"
 land = "act"
 upgrade = "act"                   # shipmill config migrations land without a question
 
-# Who decides (spec 030; Roman, 2026-11-21). treaty is before 1.0.0: a changed command, flag,
-# format or exit code is listed under Changed and undone by a revert within veto_hours, as in
-# shipmill and cloudfall. Read this level again when 1.0.0 is released. scope, rule-departure,
-# security and protected stay ask
+# Who decides (spec 030; Roman, 2026-11-21): a role decides a contract change from the written
+# direction and he is notified, as in shipmill and cloudfall. Unlike them treaty is past 1.0
+# (1.1.0 on 2026-11-07), so a changed command, flag, format or exit code reaches users of a
+# stable line: it is listed under Changed and a veto within veto_hours reverts it. scope,
+# rule-departure, security and protected stay ask
 [decisions]
 contract-change = "notify"
