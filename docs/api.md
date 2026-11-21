@@ -9,6 +9,56 @@ including every `treaty._*` module, may change in any release.
 regenerated on purpose with `uv run python tests/test_public_api.py > tests/data/public_api.json`
 and the change has a changelog entry (a fragment in `changelog.d/`).
 
+The same test file compares the snapshot with `tests/data/public_api.released.json`, the
+snapshot as of the last stable release, and sorts each difference:
+
+- **Added**: a name, method, keyword, key, exit code, or variable that the release
+  lacked. It passes: it is a minor change. So do a function's new parameter and a
+  dataclass's new field, under the rules below
+- **Removed**: one the release had and the snapshot lacks
+- **Changed**: one both have with a different value (an alias, an exit code's number, a
+  kind), or a list whose kept items moved (the order of keywords)
+
+A function's signature is compared parameter by parameter. A new parameter counts as added
+when every old one keeps its name, kind, position (a positional one), annotation, and
+default, the new one has a default or is `*args` or `**kwargs`, and the return annotation
+stays. Anything else is changed: a removed or renamed parameter, a new required one, a
+changed default or annotation, a positional one inserted or moved. A signature the check
+can't parse fails the test rather than being guessed at.
+
+A dataclass's new field counts as added when it comes after every kept field and has a
+default. A new field without one, a field inserted among the kept ones, and a reorder are
+changed.
+
+A keyword list (`App`, `App.command`, `App.format`, `App.run`, `Flag`, `Arg`, `Deprecated`)
+holds names only, so a new keyword is read from the live signature: it counts as added when
+it has a default or is variadic and, if positional, comes after every kept positional one. A
+new required keyword and a positional one inserted among the kept ones are changed.
+
+A removed or changed entry fails CI unless the changelog since that release has a Breaking
+entry: a `- ` line under a `### Breaking` heading in a `changelog.d/` fragment or in
+CHANGELOG.md above the release's heading, the same entry that makes the release bot bump
+the major version. The failure lists each entry; restore it, or add a fragment such as
+
+```markdown
+### Breaking
+
+- `App.run` is gone: call `App.call` instead (#123)
+```
+
+The baseline is committed because a pull request's CI checkout has no tags or history to
+read the release from. After a stable release X.Y.Z, the first pull request that follows
+it refreshes the baseline from the tag (the maintainer, or the agent landing that pull
+request; the release bot doesn't):
+
+```bash
+git fetch --tags origin
+uv run python tests/test_public_api.py --released X.Y.Z
+```
+
+Until then the check reads the changelog from the older release on, so a Breaking entry
+the release already shipped still excuses a removal.
+
 Decision key: **keep** (frozen as is), **private** (moved out of the public surface in the
 review), **rename**, **remove**.
 
