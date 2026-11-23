@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "tool": "treaty 0.0.1",
   "command": [
-    "/Users/roman/PycharmProjects/CLI-argonomics/treaty/.venv/bin/treaty"
+    "/path/to/checkout/.venv/bin/treaty"
   ],
   "timeout_seconds": 10,
   "manifest": [
