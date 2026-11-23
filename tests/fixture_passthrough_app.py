@@ -1,4 +1,4 @@
-"""A passthrough command (#35): ``ingest`` hands its argv to argparse, as ibkr-converter's
+"""A passthrough command (#35): ``ingest`` hands its argv to argparse, as a private converter's
 hands it to beangulp, and prints its result to stdout, as the tool it wraps does"""
 
 import argparse

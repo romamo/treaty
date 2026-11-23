@@ -14,7 +14,7 @@
 ## Binary
 - Entry point: `uv run treaty`
 - Version: 0.0.1 (via `treaty version` or root-level `treaty --version`)
-- Resolved path: /Users/roman/PycharmProjects/CLI-argonomics/treaty/.venv/bin/treaty
+- Resolved path: /path/to/checkout/.venv/bin/treaty
 
 ## Non-Interactive Flags
 - `--confirm-destructive`: framework flag required to run commands with `danger_level="destructive"` (no prompt)

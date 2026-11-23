@@ -54,7 +54,7 @@ deployctl: CONFIRMATION_REQUIRED: deploy.rollback is destructive; nothing was ap
 {"error":{"code":"ARG_ERROR","context":{"name":"acme%2Fwidgets"},"message":"name must be lowercase letters, digits, and hyphens, starting with a letter","phase":"validation"},"meta":{"exit_code":2},"ok":false}
 {"data":{"directory":"../../etc/test","files":[...9 files],"written":false},"ok":true}
 {"data":{"checks":[],"probes":4,"profile":"../../etc/test.json","ran":false},"ok":true}
-[stray /Users/roman/PycharmProjects/etc/test.json removed after the check]
+[stray /path/to/projects/etc/test.json removed after the check]
 ```
 
 **stderr** (first 20 lines):
